@@ -1,37 +1,23 @@
 // src/services/scanOpenAI.js
+export async function scanReceiptOpenAI(file, { onStatus } = {}) {
+  onStatus?.("Uploading...");
 
-export const fileToBase64 = (file) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
+  const form = new FormData();
+  form.append("file", file);
 
-    reader.onload = () => {
-      const base64String = String(reader.result).split(",")[1];
-      resolve({
-        base64: base64String,
-        mimeType: file.type,
-        preview: reader.result,
-      });
-    };
-
-    reader.onerror = (error) => reject(error);
-  });
-};
-
-export async function callOpenAIScan(base64, mimeType) {
-  // ถ้าอยากทดสอบจากเครื่องตอน dev โดยไม่ใช้ vercel dev:
-  // ตั้ง VITE_SCAN_API_BASE เป็น URL โปรดักชันของคุณ เช่น https://xxx.vercel.app
-  const base = import.meta.env.VITE_SCAN_API_BASE || "";
-  const url = `${base}/api/scan-receipt`;
-
-  const resp = await fetch(url, {
+  const res = await fetch("/api/scan-receipt", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ base64, mimeType }),
+    body: form,
   });
 
-  if (!resp.ok) {
-    throw new Error(`Scan API error: ${resp.status}`);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`scan_failed_${res.status}:${txt}`);
   }
-  return resp.json();
+
+  onStatus?.("Parsing...");
+  const data = await res.json();
+
+  // expected: { amount, date, merchant, category }
+  return data;
 }

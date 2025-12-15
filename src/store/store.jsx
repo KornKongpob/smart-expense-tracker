@@ -1,30 +1,31 @@
 // src/store/store.jsx
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
-
 import { ACTIONS } from "./actions";
 import { reducer, createInitialState } from "./reducer";
 
-import { loadAll, saveAll, clearAll, exportBackup as exportBackupFn } from "../services/storage.js";
-import { DEFAULT_CATEGORIES } from "../constants/categories.js";
-import { generateId } from "../utils/id.js";
+import { loadAll, saveAll, clearAll, exportBackup } from "../services/storage";
+import { DEFAULT_CATEGORIES } from "../constants/categories";
+import { generateId, generateTransferId } from "../utils/id";
 
-// ===== Defaults =====
-const DEFAULT_ACCOUNTS = [{ id: "acc_cash", name: "เงินสด", type: "cash", color: "#1DD1A1" }];
-
-// ===== Context =====
 const AppStoreContext = createContext(null);
 
-export function AppStoreProvider({ children }) {
-  // init from localStorage
-  const [state, dispatch] = useReducer(reducer, undefined, () => {
-    const boot = loadAll({
-      defaultAccounts: DEFAULT_ACCOUNTS,
-      defaultCategories: DEFAULT_CATEGORIES,
-    });
-    return createInitialState(boot);
+const DEFAULT_ACCOUNTS = [
+  { id: "acc_cash", name: "เงินสด", type: "cash", color: "#1DD1A1" },
+];
+
+function bootstrap() {
+  const { transactions, accounts, categories } = loadAll({
+    defaultAccounts: DEFAULT_ACCOUNTS,
+    defaultCategories: DEFAULT_CATEGORIES,
   });
 
-  // persist (model only)
+  return { transactions, accounts, categories };
+}
+
+export function AppStoreProvider({ children }) {
+  const [state, dispatch] = useReducer(reducer, undefined, () => createInitialState(bootstrap()));
+
+  // persist model changes
   useEffect(() => {
     saveAll({
       transactions: state.transactions,
@@ -33,52 +34,142 @@ export function AppStoreProvider({ children }) {
     });
   }, [state.transactions, state.accounts, state.categories]);
 
-  // ===== Helpers / Selectors =====
-  const getEditingTransaction = () => {
-    const id = state?.ui?.editingId;
-    if (!id) return null;
-    return (state.transactions || []).find((t) => t.id === id) || null;
+  // helpers
+  const getTxById = (id) => state.transactions.find((t) => t.id === id) || null;
+
+  const getTransferPairByGroupId = (groupId) => {
+    const group = state.transactions.filter((t) => t.transferGroupId === groupId);
+    const outTx = group.find((t) => t.transferSide === "out") || null;
+    const inTx = group.find((t) => t.transferSide === "in") || null;
+    return { outTx, inTx };
   };
 
-  // ===== Actions (match reducer.js) =====
+  // ✅ editing entry (รองรับ transfer)
+  const getEditingEntry = () => {
+    const id = state.ui.editingId;
+    if (!id) return null;
+
+    const tx = getTxById(id);
+    if (!tx) return null;
+
+    if (tx.isTransfer && tx.transferGroupId) {
+      const { outTx, inTx } = getTransferPairByGroupId(tx.transferGroupId);
+      if (!outTx || !inTx) return null;
+
+      return {
+        mode: "transfer",
+        transferGroupId: tx.transferGroupId,
+        amount: outTx.amount,
+        date: outTx.date,
+        note: outTx.note || "",
+        fromAccountId: outTx.accountId,
+        toAccountId: inTx.accountId,
+        outId: outTx.id,
+        inId: inTx.id,
+      };
+    }
+
+    return { mode: "transaction", ...tx };
+  };
+
   const actions = useMemo(() => {
     return {
-      init: (payload) => dispatch({ type: ACTIONS.INIT, payload }),
-
+      // nav
       navigate: (view) => dispatch({ type: ACTIONS.NAVIGATE, payload: view }),
-
       startNewTransaction: () => dispatch({ type: ACTIONS.START_NEW_TRANSACTION }),
-
       startEditTransaction: (id) => dispatch({ type: ACTIONS.START_EDIT_TRANSACTION, payload: id }),
 
+      // transaction
       upsertTransaction: (tx) => {
-        const withId = tx?.id ? tx : { ...tx, id: generateId() };
-        dispatch({ type: ACTIONS.UPSERT_TRANSACTION, payload: withId });
+        const payload = {
+          id: tx.id ?? generateId(),
+          amount: Number(tx.amount || 0),
+          type: tx.type,
+          category: tx.category,
+          accountId: tx.accountId,
+          date: tx.date,
+          note: tx.note || "",
+          isTransfer: !!tx.isTransfer,
+          transferGroupId: tx.transferGroupId ?? null,
+          transferSide: tx.transferSide ?? null,
+          transferAccountId: tx.transferAccountId ?? null,
+        };
+
+        dispatch({ type: ACTIONS.UPSERT_TRANSACTION, payload });
       },
 
       deleteTransaction: (id) => dispatch({ type: ACTIONS.DELETE_TRANSACTION, payload: id }),
 
-      addAccount: (account) => {
-        const withId = account?.id ? account : { ...account, id: generateId() };
-        dispatch({ type: ACTIONS.ADD_ACCOUNT, payload: withId });
+      // ✅ transfer
+      upsertTransfer: ({
+        transferGroupId,
+        outId,
+        inId,
+        amount,
+        date,
+        note,
+        fromAccountId,
+        toAccountId,
+      }) => {
+        const groupId = transferGroupId ?? generateTransferId();
+        const amt = Number(amount || 0);
+
+        const outTx = {
+          id: outId ?? generateId(),
+          type: "expense",
+          category: "transfer",
+          accountId: fromAccountId,
+          date,
+          note: note || "Transfer",
+          amount: amt,
+          isTransfer: true,
+          transferGroupId: groupId,
+          transferSide: "out",
+          transferAccountId: toAccountId,
+        };
+
+        const inTx = {
+          id: inId ?? generateId(),
+          type: "income",
+          category: "transfer",
+          accountId: toAccountId,
+          date,
+          note: note || "Transfer",
+          amount: amt,
+          isTransfer: true,
+          transferGroupId: groupId,
+          transferSide: "in",
+          transferAccountId: fromAccountId,
+        };
+
+        dispatch({ type: ACTIONS.UPSERT_TRANSFER, payload: { outTx, inTx } });
+      },
+
+      deleteTransferGroup: (groupId) => dispatch({ type: ACTIONS.DELETE_TRANSFER_GROUP, payload: groupId }),
+
+      // accounts
+      addAccount: ({ name, type, color }) => {
+        dispatch({
+          type: ACTIONS.ADD_ACCOUNT,
+          payload: { id: generateId(), name, type, color },
+        });
       },
 
       deleteAccount: (id) => dispatch({ type: ACTIONS.DELETE_ACCOUNT, payload: id }),
 
-      addCategory: ({ type, category }) => {
-        const withId = category?.id ? category : { ...category, id: generateId() };
+      // categories
+      addCategory: ({ type, name, icon, color }) => {
         dispatch({
           type: ACTIONS.ADD_CATEGORY,
-          payload: { type, category: withId },
+          payload: { type, category: { id: generateId(), name, icon, color } },
         });
       },
 
-      deleteCategory: ({ type, id }) => {
-        dispatch({
-          type: ACTIONS.DELETE_CATEGORY,
-          payload: { type, id },
-        });
-      },
+      deleteCategory: ({ type, id }) => dispatch({ type: ACTIONS.DELETE_CATEGORY, payload: { type, id } }),
+
+      // backup/reset
+      exportBackup: () => exportBackup(state),
+      importBackup: (payload) => dispatch({ type: ACTIONS.IMPORT_BACKUP, payload }),
 
       resetAll: () => {
         clearAll();
@@ -92,43 +183,20 @@ export function AppStoreProvider({ children }) {
         });
       },
 
-      importBackup: (payload) => {
-        // payload: {transactions, accounts, categories}
-        dispatch({ type: ACTIONS.IMPORT_BACKUP, payload });
-      },
-
-      exportBackup: () => {
-        return exportBackupFn({
-          transactions: state.transactions,
-          accounts: state.accounts,
-          categories: state.categories,
-        });
-      },
+      // getters
+      getEditingEntry,
+      // backward compat (ชื่อเก่า)
+      getEditingTransaction: getEditingEntry,
     };
-  }, [state.transactions, state.accounts, state.categories]);
+  }, [state]);
 
-  // ✅ Backward-compatible API: ให้ destructure ได้ตรงๆ (เหมือนที่ไฟล์อื่นใช้)
+  // ✅ return แบบ destructure ง่าย ๆ (รองรับโค้ดเก่าที่เรียก navigate/startNew/... ตรงๆ)
   const value = useMemo(() => {
     return {
       state,
       dispatch,
-      actions,
-      getEditingTransaction,
-
-      // expose shortcuts
-      navigate: actions.navigate,
-      startNew: actions.startNewTransaction,
-      startNewTransaction: actions.startNewTransaction,
-      startEditTransaction: actions.startEditTransaction,
-      upsertTransaction: actions.upsertTransaction,
-      deleteTransaction: actions.deleteTransaction,
-      addAccount: actions.addAccount,
-      deleteAccount: actions.deleteAccount,
-      addCategory: actions.addCategory,
-      deleteCategory: actions.deleteCategory,
-      resetAll: actions.resetAll,
-      importBackup: actions.importBackup,
-      exportBackup: actions.exportBackup,
+      ...actions,
+      actions, // เผื่อบางไฟล์ใช้ actions.navigate
     };
   }, [state, actions]);
 

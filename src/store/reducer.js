@@ -1,7 +1,6 @@
 // src/store/reducer.js
 
 import { ACTIONS } from "./actions";
-import { generateId } from "../utils/id";
 
 export function createInitialState({
   transactions = [],
@@ -17,6 +16,11 @@ export function createInitialState({
       editingId: null, // ถ้ามีค่า = edit mode
     },
   };
+}
+
+function upsertOne(list, tx) {
+  const exists = list.some((t) => t.id === tx.id);
+  return exists ? list.map((t) => (t.id === tx.id ? tx : t)) : [...list, tx];
 }
 
 export function reducer(state, action) {
@@ -40,11 +44,7 @@ export function reducer(state, action) {
 
     case ACTIONS.UPSERT_TRANSACTION: {
       const tx = action.payload;
-      const exists = state.transactions.some((t) => t.id === tx.id);
-
-      const nextTransactions = exists
-        ? state.transactions.map((t) => (t.id === tx.id ? tx : t))
-        : [...state.transactions, { ...tx, id: tx.id || generateId() }];
+      const nextTransactions = upsertOne(state.transactions, tx);
 
       return {
         ...state,
@@ -53,10 +53,55 @@ export function reducer(state, action) {
       };
     }
 
+    // ✅ Transfer: upsert ออก+เข้า เป็นชุด
+    case ACTIONS.UPSERT_TRANSFER: {
+      const { outTx, inTx } = action.payload;
+
+      let next = state.transactions;
+      next = upsertOne(next, outTx);
+      next = upsertOne(next, inTx);
+
+      return {
+        ...state,
+        transactions: next,
+        ui: { ...state.ui, editingId: null, view: "dashboard" },
+      };
+    }
+
+    case ACTIONS.DELETE_TRANSFER_GROUP: {
+      const groupId = action.payload;
+      const nextTransactions = state.transactions.filter((t) => t.transferGroupId !== groupId);
+
+      // ถ้ากำลัง edit อยู่และเป็น transfer group เดียวกัน ให้เคลียร์
+      const editingTx = state.transactions.find((t) => t.id === state.ui.editingId);
+      const nextEditingId =
+        editingTx?.transferGroupId && editingTx.transferGroupId === groupId ? null : state.ui.editingId;
+
+      return {
+        ...state,
+        transactions: nextTransactions,
+        ui: { ...state.ui, editingId: nextEditingId, view: "dashboard" },
+      };
+    }
+
     case ACTIONS.DELETE_TRANSACTION: {
       const id = action.payload;
-      const nextTransactions = state.transactions.filter((t) => t.id !== id);
+      const target = state.transactions.find((t) => t.id === id);
 
+      // ✅ ถ้าลบรายการ transfer ให้ลบทั้งชุด
+      if (target?.isTransfer && target.transferGroupId) {
+        const groupId = target.transferGroupId;
+        const nextTransactions = state.transactions.filter((t) => t.transferGroupId !== groupId);
+        const editingId = state.ui.editingId === id ? null : state.ui.editingId;
+
+        return {
+          ...state,
+          transactions: nextTransactions,
+          ui: { ...state.ui, editingId, view: "dashboard" },
+        };
+      }
+
+      const nextTransactions = state.transactions.filter((t) => t.id !== id);
       const editingId = state.ui.editingId === id ? null : state.ui.editingId;
 
       return {
@@ -67,85 +112,42 @@ export function reducer(state, action) {
     }
 
     case ACTIONS.ADD_ACCOUNT: {
-      // ✅ FIX: กันพังจาก view ที่ส่งมาไม่มี id
-      const a = action.payload || {};
-      const next = {
-        id: a.id || generateId(),
-        name: (a.name || "").trim() || "บัญชีใหม่",
-        type: a.type || "cash",
-        color: a.color || "#1DD1A1",
-      };
-
-      return { ...state, accounts: [...state.accounts, next] };
+      return { ...state, accounts: [...state.accounts, action.payload] };
     }
 
     case ACTIONS.DELETE_ACCOUNT: {
       const id = action.payload;
 
-      // ✅ Guard: ต้องมีอย่างน้อย 1 บัญชี
-      if (state.accounts.length <= 1) return state;
+      // ✅ ลบ transaction ของ account นี้
+      const removedTxs = state.transactions.filter((t) => t.accountId === id);
 
-      const nextAccounts = state.accounts.filter((a) => a.id !== id);
-
-      // ✅ FIX: ลบ transaction ที่เกี่ยวข้องทั้งหมด
-      // - ลบรายการที่ accountId ตรงกับบัญชีที่ลบ
-      // - ถ้าเป็น transfer และมี transferId ให้ลบ “ทั้งคู่” ของ transfer ด้วย
-      const transferIdsInvolvingThisAccount = new Set(
-        state.transactions
-          .filter(
-            (t) =>
-              t?.isTransfer === true &&
-              (t.accountId === id || t.fromAccountId === id || t.toAccountId === id)
-          )
-          .map((t) => t.transferId)
-          .filter(Boolean)
+      // ✅ ถ้ามี transfer ที่ฝั่งหนึ่งถูกลบ -> ต้องลบทั้ง group เพื่อไม่ให้ค้างครึ่งเดียว
+      const removedGroups = new Set(
+        removedTxs.filter((t) => t.isTransfer && t.transferGroupId).map((t) => t.transferGroupId)
       );
 
-      const nextTransactions = state.transactions.filter((t) => {
-        if (!t) return false;
+      let nextTransactions = state.transactions.filter((t) => t.accountId !== id);
+      if (removedGroups.size) {
+        nextTransactions = nextTransactions.filter((t) => !removedGroups.has(t.transferGroupId));
+      }
 
-        // รายการที่ผูกกับบัญชีนี้โดยตรง
-        if (t.accountId === id) return false;
-
-        // เผื่อโครงสร้าง transfer แบบเก็บ from/to ใน record เดียว
-        if (t.fromAccountId === id || t.toAccountId === id) return false;
-
-        // ถ้า transferId อยู่ในชุดที่เกี่ยวข้องกับบัญชีนี้ -> ลบทั้งคู่
-        if (t.isTransfer && t.transferId && transferIdsInvolvingThisAccount.has(t.transferId))
-          return false;
-
-        return true;
-      });
-
-      // ✅ ถ้ากำลังแก้ไข transaction ที่โดนลบไปแล้ว ให้เคลียร์
-      const editingId = state.ui.editingId;
-      const stillExists = nextTransactions.some((t) => t.id === editingId);
-      const nextEditingId = stillExists ? editingId : null;
+      const nextAccounts = state.accounts.filter((a) => a.id !== id);
 
       return {
         ...state,
         accounts: nextAccounts,
         transactions: nextTransactions,
-        ui: { ...state.ui, editingId: nextEditingId },
+        ui: { ...state.ui, view: "accounts" },
       };
     }
 
     case ACTIONS.ADD_CATEGORY: {
-      const { type, category } = action.payload; // type: expense|income
-      const c = category || {};
-
-      const next = {
-        id: c.id || generateId(),
-        name: (c.name || "").trim() || "หมวดใหม่",
-        icon: c.icon || "🏷️",
-        color: c.color || "#C8D6E5",
-      };
-
+      const { type, category } = action.payload;
       return {
         ...state,
         categories: {
           ...state.categories,
-          [type]: [...state.categories[type], next],
+          [type]: [...state.categories[type], category],
         },
       };
     }

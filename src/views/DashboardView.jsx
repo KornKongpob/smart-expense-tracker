@@ -1,35 +1,49 @@
 // src/views/DashboardView.jsx
 import { useMemo, useState } from "react";
-import { Filter, TrendingDown, TrendingUp, FileText } from "lucide-react";
+import { Filter, TrendingDown, TrendingUp, FileText, Search } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import { formatCurrency } from "../utils/format";
 import { calcTotals } from "../store/selectors";
 import { useAppStore } from "../store/store";
 
 export default function DashboardView() {
-  const { state, navigate, startNew, startEdit } = useAppStore();
+  const { state, navigate, startEditTransaction, startNewTransaction } = useAppStore();
+
   const [filterAccount, setFilterAccount] = useState("all");
+  const [q, setQ] = useState("");
 
   const totals = useMemo(() => calcTotals(state.transactions), [state.transactions]);
 
-  const filtered = useMemo(() => {
-    let txs = state.transactions;
-    if (filterAccount !== "all") txs = txs.filter((t) => t.accountId === filterAccount);
-    return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 12);
-  }, [state.transactions, filterAccount]);
+  const allCats = [...state.categories.expense, ...state.categories.income];
 
   const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || "";
-  const allCats = [...state.categories.expense, ...state.categories.income];
+
+  const filtered = useMemo(() => {
+    let txs = state.transactions;
+
+    if (filterAccount !== "all") txs = txs.filter((t) => t.accountId === filterAccount);
+
+    if (q.trim()) {
+      const needle = q.trim().toLowerCase();
+      txs = txs.filter((t) => {
+        const cat = allCats.find((c) => c.id === t.category);
+        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)}`.toLowerCase();
+        return hay.includes(needle);
+      });
+    }
+
+    return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 30);
+  }, [state.transactions, filterAccount, q, allCats]);
 
   return (
     <div className="pb-28 pt-6 px-4">
-      <header className="mb-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">ภาพรวมบัญชี</h1>
+      <header className="mb-4 flex justify-between items-center gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-gray-800 truncate">ภาพรวมบัญชี</h1>
           <p className="text-gray-500 text-xs mt-1">Smart Expense Tracker</p>
         </div>
 
-        <div className="relative">
+        <div className="relative shrink-0">
           <select
             value={filterAccount}
             onChange={(e) => setFilterAccount(e.target.value)}
@@ -46,6 +60,20 @@ export default function DashboardView() {
         </div>
       </header>
 
+      {/* Search */}
+      <div className="mb-6">
+        <div className="bg-white border border-gray-200 rounded-2xl px-3 py-2 flex items-center gap-2 shadow-sm">
+          <Search size={16} className="text-gray-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="ค้นหาโน้ต / หมวด / บัญชี"
+            className="w-full outline-none text-sm bg-transparent text-gray-700"
+          />
+        </div>
+      </div>
+
+      {/* Summary card */}
       <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-purple-800 rounded-3xl p-6 text-white shadow-xl shadow-indigo-200 mb-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl -mr-10 -mt-10" />
         <div className="absolute bottom-0 left-0 w-24 h-24 bg-indigo-400/20 rounded-full blur-2xl -ml-6 -mb-6" />
@@ -74,7 +102,6 @@ export default function DashboardView() {
         <button
           onClick={() => navigate("stats")}
           className="text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full"
-          type="button"
         >
           ดูสรุป
         </button>
@@ -83,14 +110,19 @@ export default function DashboardView() {
       {filtered.length ? (
         <div className="space-y-3">
           {filtered.map((tx) => {
-            const category = allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
+            // ✅ Transfer special display
+            const category =
+              tx.isTransfer
+                ? { name: "Transfer", icon: "🔁", color: "#94a3b8" }
+                : allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
+
             return (
               <TransactionCard
                 key={tx.id}
                 tx={tx}
                 category={category}
                 accountName={accountName(tx.accountId)}
-                onClick={() => startEdit(tx.id)}
+                onClick={() => startEditTransaction(tx.id)}
               />
             );
           })}
@@ -101,7 +133,7 @@ export default function DashboardView() {
             <FileText size={32} />
           </div>
           <p className="text-gray-400 font-medium">ยังไม่มีรายการบันทึก</p>
-          <button onClick={startNew} className="mt-3 text-indigo-600 text-sm font-bold" type="button">
+          <button onClick={startNewTransaction} className="mt-3 text-indigo-600 text-sm font-bold">
             เริ่มบันทึกรายการแรก
           </button>
         </div>
