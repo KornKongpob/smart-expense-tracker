@@ -1,124 +1,225 @@
 // api/scan-receipt.js
+import Busboy from "busboy";
 
-function extractTextFromResponsesAPI(data) {
-  if (typeof data?.output_text === "string" && data.output_text.trim()) {
-    return data.output_text.trim();
-  }
+const OPENAI_URL = "https://api.openai.com/v1/responses";
 
-  const out = Array.isArray(data?.output) ? data.output : [];
-  for (const item of out) {
-    // responses api มักมี content เป็น array
-    const content = Array.isArray(item?.content) ? item.content : [];
-    for (const c of content) {
-      if (typeof c?.text === "string" && c.text.trim()) return c.text.trim();
-      if (typeof c === "string" && c.trim()) return c.trim();
-    }
-    if (typeof item?.text === "string" && item.text.trim()) return item.text.trim();
-  }
-  return null;
+function getContentType(req) {
+  return String(req.headers["content-type"] || "").toLowerCase();
 }
 
-function stripToJsonObject(text) {
-  if (!text) return null;
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
 
-  // remove code fences
-  let s = String(text).replace(/```json/gi, "```").replace(/```/g, "").trim();
+async function readJson(req) {
+  // Vercel บางที parse ให้แล้ว (req.body เป็น object)
+  if (req.body && typeof req.body === "object") return req.body;
 
-  // try find first {...}
-  const first = s.indexOf("{");
-  const last = s.lastIndexOf("}");
-  if (first >= 0 && last > first) s = s.slice(first, last + 1).trim();
+  const buf = await readRawBody(req);
+  const txt = buf.toString("utf-8").trim();
+  if (!txt) return {};
+  try {
+    return JSON.parse(txt);
+  } catch {
+    return {};
+  }
+}
 
-  return s;
+function parseMultipart(req, { maxBytes = 8 * 1024 * 1024 } = {}) {
+  return new Promise((resolve, reject) => {
+    const bb = Busboy({
+      headers: req.headers,
+      limits: { fileSize: maxBytes },
+    });
+
+    let fileBuffer = null;
+    let mimeType = "";
+    let filename = "";
+
+    bb.on("file", (fieldname, file, info) => {
+      const chunks = [];
+      filename = info?.filename || "";
+      mimeType = info?.mimeType || info?.mimetype || "";
+
+      file.on("data", (d) => chunks.push(d));
+      file.on("limit", () => reject(new Error("file_too_large")));
+      file.on("end", () => {
+        fileBuffer = Buffer.concat(chunks);
+      });
+    });
+
+    bb.on("error", reject);
+    bb.on("finish", () => resolve({ fileBuffer, mimeType, filename }));
+
+    req.pipe(bb);
+  });
+}
+
+function safeJsonParseMaybe(text) {
+  const t = String(text || "").trim();
+  if (!t) return null;
+  // พยายามหาบล็อก JSON ในข้อความ
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const candidate = t.slice(start, end + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    return JSON.parse(t);
+  } catch {
+    return null;
+  }
+}
+
+async function callOpenAI({ base64, mimeType }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return { status: 400, body: { error: "missing_openai_api_key" } };
+  }
+
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+
+  const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
+
+  const prompt =
+    `You are a receipt/slip parser for an expense tracker app.\n` +
+    `Extract these fields as strict JSON ONLY:\n` +
+    `{\n` +
+    `  "amount": number|null,\n` +
+    `  "date": "YYYY-MM-DD"|null,\n` +
+    `  "merchant": string,\n` +
+    `  "category": "food"|"transport"|"shopping"|"bills"|"health"|"entertainment"|"transfer"|"income"|"other",\n` +
+    `  "note": string\n` +
+    `}\n` +
+    `Rules:\n` +
+    `- amount should be the grand total / net paid (not VAT line).\n` +
+    `- If date is Buddhist Era (>=2400), convert to AD.\n` +
+    `- merchant: best guess from header.\n` +
+    `- If it's a bank transfer slip, category should be "transfer".\n` +
+    `- Return JSON only, no markdown, no extra text.\n`;
+
+  const payload = {
+    model,
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: prompt },
+          { type: "input_image", image_url: dataUrl },
+        ],
+      },
+    ],
+  };
+
+  const r = await fetch(OPENAI_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const json = await r.json().catch(() => null);
+  if (!r.ok) {
+    return {
+      status: r.status,
+      body: {
+        error: "openai_error",
+        detail: json || null,
+      },
+    };
+  }
+
+  // responses API มี output_text ให้บ่อย แต่กันเหนียวอ่านหลายทาง
+  const outputText =
+    json?.output_text ||
+    json?.output?.[0]?.content?.map((c) => c?.text).filter(Boolean).join("\n") ||
+    "";
+
+  const parsed = safeJsonParseMaybe(outputText);
+  if (!parsed) {
+    return {
+      status: 200,
+      body: {
+        error: "parse_failed",
+        rawText: outputText,
+      },
+    };
+  }
+
+  // normalize types a bit
+  const amount =
+    typeof parsed.amount === "number"
+      ? parsed.amount
+      : parsed.amount != null
+      ? Number(parsed.amount)
+      : null;
+
+  return {
+    status: 200,
+    body: {
+      amount: Number.isFinite(amount) ? amount : null,
+      date: parsed.date ?? null,
+      merchant: String(parsed.merchant ?? ""),
+      category: String(parsed.category ?? "other"),
+      note: String(parsed.note ?? ""),
+      rawText: outputText,
+    },
+  };
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
-
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "missing_openai_api_key" });
-
-    const { base64, mimeType } = req.body || {};
-    if (!base64) return res.status(400).json({ error: "missing_base64" });
-
-    const safeMime = mimeType || "image/jpeg";
-    const imageUrl = `data:${safeMime};base64,${base64}`;
-
-    const prompt = `
-You will be given an image of a Thai receipt or bank transfer slip.
-Extract information and return STRICT JSON only (no markdown, no extra text) with this schema:
-
-{
-  "amount": number|null,
-  "date": "YYYY-MM-DD"|null,
-  "merchant": string,
-  "category": "food"|"transport"|"shopping"|"bills"|"health"|"entertainment"|"other",
-  "isTransferSlip": boolean
-}
-
-Rules:
-- If date is Buddhist Era (e.g., 2568), convert to AD (2025).
-- amount must be the final total (ยอดรวม/รวมสุทธิ/total) or transfer amount.
-- merchant: best guess of store/bank/recipient label, else "".
-- isTransferSlip: true if it is a bank transfer/QR transfer slip.
-- If uncertain, use null for amount/date.
-    `.trim();
-
-    const payload = {
-      model: "gpt-4.1-mini",
-      input: [
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: prompt },
-            { type: "input_image", image_url: imageUrl, detail: "high" },
-          ],
-        },
-      ],
-      temperature: 0,
-    };
-
-    const r = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await r.json();
-    if (!r.ok) {
-      return res.status(r.status).json({
-        error: "openai_error",
-        status: r.status,
-        detail: data,
-      });
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "method_not_allowed" });
+      return;
     }
 
-    const text = extractTextFromResponsesAPI(data);
-    const jsonStr = stripToJsonObject(text);
-    if (!jsonStr) return res.status(500).json({ error: "no_text_returned", raw: data });
+    const ct = getContentType(req);
 
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch (e) {
-      return res.status(500).json({ error: "json_parse_failed", text, jsonStr });
+    // 1) multipart/form-data (field name: file)
+    if (ct.includes("multipart/form-data")) {
+      const { fileBuffer, mimeType } = await parseMultipart(req);
+      if (!fileBuffer || fileBuffer.length === 0) {
+        res.status(400).json({ error: "missing_file" });
+        return;
+      }
+
+      const base64 = fileBuffer.toString("base64");
+      const out = await callOpenAI({ base64, mimeType: mimeType || "image/jpeg" });
+      res.status(out.status).json(out.body);
+      return;
     }
 
-    // Normalize output a bit
-    const result = {
-      amount: typeof parsed.amount === "number" ? parsed.amount : (parsed.amount ? Number(parsed.amount) : null),
-      date: typeof parsed.date === "string" ? parsed.date : null,
-      merchant: typeof parsed.merchant === "string" ? parsed.merchant : "",
-      category: typeof parsed.category === "string" ? parsed.category : "other",
-      isTransferSlip: !!parsed.isTransferSlip,
-    };
+    // 2) JSON: { base64, mimeType }
+    const body = await readJson(req);
+    const base64 = body?.base64;
+    const mimeType = body?.mimeType || "image/jpeg";
 
-    return res.status(200).json(result);
-  } catch (err) {
-    return res.status(500).json({ error: "server_exception", message: String(err?.message || err) });
+    if (!base64) {
+      res.status(400).json({ error: "missing_base64" });
+      return;
+    }
+
+    const out = await callOpenAI({ base64, mimeType });
+    res.status(out.status).json(out.body);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (msg === "file_too_large") {
+      res.status(413).json({ error: "file_too_large" });
+      return;
+    }
+    res.status(500).json({ error: "server_error", detail: msg });
   }
 }
