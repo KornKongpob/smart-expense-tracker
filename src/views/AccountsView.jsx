@@ -1,153 +1,375 @@
 // src/views/AccountsView.jsx
-import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
-import { ACCOUNT_COLORS, ACCOUNT_ICONS } from "../constants/presets.jsx";
+import { useMemo, useState } from "react";
+import { Plus, Pencil, Trash2, Check, X } from "lucide-react";
+import { useAppStore } from "../store/store";
+import { ACCOUNT_COLORS } from "../constants/presets.jsx";
 import { calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
-import { useAppStore } from "../store/store";
+import { generateId } from "../utils/id";
+
+function ColorDots({ value, onChange }) {
+  return (
+    <div className="flex gap-2 flex-wrap">
+      {ACCOUNT_COLORS.map((c) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onChange(c)}
+          className={`w-8 h-8 rounded-full border-2 transition-transform ${
+            value === c ? "border-gray-400 scale-110" : "border-transparent"
+          }`}
+          style={{ backgroundColor: c }}
+          aria-label={`color ${c}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ModalShell({ title, children, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
+      <div className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-xl max-h-[90dvh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center"
+            aria-label="close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default function AccountsView({ showAlert, showConfirm }) {
-  const { state, addAccount, deleteAccount, navigate } = useAppStore();
+  const { state, addAccount, updateAccount, deleteAccount, adjustAccountBalance, navigate } =
+    useAppStore();
 
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [type, setType] = useState("cash");
-  const [color, setColor] = useState(ACCOUNT_COLORS[0]);
+  const accounts = state.accounts;
+  const transactions = state.transactions;
 
-  const create = () => {
-    if (!name.trim()) return showAlert?.("ใส่ชื่อบัญชี");
-    addAccount({ name: name.trim(), type, color });
-    setName("");
-    setType("cash");
-    setColor(ACCOUNT_COLORS[0]);
-    setOpen(false);
+  const [openCreate, setOpenCreate] = useState(false);
+  const [openEdit, setOpenEdit] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+
+  // create form
+  const [cName, setCName] = useState("");
+  const [cIcon, setCIcon] = useState("💳");
+  const [cColor, setCColor] = useState(ACCOUNT_COLORS[0]);
+  const [cBalance, setCBalance] = useState("0");
+
+  // edit form
+  const editing = useMemo(
+    () => accounts.find((a) => a.id === editingId) || null,
+    [accounts, editingId]
+  );
+
+  const computedBalance = useMemo(() => {
+    if (!editing) return 0;
+    return calcAccountBalance(accounts, transactions, editing.id);
+  }, [editing, accounts, transactions]);
+
+  const [eName, setEName] = useState("");
+  const [eIcon, setEIcon] = useState("💳");
+  const [eColor, setEColor] = useState(ACCOUNT_COLORS[0]);
+  const [eBalance, setEBalance] = useState("");
+  const [recordAsTx, setRecordAsTx] = useState(false);
+
+  const openEditModal = (acc) => {
+    setEditingId(acc.id);
+    setEName(acc.name || "");
+    setEIcon(acc.icon || "💳");
+    setEColor(acc.color || ACCOUNT_COLORS[0]);
+    setEBalance(String(calcAccountBalance(accounts, transactions, acc.id)));
+    setRecordAsTx(false);
+    setOpenEdit(true);
   };
 
-  const del = (id) => {
-    if (state.accounts.length <= 1) return showAlert?.("ต้องมีอย่างน้อย 1 บัญชี");
-    showConfirm?.("ลบบัญชี", "ยืนยันลบบัญชี? รายการที่เกี่ยวข้องจะถูกลบด้วย", () => deleteAccount(id), true);
+  const create = () => {
+    if (!cName.trim()) return showAlert?.("ใส่ชื่อบัญชี");
+    const openingBalance = Number(cBalance || 0);
+    if (!Number.isFinite(openingBalance)) return showAlert?.("ยอดเงินไม่ถูกต้อง");
+
+    addAccount({
+      id: generateId(),
+      name: cName.trim(),
+      icon: (cIcon || "💳").trim(),
+      color: cColor,
+      openingBalance,
+    });
+
+    setCName("");
+    setCIcon("💳");
+    setCColor(ACCOUNT_COLORS[0]);
+    setCBalance("0");
+    setOpenCreate(false);
+  };
+
+  const saveEdit = () => {
+    if (!editing) return;
+
+    if (!eName.trim()) return showAlert?.("ใส่ชื่อบัญชี");
+    updateAccount({
+      id: editing.id,
+      name: eName.trim(),
+      icon: (eIcon || "💳").trim(),
+      color: eColor,
+    });
+
+    const desired = Number(eBalance);
+    if (!Number.isFinite(desired)) return showAlert?.("ยอดเงินไม่ถูกต้อง");
+
+    adjustAccountBalance({
+      accountId: editing.id,
+      desiredBalance: desired,
+      recordAsTransaction: recordAsTx,
+    });
+
+    setOpenEdit(false);
+  };
+
+  const del = (accId) => {
+    if (accounts.length <= 1) return showAlert?.("ต้องมีอย่างน้อย 1 บัญชี");
+    showConfirm?.(
+      "ลบบัญชี",
+      "ยืนยันลบบัญชี? รายการที่เกี่ยวข้องกับบัญชีนี้จะถูกลบด้วย",
+      () => {
+        deleteAccount(accId);
+      },
+      true
+    );
   };
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh">
+    <div className="pb-28 pt-6 px-4 min-h-dvh bg-gray-50">
       <header className="mb-6 flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">บัญชีของฉัน</h1>
-          <p className="text-gray-500 text-sm">จัดการบัญชีการเงิน</p>
+          <h1 className="text-2xl font-extrabold text-gray-900">บัญชีของฉัน</h1>
+          <p className="text-gray-500 text-sm">แก้ไขไอคอน สี และยอดเงินได้</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => navigate("dashboard")}
-            className="h-10 px-4 bg-white border border-gray-200 rounded-xl text-gray-600 text-sm font-bold"
-          >
-            กลับ
-          </button>
-          <button
-            onClick={() => setOpen(true)}
-            className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg"
-            type="button"
-          >
-            <Plus size={20} />
-          </button>
-        </div>
+        <button
+          onClick={() => setOpenCreate(true)}
+          className="w-11 h-11 bg-gray-900 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95"
+          type="button"
+          aria-label="add account"
+        >
+          <Plus size={18} />
+        </button>
       </header>
 
-      <div className="space-y-4">
-        {state.accounts.map((acc) => {
-          const bal = calcAccountBalance(state.transactions, acc.id);
-          const iconObj = ACCOUNT_ICONS.find((i) => i.id === acc.type) || ACCOUNT_ICONS[0];
-
+      <div className="space-y-3">
+        {accounts.map((acc) => {
+          const bal = calcAccountBalance(accounts, transactions, acc.id);
           return (
-            <div key={acc.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-1.5 h-full" style={{ backgroundColor: acc.color }} />
-              <div className="flex justify-between items-center pl-3">
-                <div className="flex items-center gap-3 overflow-hidden">
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-white shrink-0" style={{ backgroundColor: acc.color }}>
-                    {iconObj.icon}
+            <div
+              key={acc.id}
+              className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+            >
+              <div className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0"
+                    style={{ backgroundColor: `${acc.color}22` }}
+                  >
+                    {acc.icon || "💳"}
                   </div>
-                  <div className="truncate">
-                    <h3 className="font-bold text-gray-800 text-lg truncate">{acc.name}</h3>
-                    <p className="text-gray-400 text-xs">{iconObj.name}</p>
+
+                  <div className="min-w-0">
+                    <div className="font-bold text-gray-900 truncate">{acc.name}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      ยอดคงเหลือ:{" "}
+                      <span className={`font-bold ${bal < 0 ? "text-red-500" : "text-gray-900"}`}>
+                        {formatCurrency(bal)}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  <div className="text-right">
-                    <p className="text-xs text-gray-400 mb-1">ยอดคงเหลือ</p>
-                    <p className={`text-lg font-bold ${bal >= 0 ? "text-gray-800" : "text-red-500"}`}>{formatCurrency(bal)}</p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(acc)}
+                    className="w-10 h-10 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center active:scale-95"
+                    aria-label="edit"
+                  >
+                    <Pencil size={18} />
+                  </button>
 
-                  {state.accounts.length > 1 && (
+                  {accounts.length > 1 ? (
                     <button
-                      onClick={() => del(acc.id)}
-                      className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full ml-1"
                       type="button"
+                      onClick={() => del(acc.id)}
+                      className="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center active:scale-95"
+                      aria-label="delete"
                     >
-                      <Trash2 size={20} />
+                      <Trash2 size={18} />
                     </button>
-                  )}
+                  ) : null}
                 </div>
               </div>
+
+              <div className="h-1" style={{ backgroundColor: acc.color }} />
             </div>
           );
         })}
       </div>
 
-      {open ? (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">เพิ่มบัญชีใหม่</h3>
+      {/* Create */}
+      {openCreate ? (
+        <ModalShell title="เพิ่มบัญชีใหม่" onClose={() => setOpenCreate(false)}>
+          <label className="text-xs font-bold text-gray-500 mb-1 block">ชื่อบัญชี</label>
+          <input
+            value={cName}
+            onChange={(e) => setCName(e.target.value)}
+            className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+            placeholder="เช่น เงินเก็บ, ธนาคาร"
+          />
 
-            <label className="text-xs font-bold text-gray-500 mb-1 block">ชื่อบัญชี</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl p-3 outline-indigo-500 mb-4"
-              placeholder="เช่น เงินเก็บ, กระเป๋าหลัก"
-            />
-
-            <label className="text-xs font-bold text-gray-500 mb-2 block">เลือกไอคอน</label>
-            <div className="grid grid-cols-5 gap-2 mb-4">
-              {ACCOUNT_ICONS.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setType(t.id)}
-                  className={`aspect-square rounded-xl border flex items-center justify-center transition-all ${
-                    type === t.id
-                      ? "border-indigo-600 bg-indigo-50 text-indigo-600 ring-1 ring-indigo-600"
-                      : "border-gray-200 text-gray-400 hover:bg-gray-50"
-                  }`}
-                  type="button"
-                  title={t.name}
-                >
-                  {t.icon}
-                </button>
-              ))}
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">ไอคอน (Emoji)</label>
+              <input
+                value={cIcon}
+                onChange={(e) => setCIcon(e.target.value)}
+                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl"
+                placeholder="💳"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                ใช้คีย์บอร์ด Emoji บนมือถือได้เลย
+              </p>
             </div>
 
-            <label className="text-xs font-bold text-gray-500 mb-2 block">สี</label>
-            <div className="flex gap-2 justify-center flex-wrap mb-6">
-              {ACCOUNT_COLORS.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setColor(c)}
-                  className={`w-8 h-8 rounded-full border-2 ${color === c ? "border-gray-400 scale-110" : "border-transparent"}`}
-                  style={{ backgroundColor: c }}
-                  type="button"
-                />
-              ))}
-            </div>
-
-            <div className="flex gap-3">
-              <button onClick={() => setOpen(false)} className="flex-1 py-3 text-gray-600 font-bold bg-gray-100 rounded-xl" type="button">
-                ยกเลิก
-              </button>
-              <button onClick={create} className="flex-1 py-3 text-white font-bold bg-indigo-600 rounded-xl shadow-lg shadow-indigo-200" type="button">
-                สร้างบัญชี
-              </button>
+            <div>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">ยอดตั้งต้น</label>
+              <input
+                value={cBalance}
+                onChange={(e) => setCBalance(e.target.value)}
+                type="number"
+                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                placeholder="0"
+              />
             </div>
           </div>
-        </div>
+
+          <div className="mt-4">
+            <label className="text-xs font-bold text-gray-500 mb-2 block">สี</label>
+            <ColorDots value={cColor} onChange={setCColor} />
+          </div>
+
+          <div className="flex gap-3 mt-6">
+            <button
+              type="button"
+              onClick={() => setOpenCreate(false)}
+              className="flex-1 py-3 rounded-2xl bg-gray-100 font-bold text-gray-700"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              onClick={create}
+              className="flex-1 py-3 rounded-2xl bg-gray-900 text-white font-bold flex items-center justify-center gap-2 active:scale-95"
+            >
+              <Check size={18} /> สร้าง
+            </button>
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {/* Edit */}
+      {openEdit && editing ? (
+        <ModalShell
+          title="แก้ไขบัญชี"
+          onClose={() => {
+            setOpenEdit(false);
+          }}
+        >
+          <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 mb-4">
+            <div className="text-xs text-gray-500">ยอดคงเหลือปัจจุบัน</div>
+            <div className="text-2xl font-extrabold text-gray-900 mt-1">
+              {formatCurrency(computedBalance)}
+            </div>
+          </div>
+
+          <label className="text-xs font-bold text-gray-500 mb-1 block">ชื่อบัญชี</label>
+          <input
+            value={eName}
+            onChange={(e) => setEName(e.target.value)}
+            className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+          />
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">ไอคอน (Emoji)</label>
+              <input
+                value={eIcon}
+                onChange={(e) => setEIcon(e.target.value)}
+                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-500 mb-1 block">ตั้งยอดใหม่</label>
+              <input
+                value={eBalance}
+                onChange={(e) => setEBalance(e.target.value)}
+                type="number"
+                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                placeholder="เช่น 1200"
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-3">
+            <div>
+              <div className="text-sm font-bold text-gray-900">บันทึกเป็นรายการ (Transaction)</div>
+              <div className="text-[12px] text-gray-500">
+                เปิด = จะไปอยู่ในสรุปผล/สถิติด้วย
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRecordAsTx((v) => !v)}
+              className={`w-14 h-8 rounded-full transition-all relative ${
+                recordAsTx ? "bg-gray-900" : "bg-gray-200"
+              }`}
+              aria-label="toggle record as transaction"
+            >
+              <span
+                className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
+                  recordAsTx ? "left-7" : "left-1"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="mt-4">
+            <label className="text-xs font-bold text-gray-500 mb-2 block">สี</label>
+            <ColorDots value={eColor} onChange={setEColor} />
+          </div>
+
+          <div className="flex gap-3 mt-6">
+            <button
+              type="button"
+              onClick={() => setOpenEdit(false)}
+              className="flex-1 py-3 rounded-2xl bg-gray-100 font-bold text-gray-700"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              onClick={saveEdit}
+              className="flex-1 py-3 rounded-2xl bg-gray-900 text-white font-bold flex items-center justify-center gap-2 active:scale-95"
+            >
+              <Check size={18} /> บันทึก
+            </button>
+          </div>
+        </ModalShell>
       ) : null}
     </div>
   );
