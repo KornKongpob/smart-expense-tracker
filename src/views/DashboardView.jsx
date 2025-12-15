@@ -1,22 +1,25 @@
-import { useMemo, useState } from 'react'
-import { Filter, TrendingDown, TrendingUp, FileText } from 'lucide-react'
-import TransactionCard from '../components/TransactionCard'
-import { formatCurrency } from '../utils/format'
-import { calcTotals } from '../store/selectors'
+// src/views/DashboardView.jsx
+import { useMemo, useState } from "react";
+import { Filter, TrendingDown, TrendingUp, FileText } from "lucide-react";
+import TransactionCard from "../components/TransactionCard";
+import { formatCurrency } from "../utils/format";
+import { calcTotals } from "../store/selectors";
+import { useAppStore } from "../store/store";
 
-export default function DashboardView({ state, onNavigate, onEdit }) {
-  const [filterAccount, setFilterAccount] = useState('all')
+export default function DashboardView() {
+  const { state, navigate, startNew, startEdit } = useAppStore();
+  const [filterAccount, setFilterAccount] = useState("all");
 
-  const totals = useMemo(() => calcTotals(state.transactions), [state.transactions])
+  const totals = useMemo(() => calcTotals(state.transactions), [state.transactions]);
 
   const filtered = useMemo(() => {
-    let txs = state.transactions
-    if (filterAccount !== 'all') txs = txs.filter(t => t.accountId === filterAccount)
-    return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 12)
-  }, [state.transactions, filterAccount])
+    let txs = state.transactions;
+    if (filterAccount !== "all") txs = txs.filter((t) => t.accountId === filterAccount);
+    return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 12);
+  }, [state.transactions, filterAccount]);
 
-  const accountName = (id) => state.accounts.find(a => a.id === id)?.name || ''
-  const allCats = [...state.categories.expense, ...state.categories.income]
+  const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || "";
+  const allCats = [...state.categories.expense, ...state.categories.income];
 
   return (
     <div className="pb-28 pt-6 px-4">
@@ -33,8 +36,10 @@ export default function DashboardView({ state, onNavigate, onEdit }) {
             className="appearance-none bg-white border border-gray-200 text-gray-600 py-2 pl-3 pr-8 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 shadow-sm"
           >
             <option value="all">ทุกบัญชี</option>
-            {state.accounts.map(acc => (
-              <option key={acc.id} value={acc.id}>{acc.name}</option>
+            {state.accounts.map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.name}
+              </option>
             ))}
           </select>
           <Filter size={14} className="absolute right-2.5 top-2.5 text-gray-400 pointer-events-none" />
@@ -66,24 +71,28 @@ export default function DashboardView({ state, onNavigate, onEdit }) {
 
       <div className="mb-4 flex justify-between items-end">
         <h3 className="font-bold text-lg text-gray-800">รายการล่าสุด</h3>
-        <button onClick={() => onNavigate('stats')} className="text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full">
+        <button
+          onClick={() => navigate("stats")}
+          className="text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full"
+          type="button"
+        >
           ดูสรุป
         </button>
       </div>
 
       {filtered.length ? (
         <div className="space-y-3">
-          {filtered.map(tx => {
-            const category = allCats.find(c => c.id === tx.category) || { name: 'ไม่ระบุ', icon: '❓', color: '#ccc' }
+          {filtered.map((tx) => {
+            const category = allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
             return (
               <TransactionCard
                 key={tx.id}
                 tx={tx}
                 category={category}
                 accountName={accountName(tx.accountId)}
-                onClick={() => onEdit(tx.id)}
+                onClick={() => startEdit(tx.id)}
               />
-            )
+            );
           })}
         </div>
       ) : (
@@ -92,9 +101,11 @@ export default function DashboardView({ state, onNavigate, onEdit }) {
             <FileText size={32} />
           </div>
           <p className="text-gray-400 font-medium">ยังไม่มีรายการบันทึก</p>
-          <button onClick={() => onNavigate('add')} className="mt-3 text-indigo-600 text-sm font-bold">เริ่มบันทึกรายการแรก</button>
+          <button onClick={startNew} className="mt-3 text-indigo-600 text-sm font-bold" type="button">
+            เริ่มบันทึกรายการแรก
+          </button>
         </div>
       )}
     </div>
-  )
+  );
 }
