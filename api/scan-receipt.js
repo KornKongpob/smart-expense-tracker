@@ -18,7 +18,6 @@ function readRawBody(req) {
 
 async function readJson(req) {
   if (req.body && typeof req.body === "object") return req.body;
-
   const buf = await readRawBody(req);
   const txt = buf.toString("utf-8").trim();
   if (!txt) return {};
@@ -29,7 +28,7 @@ async function readJson(req) {
   }
 }
 
-function parseMultipart(req, { maxBytes = 8 * 1024 * 1024 } = {}) {
+function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     const bb = Busboy({
       headers: req.headers,
@@ -40,7 +39,7 @@ function parseMultipart(req, { maxBytes = 8 * 1024 * 1024 } = {}) {
     let mimeType = "";
     let filename = "";
 
-    bb.on("file", (_fieldname, file, info) => {
+    bb.on("file", (fieldname, file, info) => {
       const chunks = [];
       filename = info?.filename || "";
       mimeType = info?.mimeType || info?.mimetype || "";
@@ -62,14 +61,15 @@ function parseMultipart(req, { maxBytes = 8 * 1024 * 1024 } = {}) {
 function safeJsonParseMaybe(text) {
   const t = String(text || "").trim();
   if (!t) return null;
-
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
   if (start >= 0 && end > start) {
     const candidate = t.slice(start, end + 1);
     try {
       return JSON.parse(candidate);
-    } catch {}
+    } catch {
+      // ignore
+    }
   }
   try {
     return JSON.parse(t);
@@ -78,23 +78,11 @@ function safeJsonParseMaybe(text) {
   }
 }
 
-function normalizeTransferShape(parsed) {
-  const isTransfer = !!parsed?.isTransfer || String(parsed?.category || "").toLowerCase() === "transfer";
-  const transfer = parsed?.transfer && typeof parsed.transfer === "object" ? parsed.transfer : null;
-
-  const pickSide = (side) => {
-    const s = transfer?.[side] && typeof transfer?.[side] === "object" ? transfer[side] : {};
-    return {
-      bank: s?.bank != null ? String(s.bank) : null,
-      accountLast4: s?.accountLast4 != null ? String(s.accountLast4).replace(/[^\d]/g, "").slice(-4) || null : null,
-      name: s?.name != null ? String(s.name) : null,
-    };
-  };
-
-  return {
-    isTransfer,
-    transfer: isTransfer ? { from: pickSide("from"), to: pickSide("to") } : null,
-  };
+function normalizeAccountNo(s) {
+  return String(s || "")
+    .replace(/\s+/g, "")
+    .replace(/[^0-9]/g, "")
+    .slice(-16); // เก็บท้ายไว้พอ match
 }
 
 async function callOpenAI({ base64, mimeType }) {
@@ -106,34 +94,39 @@ async function callOpenAI({ base64, mimeType }) {
   const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
-  const prompt =
-    `You are a receipt AND bank transfer slip parser for an expense tracker app.\n` +
-    `Return STRICT JSON ONLY (no markdown, no extra text).\n` +
-    `\n` +
-    `Output schema:\n` +
-    `{\n` +
-    `  "amount": number|null,\n` +
-    `  "date": "YYYY-MM-DD"|null,\n` +
-    `  "merchant": string,\n` +
-    `  "category": "food"|"transport"|"shopping"|"bills"|"health"|"entertainment"|"transfer"|"income"|"other",\n` +
-    `  "note": string,\n` +
-    `  "isTransfer": boolean,\n` +
-    `  "transfer": {\n` +
-    `    "from": { "bank": string|null, "accountLast4": string|null, "name": string|null },\n` +
-    `    "to":   { "bank": string|null, "accountLast4": string|null, "name": string|null }\n` +
-    `  }|null\n` +
-    `}\n` +
-    `\n` +
-    `Rules:\n` +
-    `- amount should be the grand total / net paid.\n` +
-    `- If date is Buddhist Era (>=2400), convert to AD.\n` +
-    `- merchant: best guess from header.\n` +
-    `- If it's a bank transfer slip, set category="transfer" and isTransfer=true.\n` +
-    `- For transfer slips, fill transfer.from/to if possible:\n` +
-    `  - bank: bank name in slip (e.g. KBank, SCB, BBL, Krungthai, etc.)\n` +
-    `  - accountLast4: last 4 digits shown (if any)\n` +
-    `  - name: account owner name shown (if any)\n` +
-    `- If not transfer slip, isTransfer=false and transfer=null.\n`;
+  const prompt = `
+You are a receipt / bank transfer slip parser for an expense tracker.
+Return STRICT JSON ONLY (no markdown, no extra text).
+
+Schema:
+{
+  "kind": "receipt" | "transfer" | "income",
+  "amount": number | null,
+  "date": "YYYY-MM-DD" | null,
+  "merchant": string,
+  "category": string,         // either existing id-like (food/transport/...) OR a human category name
+  "note": string,
+  "ref": string | null,       // transaction reference / slip ref / authorization code
+  "payment_method": "cash" | "bank" | "credit_card" | "unknown",
+  "from_account_no": string | null,
+  "to_account_no": string | null,
+  "card_last4": string | null
+}
+
+Rules:
+- amount = grand total / net paid.
+- If date is Buddhist Era (>=2400), convert to AD.
+- If bank transfer slip: kind="transfer"
+- If salary/receive money slip: kind="income"
+- ref: best reference number if present.
+- from_account_no / to_account_no: digits only if found; otherwise null.
+- card_last4: last 4 digits if present; otherwise null.
+- category:
+  - If receipt: choose best among (food, transport, shopping, bills, health, entertainment, other) OR return a specific category name from the slip.
+  - If transfer: "transfer"
+  - If income: "income"
+Return JSON only.
+`.trim();
 
   const payload = {
     model,
@@ -182,21 +175,22 @@ async function callOpenAI({ base64, mimeType }) {
       ? Number(parsed.amount)
       : null;
 
-  const tinfo = normalizeTransferShape(parsed);
-
-  return {
-    status: 200,
-    body: {
-      amount: Number.isFinite(amount) ? amount : null,
-      date: parsed.date ?? null,
-      merchant: String(parsed.merchant ?? ""),
-      category: String(parsed.category ?? "other"),
-      note: String(parsed.note ?? ""),
-      isTransfer: tinfo.isTransfer,
-      transfer: tinfo.transfer,
-      rawText: outputText,
-    },
+  const body = {
+    kind: String(parsed.kind || "receipt"),
+    amount: Number.isFinite(amount) ? amount : null,
+    date: parsed.date ?? null,
+    merchant: String(parsed.merchant ?? ""),
+    category: String(parsed.category ?? "other"),
+    note: String(parsed.note ?? ""),
+    ref: parsed.ref != null ? String(parsed.ref) : null,
+    payment_method: String(parsed.payment_method ?? "unknown"),
+    from_account_no: parsed.from_account_no ? normalizeAccountNo(parsed.from_account_no) : null,
+    to_account_no: parsed.to_account_no ? normalizeAccountNo(parsed.to_account_no) : null,
+    card_last4: parsed.card_last4 ? String(parsed.card_last4).replace(/\D/g, "").slice(-4) : null,
+    rawText: outputText,
   };
+
+  return { status: 200, body };
 }
 
 export default async function handler(req, res) {
@@ -208,14 +202,13 @@ export default async function handler(req, res) {
 
     const ct = getContentType(req);
 
-    // 1) multipart/form-data (field name: file)
+    // 1) multipart/form-data
     if (ct.includes("multipart/form-data")) {
       const { fileBuffer, mimeType } = await parseMultipart(req);
       if (!fileBuffer || fileBuffer.length === 0) {
         res.status(400).json({ error: "missing_file" });
         return;
       }
-
       const base64 = fileBuffer.toString("base64");
       const out = await callOpenAI({ base64, mimeType: mimeType || "image/jpeg" });
       res.status(out.status).json(out.body);

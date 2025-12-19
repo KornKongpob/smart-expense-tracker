@@ -1,61 +1,57 @@
-// src/views/DashboardView.jsx
 import { useMemo, useState } from "react";
-import { Filter, TrendingDown, TrendingUp, FileText, Search } from "lucide-react";
+import { Filter, TrendingDown, TrendingUp, FileText, Search, AlertTriangle } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import { formatCurrency } from "../utils/format";
-import { calcTotals } from "../store/selectors";
+import { calcTotals, calcSpentByCategoryInMonth, monthKeyOf } from "../store/selectors";
 import { useAppStore } from "../store/store";
 
 export default function DashboardView() {
-  const { state, navigate, startEditTransaction, startNewTransaction } = useAppStore();
+  const { state, actions } = useAppStore();
 
   const [filterAccount, setFilterAccount] = useState("all");
   const [q, setQ] = useState("");
 
   const totals = useMemo(() => calcTotals(state.transactions), [state.transactions]);
-  const allCats = [...state.categories.expense, ...state.categories.income];
+  const allCats = [...(state.categories.expense || []), ...(state.categories.income || [])];
 
   const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || "";
 
   const filtered = useMemo(() => {
     let txs = state.transactions;
 
-    // ✅ show only ONE record per transfer slip (use expense-side as representative)
-    txs = txs.filter((t) => {
-      if (!t.isTransfer) return true;
-      return t.type === "expense"; // only show outgoing side
-    });
+    // hide transfer "in" side (show only out side)
+    txs = txs.filter((t) => !(t.isTransfer && t.meta?.transferSide === "in"));
 
-    if (filterAccount !== "all") {
-      txs = txs.filter((t) => {
-        // if transfer: filter by either side (from or to) so UX ไม่งง
-        if (t.isTransfer && t.transferId) {
-          const mate = state.transactions.find((x) => x.transferId === t.transferId && x.type === "income");
-          return t.accountId === filterAccount || mate?.accountId === filterAccount;
-        }
-        return t.accountId === filterAccount;
-      });
-    }
+    if (filterAccount !== "all") txs = txs.filter((t) => t.accountId === filterAccount);
 
     if (q.trim()) {
       const needle = q.trim().toLowerCase();
       txs = txs.filter((t) => {
         const cat = allCats.find((c) => c.id === t.category);
-        const mate =
-          t.isTransfer && t.transferId
-            ? state.transactions.find((x) => x.transferId === t.transferId && x.type === "income")
-            : null;
-
-        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)} ${
-          mate ? accountName(mate.accountId) : ""
-        }`.toLowerCase();
-
+        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)} ${t.meta?.ref || ""}`.toLowerCase();
         return hay.includes(needle);
       });
     }
 
-    return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 30);
-  }, [state.transactions, filterAccount, q, allCats, state.accounts]);
+    return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 40);
+  }, [state.transactions, filterAccount, q, allCats]);
+
+  // budget alert
+  const monthKey = monthKeyOf(new Date());
+  const spentMap = useMemo(() => calcSpentByCategoryInMonth(state.transactions, new Date()), [state.transactions]);
+  const budgetMap = state.budgets?.[monthKey] || {};
+
+  const overBudget = useMemo(() => {
+    const hits = [];
+    for (const [catId, budget] of Object.entries(budgetMap)) {
+      const spent = spentMap[catId] || 0;
+      if ((Number(budget) || 0) > 0 && spent > (Number(budget) || 0)) {
+        const cat = (state.categories.expense || []).find((c) => c.id === catId);
+        hits.push({ catId, name: cat?.name || catId, spent, budget: Number(budget) || 0 });
+      }
+    }
+    return hits.sort((a, b) => (b.spent - b.budget) - (a.spent - a.budget));
+  }, [budgetMap, spentMap, state.categories.expense]);
 
   return (
     <div className="pb-28 pt-6 px-4">
@@ -73,14 +69,28 @@ export default function DashboardView() {
           >
             <option value="all">ทุกบัญชี</option>
             {state.accounts.map((acc) => (
-              <option key={acc.id} value={acc.id}>
-                {acc.name}
-              </option>
+              <option key={acc.id} value={acc.id}>{acc.name}</option>
             ))}
           </select>
           <Filter size={14} className="absolute right-2.5 top-2.5 text-gray-400 pointer-events-none" />
         </div>
       </header>
+
+      {overBudget.length ? (
+        <button
+          type="button"
+          onClick={() => actions.navigate("budgets")}
+          className="mb-4 w-full bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-2xl px-4 py-3 flex items-start gap-3"
+        >
+          <AlertTriangle className="mt-0.5" size={18} />
+          <div className="text-left">
+            <div className="font-extrabold text-sm">Budget Alert</div>
+            <div className="text-xs text-yellow-700 mt-0.5">
+              เกินงบ {overBudget[0].name}: {formatCurrency(overBudget[0].spent)} / {formatCurrency(overBudget[0].budget)}
+            </div>
+          </div>
+        </button>
+      ) : null}
 
       <div className="mb-6">
         <div className="bg-white border border-gray-200 rounded-2xl px-3 py-2 flex items-center gap-2 shadow-sm">
@@ -88,7 +98,7 @@ export default function DashboardView() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหาโน้ต / หมวด / บัญชี"
+            placeholder="ค้นหาโน้ต / หมวด / บัญชี / ref"
             className="w-full outline-none text-sm bg-transparent text-gray-700"
           />
         </div>
@@ -120,7 +130,7 @@ export default function DashboardView() {
       <div className="mb-4 flex justify-between items-end">
         <h3 className="font-bold text-lg text-gray-800">รายการล่าสุด</h3>
         <button
-          onClick={() => navigate("stats")}
+          onClick={() => actions.navigate("stats")}
           className="text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full"
           type="button"
         >
@@ -136,19 +146,13 @@ export default function DashboardView() {
                 ? { name: "Transfer", icon: "🔁", color: "#94a3b8" }
                 : allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
 
-            const mate =
-              tx.isTransfer && tx.transferId
-                ? state.transactions.find((x) => x.transferId === tx.transferId && x.type === "income")
-                : null;
-
             return (
               <TransactionCard
                 key={tx.id}
                 tx={tx}
                 category={category}
                 accountName={accountName(tx.accountId)}
-                transferToName={mate ? accountName(mate.accountId) : ""}
-                onClick={() => startEditTransaction(tx.id)}
+                onClick={() => actions.startEditTransaction(tx.id)}
               />
             );
           })}
@@ -159,7 +163,7 @@ export default function DashboardView() {
             <FileText size={32} />
           </div>
           <p className="text-gray-400 font-medium">ยังไม่มีรายการบันทึก</p>
-          <button onClick={startNewTransaction} className="mt-3 text-indigo-600 text-sm font-bold" type="button">
+          <button onClick={() => actions.startNewTransaction()} className="mt-3 text-indigo-600 text-sm font-bold" type="button">
             เริ่มบันทึกรายการแรก
           </button>
         </div>

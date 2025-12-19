@@ -5,6 +5,8 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, BarChart, Ba
 import { formatCurrency, formatDateShort } from "../utils/format";
 import { useAppStore } from "../store/store";
 
+const isTransferTx = (t) => t?.type === "transfer" || t?.isTransfer === true;
+
 export default function StatsView() {
   const { state } = useAppStore();
   const [period, setPeriod] = useState("month"); // week | month | year
@@ -12,7 +14,7 @@ export default function StatsView() {
   const filtered = useMemo(() => {
     const now = new Date();
     return state.transactions.filter((t) => {
-      if (t.isTransfer) return false;
+      if (isTransferTx(t)) return false;
       const d = new Date(t.date);
       if (period === "week") return d >= new Date(now.getTime() - 7 * 86400000);
       if (period === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();

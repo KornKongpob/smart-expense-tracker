@@ -1,5 +1,3 @@
-// src/components/Navbar.jsx
-
 import React from "react";
 import { Plus, Home, Activity, CreditCard, MoreHorizontal } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
@@ -7,9 +5,6 @@ import { useAppStore } from "../store/store.jsx";
 export default function Navbar() {
   const { state, actions } = useAppStore();
   const currentView = state.ui.view;
-
-  const navigate = actions?.navigate ?? (() => {});
-  const startNew = actions?.startNewTransaction ?? actions?.startNew ?? (() => {});
 
   return (
     <div
@@ -25,7 +20,7 @@ export default function Navbar() {
       "
     >
       <button
-        onClick={() => navigate("dashboard")}
+        onClick={() => actions.navigate("dashboard")}
         className={`flex flex-col items-center w-16 p-1 rounded-xl transition-all ${
           currentView === "dashboard" ? "text-indigo-600 bg-indigo-50" : "text-gray-400 hover:text-gray-600"
         }`}
@@ -36,7 +31,7 @@ export default function Navbar() {
       </button>
 
       <button
-        onClick={() => navigate("stats")}
+        onClick={() => actions.navigate("stats")}
         className={`flex flex-col items-center w-16 p-1 rounded-xl transition-all ${
           currentView === "stats" ? "text-indigo-600 bg-indigo-50" : "text-gray-400 hover:text-gray-600"
         }`}
@@ -47,7 +42,7 @@ export default function Navbar() {
       </button>
 
       <button
-        onClick={startNew}
+        onClick={() => actions.startNewTransaction()}
         className="bg-gradient-to-tr from-indigo-600 to-purple-600 text-white rounded-full p-3 -mt-8 shadow-lg shadow-indigo-200 border-4 border-gray-50 active:scale-95 transition-all"
         aria-label="Add"
         type="button"
@@ -56,7 +51,7 @@ export default function Navbar() {
       </button>
 
       <button
-        onClick={() => navigate("accounts")}
+        onClick={() => actions.navigate("accounts")}
         className={`flex flex-col items-center w-16 p-1 rounded-xl transition-all ${
           currentView === "accounts" ? "text-indigo-600 bg-indigo-50" : "text-gray-400 hover:text-gray-600"
         }`}
@@ -67,7 +62,7 @@ export default function Navbar() {
       </button>
 
       <button
-        onClick={() => navigate("more")}
+        onClick={() => actions.navigate("more")}
         className={`flex flex-col items-center w-16 p-1 rounded-xl transition-all ${
           currentView === "more" ? "text-indigo-600 bg-indigo-50" : "text-gray-400 hover:text-gray-600"
         }`}

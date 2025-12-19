@@ -1,7 +1,7 @@
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle } from "lucide-react";
 
 export default function ConfirmationModal({ isOpen, title, message, onConfirm, onCancel, isDestructive }) {
-  if (!isOpen) return null
+  if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
@@ -11,7 +11,7 @@ export default function ConfirmationModal({ isOpen, title, message, onConfirm, o
               <AlertCircle size={24} />
             </div>
           )}
-          <h3 className={`text-xl font-bold mt-1 ${isDestructive ? 'text-red-600' : 'text-gray-800'}`}>
+          <h3 className={`text-xl font-bold mt-1 ${isDestructive ? "text-red-600" : "text-gray-800"}`}>
             {title}
           </h3>
         </div>
@@ -25,7 +25,7 @@ export default function ConfirmationModal({ isOpen, title, message, onConfirm, o
           <button
             onClick={onConfirm}
             className={`flex-1 py-3 text-white font-bold rounded-xl shadow-lg active:scale-95 transition-transform ${
-              isDestructive ? 'bg-red-500 shadow-red-200' : 'bg-indigo-600 shadow-indigo-200'
+              isDestructive ? "bg-red-500 shadow-red-200" : "bg-indigo-600 shadow-indigo-200"
             }`}
           >
             ยืนยัน
@@ -33,5 +33,5 @@ export default function ConfirmationModal({ isOpen, title, message, onConfirm, o
         </div>
       </div>
     </div>
-  )
+  );
 }

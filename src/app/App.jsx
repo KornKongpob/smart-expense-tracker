@@ -1,4 +1,3 @@
-// src/app/App.jsx
 import React, { useState } from "react";
 
 import DashboardView from "../views/DashboardView";
@@ -7,6 +6,8 @@ import StatsView from "../views/StatsView";
 import AccountsView from "../views/AccountsView";
 import CategoriesView from "../views/CategoriesView";
 import MoreView from "../views/MoreView";
+import BudgetsView from "../views/BudgetsView";
+import RecurringView from "../views/RecurringView";
 
 import Navbar from "../components/Navbar";
 import ConfirmationModal from "../components/ConfirmationModal";
@@ -35,7 +36,6 @@ export default function App() {
     });
   };
 
-  // ✅ FIX: ยืนยันแล้วปิด popup ให้อัตโนมัติ
   const showConfirm = (title, message, onConfirm, isDestructive = false) => {
     setModal({
       isOpen: true,
@@ -62,6 +62,8 @@ export default function App() {
         {view === "stats" && <StatsView />}
         {view === "accounts" && <AccountsView showAlert={showAlert} showConfirm={showConfirm} />}
         {view === "categories" && <CategoriesView showAlert={showAlert} showConfirm={showConfirm} />}
+        {view === "budgets" && <BudgetsView showAlert={showAlert} showConfirm={showConfirm} />}
+        {view === "recurring" && <RecurringView showAlert={showAlert} showConfirm={showConfirm} />}
         {view === "more" && <MoreView showAlert={showAlert} showConfirm={showConfirm} />}
 
         <ConfirmationModal

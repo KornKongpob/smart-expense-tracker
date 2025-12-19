@@ -1,14 +1,11 @@
 import { formatCurrency, formatDateShort } from "../utils/format";
 
-export default function TransactionCard({ tx, category, accountName, transferToName = "", onClick }) {
+export default function TransactionCard({ tx, category, accountName, onClick }) {
   const isExpense = tx.type === "expense";
   const sign = isExpense ? "-" : "+";
 
-  const subtitle = tx.isTransfer
-    ? `Transfer: ${accountName}${transferToName ? ` → ${transferToName}` : ""}`
-    : accountName
-    ? accountName
-    : "";
+  const isTransferOut = tx.isTransfer && tx.meta?.transferSide === "out";
+  const transferToName = tx.meta?.toAccountName || "";
 
   return (
     <div
@@ -22,16 +19,37 @@ export default function TransactionCard({ tx, category, accountName, transferToN
         >
           {category.icon}
         </div>
+
         <div className="min-w-0">
           <p className="font-medium text-gray-800 text-sm truncate">
             {tx.note || category.name}
           </p>
+
           <div className="flex items-center gap-2 text-xs text-gray-400">
             <span>{formatDateShort(tx.date)}</span>
-            {subtitle ? (
+
+            {accountName ? (
               <>
                 <span>•</span>
-                <span className="text-indigo-400 truncate max-w-[190px]">{subtitle}</span>
+                <span className="text-indigo-400 truncate max-w-[120px]">
+                  {isTransferOut && transferToName
+                    ? `${accountName} → ${transferToName}`
+                    : accountName}
+                </span>
+              </>
+            ) : null}
+
+            {tx.isTransfer ? (
+              <>
+                <span>•</span>
+                <span className="text-gray-500">Transfer</span>
+              </>
+            ) : null}
+
+            {tx.meta?.ref ? (
+              <>
+                <span>•</span>
+                <span className="text-gray-500 truncate max-w-[110px]">Ref: {tx.meta.ref}</span>
               </>
             ) : null}
           </div>

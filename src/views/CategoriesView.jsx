@@ -1,11 +1,10 @@
-// src/views/CategoriesView.jsx
 import { useState } from "react";
 import { ChevronRight, Plus, Trash2 } from "lucide-react";
 import { EMOJI_PRESETS, PRESET_COLORS } from "../constants/presets.jsx";
 import { useAppStore } from "../store/store";
 
 export default function CategoriesView({ showAlert, showConfirm }) {
-  const { state, navigate, addCategory, deleteCategory } = useAppStore();
+  const { state, actions } = useAppStore();
 
   const [tab, setTab] = useState("expense");
   const [open, setOpen] = useState(false);
@@ -14,18 +13,11 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   const [icon, setIcon] = useState("🏷️");
   const [color, setColor] = useState(PRESET_COLORS[0]);
 
-  const onBack = () => navigate("more");
+  const onBack = () => actions.navigate("more");
 
   const add = () => {
     if (!name.trim()) return showAlert?.("กรุณาใส่ชื่อหมวดหมู่");
-
-    addCategory({
-      type: tab,
-      name: name.trim(),
-      icon,
-      color,
-    });
-
+    actions.addCategory({ type: tab, name: name.trim(), icon, color });
     setName("");
     setIcon("🏷️");
     setColor(PRESET_COLORS[0]);
@@ -34,8 +26,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
 
   const del = (id) => {
     if ((state.categories?.[tab] ?? []).length <= 1) return showAlert?.("ต้องมีอย่างน้อย 1 หมวดหมู่");
-
-    showConfirm?.("ลบหมวดหมู่", "ยืนยันลบหมวดหมู่นี้?", () => deleteCategory({ id, type: tab }), true);
+    showConfirm?.("ลบหมวดหมู่", "ยืนยันลบหมวดหมู่นี้?", () => actions.deleteCategory({ id, type: tab }), true);
   };
 
   const cats = state.categories?.[tab] ?? [];
@@ -79,25 +70,15 @@ export default function CategoriesView({ showAlert, showConfirm }) {
 
       <div className="space-y-3">
         {cats.map((cat) => (
-          <div
-            key={cat.id}
-            className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between"
-          >
+          <div key={cat.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
-                style={{ backgroundColor: `${cat.color}20` }}
-              >
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg" style={{ backgroundColor: `${cat.color}20` }}>
                 {cat.icon}
               </div>
               <span className="font-medium text-gray-700">{cat.name}</span>
             </div>
 
-            <button
-              onClick={() => del(cat.id)}
-              className="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50"
-              type="button"
-            >
+            <button onClick={() => del(cat.id)} className="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50" type="button">
               <Trash2 size={20} />
             </button>
           </div>
@@ -118,12 +99,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
             <h3 className="text-xl font-bold mb-4">สร้างหมวดหมู่ใหม่</h3>
 
             <label className="text-xs font-bold text-gray-500 mb-1 block">ชื่อหมวดหมู่</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg p-3 outline-indigo-500 mb-4"
-              placeholder="เช่น กาแฟ, ค่าเช่า"
-            />
+            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-gray-200 rounded-lg p-3 outline-indigo-500 mb-4" placeholder="เช่น กาแฟ, ค่าเช่า" />
 
             <div className="flex gap-4 mb-4">
               <div className="flex-1">
@@ -168,18 +144,10 @@ export default function CategoriesView({ showAlert, showConfirm }) {
             </div>
 
             <div className="flex gap-3 mt-auto">
-              <button
-                onClick={() => setOpen(false)}
-                className="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl"
-                type="button"
-              >
+              <button onClick={() => setOpen(false)} className="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl" type="button">
                 ยกเลิก
               </button>
-              <button
-                onClick={add}
-                className="flex-1 py-3 text-white font-bold bg-indigo-600 rounded-xl shadow-lg shadow-indigo-200"
-                type="button"
-              >
+              <button onClick={add} className="flex-1 py-3 text-white font-bold bg-indigo-600 rounded-xl shadow-lg shadow-indigo-200" type="button">
                 สร้าง
               </button>
             </div>

@@ -1,46 +1,125 @@
-// src/store/store.jsx
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
 
 import { ACTIONS } from "./actions";
 import { reducer, createInitialState } from "./reducer";
 
-import { loadAll, saveAll, clearAll } from "../services/storage";
+import { loadAll, saveAll, clearAll, exportBackup as exportBackupFile } from "../services/storage";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
 import { generateId, generateTransferId } from "../utils/id";
-import { calcAccountBalance } from "./selectors";
-import { toISODate } from "../utils/format";
+import { calcAccountBalance, monthKeyOf } from "./selectors";
 
-// ===== defaults (กันแอพพังถ้า localStorage ว่าง) =====
 const DEFAULT_ACCOUNTS = [
-  { id: "acc_cash", name: "เงินสด", color: "#1DD1A1", icon: "💵", openingBalance: 0 },
+  {
+    id: "acc_cash",
+    name: "เงินสด",
+    type: "cash", // cash | bank | credit
+    color: "#1DD1A1",
+    icon: "💵",
+    openingBalance: 0,
+    accountNumber: "", // optional digits
+    cardLast4: "", // optional
+    creditLimit: 0,
+    statementDay: 25,
+    dueDay: 5,
+  },
 ];
 
 const AppStoreContext = createContext(null);
 
-function safeNumber(n, fallback = 0) {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : fallback;
+function slugId(name) {
+  const s = String(name || "").trim().toLowerCase();
+  const id = s
+    .replace(/[^\wก-๙\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 24);
+  return id || generateId();
+}
+
+function normalizeDigits(s) {
+  return String(s || "").replace(/\D/g, "");
+}
+
+function matchAccountFromHint(accounts, hint) {
+  // hint: { from_account_no, card_last4, payment_method }
+  const fromNo = normalizeDigits(hint?.from_account_no);
+  const toNo = normalizeDigits(hint?.to_account_no);
+  const last4 = normalizeDigits(hint?.card_last4).slice(-4);
+
+  // 1) match bank account number (endsWith)
+  if (fromNo) {
+    const hit = accounts.find((a) => {
+      const accNo = normalizeDigits(a.accountNumber);
+      return accNo && (accNo.endsWith(fromNo.slice(-4)) || accNo.endsWith(fromNo.slice(-6)) || accNo === fromNo);
+    });
+    if (hit) return hit.id;
+  }
+
+  // 2) if transfer and only to-account known, still try match from by NOT matching to
+  if (toNo) {
+    const hit = accounts.find((a) => {
+      const accNo = normalizeDigits(a.accountNumber);
+      return accNo && (accNo.endsWith(toNo.slice(-4)) || accNo.endsWith(toNo.slice(-6)) || accNo === toNo);
+    });
+    // ถ้าเจอแต่เป็น “to” ให้ไม่เลือกอัตโนมัติเป็น from
+    // (ปล่อยให้ user เลือกเองใน queue)
+    if (hit) return null;
+  }
+
+  // 3) match credit card last4
+  if (last4) {
+    const hit = accounts.find((a) => String(a.cardLast4 || "").replace(/\D/g, "").slice(-4) === last4);
+    if (hit) return hit.id;
+  }
+
+  return null;
+}
+
+function findCategoryId(state, type, catValue) {
+  const list = state.categories?.[type] || [];
+  const raw = String(catValue || "").trim();
+
+  // if looks like known ids
+  const byId = list.find((c) => c.id === raw);
+  if (byId) return byId.id;
+
+  // match by name
+  const low = raw.toLowerCase();
+  const byName = list.find((c) => String(c.name || "").toLowerCase() === low);
+  if (byName) return byName.id;
+
+  // map common
+  const common = ["food","transport","shopping","bills","health","entertainment","other","transfer","income"];
+  const byCommon = common.find((x) => low.includes(x));
+  if (byCommon && list.find((c) => c.id === byCommon)) return byCommon;
+
+  return null;
 }
 
 export function AppStoreProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, undefined, () => {
-    const boot = loadAll({
-      defaultAccounts: DEFAULT_ACCOUNTS,
-      defaultCategories: DEFAULT_CATEGORIES,
-    });
-    return createInitialState(boot);
-  });
+  const [state, dispatch] = useReducer(
+    reducer,
+    undefined,
+    () => {
+      const boot = loadAll({
+        defaultAccounts: DEFAULT_ACCOUNTS,
+        defaultCategories: DEFAULT_CATEGORIES,
+        defaultBudgets: {},
+        defaultRecurring: [],
+      });
+      return createInitialState(boot);
+    }
+  );
 
-  // persist (save เสมอ)
   useEffect(() => {
     saveAll({
       transactions: state.transactions,
       accounts: state.accounts,
       categories: state.categories,
+      budgets: state.budgets,
+      recurring: state.recurring,
     });
-  }, [state.transactions, state.accounts, state.categories]);
+  }, [state.transactions, state.accounts, state.categories, state.budgets, state.recurring]);
 
-  // ===== selectors/helpers =====
   const getEditingTransaction = useMemo(() => {
     return () => {
       const id = state?.ui?.editingId;
@@ -49,54 +128,51 @@ export function AppStoreProvider({ children }) {
     };
   }, [state.transactions, state?.ui?.editingId]);
 
-  // ===== actions =====
-  const api = useMemo(() => {
+  const actions = useMemo(() => {
     const navigate = (view) => dispatch({ type: ACTIONS.NAVIGATE, payload: view });
 
-    const startNew = () => dispatch({ type: ACTIONS.START_NEW_TRANSACTION });
-    const startNewTransaction = startNew;
-
-    const startEdit = (id) => dispatch({ type: ACTIONS.START_EDIT_TRANSACTION, payload: id });
-    const startEditTransaction = startEdit;
-
-    const setTransactions = (next) => dispatch({ type: ACTIONS.SET_TRANSACTIONS, payload: next ?? [] });
+    const startNewTransaction = () => dispatch({ type: ACTIONS.START_NEW_TRANSACTION });
+    const startEditTransaction = (id) => dispatch({ type: ACTIONS.START_EDIT_TRANSACTION, payload: id });
 
     const upsertTransaction = (tx) => {
-      const next = {
+      const clean = {
         ...tx,
-        id: tx?.id || generateId(),
-        amount: safeNumber(tx?.amount, 0),
-        type: tx?.type || "expense",
-        category: tx?.category || "",
-        accountId: tx?.accountId || "",
-        date: tx?.date || toISODate(new Date()),
-        note: String(tx?.note || ""),
-        isTransfer: !!tx?.isTransfer,
-        transferId: tx?.transferId || null,
+        id: tx.id || generateId(),
+        amount: Number(tx.amount) || 0,
+        date: tx.date || new Date().toISOString().slice(0, 10),
+        note: String(tx.note || ""),
+        meta: tx.meta || {},
       };
-      dispatch({ type: ACTIONS.UPSERT_TRANSACTION, payload: next });
+      dispatch({ type: ACTIONS.UPSERT_TRANSACTION, payload: clean });
     };
 
-    // ✅ delete: if transfer => delete both sides
-    const deleteTransaction = (id) => {
-      const tx = state.transactions.find((t) => t.id === id);
-      if (tx?.isTransfer && tx?.transferId) {
-        const next = state.transactions.filter((t) => t.transferId !== tx.transferId);
-        setTransactions(next);
-        // force back to dashboard
-        navigate("dashboard");
-        return;
-      }
-      dispatch({ type: ACTIONS.DELETE_TRANSACTION, payload: id });
+    const addManyTransactions = (txs) => {
+      const clean = (txs || []).map((t) => ({
+        ...t,
+        id: t.id || generateId(),
+        amount: Number(t.amount) || 0,
+        date: t.date || new Date().toISOString().slice(0, 10),
+        note: String(t.note || ""),
+        meta: t.meta || {},
+      }));
+      dispatch({ type: ACTIONS.ADD_MANY_TRANSACTIONS, payload: clean });
     };
+
+    const deleteTransaction = (id) => dispatch({ type: ACTIONS.DELETE_TRANSACTION, payload: id });
 
     const addAccount = (account) => {
       const next = {
         id: account?.id || generateId(),
         name: String(account?.name || "").trim() || "บัญชีใหม่",
+        type: account?.type || "cash",
         color: account?.color || "#1DD1A1",
         icon: (account?.icon || "💳").trim(),
-        openingBalance: safeNumber(account?.openingBalance, 0),
+        openingBalance: Number(account?.openingBalance || 0),
+        accountNumber: String(account?.accountNumber || ""),
+        cardLast4: String(account?.cardLast4 || "").replace(/\D/g, "").slice(-4),
+        creditLimit: Number(account?.creditLimit || 0),
+        statementDay: Number(account?.statementDay || 25),
+        dueDay: Number(account?.dueDay || 5),
       };
       dispatch({ type: ACTIONS.ADD_ACCOUNT, payload: next });
     };
@@ -107,139 +183,162 @@ export function AppStoreProvider({ children }) {
 
     const deleteAccount = (id) => dispatch({ type: ACTIONS.DELETE_ACCOUNT, payload: id });
 
-    /**
-     * ✅ ปรับยอดบัญชีให้เท่ากับ desiredBalance
-     * - recordAsTransaction = false => ปรับ openingBalance อย่างเดียว (ไม่ไปอยู่ในสถิติ)
-     * - recordAsTransaction = true  => สร้าง transaction ปรับยอด (ไปอยู่ในสถิติ)
-     */
-    const adjustAccountBalance = ({ accountId, desiredBalance, recordAsTransaction }) => {
-      const current = calcAccountBalance(state.accounts, state.transactions, accountId);
-      const desired = safeNumber(desiredBalance, current);
-      const delta = desired - current;
+    const ensureCategory = ({ type, value }) => {
+      const existingId = findCategoryId(state, type, value);
+      if (existingId) return existingId;
 
-      if (Math.abs(delta) < 0.000001) return;
+      // auto create
+      const name = String(value || "").trim() || "อื่นๆ";
+      const id = slugId(name);
 
-      if (!recordAsTransaction) {
-        // ปรับ openingBalance ให้ผลรวมสุดท้าย = desired
-        const acc = state.accounts.find((a) => a.id === accountId);
-        const opening = safeNumber(acc?.openingBalance, 0);
-        const nextOpening = opening + delta;
+      // prevent duplicate id collision
+      const list = state.categories?.[type] || [];
+      const finalId = list.some((c) => c.id === id) ? generateId() : id;
 
-        dispatch({
-          type: ACTIONS.UPDATE_ACCOUNT_OPENING_BALANCE,
-          payload: { id: accountId, openingBalance: nextOpening },
-        });
-        return;
-      }
-
-      // record as transaction (income if delta>0, expense if delta<0)
-      const type = delta >= 0 ? "income" : "expense";
-      const amount = Math.abs(delta);
-
-      // choose category id that exists
-      const catId = type === "income" ? "refund" : "other";
-
-      const tx = {
-        id: generateId(),
-        type,
-        amount,
-        category: catId,
-        accountId,
-        date: toISODate(new Date()),
-        note: "ปรับยอดบัญชี",
-        isTransfer: false,
-        transferId: null,
+      const category = {
+        id: finalId,
+        name,
+        icon: "🏷️",
+        color: "#C8D6E5",
+        auto: true,
       };
 
-      // ไม่บังคับไปหน้า add — แค่เพิ่มใน list แล้วอยู่หน้าเดิม
-      const next = [...state.transactions, tx];
-      setTransactions(next);
+      dispatch({ type: ACTIONS.ADD_CATEGORY, payload: { type, category } });
+      return category.id;
     };
 
-    // ✅ Transfer: create 2 transactions linked by transferId
-    const createTransfer = ({ fromAccountId, toAccountId, amount, date, note }) => {
-      const amt = safeNumber(amount, 0);
-      if (!fromAccountId || !toAccountId || fromAccountId === toAccountId || amt <= 0) return null;
+    const addCategory = ({ type, name, icon, color, id }) => {
+      const category = {
+        id: id || slugId(name),
+        name: String(name || "").trim() || "หมวดใหม่",
+        icon: icon || "🏷️",
+        color: color || "#C8D6E5",
+      };
+      dispatch({ type: ACTIONS.ADD_CATEGORY, payload: { type, category } });
+    };
+
+    const deleteCategory = ({ type, id }) => dispatch({ type: ACTIONS.DELETE_CATEGORY, payload: { type, id } });
+
+    const adjustAccountBalance = ({ accountId, desiredBalance, recordAsTransaction, date, note }) => {
+      const current = calcAccountBalance(state.accounts, state.transactions, accountId);
+      const desired = Number(desiredBalance);
+      if (!Number.isFinite(desired)) return;
+
+      // update openingBalance to achieve desired (opening = desired - txNet)
+      // txNet = current - opening
+      const acc = state.accounts.find((a) => a.id === accountId);
+      const opening = Number(acc?.openingBalance || 0);
+      const txNet = current - opening;
+      const newOpening = desired - txNet;
+
+      dispatch({ type: ACTIONS.UPDATE_ACCOUNT, payload: { id: accountId, openingBalance: newOpening } });
+
+      if (recordAsTransaction) {
+        const delta = desired - current;
+        if (delta !== 0) {
+          upsertTransaction({
+            type: delta >= 0 ? "income" : "expense",
+            amount: Math.abs(delta),
+            category: delta >= 0 ? ensureCategory({ type: "income", value: "adjustment" }) : ensureCategory({ type: "expense", value: "adjustment" }),
+            accountId,
+            date: date || new Date().toISOString().slice(0, 10),
+            note: note || "ปรับยอดบัญชี",
+            isTransfer: false,
+            meta: { system: "balance_adjust" },
+          });
+        }
+      }
+    };
+
+    const transferFunds = ({ fromAccountId, toAccountId, amount, date, note, ref }) => {
+      const amt = Number(amount);
+      if (!Number.isFinite(amt) || amt <= 0) return;
 
       const transferId = generateTransferId();
-      const when = date || toISODate(new Date());
-      const memo = String(note || "Transfer");
+      const when = date || new Date().toISOString().slice(0, 10);
+
+      const fromName = state.accounts.find((a) => a.id === fromAccountId)?.name || "";
+      const toName = state.accounts.find((a) => a.id === toAccountId)?.name || "";
 
       const outTx = {
         id: generateId(),
         type: "expense",
         amount: amt,
-        category: "other",
+        category: "transfer",
         accountId: fromAccountId,
         date: when,
-        note: memo,
+        note: note || `โอนไป ${toName}`,
         isTransfer: true,
         transferId,
+        meta: { transferSide: "out", toAccountId, toAccountName: toName, ref: ref || null },
       };
 
       const inTx = {
         id: generateId(),
         type: "income",
         amount: amt,
-        category: "refund",
+        category: "income",
         accountId: toAccountId,
         date: when,
-        note: memo,
+        note: note || `รับโอนจาก ${fromName}`,
         isTransfer: true,
         transferId,
+        meta: { transferSide: "in", fromAccountId, fromAccountName: fromName, ref: ref || null },
       };
 
-      const next = [...state.transactions, outTx, inTx];
-      setTransactions(next);
-      navigate("dashboard");
-      return transferId;
+      dispatch({ type: ACTIONS.ADD_MANY_TRANSACTIONS, payload: [outTx, inTx] });
+      dispatch({ type: ACTIONS.NAVIGATE, payload: "dashboard" });
     };
 
-    // ✅ Update transfer (edit): rewrite both sides by transferId
-    const updateTransfer = ({ transferId, fromAccountId, toAccountId, amount, date, note }) => {
-      const amt = safeNumber(amount, 0);
-      if (!transferId || !fromAccountId || !toAccountId || fromAccountId === toAccountId || amt <= 0) return;
-
-      const when = date || toISODate(new Date());
-      const memo = String(note || "Transfer");
-
-      const next = state.transactions.map((t) => {
-        if (t.transferId !== transferId) return t;
-
-        if (t.type === "expense") {
-          return { ...t, accountId: fromAccountId, amount: amt, date: when, note: memo, isTransfer: true };
-        }
-        if (t.type === "income") {
-          return { ...t, accountId: toAccountId, amount: amt, date: when, note: memo, isTransfer: true };
-        }
-        return t;
-      });
-
-      setTransactions(next);
-      navigate("dashboard");
+    const isDuplicateRef = (ref) => {
+      const r = String(ref || "").trim();
+      if (!r) return false;
+      return state.transactions.some((t) => String(t?.meta?.ref || "").trim() === r);
     };
 
-    // ✅ Categories: accept both call styles
-    // 1) addCategory({ type, category })
-    // 2) addCategory({ type, name, icon, color })
-    const addCategory = (payload) => {
-      const type = payload?.type;
-      if (type !== "expense" && type !== "income") return;
-
-      const category =
-        payload?.category && typeof payload.category === "object"
-          ? payload.category
-          : {
-              id: generateId(),
-              name: String(payload?.name || "").trim() || "หมวดใหม่",
-              icon: String(payload?.icon || "🏷️"),
-              color: String(payload?.color || "#C8D6E5"),
-            };
-
-      dispatch({ type: ACTIONS.ADD_CATEGORY, payload: { type, category } });
+    const guessAccountIdFromScan = (scan) => {
+      return matchAccountFromHint(state.accounts, scan);
     };
 
-    const deleteCategory = ({ type, id }) => dispatch({ type: ACTIONS.DELETE_CATEGORY, payload: { type, id } });
+    const setBudget = ({ monthKey, categoryId, amount }) => {
+      dispatch({ type: ACTIONS.SET_BUDGET, payload: { monthKey, categoryId, amount: Number(amount) || 0 } });
+    };
+
+    const deleteBudget = ({ monthKey, categoryId }) => {
+      dispatch({ type: ACTIONS.DELETE_BUDGET, payload: { monthKey, categoryId } });
+    };
+
+    const addRecurring = (rule) => {
+      const next = { id: rule.id || generateId(), ...rule };
+      dispatch({ type: ACTIONS.ADD_RECURRING, payload: next });
+    };
+
+    const updateRecurring = (patch) => dispatch({ type: ACTIONS.UPDATE_RECURRING, payload: patch });
+    const deleteRecurring = (id) => dispatch({ type: ACTIONS.DELETE_RECURRING, payload: id });
+
+    const runRecurringNow = () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const txs = [];
+
+      for (const r of state.recurring || []) {
+        // very simple: create one tx when user clicks
+        txs.push({
+          id: generateId(),
+          type: "expense",
+          amount: Number(r.amount) || 0,
+          category: r.categoryId,
+          accountId: r.accountId,
+          date: today,
+          note: r.note || r.name || "Recurring",
+          isTransfer: false,
+          meta: { system: "recurring", recurringId: r.id },
+        });
+      }
+
+      if (txs.length) dispatch({ type: ACTIONS.ADD_MANY_TRANSACTIONS, payload: txs });
+    };
+
+    const exportBackup = () => exportBackupFile(state);
 
     const resetAll = () => {
       clearAll();
@@ -249,76 +348,59 @@ export function AppStoreProvider({ children }) {
           transactions: [],
           accounts: DEFAULT_ACCOUNTS,
           categories: DEFAULT_CATEGORIES,
+          budgets: {},
+          recurring: [],
         },
       });
     };
 
     const importBackup = (payload) => dispatch({ type: ACTIONS.IMPORT_BACKUP, payload });
 
-    const exportBackup = () => ({
-      transactions: state.transactions ?? [],
-      accounts: state.accounts ?? [],
-      categories: state.categories ?? { expense: [], income: [] },
-    });
-
-    // ✅ IMPORTANT: Provide BOTH top-level functions and `actions` object
-    // so old components won't break.
-    const actions = {
-      navigate,
-      startNew,
-      startNewTransaction,
-      startEdit,
-      startEditTransaction,
-      upsertTransaction,
-      deleteTransaction,
-      setTransactions,
-      addAccount,
-      updateAccount,
-      deleteAccount,
-      adjustAccountBalance,
-      createTransfer,
-      updateTransfer,
-      addCategory,
-      deleteCategory,
-      resetAll,
-      importBackup,
-      exportBackup,
-      getEditingTransaction,
-    };
-
     return {
-      // state
-      state,
-      dispatch,
-
-      // selectors
-      getEditingTransaction,
-
-      // top-level actions (new code should use these)
       navigate,
-      startNew,
       startNewTransaction,
-      startEdit,
       startEditTransaction,
       upsertTransaction,
+      addManyTransactions,
       deleteTransaction,
-      setTransactions,
+
       addAccount,
       updateAccount,
       deleteAccount,
       adjustAccountBalance,
-      createTransfer,
-      updateTransfer,
+
       addCategory,
       deleteCategory,
+      ensureCategory,
+
+      transferFunds,
+
+      guessAccountIdFromScan,
+      isDuplicateRef,
+
+      setBudget,
+      deleteBudget,
+
+      addRecurring,
+      updateRecurring,
+      deleteRecurring,
+      runRecurringNow,
+
+      exportBackup,
       resetAll,
       importBackup,
-      exportBackup,
 
-      // backward compat for Navbar/old code
-      actions,
+      monthKeyOf,
     };
-  }, [state, getEditingTransaction]);
+  }, [state]);
+
+  const api = useMemo(() => {
+    return {
+      state,
+      actions,
+      getEditingTransaction,
+    };
+  }, [state, actions, getEditingTransaction]);
 
   return <AppStoreContext.Provider value={api}>{children}</AppStoreContext.Provider>;
 }
