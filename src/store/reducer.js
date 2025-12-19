@@ -35,6 +35,10 @@ export function reducer(state, action) {
       return { ...state, ui: { ...state.ui, editingId: action.payload, view: "add" } };
     }
 
+    case ACTIONS.SET_TRANSACTIONS: {
+      return { ...state, transactions: action.payload ?? [] };
+    }
+
     case ACTIONS.UPSERT_TRANSACTION: {
       const tx = action.payload;
       const exists = state.transactions.some((t) => t.id === tx.id);
@@ -71,6 +75,14 @@ export function reducer(state, action) {
       return {
         ...state,
         accounts: state.accounts.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)),
+      };
+    }
+
+    case ACTIONS.UPDATE_ACCOUNT_OPENING_BALANCE: {
+      const { id, openingBalance } = action.payload;
+      return {
+        ...state,
+        accounts: state.accounts.map((a) => (a.id === id ? { ...a, openingBalance } : a)),
       };
     }
 

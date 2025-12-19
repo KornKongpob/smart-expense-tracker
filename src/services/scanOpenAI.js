@@ -1,5 +1,6 @@
 // src/services/scanOpenAI.js
 export async function scanReceiptOpenAI(file, { onStatus } = {}) {
+  if (!file) throw new Error("missing_file");
   onStatus?.("Uploading...");
 
   const form = new FormData();
@@ -16,8 +17,5 @@ export async function scanReceiptOpenAI(file, { onStatus } = {}) {
   }
 
   onStatus?.("Parsing...");
-  const data = await res.json();
-
-  // expected: { amount, date, merchant, category }
-  return data;
+  return await res.json();
 }
