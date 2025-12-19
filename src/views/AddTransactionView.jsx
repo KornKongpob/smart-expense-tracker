@@ -1,6 +1,18 @@
 // src/views/AddTransactionView.jsx
 import React, { useMemo, useState } from "react";
-import { X, Trash2, Calendar, FileText, Camera, Loader, Eye, Edit2, Plus, Check, ArrowLeftRight } from "lucide-react";
+import {
+  X,
+  Trash2,
+  Calendar,
+  FileText,
+  Camera,
+  Loader,
+  Eye,
+  Edit2,
+  Plus,
+  Check,
+  ArrowLeftRight,
+} from "lucide-react";
 
 import { useAppStore } from "../store/store";
 import AmountField from "../components/AmountField";
@@ -14,26 +26,64 @@ function pickCatIdForResult(categories, type, resultCategory) {
   return found?.id || (type === "income" ? "salary" : "other");
 }
 
+// --- auto match account from slip info ---
+function normalizeBank(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/bank/g, "");
+}
+
+function extractDigits(s) {
+  return String(s || "").replace(/[^\d]/g, "");
+}
+
+function matchAccountId(accounts, sideInfo, fallbackId) {
+  if (!accounts?.length) return fallbackId || "";
+
+  const bank = normalizeBank(sideInfo?.bank);
+  const last4 = extractDigits(sideInfo?.accountLast4).slice(-4) || "";
+
+  // 1) match by last4 in account name (user can name: "KBank 1234")
+  if (last4) {
+    const hit = accounts.find((a) => extractDigits(a.name).includes(last4));
+    if (hit) return hit.id;
+  }
+
+  // 2) match by bank keyword in account name
+  if (bank) {
+    const hit = accounts.find((a) => normalizeBank(a.name).includes(bank));
+    if (hit) return hit.id;
+  }
+
+  // 3) fallback
+  return fallbackId || accounts[0]?.id || "";
+}
+
 export default function AddTransactionView({ showAlert, showConfirm }) {
-  const { state, navigate, upsertTransaction, deleteTransaction, getEditingTransaction, createTransfer, updateTransfer } =
-    useAppStore();
+  const {
+    state,
+    navigate,
+    upsertTransaction,
+    deleteTransaction,
+    getEditingTransaction,
+    createTransfer,
+    updateTransfer,
+  } = useAppStore();
 
   const initialData = getEditingTransaction();
   const isEditMode = !!initialData;
-
-  // detect transfer edit
   const isEditingTransfer = !!(initialData?.isTransfer && initialData?.transferId);
 
   const accounts = state.accounts;
   const categories = state.categories;
 
-  // mode: expense | income | transfer
   const [mode, setMode] = useState(isEditingTransfer ? "transfer" : initialData?.type || "expense");
 
-  // common fields
   const [amountDigits, setAmountDigits] = useState(
     initialData?.amount != null ? String(Math.round(Number(initialData.amount))) : ""
   );
+
   const [date, setDate] = useState(initialData?.date ? String(initialData.date).slice(0, 10) : toISODate(new Date()));
   const [note, setNote] = useState(initialData?.note || "");
 
@@ -45,7 +95,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [fromAccountId, setFromAccountId] = useState(accounts?.[0]?.id || "");
   const [toAccountId, setToAccountId] = useState(accounts?.[1]?.id || accounts?.[0]?.id || "");
 
-  // if editing transfer: map both sides
+  // map both sides when editing transfer
   useMemo(() => {
     if (!isEditingTransfer) return null;
     const tid = initialData.transferId;
@@ -53,7 +103,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     const inTx = state.transactions.find((t) => t.transferId === tid && t.type === "income");
     if (outTx?.accountId) setFromAccountId(outTx.accountId);
     if (inTx?.accountId) setToAccountId(inTx.accountId);
-    // keep amountDigits/date/note already set from initialData
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -62,11 +111,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [isScanning, setIsScanning] = useState(false);
   const [scanPreview, setScanPreview] = useState(null);
   const [ocrStatus, setOcrStatus] = useState("");
-
-  const selectedAccountName = useMemo(
-    () => accounts.find((a) => a.id === accountId)?.name || "",
-    [accounts, accountId]
-  );
 
   const amountNumber = useMemo(() => {
     const n = Number(String(amountDigits || "").replace(/[^\d]/g, ""));
@@ -106,7 +150,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       return;
     }
 
-    // expense/income
     if (!amountNumber || amountNumber <= 0) return showAlert?.("กรุณาระบุจำนวนเงินที่ถูกต้อง");
     if (!category) return showAlert?.("กรุณาเลือกหมวดหมู่");
     if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
@@ -124,30 +167,41 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     });
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-
+  // --- single file scan (keeps preview) ---
+  const scanSingle = async (file) => {
     setIsScanning(true);
     setOcrStatus("กำลังอัปโหลด...");
     const previewUrl = URL.createObjectURL(file);
     setScanPreview(previewUrl);
 
     try {
-      const result = await scanReceiptOpenAI(file, {
-        onStatus: (s) => setOcrStatus(s || "กำลังอ่าน..."),
-      });
+      const result = await scanReceiptOpenAI(file, { onStatus: (s) => setOcrStatus(s || "กำลังอ่าน...") });
 
+      // if transfer slip => auto switch to transfer + auto select accounts
+      if (result?.isTransfer || String(result?.category || "").toLowerCase() === "transfer") {
+        setMode("transfer");
+        if (result?.amount) setAmountDigits(String(Math.round(Number(result.amount))));
+        if (result?.date) setDate(result.date);
+        setNote(result?.note || result?.merchant || "Transfer");
+
+        const fromId = matchAccountId(accounts, result?.transfer?.from, accounts?.[0]?.id);
+        const toId = matchAccountId(accounts, result?.transfer?.to, accounts?.[1]?.id || accounts?.[0]?.id);
+
+        setFromAccountId(fromId);
+        setToAccountId(toId);
+        return;
+      }
+
+      // receipt => fill expense by default
+      setMode("expense");
       if (result?.amount) setAmountDigits(String(Math.round(Number(result.amount))));
       if (result?.date) setDate(result.date);
       if (result?.merchant) setNote(result.merchant);
 
-      // set category only if current mode is expense/income
-      if (mode !== "transfer" && result?.category) {
-        const catId = pickCatIdForResult(categories, mode, result.category);
-        setCategory(catId);
-      }
+      const catId = pickCatIdForResult(categories, "expense", result?.category);
+      setCategory(catId);
+
+      // auto pick account (best-effort): keep current selection
     } catch (err) {
       console.error(err);
       showAlert?.("ไม่สามารถอ่านรูปภาพได้ (ลองรูปชัดขึ้น/ไม่มีเงา/ไม่เอียง)");
@@ -159,31 +213,102 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     }
   };
 
-  // UI: tabs
-  const Tabs = (
-    <div className="bg-white p-1.5 rounded-2xl flex mb-5 shadow-sm border border-gray-100">
-      {[
-        { key: "expense", label: "รายจ่าย" },
-        { key: "income", label: "รายรับ" },
-        { key: "transfer", label: "Transfer" },
-      ].map((t) => (
-        <button
-          key={t.key}
-          onClick={() => setMode(t.key)}
-          className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
-            mode === t.key ? "bg-gray-900 text-white shadow-sm" : "text-gray-400 hover:bg-gray-50"
-          }`}
-          type="button"
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
-  );
+  // --- multi files scan: create 1 slip => 1 transaction immediately ---
+  const scanBatchAndCreate = async (files) => {
+    setIsScanning(true);
+    setOcrStatus(`เตรียมสแกน ${files.length} รูป...`);
+    setScanPreview(null);
+
+    let created = 0;
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setOcrStatus(`สแกนรูป ${i + 1}/${files.length}...`);
+
+        const result = await scanReceiptOpenAI(file, {
+          onStatus: (s) => setOcrStatus(`รูป ${i + 1}/${files.length}: ${s || "กำลังอ่าน..."}`),
+        });
+
+        const amt = Number(result?.amount);
+        const iso = result?.date || toISODate(new Date());
+
+        // transfer slip
+        if (result?.isTransfer || String(result?.category || "").toLowerCase() === "transfer") {
+          const fromId = matchAccountId(accounts, result?.transfer?.from, accounts?.[0]?.id);
+          const toId = matchAccountId(accounts, result?.transfer?.to, accounts?.[1]?.id || accounts?.[0]?.id);
+
+          if (fromId && toId && fromId !== toId && Number.isFinite(amt) && amt > 0) {
+            createTransfer({
+              fromAccountId: fromId,
+              toAccountId: toId,
+              amount: Math.round(amt),
+              date: iso,
+              note: result?.note || result?.merchant || "Transfer",
+            });
+            created += 1;
+            continue;
+          }
+
+          // if cannot auto create, create as normal expense fallback (still 1 record)
+          upsertTransaction({
+            amount: Number.isFinite(amt) && amt > 0 ? Math.round(amt) : 0,
+            type: "expense",
+            category: "other",
+            accountId: accounts?.[0]?.id || "",
+            date: iso,
+            note: result?.note || result?.merchant || "Transfer (ตรวจสอบมือ)",
+            isTransfer: false,
+            transferId: null,
+          });
+          created += 1;
+          continue;
+        }
+
+        // receipt => create expense
+        const catId = pickCatIdForResult(categories, "expense", result?.category);
+
+        upsertTransaction({
+          amount: Number.isFinite(amt) && amt > 0 ? Math.round(amt) : 0,
+          type: "expense",
+          category: catId,
+          accountId: accounts?.[0]?.id || "",
+          date: iso,
+          note: result?.merchant || result?.note || "",
+          isTransfer: false,
+          transferId: null,
+        });
+        created += 1;
+      }
+
+      showAlert?.(`สร้างรายการจากสลิปสำเร็จ ${created} รายการ`);
+      navigate("dashboard");
+    } catch (err) {
+      console.error(err);
+      showAlert?.("สแกนหลายรูปไม่สำเร็จ (บางรูปอาจอ่านไม่ได้) ลองใหม่อีกครั้ง");
+    } finally {
+      setIsScanning(false);
+      setOcrStatus("");
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+
+    // multi => create immediately
+    if (files.length > 1) {
+      await scanBatchAndCreate(files);
+      return;
+    }
+
+    // single => fill form (preview)
+    await scanSingle(files[0]);
+  };
 
   return (
     <div className="pb-28 pt-6 px-4 bg-gray-50 min-h-dvh">
-      {/* header */}
       <div className="flex justify-between items-center mb-5">
         <button
           onClick={() => navigate("dashboard")}
@@ -212,9 +337,27 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         )}
       </div>
 
-      {Tabs}
+      {/* mode tabs */}
+      <div className="bg-white p-1.5 rounded-2xl flex mb-5 shadow-sm border border-gray-100">
+        {[
+          { key: "expense", label: "รายจ่าย" },
+          { key: "income", label: "รายรับ" },
+          { key: "transfer", label: "Transfer" },
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setMode(t.key)}
+            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+              mode === t.key ? "bg-gray-900 text-white shadow-sm" : "text-gray-400 hover:bg-gray-50"
+            }`}
+            type="button"
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      {/* preview */}
+      {/* preview (single scan only) */}
       {scanPreview && mode !== "transfer" ? (
         <div className="mb-5 relative group rounded-2xl overflow-hidden shadow-sm border border-gray-200">
           <img src={scanPreview} alt="Slip" className="w-full h-40 object-cover opacity-90" />
@@ -226,17 +369,15 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         </div>
       ) : null}
 
-      {/* amount */}
       <AmountField
         value={amountDigits}
         onChange={setAmountDigits}
         variant={mode === "transfer" ? "transfer" : mode}
         label={mode === "transfer" ? "จำนวนเงินโอน" : "จำนวนเงิน"}
-        helper={mode !== "transfer" && selectedAccountName ? `บัญชี: ${selectedAccountName}` : ""}
       />
 
-      {/* scan (only new & only expense/income) */}
-      {!isEditMode && mode !== "transfer" ? (
+      {/* ✅ multi upload supported */}
+      {!isEditMode ? (
         <div className="mb-6">
           <label
             className={`block w-full bg-white border-2 border-dashed ${
@@ -250,87 +391,92 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 <Camera className="text-gray-700" size={24} />
               )}
               <span className="text-gray-900 font-extrabold text-sm">
-                {isScanning ? ocrStatus || "กำลังอ่าน..." : "สแกนใบเสร็จ/สลิปด้วย AI"}
+                {isScanning ? ocrStatus || "กำลังอ่าน..." : "สแกนใบเสร็จ/สลิป (เลือกได้หลายรูป)"}
               </span>
-              <span className="text-[11px] text-gray-400">แนะนำรูปชัด ไม่เอียง แสงพอดี</span>
+              <span className="text-[11px] text-gray-400">
+                เลือกหลายรูปได้ ระบบจะสร้าง 1 รูป = 1 รายการอัตโนมัติ
+              </span>
             </div>
-            <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} disabled={isScanning} />
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFileUpload}
+              disabled={isScanning}
+            />
           </label>
         </div>
       ) : null}
 
-      {/* accounts / transfer */}
-      <div className="mb-6">
-        <h3 className="text-xs font-extrabold text-gray-400 mb-3 uppercase ml-1">
-          {mode === "transfer" ? "บัญชีโอน" : "บัญชีที่ใช้"}
-        </h3>
+      {/* transfer accounts */}
+      {mode === "transfer" ? (
+        <div className="mb-6 bg-white rounded-3xl border border-gray-100 shadow-sm p-4">
+          <label className="text-xs font-extrabold text-gray-500">จากบัญชี</label>
+          <select
+            value={fromAccountId}
+            onChange={(e) => setFromAccountId(e.target.value)}
+            className="w-full mt-2 border border-gray-200 rounded-2xl px-4 py-3 font-bold text-gray-800 bg-white"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.icon} {a.name}
+              </option>
+            ))}
+          </select>
 
-        {mode !== "transfer" ? (
-          <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4">
-            {accounts.map((acc) => {
-              const isSelected = accountId === acc.id;
-              return (
-                <button
-                  key={acc.id}
-                  onClick={() => setAccountId(acc.id)}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all min-w-max ${
-                    isSelected
-                      ? "bg-gray-900 text-white border-gray-900 shadow-lg"
-                      : "bg-white text-gray-700 border-gray-100 shadow-sm"
-                  }`}
-                  type="button"
-                >
-                  <span className="text-xl">{acc.icon || "💳"}</span>
-                  <span className="text-sm font-extrabold">{acc.name}</span>
-                  {isSelected && <Check size={14} className="ml-1" />}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-4">
-            <label className="text-xs font-extrabold text-gray-500">จากบัญชี</label>
-            <select
-              value={fromAccountId}
-              onChange={(e) => setFromAccountId(e.target.value)}
-              className="w-full mt-2 border border-gray-200 rounded-2xl px-4 py-3 font-bold text-gray-800 bg-white"
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.icon} {a.name}
-                </option>
-              ))}
-            </select>
-
-            <div className="my-3 flex justify-center">
-              <div className="w-12 h-12 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-700">
-                <ArrowLeftRight size={20} />
-              </div>
-            </div>
-
-            <label className="text-xs font-extrabold text-gray-500">ไปบัญชี</label>
-            <select
-              value={toAccountId}
-              onChange={(e) => setToAccountId(e.target.value)}
-              className="w-full mt-2 border border-gray-200 rounded-2xl px-4 py-3 font-bold text-gray-800 bg-white"
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.icon} {a.name}
-                </option>
-              ))}
-            </select>
-
-            <div className="mt-2 text-[11px] text-gray-400">
-              Transfer จะไม่ถูกรวมในสถิติรายรับ/รายจ่าย (แต่ยอดบัญชีจะเปลี่ยน)
+          <div className="my-3 flex justify-center">
+            <div className="w-12 h-12 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-700">
+              <ArrowLeftRight size={20} />
             </div>
           </div>
-        )}
-      </div>
 
-      {/* categories (only expense/income) */}
-      {mode !== "transfer" ? (
+          <label className="text-xs font-extrabold text-gray-500">ไปบัญชี</label>
+          <select
+            value={toAccountId}
+            onChange={(e) => setToAccountId(e.target.value)}
+            className="w-full mt-2 border border-gray-200 rounded-2xl px-4 py-3 font-bold text-gray-800 bg-white"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.icon} {a.name}
+              </option>
+            ))}
+          </select>
+
+          <div className="mt-2 text-[11px] text-gray-400">
+            ถ้าสลิปมีชื่อธนาคาร/เลขท้ายบัญชี ระบบจะ auto เลือกให้อัตโนมัติ
+          </div>
+        </div>
+      ) : (
         <>
+          {/* accounts select for expense/income */}
+          <div className="mb-6">
+            <h3 className="text-xs font-extrabold text-gray-400 mb-3 uppercase ml-1">บัญชีที่ใช้</h3>
+            <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4">
+              {accounts.map((acc) => {
+                const isSelected = accountId === acc.id;
+                return (
+                  <button
+                    key={acc.id}
+                    onClick={() => setAccountId(acc.id)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all min-w-max ${
+                      isSelected
+                        ? "bg-gray-900 text-white border-gray-900 shadow-lg"
+                        : "bg-white text-gray-700 border-gray-100 shadow-sm"
+                    }`}
+                    type="button"
+                  >
+                    <span className="text-xl">{acc.icon || "💳"}</span>
+                    <span className="text-sm font-extrabold">{acc.name}</span>
+                    {isSelected && <Check size={14} className="ml-1" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* categories */}
           <h3 className="text-xs font-extrabold text-gray-400 mb-3 uppercase ml-1">หมวดหมู่</h3>
           <div className="grid grid-cols-4 gap-3 mb-6">
             {(categories[mode] || []).map((cat) => (
@@ -355,7 +501,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             ))}
           </div>
         </>
-      ) : null}
+      )}
 
       {/* date & note */}
       <div className="bg-white rounded-3xl shadow-sm overflow-hidden mb-24 border border-gray-100">
@@ -384,11 +530,11 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         </div>
       </div>
 
-      {/* submit */}
       <button
         onClick={handleSave}
         className="fixed bottom-6 left-4 right-4 bg-gray-900 text-white py-4 rounded-2xl font-extrabold shadow-xl shadow-gray-200 active:scale-95 transition-all flex items-center justify-center gap-2"
         type="button"
+        disabled={isScanning}
       >
         {isEditMode ? <Edit2 size={18} /> : <Plus size={18} />}
         {isEditMode ? "บันทึกการแก้ไข" : "ยืนยันรายการ"}

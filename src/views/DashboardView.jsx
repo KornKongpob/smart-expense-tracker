@@ -13,7 +13,6 @@ export default function DashboardView() {
   const [q, setQ] = useState("");
 
   const totals = useMemo(() => calcTotals(state.transactions), [state.transactions]);
-
   const allCats = [...state.categories.expense, ...state.categories.income];
 
   const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || "";
@@ -21,19 +20,42 @@ export default function DashboardView() {
   const filtered = useMemo(() => {
     let txs = state.transactions;
 
-    if (filterAccount !== "all") txs = txs.filter((t) => t.accountId === filterAccount);
+    // ✅ show only ONE record per transfer slip (use expense-side as representative)
+    txs = txs.filter((t) => {
+      if (!t.isTransfer) return true;
+      return t.type === "expense"; // only show outgoing side
+    });
+
+    if (filterAccount !== "all") {
+      txs = txs.filter((t) => {
+        // if transfer: filter by either side (from or to) so UX ไม่งง
+        if (t.isTransfer && t.transferId) {
+          const mate = state.transactions.find((x) => x.transferId === t.transferId && x.type === "income");
+          return t.accountId === filterAccount || mate?.accountId === filterAccount;
+        }
+        return t.accountId === filterAccount;
+      });
+    }
 
     if (q.trim()) {
       const needle = q.trim().toLowerCase();
       txs = txs.filter((t) => {
         const cat = allCats.find((c) => c.id === t.category);
-        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)}`.toLowerCase();
+        const mate =
+          t.isTransfer && t.transferId
+            ? state.transactions.find((x) => x.transferId === t.transferId && x.type === "income")
+            : null;
+
+        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)} ${
+          mate ? accountName(mate.accountId) : ""
+        }`.toLowerCase();
+
         return hay.includes(needle);
       });
     }
 
     return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 30);
-  }, [state.transactions, filterAccount, q, allCats]);
+  }, [state.transactions, filterAccount, q, allCats, state.accounts]);
 
   return (
     <div className="pb-28 pt-6 px-4">
@@ -60,7 +82,6 @@ export default function DashboardView() {
         </div>
       </header>
 
-      {/* Search */}
       <div className="mb-6">
         <div className="bg-white border border-gray-200 rounded-2xl px-3 py-2 flex items-center gap-2 shadow-sm">
           <Search size={16} className="text-gray-400" />
@@ -73,7 +94,6 @@ export default function DashboardView() {
         </div>
       </div>
 
-      {/* Summary card */}
       <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-purple-800 rounded-3xl p-6 text-white shadow-xl shadow-indigo-200 mb-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl -mr-10 -mt-10" />
         <div className="absolute bottom-0 left-0 w-24 h-24 bg-indigo-400/20 rounded-full blur-2xl -ml-6 -mb-6" />
@@ -102,6 +122,7 @@ export default function DashboardView() {
         <button
           onClick={() => navigate("stats")}
           className="text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full"
+          type="button"
         >
           ดูสรุป
         </button>
@@ -110,11 +131,15 @@ export default function DashboardView() {
       {filtered.length ? (
         <div className="space-y-3">
           {filtered.map((tx) => {
-            // ✅ Transfer special display
             const category =
               tx.isTransfer
                 ? { name: "Transfer", icon: "🔁", color: "#94a3b8" }
                 : allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
+
+            const mate =
+              tx.isTransfer && tx.transferId
+                ? state.transactions.find((x) => x.transferId === tx.transferId && x.type === "income")
+                : null;
 
             return (
               <TransactionCard
@@ -122,6 +147,7 @@ export default function DashboardView() {
                 tx={tx}
                 category={category}
                 accountName={accountName(tx.accountId)}
+                transferToName={mate ? accountName(mate.accountId) : ""}
                 onClick={() => startEditTransaction(tx.id)}
               />
             );
@@ -133,7 +159,7 @@ export default function DashboardView() {
             <FileText size={32} />
           </div>
           <p className="text-gray-400 font-medium">ยังไม่มีรายการบันทึก</p>
-          <button onClick={startNewTransaction} className="mt-3 text-indigo-600 text-sm font-bold">
+          <button onClick={startNewTransaction} className="mt-3 text-indigo-600 text-sm font-bold" type="button">
             เริ่มบันทึกรายการแรก
           </button>
         </div>

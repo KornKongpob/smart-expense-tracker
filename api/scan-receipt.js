@@ -17,7 +17,6 @@ function readRawBody(req) {
 }
 
 async function readJson(req) {
-  // Vercel บางที parse ให้แล้ว (req.body เป็น object)
   if (req.body && typeof req.body === "object") return req.body;
 
   const buf = await readRawBody(req);
@@ -41,7 +40,7 @@ function parseMultipart(req, { maxBytes = 8 * 1024 * 1024 } = {}) {
     let mimeType = "";
     let filename = "";
 
-    bb.on("file", (fieldname, file, info) => {
+    bb.on("file", (_fieldname, file, info) => {
       const chunks = [];
       filename = info?.filename || "";
       mimeType = info?.mimeType || info?.mimetype || "";
@@ -63,22 +62,39 @@ function parseMultipart(req, { maxBytes = 8 * 1024 * 1024 } = {}) {
 function safeJsonParseMaybe(text) {
   const t = String(text || "").trim();
   if (!t) return null;
-  // พยายามหาบล็อก JSON ในข้อความ
+
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
   if (start >= 0 && end > start) {
     const candidate = t.slice(start, end + 1);
     try {
       return JSON.parse(candidate);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
   try {
     return JSON.parse(t);
   } catch {
     return null;
   }
+}
+
+function normalizeTransferShape(parsed) {
+  const isTransfer = !!parsed?.isTransfer || String(parsed?.category || "").toLowerCase() === "transfer";
+  const transfer = parsed?.transfer && typeof parsed.transfer === "object" ? parsed.transfer : null;
+
+  const pickSide = (side) => {
+    const s = transfer?.[side] && typeof transfer?.[side] === "object" ? transfer[side] : {};
+    return {
+      bank: s?.bank != null ? String(s.bank) : null,
+      accountLast4: s?.accountLast4 != null ? String(s.accountLast4).replace(/[^\d]/g, "").slice(-4) || null : null,
+      name: s?.name != null ? String(s.name) : null,
+    };
+  };
+
+  return {
+    isTransfer,
+    transfer: isTransfer ? { from: pickSide("from"), to: pickSide("to") } : null,
+  };
 }
 
 async function callOpenAI({ base64, mimeType }) {
@@ -88,25 +104,36 @@ async function callOpenAI({ base64, mimeType }) {
   }
 
   const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
-
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
   const prompt =
-    `You are a receipt/slip parser for an expense tracker app.\n` +
-    `Extract these fields as strict JSON ONLY:\n` +
+    `You are a receipt AND bank transfer slip parser for an expense tracker app.\n` +
+    `Return STRICT JSON ONLY (no markdown, no extra text).\n` +
+    `\n` +
+    `Output schema:\n` +
     `{\n` +
     `  "amount": number|null,\n` +
     `  "date": "YYYY-MM-DD"|null,\n` +
     `  "merchant": string,\n` +
     `  "category": "food"|"transport"|"shopping"|"bills"|"health"|"entertainment"|"transfer"|"income"|"other",\n` +
-    `  "note": string\n` +
+    `  "note": string,\n` +
+    `  "isTransfer": boolean,\n` +
+    `  "transfer": {\n` +
+    `    "from": { "bank": string|null, "accountLast4": string|null, "name": string|null },\n` +
+    `    "to":   { "bank": string|null, "accountLast4": string|null, "name": string|null }\n` +
+    `  }|null\n` +
     `}\n` +
+    `\n` +
     `Rules:\n` +
-    `- amount should be the grand total / net paid (not VAT line).\n` +
+    `- amount should be the grand total / net paid.\n` +
     `- If date is Buddhist Era (>=2400), convert to AD.\n` +
     `- merchant: best guess from header.\n` +
-    `- If it's a bank transfer slip, category should be "transfer".\n` +
-    `- Return JSON only, no markdown, no extra text.\n`;
+    `- If it's a bank transfer slip, set category="transfer" and isTransfer=true.\n` +
+    `- For transfer slips, fill transfer.from/to if possible:\n` +
+    `  - bank: bank name in slip (e.g. KBank, SCB, BBL, Krungthai, etc.)\n` +
+    `  - accountLast4: last 4 digits shown (if any)\n` +
+    `  - name: account owner name shown (if any)\n` +
+    `- If not transfer slip, isTransfer=false and transfer=null.\n`;
 
   const payload = {
     model,
@@ -134,14 +161,10 @@ async function callOpenAI({ base64, mimeType }) {
   if (!r.ok) {
     return {
       status: r.status,
-      body: {
-        error: "openai_error",
-        detail: json || null,
-      },
+      body: { error: "openai_error", detail: json || null },
     };
   }
 
-  // responses API มี output_text ให้บ่อย แต่กันเหนียวอ่านหลายทาง
   const outputText =
     json?.output_text ||
     json?.output?.[0]?.content?.map((c) => c?.text).filter(Boolean).join("\n") ||
@@ -149,22 +172,17 @@ async function callOpenAI({ base64, mimeType }) {
 
   const parsed = safeJsonParseMaybe(outputText);
   if (!parsed) {
-    return {
-      status: 200,
-      body: {
-        error: "parse_failed",
-        rawText: outputText,
-      },
-    };
+    return { status: 200, body: { error: "parse_failed", rawText: outputText } };
   }
 
-  // normalize types a bit
   const amount =
     typeof parsed.amount === "number"
       ? parsed.amount
       : parsed.amount != null
       ? Number(parsed.amount)
       : null;
+
+  const tinfo = normalizeTransferShape(parsed);
 
   return {
     status: 200,
@@ -174,6 +192,8 @@ async function callOpenAI({ base64, mimeType }) {
       merchant: String(parsed.merchant ?? ""),
       category: String(parsed.category ?? "other"),
       note: String(parsed.note ?? ""),
+      isTransfer: tinfo.isTransfer,
+      transfer: tinfo.transfer,
       rawText: outputText,
     },
   };
