@@ -1,3 +1,4 @@
+// src/components/ConfirmationModal.jsx
 import { AlertCircle } from "lucide-react";
 
 export default function ConfirmationModal({ isOpen, title, message, onConfirm, onCancel, isDestructive }) {
@@ -11,9 +12,7 @@ export default function ConfirmationModal({ isOpen, title, message, onConfirm, o
               <AlertCircle size={24} />
             </div>
           )}
-          <h3 className={`text-xl font-bold mt-1 ${isDestructive ? "text-red-600" : "text-gray-800"}`}>
-            {title}
-          </h3>
+          <h3 className={`text-xl font-bold mt-1 ${isDestructive ? "text-red-600" : "text-gray-800"}`}>{title}</h3>
         </div>
 
         <p className="text-gray-600 mb-6 ml-1">{message}</p>

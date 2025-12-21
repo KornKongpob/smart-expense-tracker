@@ -1,3 +1,4 @@
+// src/components/Navbar.jsx
 import React from "react";
 import { Plus, Home, Activity, CreditCard, MoreHorizontal } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";

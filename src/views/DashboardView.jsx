@@ -1,26 +1,25 @@
+// src/views/DashboardView.jsx
 import { useMemo, useState } from "react";
 import { Filter, TrendingDown, TrendingUp, FileText, Search, AlertTriangle } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import { formatCurrency } from "../utils/format";
-import { calcTotals, calcSpentByCategoryInMonth, monthKeyOf } from "../store/selectors";
+import { calcTotals, toMonthKey, calcSpentByCategoryInMonth, parseDateSafe } from "../store/selectors";
 import { useAppStore } from "../store/store";
 
 export default function DashboardView() {
-  const { state, actions } = useAppStore();
+  const { state, navigate, startEditTransaction, startNewTransaction } = useAppStore();
 
   const [filterAccount, setFilterAccount] = useState("all");
   const [q, setQ] = useState("");
 
-  const totals = useMemo(() => calcTotals(state.transactions), [state.transactions]);
-  const allCats = [...(state.categories.expense || []), ...(state.categories.income || [])];
+  const totals = useMemo(() => calcTotals(state.transactions || []), [state.transactions]);
+
+  const allCats = [...(state.categories?.expense || []), ...(state.categories?.income || [])];
 
   const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || "";
 
   const filtered = useMemo(() => {
-    let txs = state.transactions;
-
-    // hide transfer "in" side (show only out side)
-    txs = txs.filter((t) => !(t.isTransfer && t.meta?.transferSide === "in"));
+    let txs = state.transactions || [];
 
     if (filterAccount !== "all") txs = txs.filter((t) => t.accountId === filterAccount);
 
@@ -28,36 +27,46 @@ export default function DashboardView() {
       const needle = q.trim().toLowerCase();
       txs = txs.filter((t) => {
         const cat = allCats.find((c) => c.id === t.category);
-        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)} ${t.meta?.ref || ""}`.toLowerCase();
+        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)} ${t.ref || ""}`.toLowerCase();
         return hay.includes(needle);
       });
     }
 
-    return txs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 40);
+    return txs
+      .slice()
+      .sort((a, b) => parseDateSafe(b.date).getTime() - parseDateSafe(a.date).getTime())
+      .slice(0, 40);
   }, [state.transactions, filterAccount, q, allCats]);
 
-  // budget alert
-  const monthKey = monthKeyOf(new Date());
-  const spentMap = useMemo(() => calcSpentByCategoryInMonth(state.transactions, new Date()), [state.transactions]);
-  const budgetMap = state.budgets?.[monthKey] || {};
+  const budgetAlerts = useMemo(() => {
+    const month = toMonthKey(new Date());
+    const spentMap = calcSpentByCategoryInMonth(state.transactions || [], month);
 
-  const overBudget = useMemo(() => {
-    const hits = [];
-    for (const [catId, budget] of Object.entries(budgetMap)) {
-      const spent = spentMap[catId] || 0;
-      if ((Number(budget) || 0) > 0 && spent > (Number(budget) || 0)) {
-        const cat = (state.categories.expense || []).find((c) => c.id === catId);
-        hits.push({ catId, name: cat?.name || catId, spent, budget: Number(budget) || 0 });
+    const alerts = [];
+    for (const b of state.budgets || []) {
+      if (b.month !== month) continue;
+      if (!b.limit) continue;
+      const spent = spentMap.get(b.categoryId) || 0;
+      const pct = (spent / b.limit) * 100;
+      if (pct >= (b.alertPct || 90)) {
+        const cat = state.categories?.expense?.find((c) => c.id === b.categoryId);
+        alerts.push({
+          id: b.id,
+          name: cat?.name || b.categoryId,
+          spent,
+          limit: b.limit,
+          pct: Math.round(pct),
+        });
       }
     }
-    return hits.sort((a, b) => (b.spent - b.budget) - (a.spent - a.budget));
-  }, [budgetMap, spentMap, state.categories.expense]);
+    return alerts.sort((a, b) => b.pct - a.pct).slice(0, 3);
+  }, [state.transactions, state.budgets, state.categories?.expense]);
 
   return (
     <div className="pb-28 pt-6 px-4">
       <header className="mb-4 flex justify-between items-center gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-gray-800 truncate">ภาพรวมบัญชี</h1>
+          <h1 className="text-2xl font-extrabold text-gray-900 truncate">ภาพรวมบัญชี</h1>
           <p className="text-gray-500 text-xs mt-1">Smart Expense Tracker</p>
         </div>
 
@@ -65,31 +74,44 @@ export default function DashboardView() {
           <select
             value={filterAccount}
             onChange={(e) => setFilterAccount(e.target.value)}
-            className="appearance-none bg-white border border-gray-200 text-gray-600 py-2 pl-3 pr-8 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 shadow-sm"
+            className="appearance-none bg-white border border-gray-200 text-gray-600 py-2 pl-3 pr-8 rounded-xl text-xs font-extrabold focus:outline-none focus:border-gray-900 shadow-sm"
           >
             <option value="all">ทุกบัญชี</option>
             {state.accounts.map((acc) => (
-              <option key={acc.id} value={acc.id}>{acc.name}</option>
+              <option key={acc.id} value={acc.id}>
+                {acc.name}
+              </option>
             ))}
           </select>
           <Filter size={14} className="absolute right-2.5 top-2.5 text-gray-400 pointer-events-none" />
         </div>
       </header>
 
-      {overBudget.length ? (
-        <button
-          type="button"
-          onClick={() => actions.navigate("budgets")}
-          className="mb-4 w-full bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-2xl px-4 py-3 flex items-start gap-3"
-        >
-          <AlertTriangle className="mt-0.5" size={18} />
-          <div className="text-left">
-            <div className="font-extrabold text-sm">Budget Alert</div>
-            <div className="text-xs text-yellow-700 mt-0.5">
-              เกินงบ {overBudget[0].name}: {formatCurrency(overBudget[0].spent)} / {formatCurrency(overBudget[0].budget)}
+      {budgetAlerts.length ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-4 mb-5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="min-w-0">
+              <div className="font-extrabold text-amber-800">Budget Alert</div>
+              <div className="text-xs text-amber-800/80 mt-1 space-y-1">
+                {budgetAlerts.map((a) => (
+                  <div key={a.id} className="truncate">
+                    {a.name}: ใช้แล้ว {formatCurrency(a.spent)} / {formatCurrency(a.limit)} ({a.pct}%)
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("budgets")}
+                className="mt-2 text-xs font-extrabold text-amber-800 bg-amber-100 px-3 py-1 rounded-full active:scale-95"
+              >
+                จัดการงบประมาณ
+              </button>
             </div>
           </div>
-        </button>
+        </div>
       ) : null}
 
       <div className="mb-6">
@@ -98,7 +120,7 @@ export default function DashboardView() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหาโน้ต / หมวด / บัญชี / ref"
+            placeholder="ค้นหาโน้ต / หมวด / บัญชี / Ref"
             className="w-full outline-none text-sm bg-transparent text-gray-700"
           />
         </div>
@@ -109,29 +131,29 @@ export default function DashboardView() {
         <div className="absolute bottom-0 left-0 w-24 h-24 bg-indigo-400/20 rounded-full blur-2xl -ml-6 -mb-6" />
 
         <p className="text-indigo-100 text-sm mb-1 font-medium relative z-10">ยอดสุทธิ (ไม่รวม Transfer)</p>
-        <h2 className="text-4xl font-bold mb-6 relative z-10 tracking-tight">{formatCurrency(totals.net)}</h2>
+        <h2 className="text-4xl font-extrabold mb-6 relative z-10 tracking-tight">{formatCurrency(totals.net)}</h2>
 
         <div className="flex gap-4 relative z-10">
           <div className="flex-1 bg-white/10 rounded-xl p-3 backdrop-blur-md border border-white/10">
-            <div className="flex items-center gap-1 text-green-300 text-xs mb-1 font-bold">
+            <div className="flex items-center gap-1 text-green-300 text-xs mb-1 font-extrabold">
               <TrendingUp size={14} /> รายรับ
             </div>
-            <p className="font-semibold text-lg">{formatCurrency(totals.income)}</p>
+            <p className="font-extrabold text-lg">{formatCurrency(totals.income)}</p>
           </div>
           <div className="flex-1 bg-white/10 rounded-xl p-3 backdrop-blur-md border border-white/10">
-            <div className="flex items-center gap-1 text-red-300 text-xs mb-1 font-bold">
+            <div className="flex items-center gap-1 text-red-300 text-xs mb-1 font-extrabold">
               <TrendingDown size={14} /> รายจ่าย
             </div>
-            <p className="font-semibold text-lg">{formatCurrency(totals.expense)}</p>
+            <p className="font-extrabold text-lg">{formatCurrency(totals.expense)}</p>
           </div>
         </div>
       </div>
 
       <div className="mb-4 flex justify-between items-end">
-        <h3 className="font-bold text-lg text-gray-800">รายการล่าสุด</h3>
+        <h3 className="font-extrabold text-lg text-gray-900">รายการล่าสุด</h3>
         <button
-          onClick={() => actions.navigate("stats")}
-          className="text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full"
+          onClick={() => navigate("stats")}
+          className="text-xs text-indigo-600 font-extrabold bg-indigo-50 px-3 py-1 rounded-full active:scale-95"
           type="button"
         >
           ดูสรุป
@@ -152,7 +174,7 @@ export default function DashboardView() {
                 tx={tx}
                 category={category}
                 accountName={accountName(tx.accountId)}
-                onClick={() => actions.startEditTransaction(tx.id)}
+                onClick={() => startEditTransaction(tx.id)}
               />
             );
           })}
@@ -162,8 +184,8 @@ export default function DashboardView() {
           <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3 text-gray-300">
             <FileText size={32} />
           </div>
-          <p className="text-gray-400 font-medium">ยังไม่มีรายการบันทึก</p>
-          <button onClick={() => actions.startNewTransaction()} className="mt-3 text-indigo-600 text-sm font-bold" type="button">
+          <p className="text-gray-500 font-extrabold">ยังไม่มีรายการบันทึก</p>
+          <button onClick={startNewTransaction} className="mt-3 text-indigo-600 text-sm font-extrabold" type="button">
             เริ่มบันทึกรายการแรก
           </button>
         </div>

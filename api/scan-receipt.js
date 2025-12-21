@@ -3,6 +3,9 @@ import Busboy from "busboy";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
+// NOTE: harmless for Vercel Functions, required for Next API routes
+export const config = { api: { bodyParser: false } };
+
 function getContentType(req) {
   return String(req.headers["content-type"] || "").toLowerCase();
 }
@@ -18,6 +21,7 @@ function readRawBody(req) {
 
 async function readJson(req) {
   if (req.body && typeof req.body === "object") return req.body;
+
   const buf = await readRawBody(req);
   const txt = buf.toString("utf-8").trim();
   if (!txt) return {};
@@ -32,7 +36,7 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
     const bb = Busboy({
       headers: req.headers,
-      limits: { fileSize: maxBytes },
+      limits: { fileSize: maxBytes, files: 1 },
     });
 
     let fileBuffer = null;
@@ -53,14 +57,19 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
 
     bb.on("error", reject);
     bb.on("finish", () => resolve({ fileBuffer, mimeType, filename }));
-
     req.pipe(bb);
   });
 }
 
 function safeJsonParseMaybe(text) {
-  const t = String(text || "").trim();
-  if (!t) return null;
+  const t0 = String(text || "").trim();
+  if (!t0) return null;
+
+  const t = t0
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
   if (start >= 0 && end > start) {
@@ -68,9 +77,10 @@ function safeJsonParseMaybe(text) {
     try {
       return JSON.parse(candidate);
     } catch {
-      // ignore
+      // fallthrough
     }
   }
+
   try {
     return JSON.parse(t);
   } catch {
@@ -78,11 +88,8 @@ function safeJsonParseMaybe(text) {
   }
 }
 
-function normalizeAccountNo(s) {
-  return String(s || "")
-    .replace(/\s+/g, "")
-    .replace(/[^0-9]/g, "")
-    .slice(-16); // เก็บท้ายไว้พอ match
+function normalizeDigits(s) {
+  return String(s || "").replace(/[^\d]/g, "");
 }
 
 async function callOpenAI({ base64, mimeType }) {
@@ -94,42 +101,34 @@ async function callOpenAI({ base64, mimeType }) {
   const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
-  const prompt = `
-You are a receipt / bank transfer slip parser for an expense tracker.
-Return STRICT JSON ONLY (no markdown, no extra text).
-
-Schema:
-{
-  "kind": "receipt" | "transfer" | "income",
-  "amount": number | null,
-  "date": "YYYY-MM-DD" | null,
-  "merchant": string,
-  "category": string,         // either existing id-like (food/transport/...) OR a human category name
-  "note": string,
-  "ref": string | null,       // transaction reference / slip ref / authorization code
-  "payment_method": "cash" | "bank" | "credit_card" | "unknown",
-  "from_account_no": string | null,
-  "to_account_no": string | null,
-  "card_last4": string | null
-}
-
-Rules:
-- amount = grand total / net paid.
-- If date is Buddhist Era (>=2400), convert to AD.
-- If bank transfer slip: kind="transfer"
-- If salary/receive money slip: kind="income"
-- ref: best reference number if present.
-- from_account_no / to_account_no: digits only if found; otherwise null.
-- card_last4: last 4 digits if present; otherwise null.
-- category:
-  - If receipt: choose best among (food, transport, shopping, bills, health, entertainment, other) OR return a specific category name from the slip.
-  - If transfer: "transfer"
-  - If income: "income"
-Return JSON only.
-`.trim();
+  const prompt =
+    `You are a receipt/bank-slip parser for a personal expense tracker.\n` +
+    `Return STRICT JSON ONLY (no markdown, no explanation) with this schema:\n` +
+    `{\n` +
+    `  "tx_type": "expense"|"income"|"transfer",\n` +
+    `  "amount": number|null,\n` +
+    `  "date": "YYYY-MM-DD"|null,\n` +
+    `  "merchant": string,\n` +
+    `  "category": string,\n` +
+    `  "note": string,\n` +
+    `  "ref": string|null,\n` +
+    `  "from_account": string|null,\n` +
+    `  "to_account": string|null,\n` +
+    `  "evidence": string\n` +
+    `}\n` +
+    `Rules:\n` +
+    `- amount = grand total paid (not VAT line).\n` +
+    `- If date is Buddhist Era (>=2400), convert to AD.\n` +
+    `- If it's a bank transfer slip OR payment slip with ref/trx id -> tx_type must be "transfer".\n` +
+    `- category: use best guess, examples: food, transport, shopping, bills, health, entertainment, salary, bonus, other, transfer.\n` +
+    `- ref: extract transaction reference / TRX / Ref / เลขที่รายการ if present, else null.\n` +
+    `- from_account / to_account: extract last 4-6 digits of account/card if present (digits only). else null.\n` +
+    `- evidence: short string (<=200 chars) containing the key lines you used.\n` +
+    `Return JSON only.\n`;
 
   const payload = {
     model,
+    temperature: 0,
     input: [
       {
         role: "user",
@@ -165,7 +164,10 @@ Return JSON only.
 
   const parsed = safeJsonParseMaybe(outputText);
   if (!parsed) {
-    return { status: 200, body: { error: "parse_failed", rawText: outputText } };
+    return {
+      status: 200,
+      body: { error: "parse_failed", rawText: outputText },
+    };
   }
 
   const amount =
@@ -175,22 +177,24 @@ Return JSON only.
       ? Number(parsed.amount)
       : null;
 
-  const body = {
-    kind: String(parsed.kind || "receipt"),
-    amount: Number.isFinite(amount) ? amount : null,
-    date: parsed.date ?? null,
-    merchant: String(parsed.merchant ?? ""),
-    category: String(parsed.category ?? "other"),
-    note: String(parsed.note ?? ""),
-    ref: parsed.ref != null ? String(parsed.ref) : null,
-    payment_method: String(parsed.payment_method ?? "unknown"),
-    from_account_no: parsed.from_account_no ? normalizeAccountNo(parsed.from_account_no) : null,
-    to_account_no: parsed.to_account_no ? normalizeAccountNo(parsed.to_account_no) : null,
-    card_last4: parsed.card_last4 ? String(parsed.card_last4).replace(/\D/g, "").slice(-4) : null,
-    rawText: outputText,
-  };
+  const tx_type = String(parsed.tx_type || "").toLowerCase();
+  const safeType = tx_type === "income" || tx_type === "transfer" ? tx_type : "expense";
 
-  return { status: 200, body };
+  return {
+    status: 200,
+    body: {
+      tx_type: safeType,
+      amount: Number.isFinite(amount) ? amount : null,
+      date: parsed.date ?? null,
+      merchant: String(parsed.merchant ?? ""),
+      category: String(parsed.category ?? "other"),
+      note: String(parsed.note ?? ""),
+      ref: parsed.ref ? String(parsed.ref) : null,
+      from_account: parsed.from_account ? normalizeDigits(parsed.from_account) : null,
+      to_account: parsed.to_account ? normalizeDigits(parsed.to_account) : null,
+      evidence: String(parsed.evidence ?? "").slice(0, 200),
+    },
+  };
 }
 
 export default async function handler(req, res) {
@@ -209,6 +213,7 @@ export default async function handler(req, res) {
         res.status(400).json({ error: "missing_file" });
         return;
       }
+
       const base64 = fileBuffer.toString("base64");
       const out = await callOpenAI({ base64, mimeType: mimeType || "image/jpeg" });
       res.status(out.status).json(out.body);
