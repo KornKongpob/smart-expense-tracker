@@ -1,48 +1,90 @@
 // src/views/AccountsView.jsx
-import { useMemo, useRef, useState } from "react";
-import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Image as ImageIcon } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Sparkles } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { ACCOUNT_COLORS } from "../constants/presets.jsx";
 import { calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
 
 /**
- * ✅ Icon groups (emoji)
+ * ✅ Expanded, nicer emoji sets for account icons
+ * - Keep as string (emoji/url/data) so it can be stored safely in localStorage JSON
+ * - Grouped for better UX
  */
 const ACCOUNT_ICON_GROUPS = [
-  { id: "cash", title: "เงินสด", emojis: ["💵", "💴", "💶", "💷", "🪙", "💰", "💸", "🧧", "👛"] },
-  { id: "bank", title: "ธนาคาร•บัญชี", emojis: ["🏦", "💳", "🏧", "📒", "📘", "🧾", "📄", "🗂️", "🔐", "🔑"] },
-  { id: "credit", title: "บัตรเครดิต", emojis: ["💳", "🪪", "📇", "🧾", "💎", "⭐", "🛡️"] },
-  { id: "savings", title: "ออมเงิน", emojis: ["🐷", "🏺", "📦", "🔒", "🧱", "🧮", "🎯"] },
-  { id: "digital", title: "ดิจิทัล•วอลเล็ต", emojis: ["📱", "📲", "💻", "⌚", "🌐", "🔔"] },
-  { id: "invest", title: "ลงทุน", emojis: ["📈", "📉", "🏛️", "🪙", "💹", "💼"] },
-  { id: "gold", title: "ของมีค่า", emojis: ["🥇", "🏅", "💎", "🪙", "⭐", "✨"] },
-  { id: "business", title: "ธุรกิจ", emojis: ["💼", "🏢", "🏪", "🏭", "📦", "🚚", "🧾"] },
-  { id: "misc", title: "อื่นๆ", emojis: ["🏷️", "🧩", "📌", "🗃️", "📬", "🔧"] },
+  {
+    id: "cash",
+    title: "เงินสด",
+    emojis: ["💵", "💴", "💶", "💷", "🪙", "💰", "💸", "🧧", "👛"],
+  },
+  {
+    id: "bank",
+    title: "ธนาคาร/บัญชี",
+    emojis: ["🏦", "💳", "🏧", "📒", "📘", "🧾", "📄", "🗂️", "🔐", "🔑"],
+  },
+  {
+    id: "credit",
+    title: "บัตร/เครดิต",
+    emojis: ["💳", "🪪", "📇", "🧾", "💎", "⭐", "🧠", "🛡️"],
+  },
+  {
+    id: "savings",
+    title: "ออมเงิน",
+    emojis: ["🐷", "🐽", "🏺", "📦", "🔒", "🧱", "🧮", "🎯"],
+  },
+  {
+    id: "digital",
+    title: "ดิจิทัล/วอลเล็ต",
+    emojis: ["📱", "📲", "💻", "⌚", "🧾", "🔔", "📩", "🌐"],
+  },
+  {
+    id: "invest",
+    title: "ลงทุน",
+    emojis: ["📈", "📉", "🏛️", "🪙", "🧾", "💹", "💼", "🧠"],
+  },
+  {
+    id: "gold",
+    title: "ทอง/ของมีค่า",
+    emojis: ["🥇", "🏅", "💎", "🪙", "⭐", "✨"],
+  },
+  {
+    id: "business",
+    title: "ธุรกิจ",
+    emojis: ["💼", "🏢", "🏪", "🏭", "📦", "🚚", "🧾", "🧑‍💻"],
+  },
+  {
+    id: "misc",
+    title: "อื่นๆ",
+    emojis: ["🏷️", "🧩", "📌", "🗃️", "📬", "🧾", "🧿", "🔧"],
+  },
 ];
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
-function ModalShell({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-            aria-label="close"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        {children}
-        <div className="h-3 pb-safe" />
-      </div>
-    </div>
-  );
+const TYPE_META = {
+  bank: { label: "บัญชีธนาคาร", icon: <Banknote size={16} />, order: 1 },
+  cash: { label: "เงินสด", icon: <Wallet size={16} />, order: 2 },
+  credit: { label: "บัตรเครดิต", icon: <CreditCard size={16} />, order: 3 },
+  other: { label: "อื่นๆ", icon: <Sparkles size={16} />, order: 99 },
+};
+
+function normalizeType(t) {
+  const s = String(t || "").toLowerCase().trim();
+  if (s === "bank" || s === "cash" || s === "credit") return s;
+  return "other";
+}
+
+function isImageIcon(v) {
+  const s = String(v || "").trim();
+  return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://");
+}
+
+function AccountIcon({ value }) {
+  const v = String(value || "💳").trim();
+  if (isImageIcon(v)) {
+    return <img src={v} alt="icon" className="w-8 h-8 object-cover rounded-xl" />;
+  }
+  return <span className="text-2xl leading-none">{v || "💳"}</span>;
 }
 
 function ColorDots({ value, onChange }) {
@@ -69,7 +111,7 @@ function TypePills({ value, onChange }) {
   const items = [
     { id: "cash", label: "เงินสด", icon: <Wallet size={16} /> },
     { id: "bank", label: "ธนาคาร", icon: <Banknote size={16} /> },
-    { id: "credit", label: "เครดิต", icon: <CreditCard size={16} /> },
+    { id: "credit", label: "บัตรเครดิต", icon: <CreditCard size={16} /> },
   ];
   return (
     <div className="glass-panel border border-white/20 rounded-2xl p-1 flex">
@@ -89,139 +131,105 @@ function TypePills({ value, onChange }) {
   );
 }
 
-function IconPicker({ value, onChange }) {
-  const [groupId, setGroupId] = useState("bank");
-
-  const group = useMemo(() => ACCOUNT_ICON_GROUPS.find((g) => g.id === groupId) || ACCOUNT_ICON_GROUPS[0], [groupId]);
-  const selected = (value || "💳").trim() || "💳";
-
+function ModalShell({ title, children, onClose }) {
   return (
-    <div className="glass-panel border border-white/20 rounded-2xl p-4">
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="min-w-0">
-          <div className="text-xs font-extrabold text-gray-800/70">เลือกไอคอน (Emoji)</div>
-          <div className="text-[11px] text-gray-800/55 mt-1">แตะเพื่อเลือก • จัดให้อยู่กึ่งกลาง</div>
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
+      {/* ✅ Make sure modal always sits above bottom nav */}
+      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
+            aria-label="close"
+          >
+            <X size={18} />
+          </button>
         </div>
-
-        <div className="shrink-0">
-          <div className="text-[11px] text-gray-800/55 text-right">ที่เลือก</div>
-          <div className="mt-1 w-12 h-12 rounded-2xl bg-white/20 border border-white/20 flex items-center justify-center">
-            <span className="text-[26px] leading-none overflow-hidden select-none">{selected}</span>
-          </div>
-        </div>
+        {children}
+        <div className="h-3 pb-safe" />
       </div>
-
-      <div className="mb-3">
-        <div className="grid grid-cols-3 gap-2">
-          {ACCOUNT_ICON_GROUPS.map((g) => {
-            const active = groupId === g.id;
-            return (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => setGroupId(g.id)}
-                className={`h-9 rounded-full border transition-all active:scale-95 px-2 flex items-center justify-center ${
-                  active
-                    ? "bg-gray-900/90 text-white border-white/20"
-                    : "bg-white/18 text-gray-800/70 border-white/20 hover:bg-white/22"
-                }`}
-                title={g.title}
-              >
-                <span className="text-[11px] font-extrabold whitespace-nowrap leading-none truncate max-w-full">
-                  {g.title}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="max-h-56 overflow-y-auto no-scrollbar">
-        <div className="grid grid-cols-6 sm:grid-cols-8 gap-2.5 place-items-stretch">
-          {group.emojis.map((e, idx) => {
-            const isActive = selected === e;
-            return (
-              <button
-                key={`${group.id}_${idx}`}
-                type="button"
-                onClick={() => onChange?.(e)}
-                className={`aspect-square rounded-2xl border transition-all active:scale-95 flex items-center justify-center overflow-hidden ${
-                  isActive ? "bg-white/25 border-gray-900/40" : "bg-white/10 border-white/15 hover:bg-white/15"
-                }`}
-                aria-label={`icon ${e}`}
-                title={e}
-              >
-                <span className="text-[26px] leading-none select-none">{e}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mt-3 text-[11px] text-gray-800/55">* ยังสามารถพิมพ์ Emoji เองได้ในช่อง “ไอคอน (พิมพ์เองได้)”</div>
     </div>
   );
 }
 
-function AccountImagePicker({ value, onChange, showAlert }) {
-  const inputRef = useRef(null);
+function IconPicker({ value, onChange }) {
+  const [groupId, setGroupId] = useState("bank");
 
-  const pick = () => inputRef.current?.click();
-
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-
-    // กันไฟล์ใหญ่เกินไป (base64 จะอืดใน localStorage)
-    const max = 2.5 * 1024 * 1024; // 2.5MB
-    if (file.size > max) {
-      showAlert?.("ไฟล์รูปใหญ่เกินไป (แนะนำ < 2.5MB)");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => onChange?.(String(reader.result || ""));
-    reader.onerror = () => showAlert?.("อ่านไฟล์รูปไม่สำเร็จ");
-    reader.readAsDataURL(file);
-  };
+  const group = useMemo(() => {
+    return ACCOUNT_ICON_GROUPS.find((g) => g.id === groupId) || ACCOUNT_ICON_GROUPS[0];
+  }, [groupId]);
 
   return (
-    <div className="glass-panel border border-white/20 rounded-2xl p-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="glass-panel border border-white/20 rounded-2xl p-3">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
+          <Sparkles size={14} className="text-indigo-700" />
+          เลือกไอคอน (แนะนำ)
+        </div>
+        <div className="text-[11px] text-gray-800/55">
+          ไอคอนที่เลือก: <span className="font-extrabold text-gray-900">{value || "💳"}</span>
+        </div>
+      </div>
+
+      {/* group tabs */}
+      <div className="flex gap-2 flex-wrap mb-3">
+        {ACCOUNT_ICON_GROUPS.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            onClick={() => setGroupId(g.id)}
+            className={`text-[11px] font-extrabold px-3 py-1.5 rounded-full border transition-all active:scale-95 ${
+              groupId === g.id
+                ? "bg-gray-900/90 text-white border-white/20"
+                : "bg-white/18 text-gray-800/70 border-white/20 hover:bg-white/22"
+            }`}
+          >
+            {g.title}
+          </button>
+        ))}
+      </div>
+
+      {/* emoji grid */}
+      <div className="max-h-44 overflow-y-auto no-scrollbar">
+        <div className="grid grid-cols-8 gap-2">
+          {group.emojis.map((e, idx) => (
+            <button
+              key={`${group.id}_${idx}`}
+              type="button"
+              onClick={() => onChange?.(e)}
+              className={`text-xl p-2 rounded-xl border transition-all hover:bg-white/10 active:scale-95 ${
+                value === e ? "bg-white/20 border-gray-900/40" : "border-white/15"
+              }`}
+              aria-label={`icon ${e}`}
+              title={e}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-2 text-[11px] text-gray-800/55">* ยังสามารถพิมพ์ Emoji เองได้ในช่อง “ไอคอน” ด้านล่าง</div>
+    </div>
+  );
+}
+
+function GroupHeader({ type, count, subtitleRight }) {
+  const meta = TYPE_META[normalizeType(type)] || TYPE_META.other;
+  return (
+    <div className="flex items-center justify-between gap-3 px-1">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="w-9 h-9 rounded-2xl glass-chip flex items-center justify-center text-gray-700 shrink-0">
+          {meta.icon}
+        </span>
         <div className="min-w-0">
-          <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
-            <ImageIcon size={14} /> รูปบัญชี (Optional)
-          </div>
-          <div className="text-[11px] text-gray-800/55 mt-1">ถ้าใส่รูป ระบบจะโชว์รูปแทน emoji</div>
-        </div>
-
-        <div className="shrink-0">
-          <div className="w-14 h-14 rounded-2xl overflow-hidden bg-white/15 border border-white/15 flex items-center justify-center">
-            {value ? <img src={value} alt="account" className="w-full h-full object-cover" /> : <ImageIcon size={20} className="text-gray-700/60" />}
-          </div>
+          <div className="font-extrabold text-gray-900 truncate">{meta.label}</div>
+          <div className="text-[12px] text-gray-800/55">{count} บัญชี</div>
         </div>
       </div>
-
-      <div className="flex gap-2 mt-3">
-        <button
-          type="button"
-          onClick={pick}
-          className="flex-1 py-2.5 rounded-2xl bg-gray-900/90 text-white font-extrabold text-sm active:scale-95"
-        >
-          เลือกรูป
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange?.("")}
-          className="px-4 py-2.5 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
-          disabled={!value}
-        >
-          ลบรูป
-        </button>
-      </div>
-
-      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+      {subtitleRight ? <div className="text-[12px] text-gray-900/70 font-extrabold text-right">{subtitleRight}</div> : null}
     </div>
   );
 }
@@ -232,16 +240,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
   const accounts = state.accounts || [];
   const transactions = state.transactions || [];
 
-  // ✅ Net balance (assets only: cash + bank; exclude credit)
-  const netAssets = useMemo(() => {
-    let sum = 0;
-    for (const a of accounts) {
-      if (a.type === "credit") continue;
-      sum += calcAccountBalance(accounts, transactions, a.id);
-    }
-    return sum;
-  }, [accounts, transactions]);
-
   const [openCreate, setOpenCreate] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -249,7 +247,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
   // create form
   const [cName, setCName] = useState("");
   const [cIcon, setCIcon] = useState("💳");
-  const [cImage, setCImage] = useState("");
   const [cColor, setCColor] = useState(ACCOUNT_COLORS[0]);
   const [cType, setCType] = useState("bank");
   const [cBalance, setCBalance] = useState("0");
@@ -268,7 +265,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
   const [eName, setEName] = useState("");
   const [eIcon, setEIcon] = useState("💳");
-  const [eImage, setEImage] = useState("");
   const [eColor, setEColor] = useState(ACCOUNT_COLORS[0]);
   const [eType, setEType] = useState("bank");
   const [eBalance, setEBalance] = useState("");
@@ -282,7 +278,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
     setEditingId(acc.id);
     setEName(acc.name || "");
     setEIcon(acc.icon || "💳");
-    setEImage(acc.image || "");
     setEColor(acc.color || ACCOUNT_COLORS[0]);
     setEType(acc.type || "bank");
     setEAccountNumber(String(acc.accountNumber || ""));
@@ -300,6 +295,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     const openingBalance = Number(cBalance || 0);
     if (!Number.isFinite(openingBalance)) return showAlert?.("ยอดเงินไม่ถูกต้อง");
 
+    // ✅ credit fields sanity
     const creditLimit = Number(cCreditLimit || 0) || 0;
     const statementDay = Math.min(31, Math.max(1, Number(cStatementDay || 1) || 1));
     const dueDay = Math.min(31, Math.max(1, Number(cDueDay || 25) || 25));
@@ -307,7 +303,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
     addAccount({
       name: cName.trim(),
       icon: (cIcon || "💳").trim(),
-      image: cImage || "",
       color: cColor,
       type: cType,
       openingBalance,
@@ -319,7 +314,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
     setCName("");
     setCIcon("💳");
-    setCImage("");
     setCColor(ACCOUNT_COLORS[0]);
     setCType("bank");
     setCBalance("0");
@@ -342,7 +336,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
       id: editing.id,
       name: eName.trim(),
       icon: (eIcon || "💳").trim(),
-      image: eImage || "",
       color: eColor,
       type: eType,
       accountNumber: digitsOnly(eAccountNumber),
@@ -368,12 +361,75 @@ export default function AccountsView({ showAlert, showConfirm }) {
     showConfirm?.("ลบบัญชี", "ยืนยันลบบัญชี? รายการที่เกี่ยวข้องกับบัญชีนี้จะถูกลบด้วย", () => deleteAccount(accId), true);
   };
 
+  // ===== Grouping =====
+  const accountBalances = useMemo(() => {
+    const map = new Map();
+    for (const acc of accounts) map.set(acc.id, calcAccountBalance(accounts, transactions, acc.id));
+    return map;
+  }, [accounts, transactions]);
+
+  const groups = useMemo(() => {
+    const by = new Map();
+    for (const acc of accounts) {
+      const t = normalizeType(acc.type);
+      if (!by.has(t)) by.set(t, []);
+      by.get(t).push(acc);
+    }
+
+    const out = [...by.entries()]
+      .map(([type, items]) => {
+        const sorted = items.slice().sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+        const meta = TYPE_META[type] || TYPE_META.other;
+
+        // totals
+        if (type === "credit") {
+          let totalDebt = 0;
+          let totalLimit = 0;
+          for (const a of sorted) {
+            const bal = accountBalances.get(a.id) || 0;
+            totalDebt += Math.max(0, -bal);
+            totalLimit += Number(a.creditLimit || 0) || 0;
+          }
+          const available = Math.max(0, totalLimit - totalDebt);
+          return {
+            type,
+            order: meta.order ?? 99,
+            items: sorted,
+            right: `ค้างชำระ ${formatCurrency(totalDebt)} • วงเงินคงเหลือ ${formatCurrency(available)}`,
+          };
+        }
+
+        let total = 0;
+        for (const a of sorted) total += accountBalances.get(a.id) || 0;
+        return {
+          type,
+          order: meta.order ?? 99,
+          items: sorted,
+          right: `รวม ${formatCurrency(total)}`,
+        };
+      })
+      .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+
+    return out;
+  }, [accounts, accountBalances]);
+
+  const netBalance = useMemo(() => {
+    // ✅ exclude credit accounts (as requested)
+    let sum = 0;
+    for (const a of accounts) {
+      const t = normalizeType(a.type);
+      if (t === "credit") continue;
+      sum += accountBalances.get(a.id) || 0;
+    }
+    return sum;
+  }, [accounts, accountBalances]);
+
   return (
     <div className="pb-28 pt-6 px-4 min-h-dvh">
-      <header className="mb-4 flex justify-between items-center gap-3">
+      <header className="mb-5 flex justify-between items-start gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-extrabold text-gray-900">บัญชีของฉัน</h1>
-          <p className="text-gray-700/70 text-sm">รองรับรูปบัญชี + emoji • รวมทรัพย์สินไม่รวมเครดิต</p>
+          <p className="text-gray-700/70 text-sm">รองรับเลขบัญชี/เลขท้ายบัตร เพื่อ Auto-detect จากสลิป</p>
         </div>
 
         <button
@@ -386,101 +442,111 @@ export default function AccountsView({ showAlert, showConfirm }) {
         </button>
       </header>
 
-      {/* ✅ Net Balance */}
+      {/* ✅ Net Balance (exclude credit) */}
       <div className="glass-card rounded-3xl p-5 mb-5">
-        <div className="text-xs text-gray-900/60 font-bold">Net Balance (ไม่รวมบัญชีเครดิต)</div>
-        <div className="text-3xl font-extrabold text-gray-900 mt-1">{formatCurrency(netAssets)}</div>
-        <div className="text-[11px] text-gray-900/55 mt-1">รวมเฉพาะประเภท เงินสด + ธนาคาร</div>
+        <div className="text-xs font-extrabold text-gray-800/65">Net Balance (ไม่รวมบัตรเครดิต)</div>
+        <div className={`text-3xl font-extrabold mt-1 ${netBalance < 0 ? "text-red-600" : "text-gray-900"}`}>
+          {formatCurrency(netBalance)}
+        </div>
+        <div className="text-[11px] text-gray-800/55 mt-1">รวมเฉพาะ เงินสด + ธนาคาร (และประเภทอื่นๆที่ไม่ใช่ Credit)</div>
       </div>
 
-      <div className="space-y-3">
-        {accounts.map((acc) => {
-          const bal = calcAccountBalance(accounts, transactions, acc.id);
-          const isCredit = acc.type === "credit";
-          const debt = isCredit ? Math.max(0, -bal) : 0;
-          const available = isCredit ? Math.max(0, (Number(acc.creditLimit || 0) || 0) - debt) : 0;
+      {/* ✅ Grouped accounts */}
+      <div className="space-y-6">
+        {groups.map((g) => (
+          <section key={g.type} className="space-y-3">
+            <GroupHeader type={g.type} count={g.items.length} subtitleRight={g.right} />
 
-          return (
-            <div key={acc.id} className="glass-card rounded-2xl overflow-hidden">
-              <div className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden border border-white/10"
-                    style={{ backgroundColor: `${acc.color}22` }}
-                  >
-                    {acc.image ? (
-                      <img src={acc.image} alt="acc" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-2xl">{acc.icon || "💳"}</span>
-                    )}
-                  </div>
+            <div className="space-y-3">
+              {g.items.map((acc) => {
+                const bal = accountBalances.get(acc.id) || 0;
+                const isCredit = normalizeType(acc.type) === "credit";
+                const debt = isCredit ? Math.max(0, -bal) : 0;
+                const available = isCredit ? Math.max(0, (Number(acc.creditLimit || 0) || 0) - debt) : 0;
 
-                  <div className="min-w-0">
-                    <div className="font-extrabold text-gray-900 truncate">{acc.name}</div>
+                return (
+                  <div key={acc.id} className="glass-card rounded-2xl overflow-hidden">
+                    <div className="flex items-center justify-between p-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden"
+                          style={{ backgroundColor: `${acc.color}22` }}
+                        >
+                          <AccountIcon value={acc.icon || "💳"} />
+                        </div>
 
-                    <div className="text-xs text-gray-800/70 mt-0.5">
-                      {isCredit ? (
-                        <>
-                          ค้างชำระ: <span className="font-extrabold text-red-600">{formatCurrency(debt)}</span>
-                          {Number(acc.creditLimit || 0) ? (
-                            <>
-                              <span className="mx-2">•</span>
-                              วงเงินคงเหลือ: <span className="font-extrabold text-gray-900">{formatCurrency(available)}</span>
-                            </>
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-gray-900 truncate">{acc.name}</div>
+
+                          <div className="text-xs text-gray-800/70 mt-0.5">
+                            {isCredit ? (
+                              <>
+                                ค้างชำระ: <span className="font-extrabold text-red-600">{formatCurrency(debt)}</span>
+                                {Number(acc.creditLimit || 0) ? (
+                                  <>
+                                    <span className="mx-2">•</span>
+                                    วงเงินคงเหลือ:{" "}
+                                    <span className="font-extrabold text-gray-900">{formatCurrency(available)}</span>
+                                  </>
+                                ) : null}
+                              </>
+                            ) : (
+                              <>
+                                ยอดคงเหลือ:{" "}
+                                <span className={`font-extrabold ${bal < 0 ? "text-red-600" : "text-gray-900"}`}>
+                                  {formatCurrency(bal)}
+                                </span>
+                              </>
+                            )}
+                          </div>
+
+                          {acc.accountNumber ? (
+                            <div className="text-[11px] text-gray-800/55 mt-1">
+                              เลขบัญชี/เลขท้ายบัตร: <span className="font-bold">{acc.accountNumber}</span>
+                            </div>
                           ) : null}
-                        </>
-                      ) : (
-                        <>
-                          ยอดคงเหลือ:{" "}
-                          <span className={`font-extrabold ${bal < 0 ? "text-red-600" : "text-gray-900"}`}>{formatCurrency(bal)}</span>
-                        </>
-                      )}
+
+                          {isCredit && (Number(acc.statementDay || 0) || Number(acc.dueDay || 0)) ? (
+                            <div className="text-[11px] text-gray-800/55 mt-1">
+                              ตัดรอบ: <span className="font-bold">{acc.statementDay || 1}</span> • ครบกำหนด:{" "}
+                              <span className="font-bold">{acc.dueDay || 25}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(acc)}
+                          className="w-10 h-10 rounded-full glass-icon-btn text-gray-800 flex items-center justify-center active:scale-95"
+                          aria-label="edit"
+                          title="แก้ไข"
+                        >
+                          <Pencil size={18} />
+                        </button>
+
+                        {accounts.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => del(acc.id)}
+                            className="w-10 h-10 rounded-full bg-red-500/10 text-red-700 flex items-center justify-center active:scale-95 border border-red-500/15"
+                            aria-label="delete"
+                            title="ลบ"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
 
-                    {acc.accountNumber ? (
-                      <div className="text-[11px] text-gray-800/55 mt-1">
-                        เลขบัญชี/เลขท้ายบัตร: <span className="font-bold">{acc.accountNumber}</span>
-                      </div>
-                    ) : null}
-
-                    {acc.type === "credit" && (Number(acc.statementDay || 0) || Number(acc.dueDay || 0)) ? (
-                      <div className="text-[11px] text-gray-800/55 mt-1">
-                        ตัดรอบ: <span className="font-bold">{acc.statementDay || 1}</span> • ครบกำหนด:{" "}
-                        <span className="font-bold">{acc.dueDay || 25}</span>
-                      </div>
-                    ) : null}
+                    <div className="h-1" style={{ backgroundColor: acc.color }} />
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(acc)}
-                    className="w-10 h-10 rounded-full glass-icon-btn text-gray-800 flex items-center justify-center active:scale-95"
-                    aria-label="edit"
-                    title="แก้ไข"
-                  >
-                    <Pencil size={18} />
-                  </button>
-
-                  {accounts.length > 1 ? (
-                    <button
-                      type="button"
-                      onClick={() => del(acc.id)}
-                      className="w-10 h-10 rounded-full bg-red-500/10 text-red-700 flex items-center justify-center active:scale-95 border border-red-500/15"
-                      aria-label="delete"
-                      title="ลบ"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="h-1" style={{ backgroundColor: acc.color }} />
+                );
+              })}
             </div>
-          );
-        })}
+          </section>
+        ))}
       </div>
 
       {/* Create */}
@@ -496,10 +562,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
             placeholder="เช่น KBank, Wallet, Credit Card"
           />
-
-          <div className="mt-4">
-            <AccountImagePicker value={cImage} onChange={setCImage} showAlert={showAlert} />
-          </div>
 
           <div className="mt-4">
             <IconPicker value={cIcon} onChange={setCIcon} />
@@ -622,10 +684,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
           />
 
           <div className="mt-4">
-            <AccountImagePicker value={eImage} onChange={setEImage} showAlert={showAlert} />
-          </div>
-
-          <div className="mt-4">
             <IconPicker value={eIcon} onChange={setEIcon} />
           </div>
 
@@ -712,7 +770,9 @@ export default function AccountsView({ showAlert, showConfirm }) {
               }`}
               aria-label="toggle record as transaction"
             >
-              <span className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${recordAsTx ? "left-7" : "left-1"}`} />
+              <span
+                className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${recordAsTx ? "left-7" : "left-1"}`}
+              />
             </button>
           </div>
 
