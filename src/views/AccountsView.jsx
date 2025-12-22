@@ -1,27 +1,49 @@
 // src/views/AccountsView.jsx
-import { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Sparkles } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Image as ImageIcon } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { ACCOUNT_COLORS } from "../constants/presets.jsx";
 import { calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
 
 /**
- * ✅ Icon groups
- * - ปรับ title ให้ไม่ตัดคำ/ไม่ขึ้นบรรทัดแปลก (เลี่ยง "/" )
- * - คงเป็น emoji string เพื่อ serialize ได้
+ * ✅ Icon groups (emoji)
  */
 const ACCOUNT_ICON_GROUPS = [
   { id: "cash", title: "เงินสด", emojis: ["💵", "💴", "💶", "💷", "🪙", "💰", "💸", "🧧", "👛"] },
   { id: "bank", title: "ธนาคาร•บัญชี", emojis: ["🏦", "💳", "🏧", "📒", "📘", "🧾", "📄", "🗂️", "🔐", "🔑"] },
-  { id: "credit", title: "บัตรเครดิต", emojis: ["💳", "🪪", "📇", "🧾", "💎", "⭐", "🧠", "🛡️"] },
-  { id: "savings", title: "ออมเงิน", emojis: ["🐷", "🐽", "🏺", "📦", "🔒", "🧱", "🧮", "🎯"] },
-  { id: "digital", title: "ดิจิทัล•วอลเล็ต", emojis: ["📱", "📲", "💻", "⌚", "🧾", "🔔", "📩", "🌐"] },
-  { id: "invest", title: "ลงทุน", emojis: ["📈", "📉", "🏛️", "🪙", "🧾", "💹", "💼", "🧠"] },
+  { id: "credit", title: "บัตรเครดิต", emojis: ["💳", "🪪", "📇", "🧾", "💎", "⭐", "🛡️"] },
+  { id: "savings", title: "ออมเงิน", emojis: ["🐷", "🏺", "📦", "🔒", "🧱", "🧮", "🎯"] },
+  { id: "digital", title: "ดิจิทัล•วอลเล็ต", emojis: ["📱", "📲", "💻", "⌚", "🌐", "🔔"] },
+  { id: "invest", title: "ลงทุน", emojis: ["📈", "📉", "🏛️", "🪙", "💹", "💼"] },
   { id: "gold", title: "ของมีค่า", emojis: ["🥇", "🏅", "💎", "🪙", "⭐", "✨"] },
-  { id: "business", title: "ธุรกิจ", emojis: ["💼", "🏢", "🏪", "🏭", "📦", "🚚", "🧾", "🧑‍💻"] },
-  { id: "misc", title: "อื่นๆ", emojis: ["🏷️", "🧩", "📌", "🗃️", "📬", "🧾", "🧿", "🔧"] },
+  { id: "business", title: "ธุรกิจ", emojis: ["💼", "🏢", "🏪", "🏭", "📦", "🚚", "🧾"] },
+  { id: "misc", title: "อื่นๆ", emojis: ["🏷️", "🧩", "📌", "🗃️", "📬", "🔧"] },
 ];
+
+const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
+
+function ModalShell({ title, children, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
+      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
+            aria-label="close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {children}
+        <div className="h-3 pb-safe" />
+      </div>
+    </div>
+  );
+}
 
 function ColorDots({ value, onChange }) {
   return (
@@ -47,7 +69,7 @@ function TypePills({ value, onChange }) {
   const items = [
     { id: "cash", label: "เงินสด", icon: <Wallet size={16} /> },
     { id: "bank", label: "ธนาคาร", icon: <Banknote size={16} /> },
-    { id: "credit", label: "บัตรเครดิต", icon: <CreditCard size={16} /> },
+    { id: "credit", label: "เครดิต", icon: <CreditCard size={16} /> },
   ];
   return (
     <div className="glass-panel border border-white/20 rounded-2xl p-1 flex">
@@ -67,52 +89,17 @@ function TypePills({ value, onChange }) {
   );
 }
 
-function ModalShell({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-            aria-label="close"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        {children}
-        <div className="h-3 pb-safe" />
-      </div>
-    </div>
-  );
-}
-
-/**
- * ✅ IconPicker (fix: หมวดไม่ตัดคำ + grid สมมาตร/ไม่แปลก)
- * - หมวด: ใช้ pill แบบเท่ากันทุกอัน (grid) ไม่ตัดคำ, ไม่ wrap
- * - emoji: ใช้ปุ่มแบบ aspect-square + w-full/h-full + leading-none + overflow-hidden
- * - ใช้ place-items-stretch + padding เท่ากัน ทำให้ดูเรียบร้อยขึ้น
- */
 function IconPicker({ value, onChange }) {
   const [groupId, setGroupId] = useState("bank");
 
-  const group = useMemo(() => {
-    return ACCOUNT_ICON_GROUPS.find((g) => g.id === groupId) || ACCOUNT_ICON_GROUPS[0];
-  }, [groupId]);
-
+  const group = useMemo(() => ACCOUNT_ICON_GROUPS.find((g) => g.id === groupId) || ACCOUNT_ICON_GROUPS[0], [groupId]);
   const selected = (value || "💳").trim() || "💳";
 
   return (
     <div className="glass-panel border border-white/20 rounded-2xl p-4">
-      {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0">
-          <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
-            <Sparkles size={14} className="text-indigo-700" />
-            เลือกไอคอน
-          </div>
+          <div className="text-xs font-extrabold text-gray-800/70">เลือกไอคอน (Emoji)</div>
           <div className="text-[11px] text-gray-800/55 mt-1">แตะเพื่อเลือก • จัดให้อยู่กึ่งกลาง</div>
         </div>
 
@@ -124,7 +111,6 @@ function IconPicker({ value, onChange }) {
         </div>
       </div>
 
-      {/* Group pills (no broken words) */}
       <div className="mb-3">
         <div className="grid grid-cols-3 gap-2">
           {ACCOUNT_ICON_GROUPS.map((g) => {
@@ -150,7 +136,6 @@ function IconPicker({ value, onChange }) {
         </div>
       </div>
 
-      {/* Emoji grid (symmetry + nicer) */}
       <div className="max-h-56 overflow-y-auto no-scrollbar">
         <div className="grid grid-cols-6 sm:grid-cols-8 gap-2.5 place-items-stretch">
           {group.emojis.map((e, idx) => {
@@ -173,20 +158,89 @@ function IconPicker({ value, onChange }) {
         </div>
       </div>
 
-      <div className="mt-3 text-[11px] text-gray-800/55">
-        * ยังสามารถพิมพ์ Emoji เองได้ในช่อง “ไอคอน (พิมพ์เองได้)” ด้านล่าง
-      </div>
+      <div className="mt-3 text-[11px] text-gray-800/55">* ยังสามารถพิมพ์ Emoji เองได้ในช่อง “ไอคอน (พิมพ์เองได้)”</div>
     </div>
   );
 }
 
-const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
+function AccountImagePicker({ value, onChange, showAlert }) {
+  const inputRef = useRef(null);
+
+  const pick = () => inputRef.current?.click();
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    // กันไฟล์ใหญ่เกินไป (base64 จะอืดใน localStorage)
+    const max = 2.5 * 1024 * 1024; // 2.5MB
+    if (file.size > max) {
+      showAlert?.("ไฟล์รูปใหญ่เกินไป (แนะนำ < 2.5MB)");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => onChange?.(String(reader.result || ""));
+    reader.onerror = () => showAlert?.("อ่านไฟล์รูปไม่สำเร็จ");
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="glass-panel border border-white/20 rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
+            <ImageIcon size={14} /> รูปบัญชี (Optional)
+          </div>
+          <div className="text-[11px] text-gray-800/55 mt-1">ถ้าใส่รูป ระบบจะโชว์รูปแทน emoji</div>
+        </div>
+
+        <div className="shrink-0">
+          <div className="w-14 h-14 rounded-2xl overflow-hidden bg-white/15 border border-white/15 flex items-center justify-center">
+            {value ? <img src={value} alt="account" className="w-full h-full object-cover" /> : <ImageIcon size={20} className="text-gray-700/60" />}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex gap-2 mt-3">
+        <button
+          type="button"
+          onClick={pick}
+          className="flex-1 py-2.5 rounded-2xl bg-gray-900/90 text-white font-extrabold text-sm active:scale-95"
+        >
+          เลือกรูป
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange?.("")}
+          className="px-4 py-2.5 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
+          disabled={!value}
+        >
+          ลบรูป
+        </button>
+      </div>
+
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+    </div>
+  );
+}
 
 export default function AccountsView({ showAlert, showConfirm }) {
   const { state, addAccount, updateAccount, deleteAccount, adjustAccountBalance } = useAppStore();
 
   const accounts = state.accounts || [];
   const transactions = state.transactions || [];
+
+  // ✅ Net balance (assets only: cash + bank; exclude credit)
+  const netAssets = useMemo(() => {
+    let sum = 0;
+    for (const a of accounts) {
+      if (a.type === "credit") continue;
+      sum += calcAccountBalance(accounts, transactions, a.id);
+    }
+    return sum;
+  }, [accounts, transactions]);
 
   const [openCreate, setOpenCreate] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
@@ -195,6 +249,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
   // create form
   const [cName, setCName] = useState("");
   const [cIcon, setCIcon] = useState("💳");
+  const [cImage, setCImage] = useState("");
   const [cColor, setCColor] = useState(ACCOUNT_COLORS[0]);
   const [cType, setCType] = useState("bank");
   const [cBalance, setCBalance] = useState("0");
@@ -213,6 +268,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
   const [eName, setEName] = useState("");
   const [eIcon, setEIcon] = useState("💳");
+  const [eImage, setEImage] = useState("");
   const [eColor, setEColor] = useState(ACCOUNT_COLORS[0]);
   const [eType, setEType] = useState("bank");
   const [eBalance, setEBalance] = useState("");
@@ -226,6 +282,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     setEditingId(acc.id);
     setEName(acc.name || "");
     setEIcon(acc.icon || "💳");
+    setEImage(acc.image || "");
     setEColor(acc.color || ACCOUNT_COLORS[0]);
     setEType(acc.type || "bank");
     setEAccountNumber(String(acc.accountNumber || ""));
@@ -250,6 +307,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     addAccount({
       name: cName.trim(),
       icon: (cIcon || "💳").trim(),
+      image: cImage || "",
       color: cColor,
       type: cType,
       openingBalance,
@@ -261,6 +319,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
     setCName("");
     setCIcon("💳");
+    setCImage("");
     setCColor(ACCOUNT_COLORS[0]);
     setCType("bank");
     setCBalance("0");
@@ -283,6 +342,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
       id: editing.id,
       name: eName.trim(),
       icon: (eIcon || "💳").trim(),
+      image: eImage || "",
       color: eColor,
       type: eType,
       accountNumber: digitsOnly(eAccountNumber),
@@ -305,20 +365,15 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
   const del = (accId) => {
     if (accounts.length <= 1) return showAlert?.("ต้องมีอย่างน้อย 1 บัญชี");
-    showConfirm?.(
-      "ลบบัญชี",
-      "ยืนยันลบบัญชี? รายการที่เกี่ยวข้องกับบัญชีนี้จะถูกลบด้วย",
-      () => deleteAccount(accId),
-      true
-    );
+    showConfirm?.("ลบบัญชี", "ยืนยันลบบัญชี? รายการที่เกี่ยวข้องกับบัญชีนี้จะถูกลบด้วย", () => deleteAccount(accId), true);
   };
 
   return (
     <div className="pb-28 pt-6 px-4 min-h-dvh">
-      <header className="mb-6 flex justify-between items-center gap-3">
+      <header className="mb-4 flex justify-between items-center gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-extrabold text-gray-900">บัญชีของฉัน</h1>
-          <p className="text-gray-700/70 text-sm">รองรับเลขบัญชี/เลขท้ายบัตร เพื่อ Auto-detect จากสลิป</p>
+          <p className="text-gray-700/70 text-sm">รองรับรูปบัญชี + emoji • รวมทรัพย์สินไม่รวมเครดิต</p>
         </div>
 
         <button
@@ -330,6 +385,13 @@ export default function AccountsView({ showAlert, showConfirm }) {
           <Plus size={18} />
         </button>
       </header>
+
+      {/* ✅ Net Balance */}
+      <div className="glass-card rounded-3xl p-5 mb-5">
+        <div className="text-xs text-gray-900/60 font-bold">Net Balance (ไม่รวมบัญชีเครดิต)</div>
+        <div className="text-3xl font-extrabold text-gray-900 mt-1">{formatCurrency(netAssets)}</div>
+        <div className="text-[11px] text-gray-900/55 mt-1">รวมเฉพาะประเภท เงินสด + ธนาคาร</div>
+      </div>
 
       <div className="space-y-3">
         {accounts.map((acc) => {
@@ -343,10 +405,14 @@ export default function AccountsView({ showAlert, showConfirm }) {
               <div className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3 min-w-0">
                   <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0"
+                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden border border-white/10"
                     style={{ backgroundColor: `${acc.color}22` }}
                   >
-                    {acc.icon || "💳"}
+                    {acc.image ? (
+                      <img src={acc.image} alt="acc" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-2xl">{acc.icon || "💳"}</span>
+                    )}
                   </div>
 
                   <div className="min-w-0">
@@ -359,17 +425,14 @@ export default function AccountsView({ showAlert, showConfirm }) {
                           {Number(acc.creditLimit || 0) ? (
                             <>
                               <span className="mx-2">•</span>
-                              วงเงินคงเหลือ:{" "}
-                              <span className="font-extrabold text-gray-900">{formatCurrency(available)}</span>
+                              วงเงินคงเหลือ: <span className="font-extrabold text-gray-900">{formatCurrency(available)}</span>
                             </>
                           ) : null}
                         </>
                       ) : (
                         <>
                           ยอดคงเหลือ:{" "}
-                          <span className={`font-extrabold ${bal < 0 ? "text-red-600" : "text-gray-900"}`}>
-                            {formatCurrency(bal)}
-                          </span>
+                          <span className={`font-extrabold ${bal < 0 ? "text-red-600" : "text-gray-900"}`}>{formatCurrency(bal)}</span>
                         </>
                       )}
                     </div>
@@ -433,6 +496,10 @@ export default function AccountsView({ showAlert, showConfirm }) {
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
             placeholder="เช่น KBank, Wallet, Credit Card"
           />
+
+          <div className="mt-4">
+            <AccountImagePicker value={cImage} onChange={setCImage} showAlert={showAlert} />
+          </div>
 
           <div className="mt-4">
             <IconPicker value={cIcon} onChange={setCIcon} />
@@ -555,6 +622,10 @@ export default function AccountsView({ showAlert, showConfirm }) {
           />
 
           <div className="mt-4">
+            <AccountImagePicker value={eImage} onChange={setEImage} showAlert={showAlert} />
+          </div>
+
+          <div className="mt-4">
             <IconPicker value={eIcon} onChange={setEIcon} />
           </div>
 
@@ -641,11 +712,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
               }`}
               aria-label="toggle record as transaction"
             >
-              <span
-                className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
-                  recordAsTx ? "left-7" : "left-1"
-                }`}
-              />
+              <span className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${recordAsTx ? "left-7" : "left-1"}`} />
             </button>
           </div>
 
