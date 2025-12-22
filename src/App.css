@@ -1,5 +1,5 @@
 /* src/App.css */
-/* Neutralize Vite template styles (mobile-first Tailwind app) */
+/* Keep App.css minimal. Global theme/utilities live in src/index.css */
 
 #root {
   max-width: none;
@@ -8,6 +8,7 @@
   text-align: initial;
 }
 
+/* Keep optional animation definitions if any old component referenced them */
 @keyframes logo-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

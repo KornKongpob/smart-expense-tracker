@@ -1,12 +1,21 @@
 // src/views/MoreView.jsx
-import { useRef } from "react";
-import { Settings, Upload, Trash2, ChevronRight, Bell, Repeat } from "lucide-react";
+import { useMemo, useRef } from "react";
+import { Settings, Upload, Trash2, ChevronRight, Bell, Repeat, PlayCircle } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { downloadBackupJSON } from "../services/storage";
+import { toISODate } from "../utils/format";
+import { parseDateSafe } from "../store/selectors";
 
 export default function MoreView({ showAlert, showConfirm }) {
-  const { navigate, exportBackup, importBackup, resetAll, runRecurringNow } = useAppStore();
+  const { state, navigate, exportBackup, importBackup, resetAll, runRecurringNow } = useAppStore();
   const fileRef = useRef(null);
+
+  // ✅ small status helper: how many recurring rules exist / enabled
+  const recurringStats = useMemo(() => {
+    const list = state?.recurring || [];
+    const enabled = list.filter((r) => r?.enabled !== false).length;
+    return { total: list.length, enabled };
+  }, [state?.recurring]);
 
   const onExport = () => {
     const data = exportBackup();
@@ -14,11 +23,13 @@ export default function MoreView({ showAlert, showConfirm }) {
     showAlert?.("ส่งออกไฟล์ backup แล้ว");
   };
 
-  const onPickImport = () => fileRef.current?.click();
+  const onPickImport = () => {
+    fileRef.current?.click();
+  };
 
   const onImportFile = async (e) => {
     const file = e.target.files?.[0];
-    e.target.value = "";
+    e.target.value = ""; // allow reselect same file
     if (!file) return;
 
     try {
@@ -44,118 +55,99 @@ export default function MoreView({ showAlert, showConfirm }) {
     showConfirm?.("ล้างข้อมูลทั้งหมด", "ยืนยันล้างข้อมูลทั้งหมด? (ย้อนกลับไม่ได้)", () => resetAll(), true);
   };
 
+  // ✅ Run now with a nice hint about "today"
   const onRunRecurring = () => {
+    const today = toISODate(new Date());
     const n = runRecurringNow?.() ?? 0;
-    showAlert?.(`สร้างรายการ Recurring เพิ่มแล้ว ${n} รายการ`);
+    showAlert?.(`สร้างรายการ Recurring เพิ่มแล้ว ${n} รายการ (ถึงวันที่ ${today})`);
   };
+
+  // Optional: quick sanity check message for recurring lastGenerated
+  const recurringHealth = useMemo(() => {
+    const list = state?.recurring || [];
+    if (!list.length) return "";
+
+    const todayISO = toISODate(new Date());
+    const today = parseDateSafe(todayISO).getTime();
+
+    // Count rules that look "in the past" and might generate something
+    let dueish = 0;
+    for (const r of list) {
+      if (r?.enabled === false) continue;
+
+      const last = r?.lastGenerated ? parseDateSafe(r.lastGenerated).getTime() : 0;
+      const start = r?.startDate ? parseDateSafe(r.startDate).getTime() : 0;
+
+      // if never generated and started in past, or lastGenerated in past, mark as potentially due
+      if ((!r?.lastGenerated && start && start <= today) || (r?.lastGenerated && last <= today)) dueish += 1;
+    }
+
+    if (!dueish) return "ยังไม่พบรายการที่น่าจะถึงรอบในวันนี้";
+    return `มี ${dueish} กฎที่อาจถึงรอบ (กด Run เพื่อสร้างทันที)`;
+  }, [state?.recurring]);
+
+  const Row = ({ icon, title, subtitle, onClick, danger, noBorder }) => (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center justify-between p-4 hover:bg-white/10 ${noBorder ? "" : "border-b glass-divider"}`}
+      type="button"
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className={`w-10 h-10 rounded-full flex items-center justify-center ${
+            danger ? "bg-red-500/10 text-red-600" : "glass-chip text-gray-700"
+          }`}
+        >
+          {icon}
+        </div>
+        <div className="text-left">
+          <div className={`font-extrabold ${danger ? "text-red-700" : "text-gray-900"}`}>{title}</div>
+          {subtitle ? <div className="text-xs text-gray-600 mt-0.5">{subtitle}</div> : null}
+        </div>
+      </div>
+      <ChevronRight size={20} className={danger ? "text-red-300" : "text-gray-500"} />
+    </button>
+  );
 
   return (
     <div className="pb-28 pt-6 px-4">
-      <h1 className="text-2xl font-extrabold text-gray-900 mb-6">ตั้งค่าอื่นๆ</h1>
+      <h1 className="text-2xl font-extrabold text-gray-900 mb-2">ตั้งค่าอื่นๆ</h1>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4">
-        <button
-          onClick={() => navigate("categories")}
-          className="w-full flex items-center justify-between p-4 hover:bg-gray-50 border-b border-gray-100"
-          type="button"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
-              <Settings size={20} />
-            </div>
-            <span className="text-gray-800 font-extrabold">จัดการหมวดหมู่</span>
-          </div>
-          <ChevronRight size={20} className="text-gray-400" />
-        </button>
+      {/* ✅ small recurring status chip */}
+      <div className="text-xs text-gray-700/70 mb-6">
+        Recurring: <span className="font-extrabold text-gray-900">{recurringStats.enabled}</span> เปิดใช้งาน จาก{" "}
+        <span className="font-extrabold text-gray-900">{recurringStats.total}</span> รายการ
+        {recurringHealth ? <div className="mt-1 text-[11px] text-gray-700/60">{recurringHealth}</div> : null}
+      </div>
 
-        <button
-          onClick={() => navigate("budgets")}
-          className="w-full flex items-center justify-between p-4 hover:bg-gray-50 border-b border-gray-100"
-          type="button"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center text-amber-700">
-              <Bell size={20} />
-            </div>
-            <span className="text-gray-800 font-extrabold">Budget Alert</span>
-          </div>
-          <ChevronRight size={20} className="text-gray-400" />
-        </button>
+      <div className="glass-card rounded-2xl overflow-hidden mb-4">
+        <Row icon={<Settings size={20} />} title="จัดการหมวดหมู่" onClick={() => navigate("categories")} />
+        <Row icon={<Bell size={20} />} title="Budget Alert" onClick={() => navigate("budgets")} />
 
-        <button
+        <Row
+          icon={<Repeat size={20} />}
+          title="Recurring Expense"
+          subtitle="ตั้งรายการรายจ่าย/รายรับอัตโนมัติ"
           onClick={() => navigate("recurring")}
-          className="w-full flex items-center justify-between p-4 hover:bg-gray-50 border-b border-gray-100"
-          type="button"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-700">
-              <Repeat size={20} />
-            </div>
-            <span className="text-gray-800 font-extrabold">Recurring Expense</span>
-          </div>
-          <ChevronRight size={20} className="text-gray-400" />
-        </button>
+        />
 
-        <button
+        <Row
+          icon={<PlayCircle size={20} />}
+          title="Run Recurring Now"
+          subtitle="สร้างรายการที่ถึงรอบทันที"
           onClick={onRunRecurring}
-          className="w-full flex items-center justify-between p-4 hover:bg-gray-50 border-b border-gray-100"
-          type="button"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-700">
-              <Repeat size={20} />
-            </div>
-            <span className="text-gray-800 font-extrabold">Run Recurring Now</span>
-          </div>
-          <ChevronRight size={20} className="text-gray-400" />
-        </button>
+        />
 
-        <button
-          onClick={onPickImport}
-          className="w-full flex items-center justify-between p-4 hover:bg-gray-50 border-b border-gray-100"
-          type="button"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
-              <Upload size={20} />
-            </div>
-            <span className="text-gray-800 font-extrabold">นำเข้าข้อมูล (Import Backup JSON)</span>
-          </div>
-          <ChevronRight size={20} className="text-gray-400" />
-        </button>
+        <Row icon={<Upload size={20} />} title="นำเข้าข้อมูล (Import Backup JSON)" onClick={onPickImport} />
 
         <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onImportFile} />
 
-        <button
-          onClick={onExport}
-          className="w-full flex items-center justify-between p-4 hover:bg-gray-50 border border-gray-100 border-x-0 border-b-0"
-          type="button"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
-              <Upload size={20} />
-            </div>
-            <span className="text-gray-800 font-extrabold">ส่งออกข้อมูล (Backup JSON)</span>
-          </div>
-          <ChevronRight size={20} className="text-gray-400" />
-        </button>
+        <Row icon={<Upload size={20} />} title="ส่งออกข้อมูล (Backup JSON)" onClick={onExport} />
 
-        <button
-          onClick={onReset}
-          className="w-full flex items-center justify-between p-4 hover:bg-red-50 group"
-          type="button"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500 group-hover:bg-red-100">
-              <Trash2 size={20} />
-            </div>
-            <span className="text-red-600 font-extrabold">ล้างข้อมูลทั้งหมด</span>
-          </div>
-          <ChevronRight size={20} className="text-gray-300 group-hover:text-red-300" />
-        </button>
+        <Row icon={<Trash2 size={20} />} title="ล้างข้อมูลทั้งหมด" danger onClick={onReset} noBorder />
       </div>
 
-      <div className="text-center text-gray-400 text-xs mt-8">Smart Expense Tracker</div>
+      <div className="text-center text-gray-500 text-xs mt-8">Smart Expense Tracker</div>
     </div>
   );
 }

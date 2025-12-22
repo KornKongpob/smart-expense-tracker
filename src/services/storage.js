@@ -1,4 +1,14 @@
 // src/services/storage.js
+/**
+ * Storage layer for Smart Expense Tracker
+ * - รองรับทั้ง format เก่า (เก็บ state ตรงๆ) และ format ใหม่ (versioned: { v, updatedAt, data })
+ * - ทำให้การอ่าน/เขียน “ทนทาน” ต่อข้อมูลเสีย / schema เปลี่ยน
+ * - ป้องกันแอพพังจาก localStorage quota / JSON parse error
+ *
+ * NOTE:
+ * - ไฟล์นี้ไม่ยุ่งกับ UX/UI โดยตรง แต่เป็นแกนสำคัญให้แอพ “ทำงานถูกต้องและสอดคล้องกัน”
+ */
+
 const STORAGE_KEY = "smart-expense-tracker_v1";
 const STORAGE_VERSION = 1;
 
@@ -23,11 +33,27 @@ function safeStringifyJSON(data) {
   }
 }
 
+function isPlainObject(v) {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function ensureArray(v, fallback = []) {
+  return Array.isArray(v) ? v : fallback;
+}
+
+function ensureCategoriesShape(v) {
+  // categories ต้องมี expense/income เป็น array
+  if (!isPlainObject(v)) return { expense: [], income: [] };
+  const expense = ensureArray(v.expense, []);
+  const income = ensureArray(v.income, []);
+  return { expense, income };
+}
+
 function normalizeBoot(data, defaults = {}) {
-  const obj = data && typeof data === "object" ? data : {};
+  const obj = isPlainObject(data) ? data : {};
 
   // allow both legacy shape (plain state) and versioned shape
-  const root = obj.data && typeof obj.data === "object" ? obj.data : obj;
+  const root = isPlainObject(obj.data) ? obj.data : obj;
 
   const transactions = Array.isArray(root.transactions)
     ? root.transactions
@@ -41,12 +67,11 @@ function normalizeBoot(data, defaults = {}) {
     ? defaults.defaultAccounts
     : [];
 
-  const categories =
-    root.categories && typeof root.categories === "object"
-      ? root.categories
-      : defaults.defaultCategories && typeof defaults.defaultCategories === "object"
-      ? defaults.defaultCategories
-      : { expense: [], income: [] };
+  const categories = isPlainObject(root.categories)
+    ? ensureCategoriesShape(root.categories)
+    : isPlainObject(defaults.defaultCategories)
+    ? ensureCategoriesShape(defaults.defaultCategories)
+    : { expense: [], income: [] };
 
   const budgets = Array.isArray(root.budgets)
     ? root.budgets
@@ -60,19 +85,18 @@ function normalizeBoot(data, defaults = {}) {
     ? defaults.defaultRecurring
     : [];
 
-  const ui =
-    root.ui && typeof root.ui === "object"
-      ? root.ui
-      : defaults.defaultUI && typeof defaults.defaultUI === "object"
-      ? defaults.defaultUI
-      : undefined;
+  const ui = isPlainObject(root.ui)
+    ? root.ui
+    : isPlainObject(defaults.defaultUI)
+    ? defaults.defaultUI
+    : undefined;
 
   return { transactions, accounts, categories, budgets, recurring, ui };
 }
 
 /**
  * ✅ Primary API used by src/store/store.jsx
- * loadAll({ defaultAccounts, defaultCategories, defaultBudgets, defaultRecurring })
+ * loadAll({ defaultAccounts, defaultCategories, defaultBudgets, defaultRecurring, defaultUI })
  */
 export function loadAll(defaults = {}) {
   if (!hasWindow()) {
@@ -97,18 +121,19 @@ export function loadAll(defaults = {}) {
 export function saveAll(payload) {
   if (!hasWindow()) return;
 
-  const data = payload && typeof payload === "object" ? payload : {};
+  const data = isPlainObject(payload) ? payload : {};
 
+  // บังคับ shape ขั้นต่ำ เพื่อลดโอกาส state เพี้ยน
   const record = {
     v: STORAGE_VERSION,
     updatedAt: Date.now(),
     data: {
-      transactions: Array.isArray(data.transactions) ? data.transactions : [],
-      accounts: Array.isArray(data.accounts) ? data.accounts : [],
-      categories: data.categories && typeof data.categories === "object" ? data.categories : { expense: [], income: [] },
-      budgets: Array.isArray(data.budgets) ? data.budgets : [],
-      recurring: Array.isArray(data.recurring) ? data.recurring : [],
-      ui: data.ui && typeof data.ui === "object" ? data.ui : undefined,
+      transactions: ensureArray(data.transactions, []),
+      accounts: ensureArray(data.accounts, []),
+      categories: ensureCategoriesShape(data.categories),
+      budgets: ensureArray(data.budgets, []),
+      recurring: ensureArray(data.recurring, []),
+      ui: isPlainObject(data.ui) ? data.ui : undefined,
     },
   };
 
@@ -119,6 +144,7 @@ export function saveAll(payload) {
     window.localStorage.setItem(STORAGE_KEY, json);
   } catch {
     // ignore quota / serialization errors
+    // (ป้องกันแอพ crash เมื่อ storage เต็ม หรือ iOS Safari โยน error)
   }
 }
 
@@ -138,6 +164,8 @@ export function clearAll() {
  * Legacy/simple APIs (kept for compatibility)
  * - loadState/saveState/clearState operate on the same key
  * - They store raw state directly (non-versioned)
+ *
+ * เหมาะกับการ “อ่านข้อมูลเก่า” แต่แนะนำให้ store.jsx ใช้ loadAll/saveAll เป็นหลัก
  */
 export function loadState() {
   if (!hasWindow()) return null;
@@ -152,6 +180,9 @@ export function loadState() {
 
 export function saveState(state) {
   if (!hasWindow()) return;
+
+  // NOTE: saveState เป็น legacy — จะเก็บแบบ plain state (ไม่ใส่ {v,data})
+  // เก็บไว้เพื่อ backward compatibility เท่านั้น
   const json = safeStringifyJSON(state ?? null);
   if (!json) return;
 
@@ -219,6 +250,7 @@ function escapeHtml(s) {
 
 // Optional helpers (safe to keep)
 export function exportBackup(state) {
+  // คืนค่า raw object (ใช้กับ UI export/import ได้)
   return state ?? {};
 }
 

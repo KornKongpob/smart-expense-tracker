@@ -1,259 +1,304 @@
 // src/store/reducer.js
+/**
+ * Reducer (pure) สำหรับจัดการ state transitions
+ * เป้าหมาย:
+ * 1) สอดคล้องกับ src/store/store.jsx และ ACTIONS ทั้งหมด
+ * 2) รองรับ payload หลายรูปแบบแบบปลอดภัย (กัน state พังจากข้อมูลเก่า/backup)
+ * 3) รองรับ BULK_UPSERT_TRANSACTIONS (scan queue / transfer) และ APPLY_RECURRING_GENERATION
+ *
+ * IMPORTANT: ไฟล์นี้ “ไม่ควร” ไปยุ่งกับ UI/Glassmorphism โดยตรง (เป็นเรื่องของ components/css)
+ */
+
 import { ACTIONS } from "./actions";
 
-// แปลงให้เป็น array แบบปลอดภัย (รองรับเคสเก็บเป็น object มาก่อน)
+// -------------------------
+// Helpers (pure / safe)
+// -------------------------
+const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+
 const toArray = (v) => {
   if (Array.isArray(v)) return v;
-  if (v && typeof v === "object") return Object.values(v);
+  if (isObj(v)) return Object.values(v);
   return [];
 };
 
 const ensureCategories = (cats) => {
-  const expense = toArray(cats?.expense);
-  const income = toArray(cats?.income);
-  return {
-    expense: Array.isArray(expense) ? expense : [],
-    income: Array.isArray(income) ? income : [],
-  };
+  const c = isObj(cats) ? cats : {};
+  const expense = toArray(c.expense).filter(Boolean);
+  const income = toArray(c.income).filter(Boolean);
+  return { expense, income };
 };
 
-// fallback id generator (reducer ไม่ควร import utils เพิ่ม)
-const rid = (prefix = "id") => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+const rid = (prefix = "id") => {
+  try {
+    // modern browsers
+    // eslint-disable-next-line no-undef
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return `${prefix}_${crypto.randomUUID()}`;
+  } catch {
+    // ignore
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+};
 
+function upsertById(list, item, { idKey = "id" } = {}) {
+  const arr = toArray(list);
+  const id = item?.[idKey];
+  if (!id) return arr;
+
+  const idx = arr.findIndex((x) => x?.[idKey] === id);
+  if (idx >= 0) {
+    const next = arr.slice();
+    next[idx] = item;
+    return next;
+  }
+  return [...arr, item];
+}
+
+function bulkUpsertById(list, items, { idKey = "id" } = {}) {
+  const base = toArray(list).slice();
+  const incoming = toArray(items);
+
+  const indexById = new Map();
+  base.forEach((x, i) => indexById.set(x?.[idKey], i));
+
+  for (const it of incoming) {
+    if (!it) continue;
+    const id = it?.[idKey] || rid(idKey);
+    const nextItem = { ...it, [idKey]: id };
+
+    const idx = indexById.get(id);
+    if (idx != null && idx >= 0) {
+      base[idx] = nextItem;
+    } else {
+      indexById.set(id, base.length);
+      base.push(nextItem);
+    }
+  }
+
+  return base;
+}
+
+// -------------------------
+// Initial State
+// -------------------------
 export function createInitialState(boot = {}) {
+  const b = isObj(boot) ? boot : {};
+
   return {
-    transactions: toArray(boot.transactions),
-    accounts: toArray(boot.accounts),
-    categories: ensureCategories(boot.categories || { expense: [], income: [] }),
+    transactions: toArray(b.transactions),
+    accounts: toArray(b.accounts),
+    categories: ensureCategories(b.categories || { expense: [], income: [] }),
 
-    budgets: toArray(boot.budgets),
-    recurring: toArray(boot.recurring),
+    budgets: toArray(b.budgets),
+    recurring: toArray(b.recurring),
 
-    // ✅ ui ต้องมีเสมอ
     ui: {
-      view: boot?.ui?.view || "dashboard",
-      editingId: boot?.ui?.editingId || null,
+      view: b?.ui?.view || "dashboard",
+      editingId: b?.ui?.editingId || null,
     },
   };
 }
 
+// -------------------------
+// Reducer
+// -------------------------
 export function reducer(state, action) {
-  switch (action.type) {
+  const s = isObj(state) ? state : createInitialState({});
+  const a = isObj(action) ? action : { type: "__UNKNOWN__" };
+
+  switch (a.type) {
+    // boot / navigation
     case ACTIONS.INIT: {
-      return createInitialState(action.payload ?? {});
+      return createInitialState(a.payload ?? {});
     }
 
     case ACTIONS.NAVIGATE: {
-      return { ...state, ui: { ...state.ui, view: action.payload } };
+      return { ...s, ui: { ...s.ui, view: a.payload } };
     }
 
+    // transactions
     case ACTIONS.START_NEW_TRANSACTION: {
-      return { ...state, ui: { ...state.ui, editingId: null, view: "add" } };
+      return { ...s, ui: { ...s.ui, editingId: null, view: "add" } };
     }
 
     case ACTIONS.START_EDIT_TRANSACTION: {
-      return { ...state, ui: { ...state.ui, editingId: action.payload, view: "add" } };
+      return { ...s, ui: { ...s.ui, editingId: a.payload, view: "add" } };
     }
 
     case ACTIONS.UPSERT_TRANSACTION: {
-      const tx = action.payload;
-      const exists = state.transactions.some((t) => t?.id === tx?.id);
+      const tx0 = a.payload || {};
+      const id = tx0?.id || rid("tx");
 
-      const transactions = exists
-        ? state.transactions.map((t) => (t.id === tx.id ? tx : t))
-        : [...state.transactions, tx];
+      const tx = { ...tx0, id };
+      const transactions = upsertById(s.transactions, tx);
 
       return {
-        ...state,
+        ...s,
         transactions,
-        ui: { ...state.ui, editingId: null, view: "dashboard" },
+        ui: { ...s.ui, editingId: null, view: "dashboard" },
       };
     }
 
-    // ✅ สำคัญ: รองรับ Scan Queue และ Transfer edit (สร้าง/แก้หลายรายการในครั้งเดียว)
+    /**
+     * ✅ สำคัญ: รองรับ Scan Queue / Transfer edit
+     * store.jsx ส่ง meta: { navigateToDashboard }
+     */
     case ACTIONS.BULK_UPSERT_TRANSACTIONS: {
-      const incoming = toArray(action.payload);
+      const incoming = a.payload;
+      const transactions = bulkUpsertById(s.transactions, incoming);
 
-      const transactions = [...(state.transactions || [])];
-      const indexById = new Map();
-      transactions.forEach((t, idx) => indexById.set(t?.id, idx));
-
-      for (const tx of incoming) {
-        if (!tx) continue;
-        const id = tx.id || rid("tx");
-        const nextTx = { ...tx, id };
-
-        const idx = indexById.get(id);
-        if (idx != null) {
-          transactions[idx] = nextTx;
-        } else {
-          indexById.set(id, transactions.length);
-          transactions.push(nextTx);
-        }
-      }
+      const navigateToDashboard = a?.meta?.navigateToDashboard !== false;
 
       return {
-        ...state,
+        ...s,
         transactions,
-        ui: { ...state.ui, editingId: null, view: "dashboard" },
+        ui: navigateToDashboard ? { ...s.ui, editingId: null, view: "dashboard" } : s.ui,
       };
     }
 
     case ACTIONS.DELETE_TRANSACTION: {
-      const id = action.payload;
-      const transactions = (state.transactions || []).filter((t) => t?.id !== id);
-      const editingId = state.ui.editingId === id ? null : state.ui.editingId;
+      const id = a.payload;
+      const transactions = toArray(s.transactions).filter((t) => t?.id !== id);
+
+      const editingId = s?.ui?.editingId === id ? null : s?.ui?.editingId;
 
       return {
-        ...state,
+        ...s,
         transactions,
-        ui: { ...state.ui, editingId, view: "dashboard" },
+        ui: { ...s.ui, editingId, view: "dashboard" },
       };
     }
 
+    // accounts
     case ACTIONS.ADD_ACCOUNT: {
-      return { ...state, accounts: [...(state.accounts || []), action.payload] };
+      const acc0 = a.payload || {};
+      const id = acc0?.id || rid("acc");
+      const account = { ...acc0, id };
+
+      return { ...s, accounts: [...toArray(s.accounts), account] };
     }
 
     case ACTIONS.UPDATE_ACCOUNT: {
-      const updated = action.payload;
-      return {
-        ...state,
-        accounts: (state.accounts || []).map((a) => (a?.id === updated?.id ? { ...a, ...updated } : a)),
-      };
+      const updated = a.payload || {};
+      if (!updated?.id) return s;
+
+      const accounts = toArray(s.accounts).map((x) => (x?.id === updated.id ? { ...x, ...updated } : x));
+      return { ...s, accounts };
     }
 
     case ACTIONS.DELETE_ACCOUNT: {
-      const id = action.payload;
-      const accounts = (state.accounts || []).filter((a) => a?.id !== id);
-      const transactions = (state.transactions || []).filter((t) => t?.accountId !== id);
-      return { ...state, accounts, transactions };
+      const id = a.payload;
+
+      const accounts = toArray(s.accounts).filter((x) => x?.id !== id);
+
+      // ลบ transactions ที่ผูกกับบัญชีนี้ (ตามที่ store.jsx ทำ)
+      const transactions = toArray(s.transactions).filter((t) => t?.accountId !== id);
+
+      return { ...s, accounts, transactions };
     }
 
+    // categories
     case ACTIONS.ADD_CATEGORY: {
-      const { type, category } = action.payload || {};
-      if (!type || !category) return state;
+      const type = a?.payload?.type;
+      const category0 = a?.payload?.category;
 
+      if (!type || !category0) return s;
+
+      const category = { ...category0, id: category0?.id || rid("cat") };
+
+      const nextCats = ensureCategories(s.categories);
       return {
-        ...state,
+        ...s,
         categories: {
-          ...state.categories,
-          [type]: [...(state.categories?.[type] || []), category],
+          ...nextCats,
+          [type]: [...toArray(nextCats[type]), category],
         },
       };
     }
 
     case ACTIONS.DELETE_CATEGORY: {
-      const { type, id } = action.payload || {};
-      if (!type || !id) return state;
+      const type = a?.payload?.type;
+      const id = a?.payload?.id;
 
+      if (!type || !id) return s;
+
+      const nextCats = ensureCategories(s.categories);
       return {
-        ...state,
+        ...s,
         categories: {
-          ...state.categories,
-          [type]: (state.categories?.[type] || []).filter((c) => c?.id !== id),
+          ...nextCats,
+          [type]: toArray(nextCats[type]).filter((c) => c?.id !== id),
         },
       };
     }
 
-    // =======================
-    // ✅ Budgets
-    // =======================
+    // budgets
     case ACTIONS.UPSERT_BUDGET: {
-      const b = action.payload || {};
-      if (!b.month || !b.categoryId) return state;
+      const b0 = a.payload || {};
+      const id = b0?.id || rid("bud");
 
-      const budgets = [...(state.budgets || [])];
+      // match by month+categoryId if exists (กัน id ไม่ส่ง)
+      const budgets = toArray(s.budgets).slice();
+      const idx =
+        budgets.findIndex((x) => x?.id === id) >= 0
+          ? budgets.findIndex((x) => x?.id === id)
+          : budgets.findIndex((x) => x?.month === b0?.month && x?.categoryId === b0?.categoryId);
 
-      // match by id first, else by month+categoryId (กันกรณี id ไม่ส่งมา)
-      let idx = b.id ? budgets.findIndex((x) => x?.id === b.id) : -1;
-      if (idx < 0) idx = budgets.findIndex((x) => x?.month === b.month && x?.categoryId === b.categoryId);
-
-      const next = { ...b, id: b.id || budgets[idx]?.id || rid("bud") };
+      const next = { ...b0, id: budgets[idx]?.id || id };
 
       if (idx >= 0) budgets[idx] = { ...budgets[idx], ...next };
       else budgets.push(next);
 
-      return { ...state, budgets };
+      return { ...s, budgets };
     }
 
     case ACTIONS.DELETE_BUDGET: {
-      const id = action.payload;
-      const budgets = (state.budgets || []).filter((b) => b?.id !== id);
-      return { ...state, budgets };
+      const id = a.payload;
+      const budgets = toArray(s.budgets).filter((b) => b?.id !== id);
+      return { ...s, budgets };
     }
 
-    // =======================
-    // ✅ Recurring
-    // =======================
+    // recurring
     case ACTIONS.UPSERT_RECURRING: {
-      const r = action.payload || {};
-      const recurring = [...(state.recurring || [])];
+      const r0 = a.payload || {};
+      const id = r0?.id || rid("rec");
 
-      // match by id (ถ้าไม่มี id ให้สร้าง)
-      const id = r.id || rid("rec");
-      const idx = recurring.findIndex((x) => x?.id === id);
-
-      const next = { ...r, id };
-
-      if (idx >= 0) recurring[idx] = { ...recurring[idx], ...next };
-      else recurring.push(next);
-
-      return { ...state, recurring };
+      const recurring = upsertById(toArray(s.recurring), { ...r0, id });
+      return { ...s, recurring };
     }
 
     case ACTIONS.DELETE_RECURRING: {
-      const id = action.payload;
-      const recurring = (state.recurring || []).filter((r) => r?.id !== id);
-      return { ...state, recurring };
+      const id = a.payload;
+      const recurring = toArray(s.recurring).filter((r) => r?.id !== id);
+      return { ...s, recurring };
     }
 
-    // เผื่ออนาคต: สร้าง tx จาก recurring แบบ action เดียว
+    /**
+     * ✅ ให้สอดคล้องกับ store.jsx:
+     * dispatch({ type: APPLY_RECURRING_GENERATION, payload: { transactions: created, recurring: nextRecurring } })
+     */
     case ACTIONS.APPLY_RECURRING_GENERATION: {
-      const payload = action.payload || {};
-      const newTransactions = toArray(payload.newTransactions);
-      const updatedRecurring = toArray(payload.updatedRecurring);
+      const txs = a?.payload?.transactions;
+      const nextRecurring = a?.payload?.recurring;
 
-      const transactions = [...(state.transactions || [])];
-      const indexById = new Map();
-      transactions.forEach((t, idx) => indexById.set(t?.id, idx));
-
-      for (const tx of newTransactions) {
-        if (!tx) continue;
-        const id = tx.id || rid("tx");
-        const nextTx = { ...tx, id };
-        const idx = indexById.get(id);
-        if (idx != null) transactions[idx] = nextTx;
-        else {
-          indexById.set(id, transactions.length);
-          transactions.push(nextTx);
-        }
-      }
-
-      const recurring = [...(state.recurring || [])];
-      for (const r of updatedRecurring) {
-        if (!r) continue;
-        const id = r.id || rid("rec");
-        const idx = recurring.findIndex((x) => x?.id === id);
-        const next = { ...r, id };
-        if (idx >= 0) recurring[idx] = { ...recurring[idx], ...next };
-        else recurring.push(next);
-      }
+      const transactions = bulkUpsertById(s.transactions, txs);
+      const recurring = bulkUpsertById(s.recurring, nextRecurring);
 
       return {
-        ...state,
+        ...s,
         transactions,
         recurring,
-        ui: { ...state.ui, view: "dashboard", editingId: null },
+        ui: { ...s.ui, view: "dashboard", editingId: null },
       };
     }
 
+    // reset/import
     case ACTIONS.RESET_ALL:
     case ACTIONS.IMPORT_BACKUP: {
-      return createInitialState(action.payload ?? {});
+      return createInitialState(a.payload ?? {});
     }
 
     default:
-      return state;
+      return s;
   }
 }

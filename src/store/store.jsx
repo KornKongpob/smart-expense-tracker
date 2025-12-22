@@ -5,17 +5,36 @@ import { ACTIONS } from "./actions";
 
 import { loadAll, saveAll, clearAll } from "../services/storage";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
+import { ACCOUNT_ICONS } from "../constants/presets.jsx"; // ✅ for iconId validation + future UI usage
 import { generateId } from "../utils/id";
-import { calcAccountBalance, parseDateSafe } from "./selectors"; // ✅ parseDateSafe อยู่ที่นี่
-import { toISODate } from "../utils/format"; // ✅ ที่นี่มี toISODate จริง
+import { calcAccountBalance, parseDateSafe } from "./selectors";
+import { toISODate } from "../utils/format";
 
+/**
+ * ✅ Default account
+ * - icon: legacy emoji (still supported)
+ * - iconId: new stable id for beautiful icon presets (preferred)
+ */
 const DEFAULT_ACCOUNTS = [
-  { id: "acc_cash", name: "เงินสด", type: "cash", color: "#1DD1A1", icon: "💵", openingBalance: 0 },
+  {
+    id: "acc_cash",
+    name: "เงินสด",
+    type: "cash",
+    color: "#1DD1A1",
+    icon: "💵",
+    iconId: "cash",
+    openingBalance: 0,
+    accountNumber: "",
+    creditLimit: 0,
+    statementDay: 1,
+    dueDay: 25,
+    cardLast4: "",
+  },
 ];
 
 const AppStoreContext = createContext(null);
 
-// ---------- helpers ----------
+// ---------- small helpers ----------
 const toArray = (v) => {
   if (Array.isArray(v)) return v;
   if (v && typeof v === "object") return Object.values(v);
@@ -41,24 +60,71 @@ const slugifyId = (s) =>
     .replace(/[^\w\-ก-๙]/g, "")
     .slice(0, 40);
 
+const safeNum = (v, fallback = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const clampInt = (v, min, max, fallback) => {
+  const n = Math.trunc(safeNum(v, fallback));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+};
+
+const hasValidIconId = (iconId) => {
+  const id = String(iconId || "").trim();
+  if (!id) return false;
+  return (ACCOUNT_ICONS || []).some((x) => String(x?.id || "") === id);
+};
+
+/**
+ * ✅ Normalize account shape with backward compatibility
+ * - icon: emoji string (legacy)  ✅ still supported
+ * - iconId: preset id (new)      ✅ preferred for "beautiful icon set"
+ *
+ * Why normalize here:
+ * - Prevent crashes when older backups miss fields
+ * - Keep types consistent (string/number)
+ * - Make UI and scanners stable (accountNumber digits-only)
+ */
+function normalizeAccount(a) {
+  const id = a?.id || generateId();
+  const name = String(a?.name || "").trim() || "บัญชีใหม่";
+  const type = String(a?.type || "cash").trim() || "cash";
+  const color = String(a?.color || "#1DD1A1");
+
+  // legacy emoji fallback (string only)
+  const icon = String(a?.icon || "💳");
+
+  // new icon id for preset icons (string only) + validate
+  // if invalid -> keep but also allow UI to fallback to emoji
+  const iconId = hasValidIconId(a?.iconId) ? String(a.iconId) : "";
+
+  const openingBalance = safeNum(a?.openingBalance, 0);
+
+  return {
+    ...a,
+    id,
+    name,
+    type,
+    color,
+    icon,
+    iconId,
+    openingBalance,
+
+    accountNumber: a?.accountNumber ? digitsOnly(a.accountNumber) : "",
+    creditLimit: safeNum(a?.creditLimit, 0),
+    statementDay: clampInt(a?.statementDay, 1, 31, 1),
+    dueDay: clampInt(a?.dueDay, 1, 31, 25),
+    cardLast4: a?.cardLast4 ? digitsOnly(a.cardLast4) : "",
+  };
+}
+
 function normalizeBoot(boot) {
   const transactions = toArray(boot?.transactions);
 
   const accountsRaw = toArray(boot?.accounts);
-  const accounts = (accountsRaw.length ? accountsRaw : DEFAULT_ACCOUNTS).map((a) => ({
-    ...a,
-    id: a?.id || generateId(),
-    name: String(a?.name || "").trim() || "บัญชีใหม่",
-    type: a?.type || "cash",
-    color: a?.color || "#1DD1A1",
-    icon: (a?.icon || "💳").toString(),
-    openingBalance: Number(a?.openingBalance || 0),
-    accountNumber: a?.accountNumber ? digitsOnly(a.accountNumber) : "",
-    creditLimit: Number(a?.creditLimit || 0) || 0,
-    statementDay: Number(a?.statementDay || 1) || 1,
-    dueDay: Number(a?.dueDay || 25) || 25,
-    cardLast4: a?.cardLast4 ? digitsOnly(a.cardLast4) : "",
-  }));
+  const accounts = (accountsRaw.length ? accountsRaw : DEFAULT_ACCOUNTS).map(normalizeAccount);
 
   const cats = boot?.categories && typeof boot.categories === "object" ? boot.categories : DEFAULT_CATEGORIES;
   const categories = ensureCategories(cats);
@@ -66,13 +132,15 @@ function normalizeBoot(boot) {
   const budgets = toArray(boot?.budgets);
   const recurring = toArray(boot?.recurring);
 
+  const ui = boot?.ui && typeof boot.ui === "object" ? boot.ui : undefined;
+
   return {
     transactions,
     accounts,
     categories,
     budgets,
     recurring,
-    ui: boot?.ui,
+    ui,
   };
 }
 
@@ -81,9 +149,12 @@ export function createInitialState(boot = {}) {
   const acc = toArray(boot?.accounts);
   const cats = ensureCategories(boot?.categories);
 
+  // ✅ Always enforce normalized accounts (even if provided)
+  const normalizedAccounts = acc.length ? acc.map(normalizeAccount) : DEFAULT_ACCOUNTS.map(normalizeAccount);
+
   return {
     transactions: tx,
-    accounts: acc.length ? acc : DEFAULT_ACCOUNTS,
+    accounts: normalizedAccounts,
     categories: cats,
     budgets: toArray(boot?.budgets),
     recurring: toArray(boot?.recurring),
@@ -125,7 +196,7 @@ function addMonthsLocal(dateObj, n) {
 }
 
 function advanceRecurringDate(dateObj, frequency, interval) {
-  const itv = Number(interval || 1) || 1;
+  const itv = clampInt(interval, 1, 120, 1);
   if (frequency === "weekly") return addDaysLocal(dateObj, 7 * itv);
   return addMonthsLocal(dateObj, itv); // monthly default
 }
@@ -151,10 +222,11 @@ function generateDueTransactionsForRecurring(r, todayISO) {
     if (safety > 500) break;
 
     const iso = toISODate(nextDue);
+
     txs.push({
       id: generateId(),
       type: r.type === "income" ? "income" : "expense",
-      amount: Number(r.amount || 0) || 0,
+      amount: safeNum(r.amount, 0),
       category: r.categoryId,
       accountId: r.accountId,
       date: iso,
@@ -231,14 +303,15 @@ export function reducer(state, action) {
     }
 
     case ACTIONS.ADD_ACCOUNT: {
-      return { ...state, accounts: [...state.accounts, action.payload] };
+      return { ...state, accounts: [...state.accounts, normalizeAccount(action.payload)] };
     }
 
     case ACTIONS.UPDATE_ACCOUNT: {
       const updated = action.payload;
+      if (!updated?.id) return state;
       return {
         ...state,
-        accounts: state.accounts.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)),
+        accounts: state.accounts.map((a) => (a.id === updated.id ? normalizeAccount({ ...a, ...updated }) : a)),
       };
     }
 
@@ -285,8 +358,8 @@ export function reducer(state, action) {
         id: finalId,
         month: String(b.month || ""),
         categoryId: String(b.categoryId || ""),
-        limit: Number(b.limit || 0) || 0,
-        alertPct: Number(b.alertPct || 90) || 90,
+        limit: safeNum(b.limit, 0),
+        alertPct: clampInt(b.alertPct, 1, 100, 90),
       };
 
       const budgets = upsertById(state.budgets || [], nextBudget);
@@ -308,13 +381,13 @@ export function reducer(state, action) {
         id,
         enabled: r.enabled !== false,
         type: r.type === "income" ? "income" : "expense",
-        amount: Number(r.amount || 0) || 0,
+        amount: safeNum(r.amount, 0),
         categoryId: String(r.categoryId || ""),
         accountId: String(r.accountId || ""),
         note: String(r.note || "Recurring").trim() || "Recurring",
         startDate: String(r.startDate || toISODate(new Date())).slice(0, 10),
         frequency: r.frequency === "weekly" ? "weekly" : "monthly",
-        interval: Number(r.interval || 1) || 1,
+        interval: clampInt(r.interval, 1, 120, 1),
         lastGenerated: r.lastGenerated ? String(r.lastGenerated).slice(0, 10) : null,
       };
 
@@ -354,12 +427,13 @@ export function AppStoreProvider({ children }) {
       defaultCategories: DEFAULT_CATEGORIES,
       defaultBudgets: [],
       defaultRecurring: [],
+      defaultUI: { view: "dashboard", editingId: null },
     });
 
     return createInitialState(normalizeBoot(boot));
   });
 
-  // persist
+  // ✅ persist (include ui to keep view/editingId stable)
   useEffect(() => {
     saveAll({
       transactions: state.transactions,
@@ -367,8 +441,9 @@ export function AppStoreProvider({ children }) {
       categories: state.categories,
       budgets: state.budgets,
       recurring: state.recurring,
+      ui: state.ui,
     });
-  }, [state.transactions, state.accounts, state.categories, state.budgets, state.recurring]);
+  }, [state.transactions, state.accounts, state.categories, state.budgets, state.recurring, state.ui]);
 
   const getEditingTransaction = useMemo(() => {
     return () => {
@@ -389,13 +464,13 @@ export function AppStoreProvider({ children }) {
 
     const upsertTransaction = (tx) => {
       const id = tx?.id || generateId();
-      const amount = Number(tx?.amount || 0);
+      const amount = safeNum(tx?.amount, 0);
       const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
 
       const cleaned = {
         ...tx,
         id,
-        amount: Number.isFinite(amount) ? amount : 0,
+        amount,
         date,
         note: String(tx?.note || ""),
         isTransfer: !!tx?.isTransfer,
@@ -410,12 +485,12 @@ export function AppStoreProvider({ children }) {
         type: ACTIONS.BULK_UPSERT_TRANSACTIONS,
         payload: list.map((tx) => {
           const id = tx?.id || generateId();
-          const amount = Number(tx?.amount || 0);
+          const amount = safeNum(tx?.amount, 0);
           const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
           return {
             ...tx,
             id,
-            amount: Number.isFinite(amount) ? amount : 0,
+            amount,
             date,
             note: String(tx?.note || ""),
             isTransfer: !!tx?.isTransfer,
@@ -428,20 +503,10 @@ export function AppStoreProvider({ children }) {
     const deleteTransaction = (id) => dispatch({ type: ACTIONS.DELETE_TRANSACTION, payload: id });
 
     const addAccount = (account) => {
-      const next = {
+      const next = normalizeAccount({
         ...account,
         id: account?.id || generateId(),
-        name: String(account?.name || "").trim() || "บัญชีใหม่",
-        type: account?.type || "cash",
-        color: account?.color || "#1DD1A1",
-        icon: (account?.icon || "💳").toString(),
-        openingBalance: Number(account?.openingBalance || 0),
-        accountNumber: digitsOnly(account?.accountNumber),
-        creditLimit: Number(account?.creditLimit || 0) || 0,
-        statementDay: Number(account?.statementDay || 1) || 1,
-        dueDay: Number(account?.dueDay || 25) || 25,
-        cardLast4: digitsOnly(account?.cardLast4),
-      };
+      });
       dispatch({ type: ACTIONS.ADD_ACCOUNT, payload: next });
     };
 
@@ -452,8 +517,13 @@ export function AppStoreProvider({ children }) {
 
     const deleteAccount = (id) => dispatch({ type: ACTIONS.DELETE_ACCOUNT, payload: id });
 
+    /**
+     * ✅ Adjust account balance
+     * - recordAsTransaction = true: create an income/expense tx (shows in stats)
+     * - recordAsTransaction = false: modify openingBalance to match desired (silent fix)
+     */
     const adjustAccountBalance = ({ accountId, desiredBalance, recordAsTransaction }) => {
-      const desired = Number(desiredBalance);
+      const desired = safeNum(desiredBalance, NaN);
       if (!Number.isFinite(desired)) return;
 
       const current = calcAccountBalance(state.accounts, state.transactions, accountId);
@@ -482,7 +552,7 @@ export function AppStoreProvider({ children }) {
 
         dispatch({ type: ACTIONS.NAVIGATE, payload: "accounts" });
       } else {
-        const opening = Number(acc.openingBalance || 0);
+        const opening = safeNum(acc.openingBalance, 0);
         updateAccount({ id: accountId, openingBalance: opening + delta });
       }
     };
@@ -496,8 +566,8 @@ export function AppStoreProvider({ children }) {
         ...category,
         id: category?.id || slugifyId(name) || generateId(),
         name,
-        icon: (category?.icon || "🏷️").toString(),
-        color: category?.color || "#C8D6E5",
+        icon: String(category?.icon || "🏷️"),
+        color: String(category?.color || "#C8D6E5"),
       };
 
       dispatch({ type: ACTIONS.ADD_CATEGORY, payload: { type, category: next } });
@@ -558,6 +628,7 @@ export function AppStoreProvider({ children }) {
       categories: state.categories ?? { expense: [], income: [] },
       budgets: state.budgets ?? [],
       recurring: state.recurring ?? [],
+      ui: state.ui ?? { view: "dashboard", editingId: null },
     });
 
     const actions = {

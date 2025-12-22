@@ -1,10 +1,27 @@
 // src/views/AccountsView.jsx
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Sparkles } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { ACCOUNT_COLORS } from "../constants/presets.jsx";
 import { calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
+
+/**
+ * ✅ Icon groups
+ * - ปรับ title ให้ไม่ตัดคำ/ไม่ขึ้นบรรทัดแปลก (เลี่ยง "/" )
+ * - คงเป็น emoji string เพื่อ serialize ได้
+ */
+const ACCOUNT_ICON_GROUPS = [
+  { id: "cash", title: "เงินสด", emojis: ["💵", "💴", "💶", "💷", "🪙", "💰", "💸", "🧧", "👛"] },
+  { id: "bank", title: "ธนาคาร•บัญชี", emojis: ["🏦", "💳", "🏧", "📒", "📘", "🧾", "📄", "🗂️", "🔐", "🔑"] },
+  { id: "credit", title: "บัตรเครดิต", emojis: ["💳", "🪪", "📇", "🧾", "💎", "⭐", "🧠", "🛡️"] },
+  { id: "savings", title: "ออมเงิน", emojis: ["🐷", "🐽", "🏺", "📦", "🔒", "🧱", "🧮", "🎯"] },
+  { id: "digital", title: "ดิจิทัล•วอลเล็ต", emojis: ["📱", "📲", "💻", "⌚", "🧾", "🔔", "📩", "🌐"] },
+  { id: "invest", title: "ลงทุน", emojis: ["📈", "📉", "🏛️", "🪙", "🧾", "💹", "💼", "🧠"] },
+  { id: "gold", title: "ของมีค่า", emojis: ["🥇", "🏅", "💎", "🪙", "⭐", "✨"] },
+  { id: "business", title: "ธุรกิจ", emojis: ["💼", "🏢", "🏪", "🏭", "📦", "🚚", "🧾", "🧑‍💻"] },
+  { id: "misc", title: "อื่นๆ", emojis: ["🏷️", "🧩", "📌", "🗃️", "📬", "🧾", "🧿", "🔧"] },
+];
 
 function ColorDots({ value, onChange }) {
   return (
@@ -14,11 +31,12 @@ function ColorDots({ value, onChange }) {
           key={c}
           type="button"
           onClick={() => onChange(c)}
-          className={`w-8 h-8 rounded-full border-2 transition-transform ${
-            value === c ? "border-gray-400 scale-110" : "border-transparent"
+          className={`w-8 h-8 rounded-full border transition-transform active:scale-95 ${
+            value === c ? "border-gray-800/30 ring-2 ring-white/40" : "border-white/10"
           }`}
           style={{ backgroundColor: c }}
           aria-label={`color ${c}`}
+          title={c}
         />
       ))}
     </div>
@@ -32,14 +50,14 @@ function TypePills({ value, onChange }) {
     { id: "credit", label: "บัตรเครดิต", icon: <CreditCard size={16} /> },
   ];
   return (
-    <div className="bg-gray-50 border border-gray-100 rounded-2xl p-1 flex">
+    <div className="glass-panel border border-white/20 rounded-2xl p-1 flex">
       {items.map((it) => (
         <button
           key={it.id}
           type="button"
           onClick={() => onChange(it.id)}
-          className={`flex-1 py-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 ${
-            value === it.id ? "bg-gray-900 text-white" : "text-gray-500 hover:bg-white"
+          className={`flex-1 py-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all ${
+            value === it.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-700 hover:bg-white/10"
           }`}
         >
           {it.icon} {it.label}
@@ -52,19 +70,111 @@ function TypePills({ value, onChange }) {
 function ModalShell({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 shadow-xl max-h-[90dvh] overflow-y-auto">
+      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center"
+            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
             aria-label="close"
           >
             <X size={18} />
           </button>
         </div>
         {children}
+        <div className="h-3 pb-safe" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ✅ IconPicker (fix: หมวดไม่ตัดคำ + grid สมมาตร/ไม่แปลก)
+ * - หมวด: ใช้ pill แบบเท่ากันทุกอัน (grid) ไม่ตัดคำ, ไม่ wrap
+ * - emoji: ใช้ปุ่มแบบ aspect-square + w-full/h-full + leading-none + overflow-hidden
+ * - ใช้ place-items-stretch + padding เท่ากัน ทำให้ดูเรียบร้อยขึ้น
+ */
+function IconPicker({ value, onChange }) {
+  const [groupId, setGroupId] = useState("bank");
+
+  const group = useMemo(() => {
+    return ACCOUNT_ICON_GROUPS.find((g) => g.id === groupId) || ACCOUNT_ICON_GROUPS[0];
+  }, [groupId]);
+
+  const selected = (value || "💳").trim() || "💳";
+
+  return (
+    <div className="glass-panel border border-white/20 rounded-2xl p-4">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
+            <Sparkles size={14} className="text-indigo-700" />
+            เลือกไอคอน
+          </div>
+          <div className="text-[11px] text-gray-800/55 mt-1">แตะเพื่อเลือก • จัดให้อยู่กึ่งกลาง</div>
+        </div>
+
+        <div className="shrink-0">
+          <div className="text-[11px] text-gray-800/55 text-right">ที่เลือก</div>
+          <div className="mt-1 w-12 h-12 rounded-2xl bg-white/20 border border-white/20 flex items-center justify-center">
+            <span className="text-[26px] leading-none overflow-hidden select-none">{selected}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Group pills (no broken words) */}
+      <div className="mb-3">
+        <div className="grid grid-cols-3 gap-2">
+          {ACCOUNT_ICON_GROUPS.map((g) => {
+            const active = groupId === g.id;
+            return (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => setGroupId(g.id)}
+                className={`h-9 rounded-full border transition-all active:scale-95 px-2 flex items-center justify-center ${
+                  active
+                    ? "bg-gray-900/90 text-white border-white/20"
+                    : "bg-white/18 text-gray-800/70 border-white/20 hover:bg-white/22"
+                }`}
+                title={g.title}
+              >
+                <span className="text-[11px] font-extrabold whitespace-nowrap leading-none truncate max-w-full">
+                  {g.title}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Emoji grid (symmetry + nicer) */}
+      <div className="max-h-56 overflow-y-auto no-scrollbar">
+        <div className="grid grid-cols-6 sm:grid-cols-8 gap-2.5 place-items-stretch">
+          {group.emojis.map((e, idx) => {
+            const isActive = selected === e;
+            return (
+              <button
+                key={`${group.id}_${idx}`}
+                type="button"
+                onClick={() => onChange?.(e)}
+                className={`aspect-square rounded-2xl border transition-all active:scale-95 flex items-center justify-center overflow-hidden ${
+                  isActive ? "bg-white/25 border-gray-900/40" : "bg-white/10 border-white/15 hover:bg-white/15"
+                }`}
+                aria-label={`icon ${e}`}
+                title={e}
+              >
+                <span className="text-[26px] leading-none select-none">{e}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-3 text-[11px] text-gray-800/55">
+        * ยังสามารถพิมพ์ Emoji เองได้ในช่อง “ไอคอน (พิมพ์เองได้)” ด้านล่าง
       </div>
     </div>
   );
@@ -129,8 +239,13 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
   const create = () => {
     if (!cName.trim()) return showAlert?.("ใส่ชื่อบัญชี");
+
     const openingBalance = Number(cBalance || 0);
     if (!Number.isFinite(openingBalance)) return showAlert?.("ยอดเงินไม่ถูกต้อง");
+
+    const creditLimit = Number(cCreditLimit || 0) || 0;
+    const statementDay = Math.min(31, Math.max(1, Number(cStatementDay || 1) || 1));
+    const dueDay = Math.min(31, Math.max(1, Number(cDueDay || 25) || 25));
 
     addAccount({
       name: cName.trim(),
@@ -139,9 +254,9 @@ export default function AccountsView({ showAlert, showConfirm }) {
       type: cType,
       openingBalance,
       accountNumber: digitsOnly(cAccountNumber),
-      creditLimit: Number(cCreditLimit || 0) || 0,
-      statementDay: Number(cStatementDay || 1) || 1,
-      dueDay: Number(cDueDay || 25) || 25,
+      creditLimit,
+      statementDay,
+      dueDay,
     });
 
     setCName("");
@@ -160,6 +275,10 @@ export default function AccountsView({ showAlert, showConfirm }) {
     if (!editing) return;
     if (!eName.trim()) return showAlert?.("ใส่ชื่อบัญชี");
 
+    const creditLimit = Number(eCreditLimit || 0) || 0;
+    const statementDay = Math.min(31, Math.max(1, Number(eStatementDay || 1) || 1));
+    const dueDay = Math.min(31, Math.max(1, Number(eDueDay || 25) || 25));
+
     updateAccount({
       id: editing.id,
       name: eName.trim(),
@@ -167,9 +286,9 @@ export default function AccountsView({ showAlert, showConfirm }) {
       color: eColor,
       type: eType,
       accountNumber: digitsOnly(eAccountNumber),
-      creditLimit: Number(eCreditLimit || 0) || 0,
-      statementDay: Number(eStatementDay || 1) || 1,
-      dueDay: Number(eDueDay || 25) || 25,
+      creditLimit,
+      statementDay,
+      dueDay,
     });
 
     const desired = Number(eBalance);
@@ -195,16 +314,16 @@ export default function AccountsView({ showAlert, showConfirm }) {
   };
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh bg-gray-50">
-      <header className="mb-6 flex justify-between items-center">
-        <div>
+    <div className="pb-28 pt-6 px-4 min-h-dvh">
+      <header className="mb-6 flex justify-between items-center gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-extrabold text-gray-900">บัญชีของฉัน</h1>
-          <p className="text-gray-500 text-sm">รองรับเลขบัญชี/เลขท้ายบัตร เพื่อ Auto-detect จากสลิป</p>
+          <p className="text-gray-700/70 text-sm">รองรับเลขบัญชี/เลขท้ายบัตร เพื่อ Auto-detect จากสลิป</p>
         </div>
 
         <button
           onClick={() => setOpenCreate(true)}
-          className="w-11 h-11 bg-gray-900 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95"
+          className="w-11 h-11 bg-gray-900/90 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95 shrink-0"
           type="button"
           aria-label="add account"
         >
@@ -220,7 +339,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
           const available = isCredit ? Math.max(0, (Number(acc.creditLimit || 0) || 0) - debt) : 0;
 
           return (
-            <div key={acc.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div key={acc.id} className="glass-card rounded-2xl overflow-hidden">
               <div className="flex items-center justify-between p-4">
                 <div className="flex items-center gap-3 min-w-0">
                   <div
@@ -232,7 +351,8 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
                   <div className="min-w-0">
                     <div className="font-extrabold text-gray-900 truncate">{acc.name}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">
+
+                    <div className="text-xs text-gray-800/70 mt-0.5">
                       {isCredit ? (
                         <>
                           ค้างชำระ: <span className="font-extrabold text-red-600">{formatCurrency(debt)}</span>
@@ -247,7 +367,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
                       ) : (
                         <>
                           ยอดคงเหลือ:{" "}
-                          <span className={`font-extrabold ${bal < 0 ? "text-red-500" : "text-gray-900"}`}>
+                          <span className={`font-extrabold ${bal < 0 ? "text-red-600" : "text-gray-900"}`}>
                             {formatCurrency(bal)}
                           </span>
                         </>
@@ -255,8 +375,15 @@ export default function AccountsView({ showAlert, showConfirm }) {
                     </div>
 
                     {acc.accountNumber ? (
-                      <div className="text-[11px] text-gray-400 mt-1">
+                      <div className="text-[11px] text-gray-800/55 mt-1">
                         เลขบัญชี/เลขท้ายบัตร: <span className="font-bold">{acc.accountNumber}</span>
+                      </div>
+                    ) : null}
+
+                    {acc.type === "credit" && (Number(acc.statementDay || 0) || Number(acc.dueDay || 0)) ? (
+                      <div className="text-[11px] text-gray-800/55 mt-1">
+                        ตัดรอบ: <span className="font-bold">{acc.statementDay || 1}</span> • ครบกำหนด:{" "}
+                        <span className="font-bold">{acc.dueDay || 25}</span>
                       </div>
                     ) : null}
                   </div>
@@ -266,8 +393,9 @@ export default function AccountsView({ showAlert, showConfirm }) {
                   <button
                     type="button"
                     onClick={() => openEditModal(acc)}
-                    className="w-10 h-10 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center active:scale-95"
+                    className="w-10 h-10 rounded-full glass-icon-btn text-gray-800 flex items-center justify-center active:scale-95"
                     aria-label="edit"
+                    title="แก้ไข"
                   >
                     <Pencil size={18} />
                   </button>
@@ -276,8 +404,9 @@ export default function AccountsView({ showAlert, showConfirm }) {
                     <button
                       type="button"
                       onClick={() => del(acc.id)}
-                      className="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center active:scale-95"
+                      className="w-10 h-10 rounded-full bg-red-500/10 text-red-700 flex items-center justify-center active:scale-95 border border-red-500/15"
                       aria-label="delete"
+                      title="ลบ"
                     >
                       <Trash2 size={18} />
                     </button>
@@ -294,93 +423,97 @@ export default function AccountsView({ showAlert, showConfirm }) {
       {/* Create */}
       {openCreate ? (
         <ModalShell title="เพิ่มบัญชีใหม่" onClose={() => setOpenCreate(false)}>
-          <label className="text-xs font-bold text-gray-500 mb-1 block">ประเภทบัญชี</label>
+          <label className="text-xs font-bold text-gray-800/70 mb-1 block">ประเภทบัญชี</label>
           <TypePills value={cType} onChange={setCType} />
 
-          <label className="text-xs font-bold text-gray-500 mb-1 block mt-4">ชื่อบัญชี</label>
+          <label className="text-xs font-bold text-gray-800/70 mb-1 block mt-4">ชื่อบัญชี</label>
           <input
             value={cName}
             onChange={(e) => setCName(e.target.value)}
-            className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
             placeholder="เช่น KBank, Wallet, Credit Card"
           />
 
+          <div className="mt-4">
+            <IconPicker value={cIcon} onChange={setCIcon} />
+          </div>
+
           <div className="mt-4 grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-gray-500 mb-1 block">ไอคอน (Emoji)</label>
+              <label className="text-xs font-bold text-gray-800/70 mb-1 block">ไอคอน (พิมพ์เองได้)</label>
               <input
                 value={cIcon}
                 onChange={(e) => setCIcon(e.target.value)}
-                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl"
+                className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl"
                 placeholder="💳"
               />
-              <p className="text-[11px] text-gray-400 mt-1">ใช้คีย์บอร์ด Emoji บนมือถือได้เลย</p>
+              <p className="text-[11px] text-gray-800/55 mt-1">ใช้คีย์บอร์ด Emoji บนมือถือได้เลย</p>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-gray-500 mb-1 block">ยอดตั้งต้น</label>
+              <label className="text-xs font-bold text-gray-800/70 mb-1 block">ยอดตั้งต้น</label>
               <input
                 value={cBalance}
                 onChange={(e) => setCBalance(e.target.value)}
                 type="number"
-                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                 placeholder="0"
               />
             </div>
           </div>
 
           <div className="mt-4">
-            <label className="text-xs font-bold text-gray-500 mb-1 block">เลขบัญชี / เลขท้ายบัตร (แนะนำ)</label>
+            <label className="text-xs font-bold text-gray-800/70 mb-1 block">เลขบัญชี / เลขท้ายบัตร (แนะนำ)</label>
             <input
               value={cAccountNumber}
               onChange={(e) => setCAccountNumber(e.target.value)}
-              className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+              className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
               placeholder="ใส่เฉพาะเลข เช่น 1234567890 หรือ 1234"
             />
-            <p className="text-[11px] text-gray-400 mt-1">เพื่อให้ระบบสแกนสลิปแล้ว Auto-select บัญชีได้แม่นยำขึ้น</p>
+            <p className="text-[11px] text-gray-800/55 mt-1">เพื่อให้ระบบสแกนสลิปแล้ว Auto-select บัญชีได้แม่นยำขึ้น</p>
           </div>
 
           {cType === "credit" ? (
             <div className="mt-4 grid grid-cols-3 gap-3">
               <div className="col-span-3">
-                <label className="text-xs font-bold text-gray-500 mb-1 block">วงเงิน (Credit Limit)</label>
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">วงเงิน (Credit Limit)</label>
                 <input
                   value={cCreditLimit}
                   onChange={(e) => setCCreditLimit(e.target.value)}
                   type="number"
-                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                  className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                   placeholder="0"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-500 mb-1 block">วันตัดรอบ</label>
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">วันตัดรอบ</label>
                 <input
                   value={cStatementDay}
                   onChange={(e) => setCStatementDay(e.target.value)}
                   type="number"
-                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                  className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                   min="1"
                   max="31"
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-500 mb-1 block">วันครบกำหนด</label>
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">วันครบกำหนด</label>
                 <input
                   value={cDueDay}
                   onChange={(e) => setCDueDay(e.target.value)}
                   type="number"
-                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                  className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                   min="1"
                   max="31"
                 />
               </div>
-              <div className="flex items-end text-[11px] text-gray-400">ใช้เพื่อแสดงข้อมูลบัตร</div>
+              <div className="flex items-end text-[11px] text-gray-800/55">ใช้เพื่อแสดงข้อมูลบัตร</div>
             </div>
           ) : null}
 
           <div className="mt-4">
-            <label className="text-xs font-bold text-gray-500 mb-2 block">สี</label>
+            <label className="text-xs font-bold text-gray-800/70 mb-2 block">สี</label>
             <ColorDots value={cColor} onChange={setCColor} />
           </div>
 
@@ -388,14 +521,14 @@ export default function AccountsView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={() => setOpenCreate(false)}
-              className="flex-1 py-3 rounded-2xl bg-gray-100 font-extrabold text-gray-700"
+              className="flex-1 py-3 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
             >
               ยกเลิก
             </button>
             <button
               type="button"
               onClick={create}
-              className="flex-1 py-3 rounded-2xl bg-gray-900 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
+              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
             >
               <Check size={18} /> สร้าง
             </button>
@@ -406,49 +539,53 @@ export default function AccountsView({ showAlert, showConfirm }) {
       {/* Edit */}
       {openEdit && editing ? (
         <ModalShell title="แก้ไขบัญชี" onClose={() => setOpenEdit(false)}>
-          <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 mb-4">
-            <div className="text-xs text-gray-500">ยอดคงเหลือปัจจุบัน</div>
+          <div className="glass-panel border border-white/20 rounded-2xl p-4 mb-4">
+            <div className="text-xs text-gray-800/70">ยอดคงเหลือปัจจุบัน</div>
             <div className="text-2xl font-extrabold text-gray-900 mt-1">{formatCurrency(computedBalance)}</div>
           </div>
 
-          <label className="text-xs font-bold text-gray-500 mb-1 block">ประเภทบัญชี</label>
+          <label className="text-xs font-bold text-gray-800/70 mb-1 block">ประเภทบัญชี</label>
           <TypePills value={eType} onChange={setEType} />
 
-          <label className="text-xs font-bold text-gray-500 mb-1 block mt-4">ชื่อบัญชี</label>
+          <label className="text-xs font-bold text-gray-800/70 mb-1 block mt-4">ชื่อบัญชี</label>
           <input
             value={eName}
             onChange={(e) => setEName(e.target.value)}
-            className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
           />
+
+          <div className="mt-4">
+            <IconPicker value={eIcon} onChange={setEIcon} />
+          </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-gray-500 mb-1 block">ไอคอน (Emoji)</label>
+              <label className="text-xs font-bold text-gray-800/70 mb-1 block">ไอคอน (พิมพ์เองได้)</label>
               <input
                 value={eIcon}
                 onChange={(e) => setEIcon(e.target.value)}
-                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl"
+                className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-gray-500 mb-1 block">ตั้งยอดใหม่</label>
+              <label className="text-xs font-bold text-gray-800/70 mb-1 block">ตั้งยอดใหม่</label>
               <input
                 value={eBalance}
                 onChange={(e) => setEBalance(e.target.value)}
                 type="number"
-                className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                 placeholder="เช่น 1200"
               />
             </div>
           </div>
 
           <div className="mt-4">
-            <label className="text-xs font-bold text-gray-500 mb-1 block">เลขบัญชี/เลขท้ายบัตร</label>
+            <label className="text-xs font-bold text-gray-800/70 mb-1 block">เลขบัญชี/เลขท้ายบัตร</label>
             <input
               value={eAccountNumber}
               onChange={(e) => setEAccountNumber(e.target.value)}
-              className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+              className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
               placeholder="ตัวเลขเท่านั้น"
             />
           </div>
@@ -456,49 +593,53 @@ export default function AccountsView({ showAlert, showConfirm }) {
           {eType === "credit" ? (
             <div className="mt-4 grid grid-cols-3 gap-3">
               <div className="col-span-3">
-                <label className="text-xs font-bold text-gray-500 mb-1 block">วงเงิน (Credit Limit)</label>
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">วงเงิน (Credit Limit)</label>
                 <input
                   value={eCreditLimit}
                   onChange={(e) => setECreditLimit(e.target.value)}
                   type="number"
-                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                  className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-500 mb-1 block">วันตัดรอบ</label>
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">วันตัดรอบ</label>
                 <input
                   value={eStatementDay}
                   onChange={(e) => setEStatementDay(e.target.value)}
                   type="number"
-                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                  className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                   min="1"
                   max="31"
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-500 mb-1 block">วันครบกำหนด</label>
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">วันครบกำหนด</label>
                 <input
                   value={eDueDay}
                   onChange={(e) => setEDueDay(e.target.value)}
                   type="number"
-                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 outline-none focus:border-gray-900"
+                  className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
                   min="1"
                   max="31"
                 />
               </div>
-              <div className="flex items-end text-[11px] text-gray-400">ข้อมูลบัตร</div>
+              <div className="flex items-end text-[11px] text-gray-800/55">ข้อมูลบัตร</div>
             </div>
           ) : null}
 
-          <div className="mt-4 flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-3">
+          <div className="mt-4 flex items-center justify-between glass-panel border border-white/20 rounded-2xl px-4 py-3">
             <div>
               <div className="text-sm font-extrabold text-gray-900">บันทึกเป็นรายการ (Transaction)</div>
-              <div className="text-[12px] text-gray-500">เปิด = จะไปอยู่ในสรุปผล/สถิติด้วย</div>
+              <div className="text-[12px] text-gray-800/60">เปิด = จะไปอยู่ในสรุปผล/สถิติด้วย</div>
             </div>
+
             <button
               type="button"
               onClick={() => setRecordAsTx((v) => !v)}
-              className={`w-14 h-8 rounded-full transition-all relative ${recordAsTx ? "bg-gray-900" : "bg-gray-200"}`}
+              className={`w-14 h-8 rounded-full transition-all relative border ${
+                recordAsTx ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
+              }`}
+              aria-label="toggle record as transaction"
             >
               <span
                 className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
@@ -509,7 +650,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
           </div>
 
           <div className="mt-4">
-            <label className="text-xs font-bold text-gray-500 mb-2 block">สี</label>
+            <label className="text-xs font-bold text-gray-800/70 mb-2 block">สี</label>
             <ColorDots value={eColor} onChange={setEColor} />
           </div>
 
@@ -517,14 +658,14 @@ export default function AccountsView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={() => setOpenEdit(false)}
-              className="flex-1 py-3 rounded-2xl bg-gray-100 font-extrabold text-gray-700"
+              className="flex-1 py-3 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
             >
               ยกเลิก
             </button>
             <button
               type="button"
               onClick={saveEdit}
-              className="flex-1 py-3 rounded-2xl bg-gray-900 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
+              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
             >
               <Check size={18} /> บันทึก
             </button>

@@ -7,7 +7,7 @@ const OPENAI_URL = "https://api.openai.com/v1/responses";
 export const config = { api: { bodyParser: false } };
 
 function getContentType(req) {
-  return String(req.headers["content-type"] || "").toLowerCase();
+  return String(req.headers?.["content-type"] || "").toLowerCase();
 }
 
 function readRawBody(req) {
@@ -20,6 +20,7 @@ function readRawBody(req) {
 }
 
 async function readJson(req) {
+  // In some runtimes (Next), req.body might already be an object
   if (req.body && typeof req.body === "object") return req.body;
 
   const buf = await readRawBody(req);
@@ -34,6 +35,14 @@ async function readJson(req) {
 
 function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (err, val) => {
+      if (done) return;
+      done = true;
+      if (err) reject(err);
+      else resolve(val);
+    };
+
     const bb = Busboy({
       headers: req.headers,
       limits: { fileSize: maxBytes, files: 1 },
@@ -49,15 +58,25 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
       mimeType = info?.mimeType || info?.mimetype || "";
 
       file.on("data", (d) => chunks.push(d));
-      file.on("limit", () => reject(new Error("file_too_large")));
+      file.on("limit", () => finish(new Error("file_too_large")));
       file.on("end", () => {
-        fileBuffer = Buffer.concat(chunks);
+        try {
+          fileBuffer = Buffer.concat(chunks);
+        } catch (e) {
+          finish(e);
+        }
       });
+      file.on("error", (e) => finish(e));
     });
 
-    bb.on("error", reject);
-    bb.on("finish", () => resolve({ fileBuffer, mimeType, filename }));
-    req.pipe(bb);
+    bb.on("error", (e) => finish(e));
+    bb.on("finish", () => finish(null, { fileBuffer, mimeType, filename }));
+
+    try {
+      req.pipe(bb);
+    } catch (e) {
+      finish(e);
+    }
   });
 }
 
@@ -65,10 +84,7 @@ function safeJsonParseMaybe(text) {
   const t0 = String(text || "").trim();
   if (!t0) return null;
 
-  const t = t0
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .trim();
+  const t = t0.replace(/```json/gi, "").replace(/```/g, "").trim();
 
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
@@ -77,7 +93,7 @@ function safeJsonParseMaybe(text) {
     try {
       return JSON.parse(candidate);
     } catch {
-      // fallthrough
+      // continue
     }
   }
 
@@ -92,10 +108,68 @@ function normalizeDigits(s) {
   return String(s || "").replace(/[^\d]/g, "");
 }
 
+function parseDataUrlMaybe(dataUrl) {
+  // "data:image/jpeg;base64,AAAA..."
+  const s = String(dataUrl || "").trim();
+  if (!s.startsWith("data:")) return null;
+
+  const comma = s.indexOf(",");
+  if (comma < 0) return null;
+
+  const meta = s.slice(5, comma); // after "data:"
+  const body = s.slice(comma + 1);
+
+  const parts = meta.split(";");
+  const mimeType = parts[0] || "image/jpeg";
+  const isBase64 = parts.includes("base64");
+  if (!isBase64) return null;
+
+  return { mimeType, base64: body };
+}
+
+function extractResponsesOutputText(resp) {
+  // Best effort extraction for Responses API
+  const direct = resp?.output_text;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+
+  const out = resp?.output;
+  if (Array.isArray(out)) {
+    const lines = [];
+
+    for (const item of out) {
+      // Usually type: "message"
+      const content = item?.content;
+      if (Array.isArray(content)) {
+        for (const c of content) {
+          const t = c?.text;
+          if (typeof t === "string" && t.trim()) lines.push(t.trim());
+        }
+      }
+
+      // Some SDKs may return { content: [{ type, text }] } or nested
+      if (typeof item?.text === "string" && item.text.trim()) lines.push(item.text.trim());
+    }
+
+    if (lines.length) return lines.join("\n");
+  }
+
+  // Fallback (older/other shapes)
+  const maybe =
+    resp?.output?.[0]?.content
+      ?.map((c) => c?.text)
+      .filter(Boolean)
+      .join("\n") || "";
+
+  return String(maybe || "").trim();
+}
+
 async function callOpenAI({ base64, mimeType }) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return { status: 400, body: { error: "missing_openai_api_key" } };
+    return {
+      status: 400,
+      body: { ok: false, code: "missing_openai_api_key", message: "OPENAI_API_KEY is not set" },
+    };
   }
 
   const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
@@ -150,23 +224,33 @@ async function callOpenAI({ base64, mimeType }) {
   });
 
   const json = await r.json().catch(() => null);
+
   if (!r.ok) {
     return {
       status: r.status,
-      body: { error: "openai_error", detail: json || null },
+      body: {
+        ok: false,
+        code: "openai_error",
+        message: "OpenAI request failed",
+        raw: json || null,
+        model,
+      },
     };
   }
 
-  const outputText =
-    json?.output_text ||
-    json?.output?.[0]?.content?.map((c) => c?.text).filter(Boolean).join("\n") ||
-    "";
-
+  const outputText = extractResponsesOutputText(json);
   const parsed = safeJsonParseMaybe(outputText);
+
   if (!parsed) {
     return {
       status: 200,
-      body: { error: "parse_failed", rawText: outputText },
+      body: {
+        ok: false,
+        code: "parse_failed",
+        message: "Model output is not valid JSON",
+        rawText: outputText,
+        model,
+      },
     };
   }
 
@@ -180,27 +264,30 @@ async function callOpenAI({ base64, mimeType }) {
   const tx_type = String(parsed.tx_type || "").toLowerCase();
   const safeType = tx_type === "income" || tx_type === "transfer" ? tx_type : "expense";
 
+  const normalized = {
+    tx_type: safeType,
+    amount: Number.isFinite(amount) ? amount : null,
+    date: parsed.date ?? null,
+    merchant: String(parsed.merchant ?? ""),
+    category: String(parsed.category ?? "other"),
+    note: String(parsed.note ?? ""),
+    ref: parsed.ref ? String(parsed.ref) : null,
+    from_account: parsed.from_account ? normalizeDigits(parsed.from_account) : null,
+    to_account: parsed.to_account ? normalizeDigits(parsed.to_account) : null,
+    evidence: String(parsed.evidence ?? "").slice(0, 200),
+  };
+
   return {
     status: 200,
-    body: {
-      tx_type: safeType,
-      amount: Number.isFinite(amount) ? amount : null,
-      date: parsed.date ?? null,
-      merchant: String(parsed.merchant ?? ""),
-      category: String(parsed.category ?? "other"),
-      note: String(parsed.note ?? ""),
-      ref: parsed.ref ? String(parsed.ref) : null,
-      from_account: parsed.from_account ? normalizeDigits(parsed.from_account) : null,
-      to_account: parsed.to_account ? normalizeDigits(parsed.to_account) : null,
-      evidence: String(parsed.evidence ?? "").slice(0, 200),
-    },
+    body: { ok: true, data: normalized, rawText: outputText, model },
   };
 }
 
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      res.status(405).json({ error: "method_not_allowed" });
+      res.setHeader("Allow", "POST");
+      res.status(405).json({ ok: false, code: "method_not_allowed", message: "Use POST" });
       return;
     }
 
@@ -210,7 +297,7 @@ export default async function handler(req, res) {
     if (ct.includes("multipart/form-data")) {
       const { fileBuffer, mimeType } = await parseMultipart(req);
       if (!fileBuffer || fileBuffer.length === 0) {
-        res.status(400).json({ error: "missing_file" });
+        res.status(400).json({ ok: false, code: "missing_file", message: "No file uploaded" });
         return;
       }
 
@@ -220,13 +307,22 @@ export default async function handler(req, res) {
       return;
     }
 
-    // 2) JSON: { base64, mimeType }
+    // 2) JSON: accept { base64, mimeType } OR { imageDataUrl }
     const body = await readJson(req);
-    const base64 = body?.base64;
-    const mimeType = body?.mimeType || "image/jpeg";
+
+    // Prefer imageDataUrl if present
+    const imageDataUrl = String(body?.imageDataUrl || "").trim();
+    const parsedDataUrl = imageDataUrl ? parseDataUrlMaybe(imageDataUrl) : null;
+
+    const base64 = parsedDataUrl?.base64 || body?.base64 || body?.imageBase64 || null;
+    const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
 
     if (!base64) {
-      res.status(400).json({ error: "missing_base64" });
+      res.status(400).json({
+        ok: false,
+        code: "missing_base64",
+        message: "Provide multipart file, or JSON { base64, mimeType }, or { imageDataUrl }",
+      });
       return;
     }
 
@@ -234,10 +330,12 @@ export default async function handler(req, res) {
     res.status(out.status).json(out.body);
   } catch (e) {
     const msg = String(e?.message || e);
+
     if (msg === "file_too_large") {
-      res.status(413).json({ error: "file_too_large" });
+      res.status(413).json({ ok: false, code: "file_too_large", message: "File too large" });
       return;
     }
-    res.status(500).json({ error: "server_error", detail: msg });
+
+    res.status(500).json({ ok: false, code: "server_error", message: msg });
   }
 }

@@ -3,25 +3,57 @@
 
 :root {
   color: #111827;
-  background: #f3f4f6;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Glass theme tokens */
+  --glass-bg: rgba(255, 255, 255, 0.16);
+  --glass-bg-strong: rgba(255, 255, 255, 0.22);
+  --glass-border: rgba(255, 255, 255, 0.28);
+  --glass-border-soft: rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --glass-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.06);
+
+  /* extra tokens (used by helpers) */
+  --page-bg: #f7f7fb;
+  --text: #111827;
 }
 
+/* ---------- Base ---------- */
 html {
   -webkit-text-size-adjust: 100%;
   height: 100%;
 }
+
 body {
   margin: 0;
   min-height: 100%;
+  color: var(--text);
+
+  /* ✅ Glassmorphism background */
+  background:
+    radial-gradient(1200px 800px at 10% 10%, rgba(99, 102, 241, 0.25), transparent 55%),
+    radial-gradient(900px 700px at 90% 20%, rgba(236, 72, 153, 0.18), transparent 55%),
+    radial-gradient(1000px 700px at 60% 90%, rgba(16, 185, 129, 0.18), transparent 55%),
+    linear-gradient(180deg, #f7f7fb 0%, #eef2ff 40%, #f8fafc 100%);
+  background-attachment: fixed;
 }
 
+/* ---------- Safe area helpers ---------- */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
 
+/* optional dvh helper (some components use min-h-dvh) */
+.min-h-dvh {
+  min-height: 100dvh;
+}
+
+/* ---------- Hide scrollbars ---------- */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -30,8 +62,77 @@ body {
   scrollbar-width: none;
 }
 
+/* ---------- Animations ---------- */
 @keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.animate-fade-in-up { animation: fade-in-up 200ms ease-out; }
+.animate-fade-in-up {
+  animation: fade-in-up 200ms ease-out both;
+}
+
+/* =========================
+   Glassmorphism utilities
+   ========================= */
+
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glass-card-strong {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--glass-border-soft);
+  box-shadow: var(--glass-shadow-soft);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.glass-icon-btn {
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-soft);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glass-chip {
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: var(--glass-shadow-soft);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: rgba(17, 24, 39, 0.35);
+}
+
+.glass-divider {
+  border-color: rgba(255, 255, 255, 0.22) !important;
+}
