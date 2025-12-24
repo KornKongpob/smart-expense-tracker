@@ -1,6 +1,18 @@
 // src/views/AccountsView.jsx
 import { useMemo, useRef, useState } from "react";
-import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Sparkles, Image as ImageIcon, RotateCcw } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  CreditCard,
+  Banknote,
+  Wallet,
+  Sparkles,
+  Image as ImageIcon,
+  RotateCcw,
+} from "lucide-react";
 import { useAppStore } from "../store/store";
 import { ACCOUNT_COLORS } from "../constants/presets.jsx";
 import { calcAccountBalance } from "../store/selectors";
@@ -69,7 +81,6 @@ function isImageIcon(v) {
 
 // Resize image to keep localStorage light
 async function fileToDataUrlResized(file, { maxSize = 480, quality = 0.82 } = {}) {
-  // If svg or already small, still convert, but keep in control
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("read_failed"));
@@ -77,11 +88,8 @@ async function fileToDataUrlResized(file, { maxSize = 480, quality = 0.82 } = {}
     reader.readAsDataURL(file);
   });
 
-  // if not an image, stop
   if (!String(dataUrl).startsWith("data:image/")) throw new Error("not_image");
 
-  // For small images, no need to resize
-  // But we still downscale if large to prevent huge base64
   const img = await new Promise((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
@@ -105,7 +113,6 @@ async function fileToDataUrlResized(file, { maxSize = 480, quality = 0.82 } = {}
 
   ctx.drawImage(img, 0, 0, nw, nh);
 
-  // Prefer jpeg for photos to reduce size, but keep png if original was png and likely has alpha
   const isPng = String(file.type || "").toLowerCase().includes("png");
   const mime = isPng ? "image/png" : "image/jpeg";
 
@@ -185,7 +192,6 @@ function TypePills({ value, onChange }) {
 function ModalShell({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      {/* ✅ Make sure modal always sits above bottom nav */}
       <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
@@ -224,7 +230,6 @@ function IconPicker({ value, onChange }) {
         </div>
       </div>
 
-      {/* group tabs */}
       <div className="flex gap-2 flex-wrap mb-3">
         {ACCOUNT_ICON_GROUPS.map((g) => (
           <button
@@ -242,7 +247,6 @@ function IconPicker({ value, onChange }) {
         ))}
       </div>
 
-      {/* emoji grid */}
       <div className="max-h-44 overflow-y-auto no-scrollbar">
         <div className="grid grid-cols-8 gap-2">
           {group.emojis.map((e, idx) => (
@@ -285,7 +289,12 @@ function GroupHeader({ type, count, subtitleRight }) {
   );
 }
 
-function ImagePickerInline({ value, onPick, onClear, inputRef, disabled }) {
+/**
+ * ✅ IMPORTANT FIX:
+ * - Component นี้ "ไม่สร้าง input file เอง" (กัน ref หลุด / input ซ้ำ)
+ * - ให้ parent เป็นคนสร้าง input file เพียงตัวเดียว แล้วใช้ ref.click()
+ */
+function ImagePickerInline({ value, onPickClick, onClear, disabled }) {
   const isImg = isImageIcon(value);
 
   return (
@@ -304,7 +313,7 @@ function ImagePickerInline({ value, onPick, onClear, inputRef, disabled }) {
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={onPick}
+            onClick={onPickClick}
             className="px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95 disabled:opacity-60"
             disabled={disabled}
           >
@@ -314,7 +323,7 @@ function ImagePickerInline({ value, onPick, onClear, inputRef, disabled }) {
           <button
             type="button"
             onClick={onClear}
-            className={`w-10 h-10 rounded-full flex items-center justify-center active:scale-95 border ${
+            className={`w-10 h-10 rounded-full flex items-center justify-center active:scale-95 border disabled:opacity-60 ${
               isImg ? "bg-white/20 border-white/20 text-gray-900" : "bg-white/10 border-white/15 text-gray-400"
             }`}
             title="ล้างรูป"
@@ -324,8 +333,6 @@ function ImagePickerInline({ value, onPick, onClear, inputRef, disabled }) {
           </button>
         </div>
       </div>
-
-      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
 
       {isImg ? (
         <div className="mt-3 flex items-center gap-3">
@@ -353,7 +360,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
   const [openEdit, setOpenEdit] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
-  // file inputs
+  // ✅ single input per modal
   const createImgRef = useRef(null);
   const editImgRef = useRef(null);
 
@@ -404,8 +411,8 @@ export default function AccountsView({ showAlert, showConfirm }) {
     setOpenEdit(true);
   };
 
-  const pickCreateImage = () => createImgRef.current?.click();
-  const pickEditImage = () => editImgRef.current?.click();
+  const pickCreateImageClick = () => createImgRef.current?.click();
+  const pickEditImageClick = () => editImgRef.current?.click();
 
   const onCreateImageSelected = async (e) => {
     const file = e.target.files?.[0];
@@ -413,10 +420,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     if (!file) return;
 
     if (!String(file.type || "").startsWith("image/")) return showAlert?.("ไฟล์ไม่ใช่รูปภาพ");
-    if (file.size > 1.5 * 1024 * 1024) {
-      // allow but warn
-      showAlert?.("รูปค่อนข้างใหญ่ ระบบจะย่อให้อัตโนมัติ");
-    }
+    if (file.size > 1.5 * 1024 * 1024) showAlert?.("รูปค่อนข้างใหญ่ ระบบจะย่อให้อัตโนมัติ");
 
     setImgBusy(true);
     try {
@@ -435,9 +439,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     if (!file) return;
 
     if (!String(file.type || "").startsWith("image/")) return showAlert?.("ไฟล์ไม่ใช่รูปภาพ");
-    if (file.size > 1.5 * 1024 * 1024) {
-      showAlert?.("รูปค่อนข้างใหญ่ ระบบจะย่อให้อัตโนมัติ");
-    }
+    if (file.size > 1.5 * 1024 * 1024) showAlert?.("รูปค่อนข้างใหญ่ ระบบจะย่อให้อัตโนมัติ");
 
     setImgBusy(true);
     try {
@@ -454,6 +456,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     if (!isImageIcon(cIcon)) return;
     setCIcon("💳");
   };
+
   const clearEditImage = () => {
     if (!isImageIcon(eIcon)) return;
     setEIcon("💳");
@@ -465,14 +468,13 @@ export default function AccountsView({ showAlert, showConfirm }) {
     const openingBalance = Number(cBalance || 0);
     if (!Number.isFinite(openingBalance)) return showAlert?.("ยอดเงินไม่ถูกต้อง");
 
-    // ✅ credit fields sanity
     const creditLimit = Number(cCreditLimit || 0) || 0;
     const statementDay = Math.min(31, Math.max(1, Number(cStatementDay || 1) || 1));
     const dueDay = Math.min(31, Math.max(1, Number(cDueDay || 25) || 25));
 
     addAccount({
       name: cName.trim(),
-      icon: (cIcon || "💳").trim(), // ✅ can be emoji or data:image...
+      icon: (cIcon || "💳").trim(),
       color: cColor,
       type: cType,
       openingBalance,
@@ -505,7 +507,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     updateAccount({
       id: editing.id,
       name: eName.trim(),
-      icon: (eIcon || "💳").trim(), // ✅ can be emoji or data:image...
+      icon: (eIcon || "💳").trim(),
       color: eColor,
       type: eType,
       accountNumber: digitsOnly(eAccountNumber),
@@ -551,7 +553,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
         const sorted = items.slice().sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
         const meta = TYPE_META[type] || TYPE_META.other;
 
-        // totals
         if (type === "credit") {
           let totalDebt = 0;
           let totalLimit = 0;
@@ -584,7 +585,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
   }, [accounts, accountBalances]);
 
   const netBalance = useMemo(() => {
-    // ✅ exclude credit accounts (as requested)
     let sum = 0;
     for (const a of accounts) {
       const t = normalizeType(a.type);
@@ -612,7 +612,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
         </button>
       </header>
 
-      {/* ✅ Net Balance (exclude credit) */}
       <div className="glass-card rounded-3xl p-5 mb-5">
         <div className="text-xs font-extrabold text-gray-800/65">Net Balance (ไม่รวมบัตรเครดิต)</div>
         <div className={`text-3xl font-extrabold mt-1 ${netBalance < 0 ? "text-red-600" : "text-gray-900"}`}>
@@ -621,7 +620,6 @@ export default function AccountsView({ showAlert, showConfirm }) {
         <div className="text-[11px] text-gray-800/55 mt-1">รวมเฉพาะ เงินสด + ธนาคาร (และประเภทอื่นๆที่ไม่ใช่ Credit)</div>
       </div>
 
-      {/* ✅ Grouped accounts */}
       <div className="space-y-6">
         {groups.map((g) => (
           <section key={g.type} className="space-y-3">
@@ -733,16 +731,10 @@ export default function AccountsView({ showAlert, showConfirm }) {
             placeholder="เช่น KBank, Wallet, Credit Card"
           />
 
-          {/* ✅ Image icon picker */}
+          {/* ✅ single input for Create */}
+          <input ref={createImgRef} type="file" accept="image/*" className="hidden" onChange={onCreateImageSelected} />
           <div className="mt-4">
-            <input ref={createImgRef} type="file" accept="image/*" className="hidden" onChange={onCreateImageSelected} />
-            <ImagePickerInline
-              value={cIcon}
-              onPick={pickCreateImage}
-              onClear={clearCreateImage}
-              inputRef={createImgRef}
-              disabled={imgBusy}
-            />
+            <ImagePickerInline value={cIcon} onPickClick={pickCreateImageClick} onClear={clearCreateImage} disabled={imgBusy} />
           </div>
 
           <div className="mt-4">
@@ -867,16 +859,10 @@ export default function AccountsView({ showAlert, showConfirm }) {
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
           />
 
-          {/* ✅ Image icon picker */}
+          {/* ✅ single input for Edit (THIS FIXES YOUR ISSUE) */}
+          <input ref={editImgRef} type="file" accept="image/*" className="hidden" onChange={onEditImageSelected} />
           <div className="mt-4">
-            <input ref={editImgRef} type="file" accept="image/*" className="hidden" onChange={onEditImageSelected} />
-            <ImagePickerInline
-              value={eIcon}
-              onPick={pickEditImage}
-              onClear={clearEditImage}
-              inputRef={editImgRef}
-              disabled={imgBusy}
-            />
+            <ImagePickerInline value={eIcon} onPickClick={pickEditImageClick} onClear={clearEditImage} disabled={imgBusy} />
           </div>
 
           <div className="mt-4">
@@ -966,9 +952,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
               }`}
               aria-label="toggle record as transaction"
             >
-              <span
-                className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${recordAsTx ? "left-7" : "left-1"}`}
-              />
+              <span className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${recordAsTx ? "left-7" : "left-1"}`} />
             </button>
           </div>
 
