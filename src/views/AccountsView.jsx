@@ -1,6 +1,6 @@
 // src/views/AccountsView.jsx
-import { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Sparkles } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Plus, Pencil, Trash2, Check, X, CreditCard, Banknote, Wallet, Sparkles, Image as ImageIcon, RotateCcw } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { ACCOUNT_COLORS } from "../constants/presets.jsx";
 import { calcAccountBalance } from "../store/selectors";
@@ -61,6 +61,62 @@ const ACCOUNT_ICON_GROUPS = [
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
+// ===== image helpers =====
+function isImageIcon(v) {
+  const s = String(v || "").trim();
+  return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://");
+}
+
+// Resize image to keep localStorage light
+async function fileToDataUrlResized(file, { maxSize = 480, quality = 0.82 } = {}) {
+  // If svg or already small, still convert, but keep in control
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read_failed"));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+
+  // if not an image, stop
+  if (!String(dataUrl).startsWith("data:image/")) throw new Error("not_image");
+
+  // For small images, no need to resize
+  // But we still downscale if large to prevent huge base64
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("image_load_failed"));
+    i.src = dataUrl;
+  });
+
+  const w = img.width || 0;
+  const h = img.height || 0;
+  if (!w || !h) return dataUrl;
+
+  const scale = Math.min(1, maxSize / Math.max(w, h));
+  const nw = Math.max(1, Math.round(w * scale));
+  const nh = Math.max(1, Math.round(h * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = nw;
+  canvas.height = nh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+
+  ctx.drawImage(img, 0, 0, nw, nh);
+
+  // Prefer jpeg for photos to reduce size, but keep png if original was png and likely has alpha
+  const isPng = String(file.type || "").toLowerCase().includes("png");
+  const mime = isPng ? "image/png" : "image/jpeg";
+
+  try {
+    const out = canvas.toDataURL(mime, mime === "image/jpeg" ? quality : undefined);
+    return out || dataUrl;
+  } catch {
+    return dataUrl;
+  }
+}
+
 const TYPE_META = {
   bank: { label: "บัญชีธนาคาร", icon: <Banknote size={16} />, order: 1 },
   cash: { label: "เงินสด", icon: <Wallet size={16} />, order: 2 },
@@ -72,11 +128,6 @@ function normalizeType(t) {
   const s = String(t || "").toLowerCase().trim();
   if (s === "bank" || s === "cash" || s === "credit") return s;
   return "other";
-}
-
-function isImageIcon(v) {
-  const s = String(v || "").trim();
-  return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://");
 }
 
 function AccountIcon({ value }) {
@@ -234,6 +285,64 @@ function GroupHeader({ type, count, subtitleRight }) {
   );
 }
 
+function ImagePickerInline({ value, onPick, onClear, inputRef, disabled }) {
+  const isImg = isImageIcon(value);
+
+  return (
+    <div className="glass-panel border border-white/20 rounded-2xl p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
+            <ImageIcon size={14} className="text-indigo-700" />
+            รูปภาพไอคอน (optional)
+          </div>
+          <div className="text-[11px] text-gray-800/55 mt-1">
+            เลือกรูปเพื่อใช้แทน Emoji • ระบบจะย่อรูปอัตโนมัติให้เหมาะกับ localStorage
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onPick}
+            className="px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95 disabled:opacity-60"
+            disabled={disabled}
+          >
+            เลือกรูป
+          </button>
+
+          <button
+            type="button"
+            onClick={onClear}
+            className={`w-10 h-10 rounded-full flex items-center justify-center active:scale-95 border ${
+              isImg ? "bg-white/20 border-white/20 text-gray-900" : "bg-white/10 border-white/15 text-gray-400"
+            }`}
+            title="ล้างรูป"
+            disabled={!isImg || disabled}
+          >
+            <RotateCcw size={16} />
+          </button>
+        </div>
+      </div>
+
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
+
+      {isImg ? (
+        <div className="mt-3 flex items-center gap-3">
+          <div className="w-14 h-14 rounded-2xl overflow-hidden border border-white/15 bg-white/20">
+            <img src={value} alt="preview" className="w-full h-full object-cover" />
+          </div>
+          <div className="text-[11px] text-gray-800/60 min-w-0">
+            ใช้รูปเป็นไอคอนอยู่ตอนนี้ (ถ้าจะกลับเป็น Emoji กดปุ่มล้างรูป)
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 text-[11px] text-gray-800/55">ยังไม่ได้เลือกรูป (ตอนนี้ใช้ Emoji แทน)</div>
+      )}
+    </div>
+  );
+}
+
 export default function AccountsView({ showAlert, showConfirm }) {
   const { state, addAccount, updateAccount, deleteAccount, adjustAccountBalance } = useAppStore();
 
@@ -243,6 +352,12 @@ export default function AccountsView({ showAlert, showConfirm }) {
   const [openCreate, setOpenCreate] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
+  // file inputs
+  const createImgRef = useRef(null);
+  const editImgRef = useRef(null);
+
+  const [imgBusy, setImgBusy] = useState(false);
 
   // create form
   const [cName, setCName] = useState("");
@@ -289,6 +404,61 @@ export default function AccountsView({ showAlert, showConfirm }) {
     setOpenEdit(true);
   };
 
+  const pickCreateImage = () => createImgRef.current?.click();
+  const pickEditImage = () => editImgRef.current?.click();
+
+  const onCreateImageSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!String(file.type || "").startsWith("image/")) return showAlert?.("ไฟล์ไม่ใช่รูปภาพ");
+    if (file.size > 1.5 * 1024 * 1024) {
+      // allow but warn
+      showAlert?.("รูปค่อนข้างใหญ่ ระบบจะย่อให้อัตโนมัติ");
+    }
+
+    setImgBusy(true);
+    try {
+      const dataUrl = await fileToDataUrlResized(file, { maxSize: 480, quality: 0.82 });
+      setCIcon(dataUrl);
+    } catch (err) {
+      showAlert?.(`อัปโหลดรูปไม่สำเร็จ: ${String(err?.message || err)}`);
+    } finally {
+      setImgBusy(false);
+    }
+  };
+
+  const onEditImageSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!String(file.type || "").startsWith("image/")) return showAlert?.("ไฟล์ไม่ใช่รูปภาพ");
+    if (file.size > 1.5 * 1024 * 1024) {
+      showAlert?.("รูปค่อนข้างใหญ่ ระบบจะย่อให้อัตโนมัติ");
+    }
+
+    setImgBusy(true);
+    try {
+      const dataUrl = await fileToDataUrlResized(file, { maxSize: 480, quality: 0.82 });
+      setEIcon(dataUrl);
+    } catch (err) {
+      showAlert?.(`อัปโหลดรูปไม่สำเร็จ: ${String(err?.message || err)}`);
+    } finally {
+      setImgBusy(false);
+    }
+  };
+
+  const clearCreateImage = () => {
+    if (!isImageIcon(cIcon)) return;
+    setCIcon("💳");
+  };
+  const clearEditImage = () => {
+    if (!isImageIcon(eIcon)) return;
+    setEIcon("💳");
+  };
+
   const create = () => {
     if (!cName.trim()) return showAlert?.("ใส่ชื่อบัญชี");
 
@@ -302,7 +472,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
 
     addAccount({
       name: cName.trim(),
-      icon: (cIcon || "💳").trim(),
+      icon: (cIcon || "💳").trim(), // ✅ can be emoji or data:image...
       color: cColor,
       type: cType,
       openingBalance,
@@ -335,7 +505,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
     updateAccount({
       id: editing.id,
       name: eName.trim(),
-      icon: (eIcon || "💳").trim(),
+      icon: (eIcon || "💳").trim(), // ✅ can be emoji or data:image...
       color: eColor,
       type: eType,
       accountNumber: digitsOnly(eAccountNumber),
@@ -563,6 +733,18 @@ export default function AccountsView({ showAlert, showConfirm }) {
             placeholder="เช่น KBank, Wallet, Credit Card"
           />
 
+          {/* ✅ Image icon picker */}
+          <div className="mt-4">
+            <input ref={createImgRef} type="file" accept="image/*" className="hidden" onChange={onCreateImageSelected} />
+            <ImagePickerInline
+              value={cIcon}
+              onPick={pickCreateImage}
+              onClear={clearCreateImage}
+              inputRef={createImgRef}
+              disabled={imgBusy}
+            />
+          </div>
+
           <div className="mt-4">
             <IconPicker value={cIcon} onChange={setCIcon} />
           </div>
@@ -576,7 +758,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
                 className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl"
                 placeholder="💳"
               />
-              <p className="text-[11px] text-gray-800/55 mt-1">ใช้คีย์บอร์ด Emoji บนมือถือได้เลย</p>
+              <p className="text-[11px] text-gray-800/55 mt-1">ใช้คีย์บอร์ด Emoji บนมือถือได้เลย (หรือใส่ URL รูปก็ได้)</p>
             </div>
 
             <div>
@@ -651,13 +833,15 @@ export default function AccountsView({ showAlert, showConfirm }) {
               type="button"
               onClick={() => setOpenCreate(false)}
               className="flex-1 py-3 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
+              disabled={imgBusy}
             >
               ยกเลิก
             </button>
             <button
               type="button"
               onClick={create}
-              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
+              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
+              disabled={imgBusy}
             >
               <Check size={18} /> สร้าง
             </button>
@@ -682,6 +866,18 @@ export default function AccountsView({ showAlert, showConfirm }) {
             onChange={(e) => setEName(e.target.value)}
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
           />
+
+          {/* ✅ Image icon picker */}
+          <div className="mt-4">
+            <input ref={editImgRef} type="file" accept="image/*" className="hidden" onChange={onEditImageSelected} />
+            <ImagePickerInline
+              value={eIcon}
+              onPick={pickEditImage}
+              onClear={clearEditImage}
+              inputRef={editImgRef}
+              disabled={imgBusy}
+            />
+          </div>
 
           <div className="mt-4">
             <IconPicker value={eIcon} onChange={setEIcon} />
@@ -786,13 +982,15 @@ export default function AccountsView({ showAlert, showConfirm }) {
               type="button"
               onClick={() => setOpenEdit(false)}
               className="flex-1 py-3 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
+              disabled={imgBusy}
             >
               ยกเลิก
             </button>
             <button
               type="button"
               onClick={saveEdit}
-              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
+              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60"
+              disabled={imgBusy}
             >
               <Check size={18} /> บันทึก
             </button>
