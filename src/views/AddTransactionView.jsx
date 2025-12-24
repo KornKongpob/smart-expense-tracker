@@ -1,5 +1,5 @@
 // src/views/AddTransactionView.jsx
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   X,
   Trash2,
@@ -27,6 +27,206 @@ import { isDuplicateByRef, toMonthKey, calcSpentByCategoryInMonth, getBudget } f
 import { groupReceiptItemsToCategory, sanitizeCategoryKey } from "../utils/receiptCategorizer";
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
+
+// ✅ Detect when account icon is an image URL/data-uri
+function isImageIcon(v) {
+  const s = String(v || "").trim();
+  return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://");
+}
+
+function getAccountVisual(acc) {
+  const image = String(acc?.image || "").trim();
+  const iconRaw = String(acc?.icon || "").trim();
+
+  const img = image || (isImageIcon(iconRaw) ? iconRaw : "");
+  const icon = img ? "" : iconRaw || "💳";
+  const name = String(acc?.name || "").trim() || "บัญชี";
+
+  return { img, icon, name };
+}
+
+function AccountRow({ acc, selected, onSelect }) {
+  const { img, icon, name } = getAccountVisual(acc);
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all active:scale-[0.99] ${
+        selected ? "bg-gray-900/90 text-white border-white/10" : "bg-white/15 text-gray-900 border-white/15 hover:bg-white/20"
+      }`}
+    >
+      {img ? (
+        <span className={`w-8 h-8 rounded-xl overflow-hidden shrink-0 ${selected ? "bg-white/10" : "bg-white/20"} border border-white/15`}>
+          <img src={img} alt="acc" className="w-full h-full object-cover" />
+        </span>
+      ) : (
+        <span className="text-xl shrink-0">{icon || "💳"}</span>
+      )}
+      <span className={`text-sm font-extrabold truncate ${selected ? "text-white" : "text-gray-900"}`}>{name}</span>
+      {selected ? <Check size={16} className="ml-auto shrink-0" /> : null}
+    </button>
+  );
+}
+
+// ✅ Custom dropdown (because <option> cannot render images)
+function AccountDropdown({ accounts, value, onChange, className = "" }) {
+  const wrapRef = useRef(null);
+  const btnRef = useRef(null);
+  const listRef = useRef(null);
+
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  const selectedAcc = useMemo(() => (accounts || []).find((a) => a.id === value) || null, [accounts, value]);
+  const selectedVisual = useMemo(() => getAccountVisual(selectedAcc || {}), [selectedAcc]);
+
+  // close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      const el = wrapRef.current;
+      if (!el) return;
+      if (!el.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+    };
+  }, [open]);
+
+  // keep activeIndex in sync
+  useEffect(() => {
+    if (!open) return;
+    const idx = (accounts || []).findIndex((a) => a.id === value);
+    setActiveIndex(idx >= 0 ? idx : 0);
+    // focus list for keyboard nav
+    setTimeout(() => listRef.current?.focus?.(), 0);
+  }, [open, accounts, value]);
+
+  const toggle = () => setOpen((v) => !v);
+
+  const selectByIndex = (idx) => {
+    const a = (accounts || [])[idx];
+    if (!a) return;
+    onChange?.(a.id);
+    setOpen(false);
+    btnRef.current?.focus?.();
+  };
+
+  const onButtonKeyDown = (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setOpen(true);
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setOpen(true);
+      return;
+    }
+  };
+
+  const onListKeyDown = (e) => {
+    const max = (accounts || []).length - 1;
+    if (max < 0) return;
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      btnRef.current?.focus?.();
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(max, (i < 0 ? 0 : i + 1)));
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(0, (i < 0 ? 0 : i - 1)));
+      return;
+    }
+
+    if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIndex(0);
+      return;
+    }
+
+    if (e.key === "End") {
+      e.preventDefault();
+      setActiveIndex(max);
+      return;
+    }
+
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0) selectByIndex(activeIndex);
+      return;
+    }
+  };
+
+  return (
+    <div ref={wrapRef} className={`relative ${className}`}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        onKeyDown={onButtonKeyDown}
+        className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900 bg-white/30 flex items-center gap-3"
+        aria-haspopup="listbox"
+        aria-expanded={open ? "true" : "false"}
+      >
+        {selectedVisual?.img ? (
+          <span className="w-8 h-8 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0">
+            <img src={selectedVisual.img} alt="acc" className="w-full h-full object-cover" />
+          </span>
+        ) : (
+          <span className="text-xl shrink-0">{selectedVisual?.icon || "💳"}</span>
+        )}
+
+        <span className="truncate">{selectedVisual?.name || "เลือกบัญชี"}</span>
+        <span className="ml-auto text-gray-900/60">▾</span>
+      </button>
+
+      {open ? (
+        <div className="absolute left-0 right-0 mt-2 z-[60]">
+          <div className="glass-card rounded-2xl border border-white/20 p-2 shadow-xl bg-white/20 backdrop-blur">
+            <div
+              ref={listRef}
+              tabIndex={0}
+              role="listbox"
+              aria-label="accounts"
+              onKeyDown={onListKeyDown}
+              className="outline-none max-h-64 overflow-auto no-scrollbar"
+            >
+              <div className="space-y-2">
+                {(accounts || []).map((acc, idx) => {
+                  const selected = acc.id === value;
+                  const active = idx === activeIndex;
+                  return (
+                    <div
+                      key={acc.id}
+                      className={`${active ? "ring-2 ring-gray-900/40 rounded-xl" : ""}`}
+                      onMouseEnter={() => setActiveIndex(idx)}
+                    >
+                      <AccountRow acc={acc} selected={selected} onSelect={() => selectByIndex(idx)} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // ===== merchant memory helpers =====
 function normalizeMerchantKey(s) {
@@ -929,17 +1129,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   // ===== UI helpers =====
   const renderAccountSelect = (value, onChange) => (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900 bg-white/30"
-    >
-      {accounts.map((a) => (
-        <option key={a.id} value={a.id}>
-          {a.icon} {a.name}
-        </option>
-      ))}
-    </select>
+    <AccountDropdown accounts={accounts} value={value} onChange={onChange} />
   );
 
   const selectedAccountName = useMemo(
@@ -1486,6 +1676,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4">
                 {accounts.map((acc) => {
                   const isSelected = accountId === acc.id;
+                  const { img, icon, name } = getAccountVisual(acc);
+
                   return (
                     <button
                       key={acc.id}
@@ -1497,14 +1689,14 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                       }`}
                       type="button"
                     >
-                      {acc.image ? (
+                      {img ? (
                         <span className="w-7 h-7 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0">
-                          <img src={acc.image} alt="acc" className="w-full h-full object-cover" />
+                          <img src={img} alt="acc" className="w-full h-full object-cover" />
                         </span>
                       ) : (
-                        <span className="text-xl">{acc.icon || "💳"}</span>
+                        <span className="text-xl">{icon || "💳"}</span>
                       )}
-                      <span className="text-sm font-extrabold">{acc.name}</span>
+                      <span className="text-sm font-extrabold">{name}</span>
                       {isSelected ? <Check size={14} className="ml-1" /> : null}
                     </button>
                   );
