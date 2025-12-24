@@ -1,6 +1,14 @@
 // src/views/StatsView.jsx
 import { useMemo, useState } from "react";
-import { Activity, TrendingUp, TrendingDown, Sparkles, PieChart as PieIcon, BarChart3, CalendarDays } from "lucide-react";
+import {
+  Activity,
+  TrendingUp,
+  TrendingDown,
+  Sparkles,
+  PieChart as PieIcon,
+  BarChart3,
+  CalendarDays,
+} from "lucide-react";
 import {
   ResponsiveContainer,
   PieChart,
@@ -28,6 +36,7 @@ function safeNumber(n) {
 }
 
 function getPeriodLabel(period) {
+  if (period === "today") return "วันนี้";
   if (period === "week") return "7 วันล่าสุด";
   if (period === "month") return "เดือนนี้";
   if (period === "year") return "ปีนี้";
@@ -35,6 +44,7 @@ function getPeriodLabel(period) {
 }
 
 function getPeriodStart(period, now) {
+  if (period === "today") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if (period === "week") return new Date(now.getTime() - 7 * 86400000);
   if (period === "month") return new Date(now.getFullYear(), now.getMonth(), 1);
   if (period === "year") return new Date(now.getFullYear(), 0, 1);
@@ -94,17 +104,17 @@ function CatIcon({ icon, color, title }) {
 
 export default function StatsView() {
   const { state } = useAppStore();
-  const [period, setPeriod] = useState("month"); // week | month | year
+  const [period, setPeriod] = useState("month"); // today | week | month | year
 
   const now = useMemo(() => new Date(), []);
+  const todayIso = useMemo(() => toISODateSafe(now), [now]);
+
   const periodLabel = useMemo(() => getPeriodLabel(period), [period]);
   const periodStart = useMemo(() => getPeriodStart(period, now), [period, now]);
 
-  // ✅ Today's expense (global, not tied to selected period)
+  // ✅ Today's expense (global KPI, not tied to selected period)
   const todayExpense = useMemo(() => {
-    const todayIso = toISODateSafe(now); // local timezone
     let sum = 0;
-
     for (const t of state.transactions || []) {
       if (t?.isTransfer) continue;
       if (t?.type !== "expense") continue;
@@ -112,18 +122,23 @@ export default function StatsView() {
       if (iso === todayIso) sum += safeNumber(t.amount);
     }
     return sum;
-  }, [state.transactions, now]);
+  }, [state.transactions, todayIso]);
 
   const filtered = useMemo(() => {
     return (state.transactions || []).filter((t) => {
       if (t.isTransfer) return false;
+
+      if (period === "today") {
+        return toISODateSafe(t?.date) === todayIso;
+      }
+
       const d = parseDateSafe(t.date);
       if (period === "week") return d >= periodStart;
       if (period === "month") return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
       if (period === "year") return d.getFullYear() === now.getFullYear();
       return true;
     });
-  }, [state.transactions, period, periodStart, now]);
+  }, [state.transactions, period, periodStart, now, todayIso]);
 
   const totals = useMemo(() => {
     let income = 0;
@@ -137,9 +152,13 @@ export default function StatsView() {
 
     const net = income - expense;
 
+    // avg spend per day (use days in the period window)
     const start = periodStart;
     const end = now;
-    const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
+
+    // For "today", keep it sane as 1 day even if time diff is small.
+    const daysRaw = Math.ceil((end.getTime() - start.getTime()) / 86400000);
+    const days = Math.max(1, daysRaw);
     const avgSpendPerDay = expense / days;
 
     return { income, expense, net, avgSpendPerDay, days };
@@ -160,7 +179,7 @@ export default function StatsView() {
         return {
           id: catId,
           name: cat.name || "ไม่ทราบหมวด",
-          icon: cat.icon || "❓", // ✅ FIX: keep icon for stats page
+          icon: cat.icon || "❓",
           value,
           color: cat.color || "#cbd5e1",
         };
@@ -229,6 +248,7 @@ export default function StatsView() {
       {/* Period segmented */}
       <div className="glass-panel p-1 rounded-2xl mb-5 flex">
         {[
+          { id: "today", label: "วันนี้" },
           { id: "week", label: "7 วัน" },
           { id: "month", label: "เดือนนี้" },
           { id: "year", label: "ปีนี้" },
@@ -269,7 +289,7 @@ export default function StatsView() {
           sub={hasAny ? (totals.net >= 0 ? "กำไรสุทธิ" : "ขาดดุลสุทธิ") : ""}
           icon={<Sparkles size={18} />}
         />
-        {/* ✅ NEW: Today expense */}
+        {/* KPI: Today's expense (global) */}
         <GlassKpiCard
           tone="today"
           title="ค่าใช้จ่ายวันนี้"
@@ -339,7 +359,6 @@ export default function StatsView() {
                     <div key={it.id} className="glass-panel border border-white/20 rounded-2xl p-3">
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          {/* ✅ FIX: show category icon */}
                           <CatIcon icon={it.icon} color={it.color} title={it.name} />
 
                           <div className="min-w-0">
