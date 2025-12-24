@@ -26,15 +26,49 @@ import { PRESET_COLORS } from "../constants/presets.jsx";
 import { isDuplicateByRef, toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors";
 import { groupReceiptItemsToCategory, sanitizeCategoryKey } from "../utils/receiptCategorizer";
 
-const toArabicDigits = (s) => {
-  const th = "๐๑๒๓๔๕๖๗๘๙";
-  return String(s || "").replace(/[๐-๙]/g, (ch) => {
-    const idx = th.indexOf(ch);
-    return idx >= 0 ? String(idx) : ch;
-  });
-};
+const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
-const digitsOnly = (s) => toArabicDigits(String(s || "")).replace(/[^\d]/g, "");
+// ===== merchant memory helpers =====
+function normalizeMerchantKey(s) {
+  const t = String(s || "").trim().toLowerCase();
+  if (!t) return "";
+  // keep thai/eng/numbers, collapse spaces
+  return t
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[^\wก-๙\s-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractMerchantFromNote(note) {
+  const t = String(note || "").trim();
+  if (!t) return "";
+  // Many notes are like: "ShopName • หมวด • item1,item2"
+  const parts = t.split("•").map((x) => x.trim()).filter(Boolean);
+  return parts[0] || t.slice(0, 48);
+}
+
+function appendEvidenceToNote(note, evidence, maxLen = 180) {
+  const base = String(note || "").trim();
+  const ev = String(evidence || "").trim();
+  if (!ev) return base;
+
+  // Avoid duplicating evidence if already included
+  const baseLower = base.toLowerCase();
+  const evLower = ev.toLowerCase();
+  if (baseLower.includes(evLower.slice(0, 24))) return base;
+
+  const suffix = ` • ${ev}`;
+  const out = (base ? base + suffix : ev).trim();
+  if (out.length <= maxLen) return out;
+
+  // trim evidence part first
+  if (!base) return out.slice(0, maxLen);
+
+  const room = Math.max(0, maxLen - (base.length + 3));
+  if (room <= 12) return base.slice(0, maxLen);
+  return `${base} • ${ev.slice(0, room)}`.trim();
+}
 
 function hashString(str) {
   let h = 0;
@@ -43,35 +77,15 @@ function hashString(str) {
   return h;
 }
 
-function getAccountDigitsCandidate(a) {
-  // ✅ ทำให้ robust: รองรับหลาย field เผื่อ store ของคุณชื่อไม่เหมือนกัน
-  const raw =
-    a?.accountNumber ??
-    a?.number ??
-    a?.accNumber ??
-    a?.accountNo ??
-    a?.bankAccount ??
-    a?.cardNumber ??
-    a?.last4 ??
-    a?.lastDigits ??
-    a?.ref ??
-    a?.note ??
-    a?.details ??
-    "";
-  return digitsOnly(raw);
-}
-
 function bestMatchAccountId(accounts, digits) {
   const d = digitsOnly(digits);
   if (!d || d.length < 3) return "";
 
   let best = { id: "", score: 0 };
-
-  for (const a of accounts || []) {
-    const n = getAccountDigitsCandidate(a);
+  for (const a of accounts) {
+    const n = digitsOnly(a.accountNumber);
     if (!n) continue;
 
-    // match by suffix
     const aLast = n.slice(-Math.min(n.length, 12));
     const dLast = d.slice(-Math.min(d.length, 12));
 
@@ -81,9 +95,7 @@ function bestMatchAccountId(accounts, digits) {
 
     if (score > best.score) best = { id: a.id, score };
   }
-
-  // ✅ กัน false-positive: ต้อง match อย่างน้อย 3 หลัก
-  return best.score >= 3 ? best.id : "";
+  return best.id;
 }
 
 function categoryNameFromKey(key) {
@@ -140,12 +152,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const accounts = state.accounts || [];
   const categories = state.categories || { expense: [], income: [] };
 
-  const expenseCats = categories.expense || [];
-  const incomeCats = categories.income || [];
-
-  const firstExpenseId = expenseCats?.[0]?.id || "";
-  const firstIncomeId = incomeCats?.[0]?.id || "";
-
   // ===== transfer edit pair =====
   const transferPair = useMemo(() => {
     if (!initialData?.isTransfer || !initialData?.transferId) return null;
@@ -162,7 +168,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   // ===== manual form states =====
   const initialType = initialData?.isTransfer ? "transfer" : initialData?.type || "expense";
   const [type, setType] = useState(initialType); // expense | income | transfer
-
   const [amountDigits, setAmountDigits] = useState(() => {
     const n = transferPair?.outTx?.amount ?? initialData?.amount ?? 0;
     return n ? String(Math.round(Math.abs(n))) : "";
@@ -170,7 +175,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   const [categoryId, setCategoryId] = useState(() => {
     if (initialData?.isTransfer) return "transfer";
-    return initialData?.category || (initialType === "income" ? firstIncomeId : firstExpenseId) || "";
+    return initialData?.category || "";
   });
 
   const [accountId, setAccountId] = useState(initialData?.accountId || accounts?.[0]?.id || "");
@@ -206,7 +211,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const fileInputRef = useRef(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState("");
-  const [queue, setQueue] = useState([]);
+  const [queue, setQueue] = useState([]); // queue items
   const [expandedId, setExpandedId] = useState(null);
 
   const existingRefSet = useMemo(() => {
@@ -218,7 +223,100 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return set;
   }, [state.transactions]);
 
+  const expenseCats = categories.expense || [];
+  const incomeCats = categories.income || [];
+
+  // ✅ กันการสร้าง category ซ้ำใน "batch scan" เดียวกัน
   const createdCatRef = useRef({ expense: new Map(), income: new Map() });
+
+  // ====== merchant/category memory (from history) ======
+  const categoryMemory = useMemo(() => {
+    const txs = state.transactions || [];
+
+    // Map key -> Map(categoryId -> score)
+    const merchantScores = new Map(); // `${type}|${merchantKey}`
+    const digitsScores = new Map(); // `${type}|${lastDigitsKey}`
+
+    const addScore = (map, key, catId, w = 1) => {
+      if (!key || !catId) return;
+      if (!map.has(key)) map.set(key, new Map());
+      const m = map.get(key);
+      m.set(catId, (m.get(catId) || 0) + (Number.isFinite(w) ? w : 1));
+    };
+
+    const pickBest = (map, key) => {
+      const m = map.get(key);
+      if (!m) return "";
+      let best = "";
+      let bestV = -1;
+      for (const [cat, v] of m.entries()) {
+        if (v > bestV) {
+          bestV = v;
+          best = cat;
+        }
+      }
+      return best;
+    };
+
+    for (const t of txs) {
+      const txType = t?.type === "income" ? "income" : t?.type === "expense" ? "expense" : "";
+      if (!txType) continue;
+
+      const catId = String(t?.category || "").trim();
+      if (!catId) continue;
+
+      const amt = Math.abs(Number(t?.amount) || 0) || 1;
+
+      // merchant: prefer explicit field, else infer from note
+      const merchantText = String(t?.merchant || extractMerchantFromNote(t?.note) || "").trim();
+      const mKey = normalizeMerchantKey(merchantText);
+      if (mKey) addScore(merchantScores, `${txType}|${mKey}`, catId, amt);
+
+      // digits memory: store last 4-6 digits of any saved from/to
+      const dRaw =
+        digitsOnly(t?.counterparty_digits) ||
+        digitsOnly(t?.to_account) ||
+        digitsOnly(t?.from_account) ||
+        digitsOnly(t?.toAccount) ||
+        digitsOnly(t?.fromAccount) ||
+        "";
+
+      if (dRaw && dRaw.length >= 4) {
+        const dKey = dRaw.slice(-6);
+        addScore(digitsScores, `${txType}|${dKey}`, catId, amt);
+      }
+    }
+
+    // helper: validate category exists
+    const existsInList = (txType, catId) => {
+      if (!catId) return false;
+      const list = txType === "income" ? incomeCats : expenseCats;
+      return list.some((c) => c.id === catId);
+    };
+
+    const suggestCategoryId = (txType, merchant, fromDigits, toDigits) => {
+      if (txType !== "expense" && txType !== "income") return "";
+      const mKey = normalizeMerchantKey(merchant);
+      const d = digitsOnly(toDigits || fromDigits);
+      const dKey = d && d.length >= 4 ? d.slice(-6) : "";
+
+      // Try merchant first
+      if (mKey) {
+        const c1 = pickBest(merchantScores, `${txType}|${mKey}`);
+        if (existsInList(txType, c1)) return c1;
+      }
+
+      // Then try digits
+      if (dKey) {
+        const c2 = pickBest(digitsScores, `${txType}|${dKey}`);
+        if (existsInList(txType, c2)) return c2;
+      }
+
+      return "";
+    };
+
+    return { suggestCategoryId };
+  }, [state.transactions, expenseCats, incomeCats]);
 
   const cleanupQueuePreviews = () => {
     for (const it of queue) {
@@ -242,21 +340,25 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     const list = categories[typeForCat] || [];
     const key = sanitizeCategoryKey(scannedCategory);
 
+    // 0) if already created in this scan session
     const mem = createdCatRef.current?.[typeForCat];
     if (mem && key && mem.has(key)) return mem.get(key);
 
+    // 1) direct known id mapping
     const knownId = mapKnownCategoryId(typeForCat, key);
     if (knownId && list.some((c) => c.id === knownId)) {
       if (mem && key) mem.set(key, knownId);
       return knownId;
     }
 
+    // 2) existing by id / contains / name match
     const found = list.find((c) => c.id === key || key.includes(c.id) || c.name?.toLowerCase?.() === key);
     if (found) {
       if (mem && key) mem.set(key, found.id);
       return found.id;
     }
 
+    // 3) auto-create
     let slug =
       key
         .replace(/[^a-z0-9ก-๙]+/gi, "_")
@@ -293,6 +395,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         const groups = Array.isArray(x.groups) ? x.groups.slice() : [];
         if (!groups[gidx]) return x;
         groups[gidx] = { ...groups[gidx], ...patch };
+        // keep tx amount aligned with groups sum when split enabled
         const sum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
         return { ...x, groups, amount: x.splitByCategory ? sum : x.amount };
       })
@@ -318,7 +421,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   const handleFilesSelected = async (e) => {
     const files = Array.from(e.target.files || []);
-    e.target.value = "";
+    e.target.value = ""; // ✅ allow reselect same file
 
     if (!files.length) {
       showAlert?.("ไม่พบรูปที่เลือก");
@@ -360,6 +463,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             items: [],
             groups: [],
             splitByCategory: false,
+
+            // memory helpers
+            fromDigits: "",
+            toDigits: "",
+            suggestedCategoryId: "",
+            suggestedReason: "",
           },
         ]);
 
@@ -381,7 +490,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const noteText = String(result?.note || "").trim();
           const mergedNote = noteText || merchant || "";
 
-          const contextText = `${merchant} ${noteText} ${String(result?.evidence || "")}`.trim();
+          const evidenceText = String(result?.evidence || "").trim();
+
+          const contextText = `${merchant} ${noteText} ${evidenceText}`.trim();
           const rref = String(result?.ref || "").trim();
 
           const fromDigits = digitsOnly(result?.from_account);
@@ -394,25 +505,22 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           if (txType === "transfer") {
             detectedFromId = bestMatchAccountId(accounts, fromDigits) || accounts?.[0]?.id || "";
             detectedToId = bestMatchAccountId(accounts, toDigits) || accounts?.[0]?.id || "";
-
-            // ✅ กันเลือกบัญชีเดียวกัน (ถ้ามีหลายบัญชี)
-            if (detectedFromId && detectedToId && detectedFromId === detectedToId) {
-              detectedToId = accounts.find((a) => a.id !== detectedFromId)?.id || detectedToId;
-            }
           } else {
             detectedAccountId =
               bestMatchAccountId(accounts, fromDigits) ||
               bestMatchAccountId(accounts, toDigits) ||
+              accountId ||
               accounts?.[0]?.id ||
               "";
           }
 
-          // ===== multi-line items -> group by category
+          // ====== ✅ Multi-line items -> group by category
           const scannedItems = Array.isArray(result?.items) ? result.items : [];
 
-          const fallbackKey =
-            sanitizeCategoryKey(result?.category) || sanitizeCategoryKey(result?.category_key) || "other";
+          // First choose a primary category key (fallback) from result.category or context
+          const fallbackKey = sanitizeCategoryKey(result?.category) || sanitizeCategoryKey(result?.category_key) || "other";
 
+          // group items (only meaningful for expense/income; transfer ignore)
           let groups = [];
           let primaryKey = fallbackKey;
 
@@ -420,6 +528,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             const grouped = groupReceiptItemsToCategory(txType, scannedItems, contextText, fallbackKey);
             primaryKey = grouped.primaryKey || fallbackKey;
 
+            // map groups -> real categoryId
             groups = (grouped.groups || []).map((g) => {
               const catId = ensureCategory(txType, g.key || "other");
               return {
@@ -431,9 +540,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             });
           }
 
+          // If groups exist but AI total differs: align q.amount to sum(groups) when split
           const groupSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
           const aiTotal = Number.isFinite(Number(amount)) ? Number(amount) : 0;
 
+          // default split decision:
+          // - split only for expense (most common)
+          // - only if >=2 groups and second group is significant
           let splitByCategory = false;
           if (txType === "expense" && groups.length >= 2) {
             const g0 = groups[0]?.amount || 0;
@@ -441,12 +554,30 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             const total = groupSum || aiTotal || 1;
             const ratio2 = g1 / total;
             const ratio1 = g0 / total;
-            splitByCategory = ratio2 >= 0.2 && ratio1 <= 0.88;
+            splitByCategory = ratio2 >= 0.2 && ratio1 <= 0.88; // conservative
           }
 
+          // If no groups, fallback to single categoryId
           let detectedCategoryId = "";
           if (txType === "expense") detectedCategoryId = ensureCategory("expense", primaryKey || "other");
           if (txType === "income") detectedCategoryId = ensureCategory("income", primaryKey || "other");
+
+          // ====== ✅ Suggest/auto-select category by history (merchant/digits)
+          let suggestedCategoryId = "";
+          let suggestedReason = "";
+          if ((txType === "expense" || txType === "income") && !splitByCategory) {
+            const sug = categoryMemory?.suggestCategoryId?.(txType, merchant || mergedNote, fromDigits, toDigits) || "";
+            if (sug) {
+              // Only override when AI key is missing/other OR always (auto-select) — choose auto-select as requested
+              suggestedCategoryId = sug;
+              suggestedReason = merchant
+                ? `จำจากร้านเดิม: ${merchant}`
+                : toDigits || fromDigits
+                ? `จำจากเลขบัญชีเดิม: ${String(toDigits || fromDigits).slice(-6)}`
+                : "จำจากประวัติ";
+              detectedCategoryId = sug;
+            }
+          }
 
           const dup = rref ? batchRefSet.has(rref) || isDuplicateByRef(state.transactions || [], rref) : false;
           if (rref) batchRefSet.add(rref);
@@ -465,11 +596,16 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             toAccountId: detectedToId || (accounts?.[0]?.id || ""),
             duplicate: dup,
             includeDuplicate: !dup,
-            evidence: String(result?.evidence || "").slice(0, 240),
+            evidence: evidenceText.slice(0, 240),
             items: scannedItems,
             groups,
             splitByCategory,
             error: "",
+
+            fromDigits,
+            toDigits,
+            suggestedCategoryId,
+            suggestedReason,
           });
         } catch (err) {
           const msg = String(err?.message || err);
@@ -503,6 +639,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       } else {
         if (!q.accountId) return showAlert?.("กรุณาเลือกบัญชีให้ครบ");
 
+        // split: validate groups; non-split: validate categoryId
         if (q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length) {
           for (const g of q.groups) {
             if (!g.categoryId) return showAlert?.("กรุณาเลือกหมวดหมู่ให้ครบ (ในกลุ่มแยกหมวด)");
@@ -520,11 +657,15 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       const d = String(q.date || toISODate(new Date())).slice(0, 10);
       const noteText = String(q.note || "").trim();
       const merchant = String(q.merchant || "").trim();
-      const baseNote = noteText || merchant || "Scan";
+      const baseNoteRaw = noteText || merchant || "Scan";
+
+      // ✅ append evidence into note
+      const baseNote = appendEvidenceToNote(baseNoteRaw, q.evidence, 180);
 
       if (q.txType === "transfer") {
         const transferId = generateTransferId();
 
+        // store evidence + merchant + digits in transaction (for future memory)
         txs.push({
           id: generateId(),
           type: "expense",
@@ -537,6 +678,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           transferId,
           ref: q.ref || null,
           source: "scan",
+
+          merchant: merchant || null,
+          evidence: String(q.evidence || "").slice(0, 240) || null,
+          from_account: String(q.fromDigits || "").trim() || null,
+          to_account: String(q.toDigits || "").trim() || null,
+          counterparty_digits: String(q.toDigits || q.fromDigits || "").trim() || null,
         });
 
         txs.push({
@@ -551,21 +698,30 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           transferId,
           ref: q.ref || null,
           source: "scan",
+
+          merchant: merchant || null,
+          evidence: String(q.evidence || "").slice(0, 240) || null,
+          from_account: String(q.fromDigits || "").trim() || null,
+          to_account: String(q.toDigits || "").trim() || null,
+          counterparty_digits: String(q.toDigits || q.fromDigits || "").trim() || null,
         });
 
         continue;
       }
 
+      // ✅ Split by category (expense only)
       if (q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length >= 2) {
         const groups = q.groups
           .map((g) => ({ ...g, amount: Number(g.amount) || 0 }))
           .filter((g) => g.amount > 0);
 
+        // sort stable
         groups.sort((a, b) => b.amount - a.amount);
 
         groups.forEach((g, idx) => {
           const itemsTxt = Array.isArray(g.names) && g.names.length ? ` • ${g.names.join(", ")}` : "";
-          const groupNote = `${baseNote} • ${categoryNameFromKey(g.key)}${itemsTxt}`.slice(0, 180);
+          const groupNoteRaw = `${baseNoteRaw} • ${categoryNameFromKey(g.key)}${itemsTxt}`.slice(0, 180);
+          const groupNote = appendEvidenceToNote(groupNoteRaw, q.evidence, 180);
 
           txs.push({
             id: generateId(),
@@ -577,14 +733,22 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             note: groupNote,
             isTransfer: false,
             transferId: null,
+            // ✅ ref ใส่เฉพาะรายการแรก เพื่อลดการโดน flag duplicate ในอนาคต
             ref: idx === 0 ? (q.ref || null) : null,
             source: "scan",
+
+            merchant: merchant || null,
+            evidence: String(q.evidence || "").slice(0, 240) || null,
+            from_account: String(q.fromDigits || "").trim() || null,
+            to_account: String(q.toDigits || "").trim() || null,
+            counterparty_digits: String(q.toDigits || q.fromDigits || "").trim() || null,
           });
         });
 
         continue;
       }
 
+      // single transaction (income/expense)
       txs.push({
         id: generateId(),
         type: q.txType === "income" ? "income" : "expense",
@@ -597,6 +761,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         transferId: null,
         ref: q.ref || null,
         source: "scan",
+
+        // ✅ persist scan metadata for future auto-suggest
+        merchant: merchant || null,
+        evidence: String(q.evidence || "").slice(0, 240) || null,
+        from_account: String(q.fromDigits || "").trim() || null,
+        to_account: String(q.toDigits || "").trim() || null,
+        counterparty_digits: String(q.toDigits || q.fromDigits || "").trim() || null,
       });
     }
 
@@ -610,72 +781,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
     const d = String(date || toISODate(new Date())).slice(0, 10);
     const noteText = String(note || "").trim();
-    const refText = String(ref || "").trim() || null;
-
-    // ✅ กรณี edit แล้วเดิมเป็น transfer แต่ผู้ใช้เลือกเป็น expense/income
-    if (isEditMode && initialData?.isTransfer && type !== "transfer" && transferPair) {
-      const keepId = initialData.id;
-      const otherId = transferPair.outTx.id === keepId ? transferPair.inTx.id : transferPair.outTx.id;
-
-      if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
-      if (!categoryId) return showAlert?.("กรุณาเลือกหมวดหมู่");
-
-      deleteTransaction(otherId);
-      upsertTransaction({
-        id: keepId,
-        type: type === "income" ? "income" : "expense",
-        amount: amountNumber,
-        category: categoryId,
-        accountId,
-        date: d,
-        note: noteText,
-        isTransfer: false,
-        transferId: null,
-        ref: refText,
-        source: "manual",
-      });
-      return;
-    }
-
-    // ✅ กรณี edit แล้วเดิมเป็น non-transfer แต่ผู้ใช้เปลี่ยนเป็น transfer
-    if (isEditMode && !initialData?.isTransfer && type === "transfer") {
-      if (!fromAccountId || !toAccountId) return showAlert?.("กรุณาเลือกบัญชีต้นทางและปลายทาง");
-      if (fromAccountId === toAccountId) return showAlert?.("บัญชีต้นทาง/ปลายทางต้องไม่ใช่บัญชีเดียวกัน");
-
-      const transferId = generateTransferId();
-      const outId = initialData?.id || generateId();
-      const inId = generateId();
-
-      bulkUpsertTransactions([
-        {
-          id: outId,
-          type: "expense",
-          amount: amountNumber,
-          category: "transfer",
-          accountId: fromAccountId,
-          date: d,
-          note: noteText || "Transfer",
-          isTransfer: true,
-          transferId,
-          ref: refText,
-          source: "transfer",
-        },
-        {
-          id: inId,
-          type: "income",
-          amount: amountNumber,
-          category: "transfer",
-          accountId: toAccountId,
-          date: d,
-          note: noteText || "Transfer",
-          isTransfer: true,
-          transferId,
-          ref: refText,
-          source: "transfer",
-        },
-      ]);
-      return;
-    }
 
     if (type === "transfer") {
       if (!fromAccountId || !toAccountId) return showAlert?.("กรุณาเลือกบัญชีต้นทางและปลายทาง");
@@ -696,7 +801,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           note: noteText || "Transfer",
           isTransfer: true,
           transferId,
-          ref: refText,
+          ref: String(ref || "").trim() || null,
           source: "transfer",
         },
         {
@@ -709,7 +814,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           note: noteText || "Transfer",
           isTransfer: true,
           transferId,
-          ref: refText,
+          ref: String(ref || "").trim() || null,
           source: "transfer",
         },
       ]);
@@ -729,7 +834,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       note: noteText,
       isTransfer: false,
       transferId: null,
-      ref: refText,
+      ref: String(ref || "").trim() || null,
       source: "manual",
     });
   };
@@ -769,6 +874,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     navigate("dashboard");
   };
 
+  // ===== UI helpers =====
   const renderAccountSelect = (value, onChange) => (
     <select
       value={value}
@@ -787,41 +893,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     () => accounts.find((a) => a.id === accountId)?.name || "",
     [accounts, accountId]
   );
-
-  const setQueueTxType = (q, nextType) => {
-    if (!q?.id) return;
-
-    if (nextType === "transfer") {
-      const fromId = q.fromAccountId || q.accountId || accounts?.[0]?.id || "";
-      let toId = q.toAccountId || accounts.find((a) => a.id !== fromId)?.id || fromId;
-
-      if (fromId && toId && fromId === toId) toId = accounts.find((a) => a.id !== fromId)?.id || toId;
-
-      updateQueueItem(q.id, {
-        txType: "transfer",
-        categoryId: "transfer",
-        splitByCategory: false,
-        groups: [],
-        accountId: q.accountId || accounts?.[0]?.id || "",
-        fromAccountId: fromId,
-        toAccountId: toId,
-      });
-      return;
-    }
-
-    // expense/income
-    const list = nextType === "income" ? incomeCats : expenseCats;
-    const fallbackCatId = list?.[0]?.id || ensureCategory(nextType, "other") || "";
-    const nextCatId = list.some((c) => c.id === q.categoryId) ? q.categoryId : fallbackCatId;
-
-    updateQueueItem(q.id, {
-      txType: nextType,
-      accountId: q.accountId || q.fromAccountId || q.toAccountId || accounts?.[0]?.id || "",
-      categoryId: nextCatId,
-      // income: ไม่แยกหมวด
-      ...(nextType === "income" ? { splitByCategory: false, groups: [] } : {}),
-    });
-  };
 
   return (
     <div className="pb-28 pt-6 px-4 min-h-dvh">
@@ -899,7 +970,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   <Sparkles size={18} className="text-indigo-600" />
                   Scan ใบเสร็จ / Slip
                 </div>
-                <div className="text-xs text-gray-800/60 mt-1">เลือกได้หลายรูป • รองรับแยกหมวดจากหลายบรรทัด</div>
+                <div className="text-xs text-gray-800/60 mt-1">
+                  เลือกได้หลายรูป • แนบ evidence ลง note อัตโนมัติ • จำหมวดจากร้าน/เลขบัญชีเดิมได้
+                </div>
               </div>
 
               <button
@@ -945,9 +1018,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   type="button"
                   onClick={createTransactionsFromQueue}
                   className={`px-4 py-2 rounded-xl font-extrabold text-sm active:scale-95 ${
-                    canCreateFromQueue
-                      ? "bg-indigo-600 text-white"
-                      : "bg-white/30 text-gray-700/60 border border-white/20"
+                    canCreateFromQueue ? "bg-indigo-600 text-white" : "bg-white/30 text-gray-700/60 border border-white/20"
                   }`}
                   disabled={!canCreateFromQueue}
                 >
@@ -965,9 +1036,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                     <div key={q.id} className="glass-card rounded-3xl overflow-hidden">
                       <div className="p-4 flex gap-3">
                         <div className="w-14 h-14 rounded-2xl overflow-hidden border border-white/15 bg-white/20 shrink-0">
-                          {q.previewUrl ? (
-                            <img src={q.previewUrl} alt="preview" className="w-full h-full object-cover" />
-                          ) : null}
+                          {q.previewUrl ? <img src={q.previewUrl} alt="preview" className="w-full h-full object-cover" /> : null}
                         </div>
 
                         <div className="min-w-0 flex-1">
@@ -999,14 +1068,16 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                 Multi-category
                               </span>
                             ) : null}
+
+                            {q.suggestedCategoryId ? (
+                              <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-sky-500/15 text-sky-700 border border-sky-500/20">
+                                Suggested
+                              </span>
+                            ) : null}
                           </div>
 
                           <div className="mt-2 text-sm font-extrabold text-gray-900 truncate">
-                            {q.amount
-                              ? formatCurrency(q.amount)
-                              : q.status === "error"
-                              ? "สแกนไม่สำเร็จ"
-                              : "กำลังประมวลผล..."}
+                            {q.amount ? formatCurrency(q.amount) : q.status === "error" ? "สแกนไม่สำเร็จ" : "กำลังประมวลผล..."}
                           </div>
 
                           <div className="mt-1 text-xs text-gray-800/60 truncate">
@@ -1014,8 +1085,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                             {q.ref ? <span className="ml-2 text-gray-800/50">• Ref {q.ref}</span> : null}
                           </div>
 
-                          {q.status === "error" ? (
-                            <div className="mt-2 text-xs text-red-700 break-words">{q.error}</div>
+                          {q.status === "error" ? <div className="mt-2 text-xs text-red-700 break-words">{q.error}</div> : null}
+
+                          {q.suggestedReason ? (
+                            <div className="mt-1 text-[11px] text-sky-800/70 truncate">{q.suggestedReason}</div>
                           ) : null}
                         </div>
 
@@ -1044,28 +1117,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                       {/* Expand */}
                       {isOpen && q.status === "ready" ? (
                         <div className="p-4 border-t border-white/15 bg-white/10">
-                          {/* ✅ Tx Type Switch (แก้ประเภทได้หลัง Scan) */}
-                          <div className="glass-panel border border-white/20 p-1.5 rounded-2xl flex mb-3">
-                            {[
-                              { id: "expense", label: "รายจ่าย" },
-                              { id: "income", label: "รายรับ" },
-                              { id: "transfer", label: "Transfer" },
-                            ].map((t) => (
-                              <button
-                                key={t.id}
-                                onClick={() => setQueueTxType(q, t.id)}
-                                className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all ${
-                                  q.txType === t.id
-                                    ? "bg-gray-900/90 text-white shadow-sm"
-                                    : "text-gray-800/60 hover:bg-white/10"
-                                }`}
-                                type="button"
-                              >
-                                {t.label}
-                              </button>
-                            ))}
-                          </div>
-
                           {/* Duplicate toggle */}
                           {q.duplicate ? (
                             <div className="glass-panel border border-amber-500/20 rounded-2xl p-3 mb-3 flex items-center justify-between gap-3">
@@ -1172,9 +1223,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                   <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
                                     <ArrowRightLeft size={14} /> บัญชีต้นทาง
                                   </div>
-                                  {renderAccountSelect(q.fromAccountId, (v) =>
-                                    updateQueueItem(q.id, { fromAccountId: v })
-                                  )}
+                                  {renderAccountSelect(q.fromAccountId, (v) => updateQueueItem(q.id, { fromAccountId: v }))}
                                 </div>
 
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
@@ -1191,6 +1240,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                   {renderAccountSelect(q.accountId, (v) => updateQueueItem(q.id, { accountId: v }))}
                                 </div>
 
+                                {/* Split groups editor */}
                                 {q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length >= 2 ? (
                                   <div className="glass-panel border border-emerald-500/15 rounded-2xl p-3">
                                     <div className="text-xs font-bold text-gray-900/70 mb-2">แยกหมวดจากบรรทัดในบิล</div>
@@ -1202,9 +1252,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                               <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
                                               <select
                                                 value={g.categoryId || ""}
-                                                onChange={(e) =>
-                                                  updateQueueGroup(q.id, idx, { categoryId: e.target.value })
-                                                }
+                                                onChange={(e) => updateQueueGroup(q.id, idx, { categoryId: e.target.value })}
                                                 className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
                                               >
                                                 <option value="" disabled>
@@ -1226,9 +1274,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                               <input
                                                 type="number"
                                                 value={g.amount ?? 0}
-                                                onChange={(e) =>
-                                                  updateQueueGroup(q.id, idx, { amount: Number(e.target.value || 0) })
-                                                }
+                                                onChange={(e) => updateQueueGroup(q.id, idx, { amount: Number(e.target.value || 0) })}
                                                 className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
                                               />
                                               <div className="text-[10px] text-gray-900/55 mt-1 truncate">
@@ -1239,14 +1285,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                         </div>
                                       ))}
                                     </div>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => navigate("categories")}
-                                      className="mt-3 w-full py-2.5 rounded-2xl bg-white/25 border border-white/15 text-gray-900 font-extrabold text-xs active:scale-95"
-                                    >
-                                      จัดการหมวดหมู่
-                                    </button>
                                   </div>
                                 ) : (
                                   <div className="glass-panel border border-white/20 rounded-2xl p-3">
@@ -1266,13 +1304,11 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                       ))}
                                     </select>
 
-                                    <button
-                                      type="button"
-                                      onClick={() => navigate("categories")}
-                                      className="mt-3 w-full py-2.5 rounded-2xl bg-white/25 border border-white/15 text-gray-900 font-extrabold text-xs active:scale-95"
-                                    >
-                                      จัดการหมวดหมู่
-                                    </button>
+                                    {q.suggestedCategoryId ? (
+                                      <div className="mt-2 text-[11px] text-sky-900/70">
+                                        Suggested จากประวัติแล้ว (แก้ได้ตามต้องการ)
+                                      </div>
+                                    ) : null}
                                   </div>
                                 )}
                               </div>
@@ -1329,12 +1365,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 key={t.id}
                 onClick={() => {
                   setType(t.id);
-                  if (t.id === "transfer") {
-                    setCategoryId("transfer");
-                    return;
-                  }
-                  if (t.id === "income") setCategoryId(firstIncomeId || categoryId || "");
-                  else setCategoryId(firstExpenseId || categoryId || "");
+                  if (t.id === "transfer") setCategoryId("transfer");
                 }}
                 className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
                   type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
@@ -1346,8 +1377,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             ))}
           </div>
 
+          {/* Amount */}
           <AmountField value={amountDigits} onChange={setAmountDigits} variant={type} label="จำนวนเงิน" helper={budgetHint} />
 
+          {/* Accounts */}
           {type === "transfer" ? (
             <div className="glass-card rounded-3xl p-5 mb-6">
               <div className="text-xs font-bold text-gray-900/60 uppercase mb-3 flex items-center gap-2">
@@ -1406,6 +1439,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             </div>
           )}
 
+          {/* Categories */}
           {type !== "transfer" ? (
             <>
               <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">หมวดหมู่</h3>
@@ -1415,9 +1449,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                     key={cat.id}
                     onClick={() => setCategoryId(cat.id)}
                     className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
-                      categoryId === cat.id
-                        ? "glass-card ring-2 ring-gray-900/80 border-white/20"
-                        : "glass-chip border-white/15 hover:bg-white/10"
+                      categoryId === cat.id ? "glass-card ring-2 ring-gray-900/80 border-white/20" : "glass-chip border-white/15 hover:bg-white/10"
                     }`}
                     type="button"
                   >
@@ -1427,15 +1459,14 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                     >
                       {cat.icon}
                     </div>
-                    <span className="text-[10px] font-extrabold text-gray-900/70 truncate w-full text-center">
-                      {cat.name}
-                    </span>
+                    <span className="text-[10px] font-extrabold text-gray-900/70 truncate w-full text-center">{cat.name}</span>
                   </button>
                 ))}
               </div>
             </>
           ) : null}
 
+          {/* Date / Note / Ref */}
           <div className="glass-card rounded-3xl overflow-hidden mb-24">
             <div className="flex items-center border-b border-white/15 p-4">
               <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-gray-900/50 mr-3">
@@ -1476,6 +1507,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             </div>
           </div>
 
+          {/* Fixed Save */}
           <button
             onClick={handleSaveManual}
             className="fixed bottom-6 left-4 right-4 bg-gray-900/90 text-white py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2"
@@ -1492,9 +1524,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         <button
           onClick={createTransactionsFromQueue}
           className={`fixed bottom-6 left-4 right-4 py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
-            canCreateFromQueue
-              ? "bg-indigo-600 text-white shadow-indigo-200"
-              : "bg-white/30 text-gray-700/60 border border-white/20"
+            canCreateFromQueue ? "bg-indigo-600 text-white shadow-indigo-200" : "bg-white/30 text-gray-700/60 border border-white/20"
           }`}
           type="button"
           disabled={!canCreateFromQueue}
