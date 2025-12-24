@@ -1,6 +1,6 @@
 // src/views/StatsView.jsx
 import { useMemo, useState } from "react";
-import { Activity, TrendingUp, TrendingDown, Sparkles, PieChart as PieIcon, BarChart3 } from "lucide-react";
+import { Activity, TrendingUp, TrendingDown, Sparkles, PieChart as PieIcon, BarChart3, CalendarDays } from "lucide-react";
 import {
   ResponsiveContainer,
   PieChart,
@@ -49,6 +49,8 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
       ? "bg-rose-600/15 border-rose-600/20 text-rose-800"
       : tone === "net"
       ? "bg-indigo-600/15 border-indigo-600/20 text-indigo-800"
+      : tone === "today"
+      ? "bg-amber-600/15 border-amber-600/20 text-amber-900"
       : "bg-white/18 border-white/20 text-gray-800";
 
   return (
@@ -77,6 +79,19 @@ function EmptyState() {
   );
 }
 
+function CatIcon({ icon, color, title }) {
+  const ico = String(icon || "").trim();
+  return (
+    <div
+      className="w-10 h-10 rounded-2xl border border-white/20 shrink-0 flex items-center justify-center"
+      style={{ backgroundColor: `${color || "#cbd5e1"}22` }}
+      title={title}
+    >
+      <span className="text-lg leading-none">{ico || "❓"}</span>
+    </div>
+  );
+}
+
 export default function StatsView() {
   const { state } = useAppStore();
   const [period, setPeriod] = useState("month"); // week | month | year
@@ -84,6 +99,20 @@ export default function StatsView() {
   const now = useMemo(() => new Date(), []);
   const periodLabel = useMemo(() => getPeriodLabel(period), [period]);
   const periodStart = useMemo(() => getPeriodStart(period, now), [period, now]);
+
+  // ✅ Today's expense (global, not tied to selected period)
+  const todayExpense = useMemo(() => {
+    const todayIso = toISODateSafe(now); // local timezone
+    let sum = 0;
+
+    for (const t of state.transactions || []) {
+      if (t?.isTransfer) continue;
+      if (t?.type !== "expense") continue;
+      const iso = toISODateSafe(t?.date);
+      if (iso === todayIso) sum += safeNumber(t.amount);
+    }
+    return sum;
+  }, [state.transactions, now]);
 
   const filtered = useMemo(() => {
     return (state.transactions || []).filter((t) => {
@@ -108,7 +137,6 @@ export default function StatsView() {
 
     const net = income - expense;
 
-    // avg spend per day (use days in the period window, not just days with transactions)
     const start = periodStart;
     const end = now;
     const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
@@ -120,7 +148,6 @@ export default function StatsView() {
   const expenseCats = state.categories?.expense || [];
 
   const pieData = useMemo(() => {
-    // aggregate expense categories
     const map = new Map();
     for (const t of filtered) {
       if (t.type !== "expense") continue;
@@ -129,17 +156,22 @@ export default function StatsView() {
 
     const items = [...map.entries()]
       .map(([catId, value]) => {
-        const cat = expenseCats.find((c) => c.id === catId) || { name: "ไม่ทราบหมวด", color: "#cbd5e1" };
-        return { id: catId, name: cat.name, value, color: cat.color || "#cbd5e1" };
+        const cat = expenseCats.find((c) => c.id === catId) || {};
+        return {
+          id: catId,
+          name: cat.name || "ไม่ทราบหมวด",
+          icon: cat.icon || "❓", // ✅ FIX: keep icon for stats page
+          value,
+          color: cat.color || "#cbd5e1",
+        };
       })
       .sort((a, b) => b.value - a.value);
 
-    // keep top 6, rest -> Other
     const top = items.slice(0, 6);
     const rest = items.slice(6);
     const restSum = rest.reduce((s, x) => s + safeNumber(x.value), 0);
 
-    if (restSum > 0) top.push({ id: "other_agg", name: "อื่นๆ", value: restSum, color: "#94a3b8" });
+    if (restSum > 0) top.push({ id: "other_agg", name: "อื่นๆ", icon: "🧩", value: restSum, color: "#94a3b8" });
 
     return top;
   }, [filtered, expenseCats]);
@@ -154,7 +186,6 @@ export default function StatsView() {
   }, [pieData, totalExpense]);
 
   const trend = useMemo(() => {
-    // key by ISO (YYYY-MM-DD) for correct sorting
     const map = new Map();
 
     for (const t of filtered) {
@@ -169,7 +200,6 @@ export default function StatsView() {
       map.set(iso, prev);
     }
 
-    // sort by iso ascending; take last 12 points (more readable)
     return [...map.values()]
       .sort((a, b) => String(a.iso).localeCompare(String(b.iso)))
       .slice(-12)
@@ -217,7 +247,7 @@ export default function StatsView() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-6">
         <GlassKpiCard
           tone="income"
           title="รายรับรวม"
@@ -238,6 +268,14 @@ export default function StatsView() {
           value={formatCurrency(totals.net)}
           sub={hasAny ? (totals.net >= 0 ? "กำไรสุทธิ" : "ขาดดุลสุทธิ") : ""}
           icon={<Sparkles size={18} />}
+        />
+        {/* ✅ NEW: Today expense */}
+        <GlassKpiCard
+          tone="today"
+          title="ค่าใช้จ่ายวันนี้"
+          value={formatCurrency(todayExpense)}
+          sub="เฉพาะ Expense (ไม่นับ Transfer)"
+          icon={<CalendarDays size={18} />}
         />
       </div>
 
@@ -262,6 +300,7 @@ export default function StatsView() {
                 <div className="text-right shrink-0">
                   <div className="text-[11px] text-gray-800/60">หมวดที่ใช้มากสุด</div>
                   <div className="text-sm font-extrabold text-gray-900 truncate">
+                    {topCategory.icon ? `${topCategory.icon} ` : ""}
                     {topCategory.name} • {topCategory.pct}%
                   </div>
                 </div>
@@ -299,17 +338,17 @@ export default function StatsView() {
                   return (
                     <div key={it.id} className="glass-panel border border-white/20 rounded-2xl p-3">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-extrabold text-gray-900 truncate">{it.name}</div>
-                          <div className="text-[12px] text-gray-800/60 mt-0.5">
-                            {formatCurrency(it.value)} • {pct}%
+                        <div className="flex items-center gap-3 min-w-0">
+                          {/* ✅ FIX: show category icon */}
+                          <CatIcon icon={it.icon} color={it.color} title={it.name} />
+
+                          <div className="min-w-0">
+                            <div className="font-extrabold text-gray-900 truncate">{it.name}</div>
+                            <div className="text-[12px] text-gray-800/60 mt-0.5">
+                              {formatCurrency(it.value)} • {pct}%
+                            </div>
                           </div>
                         </div>
-                        <div
-                          className="w-10 h-10 rounded-2xl border border-white/20 shrink-0"
-                          style={{ backgroundColor: `${it.color}22` }}
-                          title={it.name}
-                        />
                       </div>
 
                       <div className="mt-2 h-2 rounded-full bg-white/30 overflow-hidden">
@@ -372,7 +411,7 @@ export default function StatsView() {
               <div className="glass-panel border border-white/20 rounded-2xl p-4">
                 <div className="text-xs font-extrabold text-gray-900/70">หมวดที่ใช้มากสุด</div>
                 <div className="mt-1 text-xl font-extrabold text-gray-900">
-                  {topCategory ? topCategory.name : "—"}
+                  {topCategory ? `${topCategory.icon || ""} ${topCategory.name}`.trim() : "—"}
                 </div>
                 <div className="text-[11px] text-gray-800/55 mt-1">
                   {topCategory ? `${formatCurrency(topCategory.value)} • ${topCategory.pct}%` : "ไม่มีข้อมูล"}
