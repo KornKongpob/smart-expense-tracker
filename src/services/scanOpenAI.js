@@ -38,8 +38,8 @@ function safeParseAmount(v) {
   const s = String(v).trim();
   if (!s) return null;
 
-  // รองรับ "1,234.50" / "1234" / "1 234" / "฿1,234"
-  const cleaned = s.replace(/[฿$, ]+/g, "").replace(/,/g, "");
+  // รองรับ "1,234.50" / "1234" / "1 234"
+  const cleaned = s.replace(/[, ]+/g, "");
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
 }
@@ -58,124 +58,32 @@ function normalizeTxType(t) {
   return "expense";
 }
 
-function safeString(v) {
-  if (v == null) return "";
-  return String(v).trim();
-}
-
-function safeNumber(v) {
-  const n = typeof v === "number" ? v : Number(String(v || "").trim());
-  return Number.isFinite(n) ? n : null;
-}
-
-function tryParseJsonMaybe(v) {
-  if (typeof v !== "string") return null;
-  const s = v.trim();
-  if (!s) return null;
-  if (!(s.startsWith("{") || s.startsWith("["))) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Normalize receipt items into:
- * [{ name, qty, price, total, amount, category }]
- *
- * input may be:
- * - array of objects
- * - string(JSON)
- * - other fields like line_items, lines
- */
-function normalizeItemsFromData(d) {
-  if (!d || typeof d !== "object") return [];
-
-  let raw =
-    d.items ??
-    d.line_items ??
-    d.lineItems ??
-    d.lines ??
-    d.products ??
-    d.entries ??
-    null;
-
-  // If raw is a JSON string -> parse
-  if (typeof raw === "string") {
-    const parsed = tryParseJsonMaybe(raw);
-    if (parsed) raw = parsed;
-  }
-
-  // Some backends may put items under d.receipt.items
-  if (!raw && d.receipt && typeof d.receipt === "object") {
-    raw = d.receipt.items ?? d.receipt.line_items ?? d.receipt.lines ?? null;
-    if (typeof raw === "string") {
-      const parsed = tryParseJsonMaybe(raw);
-      if (parsed) raw = parsed;
-    }
-  }
-
-  if (!Array.isArray(raw)) return [];
-
-  const items = raw
+function normalizeItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items
     .map((it) => {
-      // allow string lines like "Diesel 350"
-      if (typeof it === "string") {
-        const name = it.trim();
-        if (!name) return null;
-        // try pull last number as total
-        const m = name.match(/(.*?)([-+]?\d[\d, ]*(?:\.\d+)?)(?!.*\d)/);
-        const total = m ? safeParseAmount(m[2]) : null;
-        const nm = m ? safeString(m[1]) : name;
-        return {
-          name: nm || name,
-          qty: null,
-          price: null,
-          total: total,
-          amount: total,
-          category: "",
-        };
-      }
-
       if (!it || typeof it !== "object") return null;
-
-      const name = safeString(it.name ?? it.title ?? it.desc ?? it.description ?? it.item ?? it.product);
-      const qty = safeNumber(it.qty ?? it.quantity);
-      const price = safeNumber(it.price ?? it.unit_price ?? it.unitPrice);
-      const total =
-        safeParseAmount(it.total) ??
-        safeParseAmount(it.lineTotal) ??
-        safeParseAmount(it.amount) ??
-        safeParseAmount(it.subtotal);
-
-      // if total missing but qty & price present
-      const computed = qty != null && price != null ? qty * price : null;
-
-      const category = safeString(it.category ?? it.category_key ?? it.cat ?? it.group);
-
-      const finalTotal = total != null ? total : computed != null ? computed : null;
-
-      // require at least a name OR total
-      if (!name && finalTotal == null) return null;
-
-      return {
-        name: name || "",
-        qty: qty != null ? qty : null,
-        price: price != null ? price : null,
-        total: finalTotal != null ? finalTotal : null,
-        amount: finalTotal != null ? finalTotal : null,
-        category: category || "",
-      };
+      const name = it.name != null ? String(it.name).trim() : "";
+      const price = safeParseAmount(it.price);
+      if (!name) return null;
+      return { name, price: Number.isFinite(price) ? price : null };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, 15);
+}
 
-  // Drop items that have neither name nor positive amount
-  return items.filter((x) => {
-    const hasName = !!safeString(x.name);
-    const amt = safeNumber(x.total ?? x.amount);
-    return hasName || (amt != null && amt > 0);
-  });
+function normalizeKeywords(kws) {
+  if (!Array.isArray(kws)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const k of kws) {
+    const s = String(k || "").trim().toLowerCase();
+    if (!s) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out.slice(0, 15);
 }
 
 function normalizeScanResult({ data, rawText, model, endpointUsed }) {
@@ -188,17 +96,12 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     merchant: d?.merchant ?? null,
     note: d?.note ?? d?.merchant ?? null,
     ref: d?.ref ?? null,
-
-    // category may come in many keys
-    category: d?.category ?? d?.category_key ?? null,
-
+    category: d?.category ?? null,
     from_account: d?.from_account ?? null,
     to_account: d?.to_account ?? null,
-
-    // ✅ NEW: normalized multi-line items
-    items: normalizeItemsFromData(d),
-
     evidence: d?.evidence ?? rawText ?? "",
+    items: normalizeItems(d?.items),
+    keywords: normalizeKeywords(d?.keywords),
     _rawText: rawText ?? "",
     _model: model ?? "",
     _endpointUsed: endpointUsed ?? "",
@@ -266,7 +169,6 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
   try {
     primary = await postJson(url, { imageDataUrl });
   } catch (err) {
-    // fetch abort / network
     const e = new Error("scan_network_error");
     e.code = "scan_network_error";
     e.cause = err;
@@ -275,7 +177,6 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
 
   // If primary endpoint missing and user didn't force endpoint: try fallback /api/scan-receipt
   if (primary?.res?.status === 404 && !explicitEndpoint) {
-    // fallback path expects base64 + mimeType
     const { base64, mimeType } = dataUrlToBase64(imageDataUrl);
 
     if (!base64) {
@@ -300,7 +201,6 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
     const res = fb.res;
     const json = fb.json;
 
-    // scan-receipt error shape: { error: "..." }
     if (!res.ok) {
       const code = json?.error || "scan_failed";
       const e = new Error(code);
@@ -318,7 +218,6 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
 
     onStatus?.("done");
 
-    // scan-receipt returns the payload directly, no ok/data wrapper
     return normalizeScanResult({
       data: json,
       rawText: "",
@@ -331,15 +230,12 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
   const res = primary.res;
   const json = primary.json || {};
 
-  // If 404 here and endpoint is explicit -> keep old behavior
   if (res.status === 404) {
     const e = new Error("scan_api_not_found");
     e.code = "scan_api_not_found";
     throw e;
   }
 
-  // /api/scan expects { ok: true, data, rawText, model }
-  // If server returned non-JSON or unexpected, guard
   if (!res.ok) {
     const code = json?.code || json?.error || "scan_failed";
     const e = new Error(code);
@@ -349,7 +245,6 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
   }
 
   if (!json?.ok) {
-    // Some deployments may return { error: ... } even with 200
     const code = json?.code || json?.error || "scan_failed";
     const e = new Error(code);
     e.code = code;

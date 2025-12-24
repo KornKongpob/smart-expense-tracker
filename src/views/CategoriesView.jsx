@@ -1,15 +1,8 @@
 // src/views/CategoriesView.jsx
 import { useMemo, useState } from "react";
-import { ChevronRight, Plus, Trash2, X, Check, Sparkles, Search } from "lucide-react";
+import { ChevronRight, Plus, Trash2, Edit2, X, Check, Search } from "lucide-react";
 import { EMOJI_PRESETS, PRESET_COLORS } from "../constants/presets.jsx";
 import { useAppStore } from "../store/store";
-
-/**
- * Goals for this view
- * - Mobile-first modal (bottom sheet style) with safe-area padding
- * - Better UX: search, preview, duplicate prevention, and optional edit-friendly behaviors
- * - Keep compatibility with store actions: addCategory({type, category}) + deleteCategory({id, type})
- */
 
 const slugify = (s) =>
   String(s || "")
@@ -19,115 +12,41 @@ const slugify = (s) =>
     .replace(/^_+|_+$/g, "")
     .slice(0, 24);
 
-function ModalShell({ title, subtitle, children, onClose }) {
+const normKw = (s) =>
+  String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, ""); // keep letters/numbers/space (unicode)
+
+function uniqKeywords(list) {
+  const out = [];
+  const seen = new Set();
+  for (const k of list || []) {
+    const nk = normKw(k);
+    if (!nk) continue;
+    if (seen.has(nk)) continue;
+    seen.add(nk);
+    out.push(nk);
+  }
+  return out;
+}
+
+function ModalShell({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div className="min-w-0">
-            <h3 className="text-lg font-extrabold text-gray-900 truncate">{title}</h3>
-            {subtitle ? <div className="text-[12px] text-gray-800/55 mt-0.5">{subtitle}</div> : null}
-          </div>
-
+      <div className="w-full sm:max-w-md glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
           <button
             type="button"
             onClick={onClose}
             className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-            aria-label="close"
-            title="ปิด"
           >
             <X size={18} />
           </button>
         </div>
-
         {children}
-
-        {/* safe bottom for iOS */}
-        <div className="h-3 pb-safe" />
-      </div>
-    </div>
-  );
-}
-
-function ColorDots({ value, onChange }) {
-  const colors = PRESET_COLORS.slice(0, 12);
-  return (
-    <div className="flex gap-2 flex-wrap">
-      {colors.map((c) => (
-        <button
-          key={c}
-          type="button"
-          onClick={() => onChange?.(c)}
-          className={`w-8 h-8 rounded-full border transition-transform active:scale-95 ${
-            value === c ? "border-gray-800/30 ring-2 ring-white/40" : "border-white/10"
-          }`}
-          style={{ backgroundColor: c }}
-          aria-label={`color ${c}`}
-          title={c}
-        />
-      ))}
-    </div>
-  );
-}
-
-function EmojiGrid({ value, onChange, query }) {
-  const q = String(query || "").trim().toLowerCase();
-
-  // Simple search behavior: filter by "includes" for emoji text (not super meaningful),
-  // but still useful because users will mostly scroll; query helps reduce list with common tags.
-  // We also include a small "tag map" for popular categories in TH.
-  const tagMap = useMemo(() => {
-    return [
-      { k: "อาหาร", e: ["🍜", "🍕", "🍔", "🥤", "🍰", "☕", "🍣", "🥗"] },
-      { k: "เดินทาง", e: ["🚗", "🚕", "🚌", "🚆", "✈️", "🚲", "⛽", "🛣️"] },
-      { k: "ช้อปปิ้ง", e: ["🛍️", "🧾", "🎁", "👕", "👟", "💄", "🧴", "📦"] },
-      { k: "บ้าน", e: ["🏠", "🧾", "💡", "🚰", "🧹", "🛠️", "🪑", "🧺"] },
-      { k: "สุขภาพ", e: ["💊", "🩺", "🏥", "🧘", "🏃", "🥦", "😷", "🧴"] },
-      { k: "บันเทิง", e: ["🎬", "🎮", "🎵", "🎟️", "🍿", "🎧", "🎤", "🎲"] },
-      { k: "เงิน", e: ["💰", "💵", "💳", "🪙", "📈", "🏦", "🧾", "💹"] },
-    ];
-  }, []);
-
-  const filtered = useMemo(() => {
-    const base = Array.isArray(EMOJI_PRESETS) ? EMOJI_PRESETS : [];
-    if (!q) return base;
-
-    // If query matches a tag, prioritize that tag emojis first.
-    const tag = tagMap.find((x) => x.k.toLowerCase().includes(q));
-    if (tag) {
-      const rest = base.filter((x) => !tag.e.includes(x));
-      return [...tag.e, ...rest];
-    }
-
-    // Fallback: basic includes (rarely helpful but harmless)
-    return base.filter((e) => String(e).includes(q));
-  }, [q, tagMap]);
-
-  return (
-    <div className="glass-panel border border-white/20 rounded-2xl p-3">
-      <div className="text-xs font-extrabold text-gray-800/70 mb-2">เลือกไอคอน</div>
-
-      <div className="max-h-52 overflow-y-auto no-scrollbar">
-        <div className="grid grid-cols-8 gap-2">
-          {filtered.map((e, idx) => (
-            <button
-              key={`${e}_${idx}`}
-              type="button"
-              onClick={() => onChange?.(e)}
-              className={`text-xl p-2 rounded-xl border transition-all hover:bg-white/10 active:scale-95 ${
-                value === e ? "bg-white/20 border-gray-900/40" : "border-white/15"
-              }`}
-              aria-label={`emoji ${e}`}
-              title={e}
-            >
-              {e}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-2 text-[11px] text-gray-800/55">
-        * ถ้าหาไม่เจอ ลองพิมพ์คำไทยสั้น ๆ เช่น “อาหาร”, “เงิน”, “เดินทาง”
       </div>
     </div>
   );
@@ -136,68 +55,84 @@ function EmojiGrid({ value, onChange, query }) {
 export default function CategoriesView({ showAlert, showConfirm }) {
   const { state, navigate, addCategory, deleteCategory } = useAppStore();
 
-  const [tab, setTab] = useState("expense"); // expense | income
+  const [tab, setTab] = useState("expense");
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(""); // "" = create new
+  const [q, setQ] = useState("");
 
-  // list + search
-  const [listQuery, setListQuery] = useState("");
+  const cats = useMemo(() => state.categories?.[tab] ?? [], [state.categories, tab]);
 
-  // create form
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("🏷️");
   const [color, setColor] = useState(PRESET_COLORS[0]);
-
-  // emoji picker search
-  const [emojiQuery, setEmojiQuery] = useState("");
-
-  const cats = state.categories?.[tab] ?? [];
+  const [kwInput, setKwInput] = useState("");
+  const [keywords, setKeywords] = useState([]);
 
   const onBack = () => navigate("more");
 
-  const filteredCats = useMemo(() => {
-    const q = String(listQuery || "").trim().toLowerCase();
-    if (!q) return cats;
-    return cats.filter((c) => {
-      const n = String(c?.name || "").toLowerCase();
-      const id = String(c?.id || "").toLowerCase();
-      return n.includes(q) || id.includes(q);
-    });
-  }, [cats, listQuery]);
-
-  const existingNameSet = useMemo(() => {
-    const s = new Set();
-    for (const c of cats) s.add(String(c?.name || "").trim().toLowerCase());
-    return s;
-  }, [cats]);
-
   const resetForm = () => {
+    setEditingId("");
     setName("");
     setIcon("🏷️");
     setColor(PRESET_COLORS[0]);
-    setEmojiQuery("");
+    setKwInput("");
+    setKeywords([]);
   };
 
-  const add = () => {
-    const n = String(name || "").trim();
-    if (!n) return showAlert?.("กรุณาใส่ชื่อหมวดหมู่");
-
-    // prevent duplicates by name (case-insensitive)
-    if (existingNameSet.has(n.toLowerCase())) return showAlert?.("ชื่อหมวดหมู่นี้มีอยู่แล้ว");
-
-    let base = slugify(n);
-    if (!base) base = `cat_${Date.now()}`;
-
-    let id = base;
-    let i = 2;
-    while (cats.some((c) => c.id === id)) id = `${base}_${i++}`;
-
-    addCategory({
-      type: tab,
-      category: { id, name: n, icon: String(icon || "🏷️"), color: String(color || PRESET_COLORS[0]) },
-    });
-
+  const openNew = () => {
     resetForm();
+    setOpen(true);
+  };
+
+  const openEdit = (cat) => {
+    setEditingId(cat.id);
+    setName(cat.name || "");
+    setIcon(cat.icon || "🏷️");
+    setColor(cat.color || PRESET_COLORS[0]);
+    setKwInput("");
+    setKeywords(uniqKeywords(cat.keywords || []));
+    setOpen(true);
+  };
+
+  // ---- IMPORTANT ----
+  // We implement "update category" without needing new store action:
+  // deleteCategory + addCategory with same id (replacement).
+  // This keeps current architecture compatible.
+  const upsertLocalCategory = ({ id, name, icon, color, keywords }) => {
+    const list = state.categories?.[tab] ?? [];
+    const existing = list.find((c) => c.id === id);
+
+    const payload = { id, name: String(name || "").trim(), icon, color, keywords: uniqKeywords(keywords) };
+
+    if (existing) {
+      // delete then add to simulate update
+      deleteCategory({ id, type: tab });
+      addCategory({ type: tab, category: payload });
+    } else {
+      addCategory({ type: tab, category: payload });
+    }
+  };
+
+  const addOrSave = () => {
+    if (!name.trim()) return showAlert?.("กรุณาใส่ชื่อหมวดหมู่");
+
+    const kw = uniqKeywords(keywords);
+
+    if (!editingId) {
+      let base = slugify(name);
+      if (!base) base = `cat_${Date.now()}`;
+      let id = base;
+      let i = 2;
+      while (cats.some((c) => c.id === id)) id = `${base}_${i++}`;
+
+      upsertLocalCategory({ id, name: name.trim(), icon, color, keywords: kw });
+    } else {
+      upsertLocalCategory({ id: editingId, name: name.trim(), icon, color, keywords: kw });
+    }
+
     setOpen(false);
+    resetForm();
+    showAlert?.(editingId ? "บันทึกหมวดหมู่แล้ว" : "สร้างหมวดหมู่แล้ว");
   };
 
   const del = (id) => {
@@ -205,41 +140,57 @@ export default function CategoriesView({ showAlert, showConfirm }) {
     showConfirm?.("ลบหมวดหมู่", "ยืนยันลบหมวดหมู่นี้?", () => deleteCategory({ id, type: tab }), true);
   };
 
+  const addKeyword = () => {
+    const raw = String(kwInput || "").trim();
+    if (!raw) return;
+
+    // allow multiple keywords separated by comma/newline
+    const parts = raw
+      .split(/[,|\n]/g)
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    const merged = uniqKeywords([...(keywords || []), ...parts]);
+    setKeywords(merged);
+    setKwInput("");
+  };
+
+  const removeKeyword = (kw) => {
+    const nk = normKw(kw);
+    setKeywords((prev) => (prev || []).filter((x) => normKw(x) !== nk));
+  };
+
+  const filteredCats = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return cats;
+
+    return cats.filter((c) => {
+      const hay = `${c.name || ""} ${(c.keywords || []).join(" ")}`.toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [cats, q]);
+
   return (
     <div className="pb-28 pt-6 px-4 min-h-dvh">
-      <header className="mb-6 flex items-center gap-3">
+      <header className="mb-4 flex items-center gap-3">
         <button
           onClick={onBack}
           className="w-10 h-10 rounded-full glass-icon-btn flex items-center justify-center text-gray-700"
           type="button"
-          aria-label="back"
-          title="ย้อนกลับ"
         >
           <ChevronRight className="rotate-180" size={24} />
         </button>
-
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0">
           <h1 className="text-2xl font-extrabold text-gray-900">จัดการหมวดหมู่</h1>
-          <p className="text-gray-600 text-sm truncate">เพิ่ม/ลบหมวดหมู่ (รายจ่าย/รายรับ)</p>
+          <p className="text-gray-600 text-sm">เพิ่ม/ลบ/แก้ไข + ตั้ง Keywords เพื่อช่วยจัดหมวดจากการสแกน</p>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="w-11 h-11 bg-gray-900/90 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95 shrink-0"
-          aria-label="add category"
-          title="เพิ่มหมวดหมู่"
-        >
-          <Plus size={18} />
-        </button>
       </header>
 
-      {/* Tabs */}
-      <div className="glass-panel border border-white/20 p-1.5 rounded-2xl flex mb-4">
+      <div className="glass-panel p-1 rounded-xl flex mb-4">
         <button
           onClick={() => setTab("expense")}
-          className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
-            tab === "expense" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
+          className={`flex-1 py-2 rounded-lg text-sm font-extrabold ${
+            tab === "expense" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
           }`}
           type="button"
         >
@@ -247,8 +198,8 @@ export default function CategoriesView({ showAlert, showConfirm }) {
         </button>
         <button
           onClick={() => setTab("income")}
-          className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
-            tab === "income" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
+          className={`flex-1 py-2 rounded-lg text-sm font-extrabold ${
+            tab === "income" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
           }`}
           type="button"
         >
@@ -257,30 +208,24 @@ export default function CategoriesView({ showAlert, showConfirm }) {
       </div>
 
       {/* Search */}
-      <div className="glass-card rounded-3xl p-4 mb-5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-gray-900/60">
-            <Search size={18} />
-          </div>
+      <div className="mb-4">
+        <div className="glass-input rounded-2xl px-3 py-2 flex items-center gap-2">
+          <Search size={16} className="text-gray-600" />
           <input
-            value={listQuery}
-            onChange={(e) => setListQuery(e.target.value)}
-            className="flex-1 glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-            placeholder="ค้นหาหมวดหมู่ (ชื่อ/ID)"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="ค้นหาหมวด หรือ keyword"
+            className="w-full outline-none text-sm bg-transparent text-gray-800 placeholder:text-gray-500"
           />
-        </div>
-        <div className="mt-2 text-[11px] text-gray-800/55">
-          แสดง {filteredCats.length} / {cats.length} หมวดหมู่
         </div>
       </div>
 
-      {/* List */}
       <div className="space-y-3">
         {filteredCats.map((cat) => (
-          <div key={cat.id} className="glass-card p-4 rounded-2xl flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0">
+          <div key={cat.id} className="glass-card p-4 rounded-2xl flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
               <div
-                className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0"
+                className="w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0"
                 style={{ backgroundColor: `${cat.color}20` }}
               >
                 {cat.icon}
@@ -288,122 +233,159 @@ export default function CategoriesView({ showAlert, showConfirm }) {
 
               <div className="min-w-0">
                 <div className="font-extrabold text-gray-900 truncate">{cat.name}</div>
-                <div className="text-[11px] text-gray-800/55 mt-0.5 truncate">
-                  ID: <span className="font-bold">{cat.id}</span>
+                <div className="text-[11px] text-gray-700/70 mt-0.5">
+                  {cat.keywords?.length ? (
+                    <>
+                      Keywords:{" "}
+                      <span className="font-bold text-gray-900/80">
+                        {cat.keywords.slice(0, 6).join(", ")}
+                        {cat.keywords.length > 6 ? " …" : ""}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-gray-500">ยังไม่ได้ตั้ง keyword</span>
+                  )}
                 </div>
               </div>
             </div>
 
-            <button
-              onClick={() => del(cat.id)}
-              className="w-10 h-10 rounded-full bg-red-500/10 text-red-700 flex items-center justify-center active:scale-95 border border-red-500/15"
-              type="button"
-              title="ลบ"
-              aria-label="delete category"
-            >
-              <Trash2 size={18} />
-            </button>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => openEdit(cat)}
+                className="w-10 h-10 rounded-full glass-icon-btn text-gray-800 flex items-center justify-center active:scale-95"
+                type="button"
+                title="แก้ไข"
+              >
+                <Edit2 size={18} />
+              </button>
+
+              <button
+                onClick={() => del(cat.id)}
+                className="w-10 h-10 rounded-full bg-red-500/10 text-red-700 flex items-center justify-center active:scale-95 border border-red-500/15"
+                type="button"
+                title="ลบ"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
           </div>
         ))}
 
-        {!cats.length ? (
-          <div className="text-center py-12 glass-card rounded-3xl border border-white/15">
-            <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 text-gray-500">
-              <Sparkles size={32} />
-            </div>
-            <p className="text-gray-900 font-extrabold">ยังไม่มีหมวดหมู่</p>
-            <p className="text-gray-900/60 text-sm mt-1">กดปุ่ม + เพื่อเพิ่มหมวดหมู่ใหม่</p>
-          </div>
-        ) : null}
-
         <button
-          onClick={() => setOpen(true)}
-          className="w-full py-4 border-2 border-dashed glass-divider rounded-2xl text-gray-800 font-extrabold flex items-center justify-center gap-2 hover:bg-white/10 active:scale-[0.99]"
+          onClick={openNew}
+          className="w-full py-4 border-2 border-dashed glass-divider rounded-2xl text-gray-800 font-extrabold flex items-center justify-center gap-2 hover:bg-white/10"
           type="button"
         >
           <Plus size={20} /> เพิ่มหมวดหมู่ใหม่
         </button>
       </div>
 
-      {/* Create Modal */}
       {open ? (
         <ModalShell
-          title="สร้างหมวดหมู่ใหม่"
-          subtitle={tab === "expense" ? "สำหรับรายจ่าย" : "สำหรับรายรับ"}
+          title={editingId ? "แก้ไขหมวดหมู่ + Keywords" : "สร้างหมวดหมู่ใหม่ + Keywords"}
           onClose={() => {
             setOpen(false);
             resetForm();
           }}
         >
-          {/* Preview */}
-          <div className="glass-panel border border-white/20 rounded-2xl p-4 mb-4 flex items-center gap-3">
-            <div
-              className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0"
-              style={{ backgroundColor: `${color}20` }}
-            >
-              {icon}
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs text-gray-800/60">ตัวอย่าง</div>
-              <div className="text-sm font-extrabold text-gray-900 truncate">{name?.trim() || "ชื่อหมวดหมู่"}</div>
-              <div className="text-[11px] text-gray-800/55 mt-0.5 truncate">
-                ID จะถูกสร้างอัตโนมัติจากชื่อ (กันซ้ำให้เอง)
-              </div>
-            </div>
-          </div>
-
-          {/* Name */}
           <label className="text-xs font-bold text-gray-700 mb-1 block">ชื่อหมวดหมู่</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 mb-3 font-extrabold text-gray-900"
-            placeholder="เช่น กาแฟ, ค่าเช่า, ของใช้"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 mb-4 font-extrabold text-gray-900"
+            placeholder="เช่น อาหาร, ค่าเช่า"
           />
 
-          {/* Color */}
-          <div className="mb-4">
-            <label className="text-xs font-bold text-gray-700 mb-2 block">สี</label>
-            <ColorDots value={color} onChange={setColor} />
-          </div>
-
-          {/* Icon quick input */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="glass-panel border border-white/20 rounded-2xl p-3">
-              <div className="text-xs font-bold text-gray-900/70 mb-1">ไอคอน (พิมพ์เองได้)</div>
-              <input
-                value={icon}
-                onChange={(e) => setIcon(e.target.value)}
-                className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-2xl text-center"
-                placeholder="🏷️"
-              />
-              <div className="text-[11px] text-gray-800/55 mt-1">ใช้คีย์บอร์ด Emoji บนมือถือได้เลย</div>
+              <div className="text-xs font-bold text-gray-700 mb-2">ไอคอน</div>
+              <div className="w-full rounded-2xl bg-white/15 border border-white/15 h-[56px] flex items-center justify-center text-2xl">
+                {icon}
+              </div>
             </div>
 
             <div className="glass-panel border border-white/20 rounded-2xl p-3">
-              <div className="text-xs font-bold text-gray-900/70 mb-1">ค้นหาไอคอน</div>
-              <div className="flex items-center gap-2">
-                <Search size={16} className="text-gray-900/50" />
-                <input
-                  value={emojiQuery}
-                  onChange={(e) => setEmojiQuery(e.target.value)}
-                  className="w-full outline-none bg-transparent text-sm font-extrabold text-gray-900"
-                  placeholder="เช่น อาหาร, เงิน, เดินทาง"
-                />
-              </div>
-              <div className="text-[11px] text-gray-800/55 mt-2 truncate">
-                เลือก: <span className="font-extrabold text-gray-900">{icon || "🏷️"}</span>
+              <div className="text-xs font-bold text-gray-700 mb-2">สี</div>
+              <div className="flex gap-2 flex-wrap">
+                {PRESET_COLORS.slice(0, 12).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setColor(c)}
+                    className={`w-7 h-7 rounded-full border border-white/30 active:scale-95 ${
+                      color === c ? "ring-2 ring-offset-1 ring-gray-700" : ""
+                    }`}
+                    style={{ backgroundColor: c }}
+                    type="button"
+                    aria-label="choose-color"
+                  />
+                ))}
               </div>
             </div>
           </div>
 
-          {/* Emoji Grid */}
-          <div className="mb-4">
-            <EmojiGrid value={icon} onChange={setIcon} query={emojiQuery} />
+          <label className="text-xs font-bold text-gray-700 mb-1 block">เลือกไอคอน</label>
+          <div className="glass-panel border border-white/20 rounded-2xl p-2 mb-4 max-h-[220px] overflow-y-auto">
+            <div className="grid grid-cols-6 gap-2">
+              {EMOJI_PRESETS.map((e, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setIcon(e)}
+                  className={`h-11 w-full flex items-center justify-center text-xl rounded-xl transition-all active:scale-95 ${
+                    icon === e ? "bg-white/25 ring-1 ring-gray-900" : "hover:bg-white/10"
+                  }`}
+                  type="button"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-3 mt-2">
+          {/* Keywords */}
+          <div className="glass-panel border border-white/20 rounded-2xl p-4 mb-4">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-sm font-extrabold text-gray-900">Keywords ของหมวดนี้</div>
+              <div className="text-[11px] text-gray-700/70">{keywords.length} คำ</div>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                value={kwInput}
+                onChange={(e) => setKwInput(e.target.value)}
+                className="flex-1 glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+                placeholder="เช่น ก๋วยเตี๋ยว, ข้าวมันไก่ (ใส่หลายคำคั่นด้วย , ได้)"
+              />
+              <button
+                type="button"
+                onClick={addKeyword}
+                className="px-4 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold active:scale-95"
+              >
+                เพิ่ม
+              </button>
+            </div>
+
+            {keywords.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {keywords.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => removeKeyword(k)}
+                    className="px-3 py-1.5 rounded-full glass-chip text-xs font-extrabold text-gray-900/80 active:scale-95"
+                    title="กดเพื่อลบ"
+                  >
+                    {k} <span className="text-gray-500">×</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 text-[12px] text-gray-700/70">
+                ยังไม่มี keyword • แนะนำใส่ชื่อเมนู/สินค้า/คำที่เจอบ่อยในบิล เพื่อให้ระบบจัดหมวดหลังสแกนแม่นขึ้น
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
             <button
               onClick={() => {
                 setOpen(false);
@@ -415,17 +397,12 @@ export default function CategoriesView({ showAlert, showConfirm }) {
               ยกเลิก
             </button>
             <button
-              onClick={add}
-              className="flex-1 py-3 text-white font-extrabold bg-gray-900/90 rounded-2xl shadow-lg active:scale-95 flex items-center justify-center gap-2"
+              onClick={addOrSave}
+              className="flex-1 py-3 text-white font-extrabold bg-gray-900/90 rounded-2xl shadow-lg active:scale-95 inline-flex items-center justify-center gap-2"
               type="button"
             >
-              <Check size={18} /> สร้าง
+              <Check size={18} /> {editingId ? "บันทึก" : "สร้าง"}
             </button>
-          </div>
-
-          {/* Small helper note */}
-          <div className="mt-3 text-[11px] text-gray-800/55">
-            Tip: ตั้งชื่อให้ชัด เช่น “กาแฟ”, “ค่าเดินทาง”, “ค่าสมัครสมาชิก” จะช่วยให้รายงานและงบประมาณใช้งานง่ายขึ้น
           </div>
         </ModalShell>
       ) : null}

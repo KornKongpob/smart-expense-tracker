@@ -1,43 +1,68 @@
 // src/views/DashboardView.jsx
 import { useMemo, useState } from "react";
-import { Filter, TrendingDown, TrendingUp, FileText, Search, AlertTriangle, ChevronRight } from "lucide-react";
+import { Filter, TrendingDown, TrendingUp, FileText, Search, AlertTriangle } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import { formatCurrency } from "../utils/format";
 import { calcTotals, toMonthKey, calcSpentByCategoryInMonth, parseDateSafe } from "../store/selectors";
 import { useAppStore } from "../store/store";
 
+function getTxOrderKey(tx) {
+  // Prefer "recently added/updated" if your store tracks it.
+  const created = Number(tx?.createdAt);
+  const updated = Number(tx?.updatedAt);
+
+  if (Number.isFinite(updated) && updated > 0) return updated;
+  if (Number.isFinite(created) && created > 0) return created;
+
+  // Fallback: transaction date
+  const t = parseDateSafe(tx?.date).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
 export default function DashboardView() {
   const { state, navigate, startEditTransaction, startNewTransaction } = useAppStore();
 
-  const accounts = state.accounts || [];
-  const expenseCats = state.categories?.expense || [];
-  const incomeCats = state.categories?.income || [];
-
-  // ✅ memo maps for fast lookup + stable deps
-  const allCats = useMemo(() => [...expenseCats, ...incomeCats], [expenseCats, incomeCats]);
-
-  const accountById = useMemo(() => {
-    const m = new Map();
-    for (const a of accounts) m.set(a.id, a);
-    return m;
-  }, [accounts]);
-
-  const catById = useMemo(() => {
-    const m = new Map();
-    for (const c of allCats) m.set(c.id, c);
-    return m;
-  }, [allCats]);
-
-  const accountName = (id) => accountById.get(id)?.name || "";
-
-  // UI state
   const [filterAccount, setFilterAccount] = useState("all");
   const [q, setQ] = useState("");
 
-  // ✅ Totals exclude transfers (as designed)
   const totals = useMemo(() => calcTotals(state.transactions || []), [state.transactions]);
+  const allCats = [...(state.categories?.expense || []), ...(state.categories?.income || [])];
 
-  // ===== budget alerts (current month) =====
+  const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || "";
+
+  const filtered = useMemo(() => {
+    let txs = state.transactions || [];
+
+    if (filterAccount !== "all") txs = txs.filter((t) => t.accountId === filterAccount);
+
+    if (q.trim()) {
+      const needle = q.trim().toLowerCase();
+      txs = txs.filter((t) => {
+        const cat = allCats.find((c) => c.id === t.category);
+        const hay = `${t.note || ""} ${cat?.name || ""} ${accountName(t.accountId)} ${t.ref || ""}`.toLowerCase();
+        return hay.includes(needle);
+      });
+    }
+
+    return txs
+      .slice()
+      .sort((a, b) => {
+        const kb = getTxOrderKey(b);
+        const ka = getTxOrderKey(a);
+        if (kb !== ka) return kb - ka;
+
+        // tie-break: date desc (if createdAt absent and same day)
+        const db = parseDateSafe(b.date).getTime();
+        const da = parseDateSafe(a.date).getTime();
+        if (db !== da) return db - da;
+
+        // final tie-break by id (stable-ish)
+        return String(b.id || "").localeCompare(String(a.id || ""));
+      })
+      .slice(0, 40);
+  }, [state.transactions, filterAccount, q, allCats]);
+
+  // Budget alerts (current month)
   const budgetAlerts = useMemo(() => {
     const month = toMonthKey(new Date());
     const spentMap = calcSpentByCategoryInMonth(state.transactions || [], month);
@@ -46,49 +71,21 @@ export default function DashboardView() {
     for (const b of state.budgets || []) {
       if (b.month !== month) continue;
       if (!b.limit) continue;
-
       const spent = spentMap.get(b.categoryId) || 0;
-      const pctRaw = b.limit ? (spent / b.limit) * 100 : 0;
-      const pct = Math.round(pctRaw);
-      const ap = Number(b.alertPct || 90) || 90;
-
-      if (pctRaw >= ap) {
-        const cat = expenseCats.find((c) => c.id === b.categoryId);
+      const pct = (spent / b.limit) * 100;
+      if (pct >= (b.alertPct || 90)) {
+        const cat = state.categories?.expense?.find((c) => c.id === b.categoryId);
         alerts.push({
           id: b.id,
           name: cat?.name || b.categoryId,
-          icon: cat?.icon || "⚠️",
-          color: cat?.color || "#f59e0b",
           spent,
           limit: b.limit,
-          pct,
-          alertPct: ap,
+          pct: Math.round(pct),
         });
       }
     }
     return alerts.sort((a, b) => b.pct - a.pct).slice(0, 3);
-  }, [state.transactions, state.budgets, expenseCats]);
-
-  // ===== filtered recent list =====
-  const filtered = useMemo(() => {
-    let txs = state.transactions || [];
-
-    if (filterAccount !== "all") txs = txs.filter((t) => t?.accountId === filterAccount);
-
-    const needle = q.trim().toLowerCase();
-    if (needle) {
-      txs = txs.filter((t) => {
-        const cat = t?.isTransfer ? null : catById.get(t?.category);
-        const hay = `${t?.note || ""} ${cat?.name || ""} ${accountName(t?.accountId)} ${t?.ref || ""}`.toLowerCase();
-        return hay.includes(needle);
-      });
-    }
-
-    return txs
-      .slice()
-      .sort((a, b) => parseDateSafe(b?.date).getTime() - parseDateSafe(a?.date).getTime())
-      .slice(0, 60);
-  }, [state.transactions, filterAccount, q, catById, accountById]);
+  }, [state.transactions, state.budgets, state.categories?.expense]);
 
   return (
     <div className="pb-28 pt-6 px-4">
@@ -105,7 +102,7 @@ export default function DashboardView() {
             className="appearance-none glass-input text-gray-700 py-2 pl-3 pr-8 rounded-xl text-xs font-extrabold focus:outline-none focus:border-gray-900"
           >
             <option value="all">ทุกบัญชี</option>
-            {accounts.map((acc) => (
+            {state.accounts.map((acc) => (
               <option key={acc.id} value={acc.id}>
                 {acc.name}
               </option>
@@ -122,49 +119,22 @@ export default function DashboardView() {
             <div className="w-10 h-10 rounded-2xl glass-chip text-amber-700 flex items-center justify-center shrink-0">
               <AlertTriangle size={20} />
             </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-extrabold text-amber-900">Budget Alert</div>
-                <button
-                  type="button"
-                  onClick={() => navigate("budgets")}
-                  className="text-[11px] font-extrabold text-amber-900 glass-chip px-3 py-1 rounded-full active:scale-95 inline-flex items-center gap-1"
-                >
-                  จัดการ <ChevronRight size={14} />
-                </button>
-              </div>
-
-              <div className="mt-2 space-y-2">
+            <div className="min-w-0">
+              <div className="font-extrabold text-amber-900">Budget Alert</div>
+              <div className="text-xs text-amber-900/80 mt-1 space-y-1">
                 {budgetAlerts.map((a) => (
-                  <div key={a.id} className="glass-panel border border-amber-500/15 rounded-2xl p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-extrabold text-amber-900 truncate">
-                          <span className="mr-2">{a.icon}</span>
-                          {a.name}
-                        </div>
-                        <div className="text-[12px] text-amber-900/80 mt-0.5 truncate">
-                          ใช้แล้ว {formatCurrency(a.spent)} / {formatCurrency(a.limit)} ({a.pct}%)
-                        </div>
-                      </div>
-                      <div className="text-[11px] font-extrabold text-amber-900/80 shrink-0">
-                        เตือน {a.alertPct}%
-                      </div>
-                    </div>
-
-                    <div className="mt-2 h-2 rounded-full bg-white/30 overflow-hidden">
-                      <div
-                        className="h-full"
-                        style={{
-                          width: `${Math.min(100, a.pct)}%`,
-                          backgroundColor: "#f59e0b",
-                        }}
-                      />
-                    </div>
+                  <div key={a.id} className="truncate">
+                    {a.name}: ใช้แล้ว {formatCurrency(a.spent)} / {formatCurrency(a.limit)} ({a.pct}%)
                   </div>
                 ))}
               </div>
+              <button
+                type="button"
+                onClick={() => navigate("budgets")}
+                className="mt-2 text-xs font-extrabold text-amber-900 glass-chip px-3 py-1 rounded-full active:scale-95"
+              >
+                จัดการงบประมาณ
+              </button>
             </div>
           </div>
         </div>
@@ -221,9 +191,10 @@ export default function DashboardView() {
       {filtered.length ? (
         <div className="space-y-3">
           {filtered.map((tx) => {
-            const category = tx?.isTransfer
-              ? { name: "Transfer", icon: "🔁", color: "#94a3b8" }
-              : catById.get(tx?.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
+            const category =
+              tx.isTransfer
+                ? { name: "Transfer", icon: "🔁", color: "#94a3b8" }
+                : allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
 
             return (
               <TransactionCard
