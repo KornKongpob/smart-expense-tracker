@@ -1,5 +1,6 @@
 // src/views/AddTransactionView.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Trash2,
@@ -53,11 +54,17 @@ function AccountRow({ acc, selected, onSelect }) {
       type="button"
       onClick={onSelect}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all active:scale-[0.99] ${
-        selected ? "bg-gray-900/90 text-white border-white/10" : "bg-white/15 text-gray-900 border-white/15 hover:bg-white/20"
+        selected
+          ? "bg-gray-900/90 text-white border-white/10"
+          : "bg-white/15 text-gray-900 border-white/15 hover:bg-white/20"
       }`}
     >
       {img ? (
-        <span className={`w-8 h-8 rounded-xl overflow-hidden shrink-0 ${selected ? "bg-white/10" : "bg-white/20"} border border-white/15`}>
+        <span
+          className={`w-8 h-8 rounded-xl overflow-hidden shrink-0 ${
+            selected ? "bg-white/10" : "bg-white/20"
+          } border border-white/15`}
+        >
           <img src={img} alt="acc" className="w-full h-full object-cover" />
         </span>
       ) : (
@@ -69,7 +76,7 @@ function AccountRow({ acc, selected, onSelect }) {
   );
 }
 
-// ✅ Custom dropdown (because <option> cannot render images)
+// ✅ Portal dropdown to avoid clipping/stacking-context issues
 function AccountDropdown({ accounts, value, onChange, className = "" }) {
   const wrapRef = useRef(null);
   const btnRef = useRef(null);
@@ -77,54 +84,91 @@ function AccountDropdown({ accounts, value, onChange, className = "" }) {
 
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [menuRect, setMenuRect] = useState({ left: 0, top: 0, width: 0, maxHeight: 240, placeAbove: false });
 
   const selectedAcc = useMemo(() => (accounts || []).find((a) => a.id === value) || null, [accounts, value]);
   const selectedVisual = useMemo(() => getAccountVisual(selectedAcc || {}), [selectedAcc]);
 
-  // close on outside click
+  const computeMenuRect = () => {
+    const btn = btnRef.current;
+    if (!btn) return;
+
+    const r = btn.getBoundingClientRect();
+    const vw = window.innerWidth || 0;
+    const vh = window.innerHeight || 0;
+
+    const margin = 8;
+    const desiredMax = 320;
+    const spaceBelow = vh - r.bottom - margin;
+    const spaceAbove = r.top - margin;
+
+    const placeAbove = spaceAbove > spaceBelow && spaceAbove >= 160;
+    const maxHeight = Math.max(160, Math.min(desiredMax, placeAbove ? spaceAbove : spaceBelow));
+
+    const width = Math.min(Math.max(r.width, 240), vw - margin * 2);
+    const left = Math.min(Math.max(r.left, margin), vw - width - margin);
+
+    const top = placeAbove ? Math.max(margin, r.top - margin) : Math.min(vh - margin, r.bottom + margin);
+
+    setMenuRect({ left, top, width, maxHeight, placeAbove });
+  };
+
+  // open/close helpers
+  const openMenu = () => {
+    computeMenuRect();
+    setOpen(true);
+  };
+  const closeMenu = () => {
+    setOpen(false);
+    setTimeout(() => btnRef.current?.focus?.(), 0);
+  };
+  const toggle = () => (open ? closeMenu() : openMenu());
+
+  // close on outside click (portal-friendly via overlay)
+  // reposition on scroll/resize while open
   useEffect(() => {
     if (!open) return;
-    const onDown = (e) => {
-      const el = wrapRef.current;
-      if (!el) return;
-      if (!el.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("touchstart", onDown, { passive: true });
+
+    computeMenuRect();
+    const onResize = () => computeMenuRect();
+    const onScroll = () => computeMenuRect();
+
+    window.addEventListener("resize", onResize);
+    // capture scroll from any container
+    window.addEventListener("scroll", onScroll, true);
+
+    // focus list for keyboard nav
+    setTimeout(() => listRef.current?.focus?.(), 0);
+
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("touchstart", onDown);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [open]);
 
-  // keep activeIndex in sync
+  // keep activeIndex in sync when open
   useEffect(() => {
     if (!open) return;
     const idx = (accounts || []).findIndex((a) => a.id === value);
     setActiveIndex(idx >= 0 ? idx : 0);
-    // focus list for keyboard nav
-    setTimeout(() => listRef.current?.focus?.(), 0);
   }, [open, accounts, value]);
-
-  const toggle = () => setOpen((v) => !v);
 
   const selectByIndex = (idx) => {
     const a = (accounts || [])[idx];
     if (!a) return;
     onChange?.(a.id);
-    setOpen(false);
-    btnRef.current?.focus?.();
+    closeMenu();
   };
 
   const onButtonKeyDown = (e) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      setOpen(true);
+      openMenu();
       return;
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setOpen(true);
+      openMenu();
       return;
     }
   };
@@ -135,20 +179,19 @@ function AccountDropdown({ accounts, value, onChange, className = "" }) {
 
     if (e.key === "Escape") {
       e.preventDefault();
-      setOpen(false);
-      btnRef.current?.focus?.();
+      closeMenu();
       return;
     }
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(max, (i < 0 ? 0 : i + 1)));
+      setActiveIndex((i) => Math.min(max, i < 0 ? 0 : i + 1));
       return;
     }
 
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActiveIndex((i) => Math.max(0, (i < 0 ? 0 : i - 1)));
+      setActiveIndex((i) => Math.max(0, i < 0 ? 0 : i - 1));
       return;
     }
 
@@ -170,6 +213,65 @@ function AccountDropdown({ accounts, value, onChange, className = "" }) {
       return;
     }
   };
+
+  const menuNode =
+    open && typeof document !== "undefined"
+      ? createPortal(
+          <div className="fixed inset-0 z-[9999]">
+            {/* overlay close */}
+            <button
+              type="button"
+              className="absolute inset-0 cursor-default"
+              aria-label="close"
+              onClick={closeMenu}
+              style={{ background: "transparent" }}
+            />
+            {/* dropdown panel */}
+            <div
+              className="fixed"
+              style={{
+                left: `${menuRect.left}px`,
+                width: `${menuRect.width}px`,
+                // if placed above, we anchor panel bottom to button top by translating later:
+                top: `${menuRect.top}px`,
+              }}
+            >
+              <div
+                className="glass-card rounded-2xl border border-white/20 p-2 shadow-2xl bg-white/25 backdrop-blur"
+                style={{
+                  maxHeight: `${menuRect.maxHeight}px`,
+                }}
+              >
+                <div
+                  ref={listRef}
+                  tabIndex={0}
+                  role="listbox"
+                  aria-label="accounts"
+                  onKeyDown={onListKeyDown}
+                  className="outline-none max-h-[inherit] overflow-auto no-scrollbar"
+                >
+                  <div className="space-y-2">
+                    {(accounts || []).map((acc, idx) => {
+                      const selected = acc.id === value;
+                      const active = idx === activeIndex;
+                      return (
+                        <div
+                          key={acc.id}
+                          className={`${active ? "ring-2 ring-gray-900/40 rounded-xl" : ""}`}
+                          onMouseEnter={() => setActiveIndex(idx)}
+                        >
+                          <AccountRow acc={acc} selected={selected} onSelect={() => selectByIndex(idx)} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
 
   return (
     <div ref={wrapRef} className={`relative ${className}`}>
@@ -194,36 +296,7 @@ function AccountDropdown({ accounts, value, onChange, className = "" }) {
         <span className="ml-auto text-gray-900/60">▾</span>
       </button>
 
-      {open ? (
-        <div className="absolute left-0 right-0 mt-2 z-[60]">
-          <div className="glass-card rounded-2xl border border-white/20 p-2 shadow-xl bg-white/20 backdrop-blur">
-            <div
-              ref={listRef}
-              tabIndex={0}
-              role="listbox"
-              aria-label="accounts"
-              onKeyDown={onListKeyDown}
-              className="outline-none max-h-64 overflow-auto no-scrollbar"
-            >
-              <div className="space-y-2">
-                {(accounts || []).map((acc, idx) => {
-                  const selected = acc.id === value;
-                  const active = idx === activeIndex;
-                  return (
-                    <div
-                      key={acc.id}
-                      className={`${active ? "ring-2 ring-gray-900/40 rounded-xl" : ""}`}
-                      onMouseEnter={() => setActiveIndex(idx)}
-                    >
-                      <AccountRow acc={acc} selected={selected} onSelect={() => selectByIndex(idx)} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {menuNode}
     </div>
   );
 }
@@ -1128,9 +1201,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   };
 
   // ===== UI helpers =====
-  const renderAccountSelect = (value, onChange) => (
-    <AccountDropdown accounts={accounts} value={value} onChange={onChange} />
-  );
+  const renderAccountSelect = (value, onChange) => <AccountDropdown accounts={accounts} value={value} onChange={onChange} />;
 
   const selectedAccountName = useMemo(
     () => accounts.find((a) => a.id === accountId)?.name || "",
@@ -1330,9 +1401,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
                           {q.status === "error" ? <div className="mt-2 text-xs text-red-700 break-words">{q.error}</div> : null}
 
-                          {q.suggestedReason ? (
-                            <div className="mt-1 text-[11px] text-sky-800/70 truncate">{q.suggestedReason}</div>
-                          ) : null}
+                          {q.suggestedReason ? <div className="mt-1 text-[11px] text-sky-800/70 truncate">{q.suggestedReason}</div> : null}
                         </div>
 
                         <div className="flex flex-col gap-2 shrink-0">
@@ -1419,9 +1488,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                             <div className="glass-panel border border-emerald-500/20 rounded-2xl p-3 mb-3 flex items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-sm font-extrabold text-emerald-800">แยกเป็นหลายหมวด</div>
-                                <div className="text-[12px] text-emerald-800/80">
-                                  ระบบจะสร้างหลายรายการตามหมวดจากหลายบรรทัดในบิล
-                                </div>
+                                <div className="text-[12px] text-emerald-800/80">ระบบจะสร้างหลายรายการตามหมวดจากหลายบรรทัดในบิล</div>
                               </div>
                               <button
                                 type="button"
@@ -1721,9 +1788,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                     key={cat.id}
                     onClick={() => setCategoryId(cat.id)}
                     className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
-                      categoryId === cat.id
-                        ? "glass-card ring-2 ring-gray-900/80 border-white/20"
-                        : "glass-chip border-white/15 hover:bg-white/10"
+                      categoryId === cat.id ? "glass-card ring-2 ring-gray-900/80 border-white/20" : "glass-chip border-white/15 hover:bg-white/10"
                     }`}
                     type="button"
                   >
