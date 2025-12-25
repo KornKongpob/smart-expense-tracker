@@ -1,6 +1,5 @@
 // src/views/AddTransactionView.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   X,
   Trash2,
@@ -16,6 +15,7 @@ import {
   ArrowRightLeft,
   Trash,
   Sparkles,
+  CreditCard,
 } from "lucide-react";
 
 import { useAppStore } from "../store/store";
@@ -24,284 +24,188 @@ import { scanReceiptOpenAI } from "../services/scanOpenAI";
 import { formatCurrency, toISODate } from "../utils/format";
 import { generateId, generateTransferId } from "../utils/id";
 import { PRESET_COLORS } from "../constants/presets.jsx";
-import { isDuplicateByRef, toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors";
+import {
+  isDuplicateByRef,
+  toMonthKey,
+  calcSpentByCategoryInMonth,
+  getBudget,
+  calcAccountBalance,
+} from "../store/selectors";
 import { groupReceiptItemsToCategory, sanitizeCategoryKey } from "../utils/receiptCategorizer";
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
-// ✅ Detect when account icon is an image URL/data-uri
-function isImageIcon(v) {
+// ===== image helpers =====
+function isImageSrc(v) {
   const s = String(v || "").trim();
   return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://");
 }
 
 function getAccountVisual(acc) {
-  const image = String(acc?.image || "").trim();
-  const iconRaw = String(acc?.icon || "").trim();
+  if (!acc) return { kind: "emoji", value: "💳" };
+  const img = acc.image && isImageSrc(acc.image) ? acc.image : null;
+  if (img) return { kind: "img", src: img };
 
-  const img = image || (isImageIcon(iconRaw) ? iconRaw : "");
-  const icon = img ? "" : iconRaw || "💳";
-  const name = String(acc?.name || "").trim() || "บัญชี";
-
-  return { img, icon, name };
+  const icon = String(acc.icon || "").trim();
+  if (isImageSrc(icon)) return { kind: "img", src: icon };
+  return { kind: "emoji", value: icon || "💳" };
 }
 
-function AccountRow({ acc, selected, onSelect }) {
-  const { img, icon, name } = getAccountVisual(acc);
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all active:scale-[0.99] ${
-        selected
-          ? "bg-gray-900/90 text-white border-white/10"
-          : "bg-white/15 text-gray-900 border-white/15 hover:bg-white/20"
-      }`}
-    >
-      {img ? (
-        <span
-          className={`w-8 h-8 rounded-xl overflow-hidden shrink-0 ${
-            selected ? "bg-white/10" : "bg-white/20"
-          } border border-white/15`}
-        >
-          <img src={img} alt="acc" className="w-full h-full object-cover" />
-        </span>
-      ) : (
-        <span className="text-xl shrink-0">{icon || "💳"}</span>
-      )}
-      <span className={`text-sm font-extrabold truncate ${selected ? "text-white" : "text-gray-900"}`}>{name}</span>
-      {selected ? <Check size={16} className="ml-auto shrink-0" /> : null}
-    </button>
-  );
+function isCreditAccount(acc) {
+  const t = String(acc?.type || "").toLowerCase().trim();
+  if (t === "credit") return true;
+  // fallback: if it has creditLimit field, treat as credit-like
+  if (Number(acc?.creditLimit || 0) > 0) return true;
+  return false;
 }
 
-// ✅ Portal dropdown to avoid clipping/stacking-context issues
-function AccountDropdown({ accounts, value, onChange, className = "" }) {
-  const wrapRef = useRef(null);
-  const btnRef = useRef(null);
-  const listRef = useRef(null);
-
+// ===== modal dropdown (shows real image + no overlap issues) =====
+function AccountDropdown({
+  accounts,
+  value,
+  onChange,
+  title = "เลือกบัญชี",
+  placeholder = "เลือกบัญชี",
+  filterFn,
+  disabled = false,
+}) {
   const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const [menuRect, setMenuRect] = useState({ left: 0, top: 0, width: 0, maxHeight: 240, placeAbove: false });
+  const [q, setQ] = useState("");
 
-  const selectedAcc = useMemo(() => (accounts || []).find((a) => a.id === value) || null, [accounts, value]);
-  const selectedVisual = useMemo(() => getAccountVisual(selectedAcc || {}), [selectedAcc]);
+  const selected = useMemo(() => accounts.find((a) => a.id === value) || null, [accounts, value]);
+  const selectedVisual = useMemo(() => getAccountVisual(selected), [selected]);
 
-  const computeMenuRect = () => {
-    const btn = btnRef.current;
-    if (!btn) return;
+  const filtered = useMemo(() => {
+    let list = accounts || [];
+    if (typeof filterFn === "function") list = list.filter(filterFn);
 
-    const r = btn.getBoundingClientRect();
-    const vw = window.innerWidth || 0;
-    const vh = window.innerHeight || 0;
+    const needle = String(q || "").trim().toLowerCase();
+    if (!needle) return list;
 
-    const margin = 8;
-    const desiredMax = 320;
-    const spaceBelow = vh - r.bottom - margin;
-    const spaceAbove = r.top - margin;
+    return list.filter((a) => {
+      const name = String(a?.name || "").toLowerCase();
+      const digits = String(a?.accountNumber || "").toLowerCase();
+      const type = String(a?.type || "").toLowerCase();
+      return name.includes(needle) || digits.includes(needle) || type.includes(needle);
+    });
+  }, [accounts, filterFn, q]);
 
-    const placeAbove = spaceAbove > spaceBelow && spaceAbove >= 160;
-    const maxHeight = Math.max(160, Math.min(desiredMax, placeAbove ? spaceAbove : spaceBelow));
-
-    const width = Math.min(Math.max(r.width, 240), vw - margin * 2);
-    const left = Math.min(Math.max(r.left, margin), vw - width - margin);
-
-    const top = placeAbove ? Math.max(margin, r.top - margin) : Math.min(vh - margin, r.bottom + margin);
-
-    setMenuRect({ left, top, width, maxHeight, placeAbove });
-  };
-
-  // open/close helpers
-  const openMenu = () => {
-    computeMenuRect();
-    setOpen(true);
-  };
-  const closeMenu = () => {
-    setOpen(false);
-    setTimeout(() => btnRef.current?.focus?.(), 0);
-  };
-  const toggle = () => (open ? closeMenu() : openMenu());
-
-  // close on outside click (portal-friendly via overlay)
-  // reposition on scroll/resize while open
+  // lock background scroll when modal open (prevents weird overlap/scroll feel)
   useEffect(() => {
     if (!open) return;
+    const el = document?.documentElement;
+    if (!el) return;
 
-    computeMenuRect();
-    const onResize = () => computeMenuRect();
-    const onScroll = () => computeMenuRect();
-
-    window.addEventListener("resize", onResize);
-    // capture scroll from any container
-    window.addEventListener("scroll", onScroll, true);
-
-    // focus list for keyboard nav
-    setTimeout(() => listRef.current?.focus?.(), 0);
-
+    const prev = el.style.overflow;
+    el.style.overflow = "hidden";
     return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("scroll", onScroll, true);
+      el.style.overflow = prev;
     };
   }, [open]);
 
-  // keep activeIndex in sync when open
-  useEffect(() => {
-    if (!open) return;
-    const idx = (accounts || []).findIndex((a) => a.id === value);
-    setActiveIndex(idx >= 0 ? idx : 0);
-  }, [open, accounts, value]);
-
-  const selectByIndex = (idx) => {
-    const a = (accounts || [])[idx];
-    if (!a) return;
-    onChange?.(a.id);
-    closeMenu();
-  };
-
-  const onButtonKeyDown = (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      openMenu();
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      openMenu();
-      return;
-    }
-  };
-
-  const onListKeyDown = (e) => {
-    const max = (accounts || []).length - 1;
-    if (max < 0) return;
-
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeMenu();
-      return;
-    }
-
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveIndex((i) => Math.min(max, i < 0 ? 0 : i + 1));
-      return;
-    }
-
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveIndex((i) => Math.max(0, i < 0 ? 0 : i - 1));
-      return;
-    }
-
-    if (e.key === "Home") {
-      e.preventDefault();
-      setActiveIndex(0);
-      return;
-    }
-
-    if (e.key === "End") {
-      e.preventDefault();
-      setActiveIndex(max);
-      return;
-    }
-
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (activeIndex >= 0) selectByIndex(activeIndex);
-      return;
-    }
-  };
-
-  const menuNode =
-    open && typeof document !== "undefined"
-      ? createPortal(
-          <div className="fixed inset-0 z-[9999]">
-            {/* overlay close */}
-            <button
-              type="button"
-              className="absolute inset-0 cursor-default"
-              aria-label="close"
-              onClick={closeMenu}
-              style={{ background: "transparent" }}
-            />
-            {/* dropdown panel */}
-            <div
-              className="fixed"
-              style={{
-                left: `${menuRect.left}px`,
-                width: `${menuRect.width}px`,
-                // if placed above, we anchor panel bottom to button top by translating later:
-                top: `${menuRect.top}px`,
-              }}
-            >
-              <div
-                className="glass-card rounded-2xl border border-white/20 p-2 shadow-2xl bg-white/25 backdrop-blur"
-                style={{
-                  maxHeight: `${menuRect.maxHeight}px`,
-                }}
-              >
-                <div
-                  ref={listRef}
-                  tabIndex={0}
-                  role="listbox"
-                  aria-label="accounts"
-                  onKeyDown={onListKeyDown}
-                  className="outline-none max-h-[inherit] overflow-auto no-scrollbar"
-                >
-                  <div className="space-y-2">
-                    {(accounts || []).map((acc, idx) => {
-                      const selected = acc.id === value;
-                      const active = idx === activeIndex;
-                      return (
-                        <div
-                          key={acc.id}
-                          className={`${active ? "ring-2 ring-gray-900/40 rounded-xl" : ""}`}
-                          onMouseEnter={() => setActiveIndex(idx)}
-                        >
-                          <AccountRow acc={acc} selected={selected} onSelect={() => selectByIndex(idx)} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )
-      : null;
-
   return (
-    <div ref={wrapRef} className={`relative ${className}`}>
+    <>
       <button
-        ref={btnRef}
         type="button"
-        onClick={toggle}
-        onKeyDown={onButtonKeyDown}
-        className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900 bg-white/30 flex items-center gap-3"
-        aria-haspopup="listbox"
-        aria-expanded={open ? "true" : "false"}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        className={`w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900 bg-white/30 flex items-center justify-between gap-3 ${
+          disabled ? "opacity-60" : "active:scale-[0.99]"
+        }`}
       >
-        {selectedVisual?.img ? (
-          <span className="w-8 h-8 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0">
-            <img src={selectedVisual.img} alt="acc" className="w-full h-full object-cover" />
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="w-8 h-8 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center">
+            {selected ? (
+              selectedVisual.kind === "img" ? (
+                <img src={selectedVisual.src} alt="acc" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-lg leading-none">{selectedVisual.value}</span>
+              )
+            ) : (
+              <span className="text-lg leading-none">🏦</span>
+            )}
           </span>
-        ) : (
-          <span className="text-xl shrink-0">{selectedVisual?.icon || "💳"}</span>
-        )}
-
-        <span className="truncate">{selectedVisual?.name || "เลือกบัญชี"}</span>
-        <span className="ml-auto text-gray-900/60">▾</span>
+          <span className="truncate">{selected ? selected.name : placeholder}</span>
+        </div>
+        <span className="text-gray-900/45 text-xs">▼</span>
       </button>
 
-      {menuNode}
-    </div>
+      {open ? (
+        <div className="fixed inset-0 z-[80] bg-black/45 flex items-end sm:items-center justify-center">
+          <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-lg font-extrabold text-gray-900">{title}</div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
+                aria-label="close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="glass-input rounded-2xl px-3 py-2 flex items-center gap-2 mb-3">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="ค้นหาชื่อบัญชี / เลขท้าย / ประเภท"
+                className="w-full outline-none text-sm bg-transparent text-gray-800 placeholder:text-gray-500"
+              />
+            </div>
+
+            <div className="space-y-2">
+              {filtered.map((acc) => {
+                const v = getAccountVisual(acc);
+                const isSel = acc.id === value;
+                return (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    onClick={() => {
+                      onChange?.(acc.id);
+                      setOpen(false);
+                    }}
+                    className={`w-full rounded-2xl p-3 border text-left flex items-center gap-3 active:scale-[0.99] transition-all ${
+                      isSel
+                        ? "glass-card border-white/20 ring-2 ring-gray-900/70"
+                        : "glass-panel border-white/15 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="w-10 h-10 rounded-2xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center">
+                      {v.kind === "img" ? (
+                        <img src={v.src} alt="acc" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-xl leading-none">{v.value}</span>
+                      )}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="font-extrabold text-gray-900 truncate">{acc.name}</div>
+                      <div className="text-[11px] text-gray-800/55 truncate">
+                        {acc.accountNumber ? `เลขท้าย: ${acc.accountNumber}` : "—"}
+                        {String(acc.type || "").trim() ? ` • ${String(acc.type)}` : ""}
+                      </div>
+                    </div>
+
+                    {isSel ? <Check size={18} className="text-gray-900" /> : null}
+                  </button>
+                );
+              })}
+              {!filtered.length ? (
+                <div className="text-center text-sm text-gray-900/60 py-8">ไม่พบบัญชี</div>
+              ) : null}
+            </div>
+
+            <div className="h-3 pb-safe" />
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
-// ===== merchant memory helpers =====
+/** ===== merchant memory helpers ===== */
 function normalizeMerchantKey(s) {
   const t = String(s || "").trim().toLowerCase();
   if (!t) return "";
@@ -346,7 +250,7 @@ function hashString(str) {
   return h;
 }
 
-// ===== account matching helpers =====
+/** ===== account matching helpers ===== */
 function bestMatchAccountCandidate(accounts, digits) {
   const d = digitsOnly(digits);
   if (!d || d.length < 3) return { id: "", score: 0 };
@@ -558,13 +462,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       }
     }
 
-    const existsInList = (txType, catId, expenseCats, incomeCats) => {
+    const existsInList = (txType, catId, expenseCats2, incomeCats2) => {
       if (!catId) return false;
-      const list = txType === "income" ? incomeCats : expenseCats;
+      const list = txType === "income" ? incomeCats2 : expenseCats2;
       return list.some((c) => c.id === catId);
     };
 
-    const suggestCategoryId = (txType, merchant, fromDigits, toDigits, expenseCats, incomeCats) => {
+    const suggestCategoryId = (txType, merchant, fromDigits, toDigits, expenseCats2, incomeCats2) => {
       if (txType !== "expense" && txType !== "income") return "";
       const mKey = normalizeMerchantKey(merchant);
       const d = digitsOnly(toDigits || fromDigits);
@@ -572,12 +476,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
       if (mKey) {
         const c1 = pickBest(merchantScores, `${txType}|${mKey}`);
-        if (existsInList(txType, c1, expenseCats, incomeCats)) return c1;
+        if (existsInList(txType, c1, expenseCats2, incomeCats2)) return c1;
       }
 
       if (dKey) {
         const c2 = pickBest(digitsScores, `${txType}|${dKey}`);
-        if (existsInList(txType, c2, expenseCats, incomeCats)) return c2;
+        if (existsInList(txType, c2, expenseCats2, incomeCats2)) return c2;
       }
 
       return "";
@@ -721,14 +625,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
         let pickedAccountId = "";
         if (candFrom.score === 0 && candTo.score === 0) {
-          // fallback: if previously transfer, use fromAccountId as "expense account" default
           pickedAccountId = x.accountId || x.fromAccountId || x.toAccountId || fallbackAcc;
         } else if (candFrom.score > candTo.score) {
           pickedAccountId = candFrom.id;
         } else if (candTo.score > candFrom.score) {
           pickedAccountId = candTo.id;
         } else {
-          // tie -> prefer from (usually payer)
           pickedAccountId = candFrom.id || candTo.id || x.accountId || x.fromAccountId || fallbackAcc;
         }
 
@@ -1200,16 +1102,45 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     navigate("dashboard");
   };
 
-  // ===== UI helpers =====
-  const renderAccountSelect = (value, onChange) => <AccountDropdown accounts={accounts} value={value} onChange={onChange} />;
+  // ===== credit card payment helpers (manual transfer) =====
+  const creditAccounts = useMemo(() => accounts.filter(isCreditAccount), [accounts]);
+  const nonCreditAccounts = useMemo(() => accounts.filter((a) => !isCreditAccount(a)), [accounts]);
 
-  const selectedAccountName = useMemo(
-    () => accounts.find((a) => a.id === accountId)?.name || "",
-    [accounts, accountId]
-  );
+  const selectedToAcc = useMemo(() => accounts.find((a) => a.id === toAccountId) || null, [accounts, toAccountId]);
+
+  const creditDebt = useMemo(() => {
+    if (!selectedToAcc) return 0;
+    if (!isCreditAccount(selectedToAcc)) return 0;
+    const bal = calcAccountBalance(accounts, state.transactions || [], selectedToAcc.id);
+    return Math.max(0, -Number(bal || 0));
+  }, [selectedToAcc, accounts, state.transactions]);
+
+  const applyPayFull = () => {
+    if (!selectedToAcc || !isCreditAccount(selectedToAcc)) {
+      showAlert?.("กรุณาเลือกบัญชีบัตรเครดิตก่อน");
+      return;
+    }
+    if (!creditDebt || creditDebt <= 0) {
+      showAlert?.("บัตรนี้ไม่มียอดค้างชำระ");
+      return;
+    }
+    setAmountDigits(String(Math.round(creditDebt)));
+    // เติม note แบบไม่ทับของเดิมถ้ามีแล้ว
+    setNote((prev) => {
+      const p = String(prev || "").trim();
+      if (p) return p;
+      return `ชำระบัตรเครดิต • ${selectedToAcc.name || "Credit Card"}`;
+    });
+  };
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh">
+    <div
+      className="pb-28 pt-6 px-4 min-h-dvh overflow-x-hidden"
+      style={{
+        overflowX: "hidden",
+        touchAction: "pan-y",
+      }}
+    >
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <button
@@ -1401,7 +1332,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
                           {q.status === "error" ? <div className="mt-2 text-xs text-red-700 break-words">{q.error}</div> : null}
 
-                          {q.suggestedReason ? <div className="mt-1 text-[11px] text-sky-800/70 truncate">{q.suggestedReason}</div> : null}
+                          {q.suggestedReason ? (
+                            <div className="mt-1 text-[11px] text-sky-800/70 truncate">{q.suggestedReason}</div>
+                          ) : null}
                         </div>
 
                         <div className="flex flex-col gap-2 shrink-0">
@@ -1488,7 +1421,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                             <div className="glass-panel border border-emerald-500/20 rounded-2xl p-3 mb-3 flex items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-sm font-extrabold text-emerald-800">แยกเป็นหลายหมวด</div>
-                                <div className="text-[12px] text-emerald-800/80">ระบบจะสร้างหลายรายการตามหมวดจากหลายบรรทัดในบิล</div>
+                                <div className="text-[12px] text-emerald-800/80">
+                                  ระบบจะสร้างหลายรายการตามหมวดจากหลายบรรทัดในบิล
+                                </div>
                               </div>
                               <button
                                 type="button"
@@ -1562,21 +1497,39 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                   <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
                                     <ArrowRightLeft size={14} /> บัญชีต้นทาง
                                   </div>
-                                  {renderAccountSelect(q.fromAccountId, (v) => updateQueueItem(q.id, { fromAccountId: v }))}
+                                  <AccountDropdown
+                                    accounts={accounts}
+                                    value={q.fromAccountId}
+                                    onChange={(v) => updateQueueItem(q.id, { fromAccountId: v })}
+                                    title="เลือกบัญชีต้นทาง"
+                                    placeholder="เลือกบัญชีต้นทาง"
+                                  />
                                 </div>
 
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                   <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
                                     <ArrowRightLeft size={14} /> บัญชีปลายทาง
                                   </div>
-                                  {renderAccountSelect(q.toAccountId, (v) => updateQueueItem(q.id, { toAccountId: v }))}
+                                  <AccountDropdown
+                                    accounts={accounts}
+                                    value={q.toAccountId}
+                                    onChange={(v) => updateQueueItem(q.id, { toAccountId: v })}
+                                    title="เลือกบัญชีปลายทาง"
+                                    placeholder="เลือกบัญชีปลายทาง"
+                                  />
                                 </div>
                               </div>
                             ) : (
                               <div className="grid grid-cols-1 gap-3">
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                   <div className="text-xs font-bold text-gray-900/70 mb-2">บัญชี</div>
-                                  {renderAccountSelect(q.accountId, (v) => updateQueueItem(q.id, { accountId: v }))}
+                                  <AccountDropdown
+                                    accounts={accounts}
+                                    value={q.accountId}
+                                    onChange={(v) => updateQueueItem(q.id, { accountId: v })}
+                                    title="เลือกบัญชี"
+                                    placeholder="เลือกบัญชี"
+                                  />
                                 </div>
 
                                 {/* Split groups editor */}
@@ -1723,16 +1676,96 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               <div className="text-xs font-bold text-gray-900/60 uppercase mb-3 flex items-center gap-2">
                 <ArrowRightLeft size={14} /> Transfer Accounts
               </div>
+
+              {/* ✅ Credit Card Payment helper */}
+              {creditAccounts.length ? (
+                <div className="glass-panel border border-indigo-500/15 rounded-2xl p-4 mb-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
+                        <CreditCard size={16} className="text-indigo-700" /> ชำระบัตรเครดิต
+                      </div>
+                      <div className="text-[12px] text-gray-900/60 mt-1">
+                        ใช้ Transfer เดิม แต่ช่วยแนะนำการ “จ่ายยอดค้าง” ของบัญชีที่เป็นบัตรเครดิต
+                      </div>
+                    </div>
+                    {selectedToAcc && isCreditAccount(selectedToAcc) ? (
+                      <div className="text-right shrink-0">
+                        <div className="text-[11px] text-gray-900/55">ยอดค้างชำระ</div>
+                        <div className="text-sm font-extrabold text-gray-900">{formatCurrency(creditDebt)}</div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3">
+                    <div>
+                      <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีที่จ่าย</div>
+                      <AccountDropdown
+                        accounts={accounts}
+                        value={fromAccountId}
+                        onChange={setFromAccountId}
+                        title="เลือกบัญชีที่จ่าย"
+                        placeholder="เลือกบัญชีที่จ่าย"
+                        filterFn={(a) => !isCreditAccount(a) || nonCreditAccounts.length === 0}
+                      />
+                      <div className="text-[11px] text-gray-900/55 mt-1">แนะนำ: ใช้บัญชีธนาคาร/เงินสด (ไม่ใช่บัตร)</div>
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัตรเครดิตที่ต้องการชำระ</div>
+                      <AccountDropdown
+                        accounts={accounts}
+                        value={toAccountId}
+                        onChange={setToAccountId}
+                        title="เลือกบัตรเครดิต"
+                        placeholder="เลือกบัตรเครดิต"
+                        filterFn={(a) => isCreditAccount(a)}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-[12px] text-gray-900/60 min-w-0 truncate">
+                        {selectedToAcc && isCreditAccount(selectedToAcc)
+                          ? `ยอดค้างชำระปัจจุบันของ ${selectedToAcc.name}: ${formatCurrency(creditDebt)}`
+                          : "เลือกบัญชีปลายทางเป็น “บัตรเครดิต” เพื่อให้แสดงยอดค้างชำระ"}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={applyPayFull}
+                        className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+                        disabled={!selectedToAcc || !isCreditAccount(selectedToAcc) || creditDebt <= 0}
+                      >
+                        จ่ายเต็มยอดค้าง
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="space-y-3">
                 <div>
                   <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีต้นทาง</div>
-                  {renderAccountSelect(fromAccountId, setFromAccountId)}
+                  <AccountDropdown
+                    accounts={accounts}
+                    value={fromAccountId}
+                    onChange={setFromAccountId}
+                    title="เลือกบัญชีต้นทาง"
+                    placeholder="เลือกบัญชีต้นทาง"
+                  />
                 </div>
+
                 <div>
                   <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีปลายทาง</div>
-                  {renderAccountSelect(toAccountId, setToAccountId)}
+                  <AccountDropdown
+                    accounts={accounts}
+                    value={toAccountId}
+                    onChange={setToAccountId}
+                    title="เลือกบัญชีปลายทาง"
+                    placeholder="เลือกบัญชีปลายทาง"
+                  />
                 </div>
               </div>
+
               <div className="mt-3 text-[12px] text-gray-900/60">
                 Transfer จะไม่ถูกนับเป็นรายรับ/รายจ่ายในสถิติ (เพื่อให้ยอดสุทธิไม่เพี้ยน)
               </div>
@@ -1740,39 +1773,42 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           ) : (
             <div className="mb-6">
               <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">บัญชีที่ใช้</h3>
-              <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4">
+
+              {/* ✅ เปลี่ยนจาก scroll แนวนอน -> wrap เพื่อกันการเลื่อนซ้าย/ขวาทั้งหน้า */}
+              <div className="flex flex-wrap gap-3 pb-2">
                 {accounts.map((acc) => {
                   const isSelected = accountId === acc.id;
-                  const { img, icon, name } = getAccountVisual(acc);
-
+                  const v = getAccountVisual(acc);
                   return (
                     <button
                       key={acc.id}
                       onClick={() => setAccountId(acc.id)}
-                      className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all min-w-max active:scale-95 ${
+                      className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all active:scale-95 ${
                         isSelected
                           ? "bg-gray-900/90 text-white border-white/10 shadow-lg"
                           : "glass-chip text-gray-900 border border-white/15 hover:bg-white/10"
                       }`}
                       type="button"
                     >
-                      {img ? (
-                        <span className="w-7 h-7 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0">
-                          <img src={img} alt="acc" className="w-full h-full object-cover" />
-                        </span>
-                      ) : (
-                        <span className="text-xl">{icon || "💳"}</span>
-                      )}
-                      <span className="text-sm font-extrabold">{name}</span>
+                      <span className="w-7 h-7 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center">
+                        {v.kind === "img" ? (
+                          <img src={v.src} alt="acc" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-xl leading-none">{v.value}</span>
+                        )}
+                      </span>
+
+                      <span className="text-sm font-extrabold">{acc.name}</span>
                       {isSelected ? <Check size={14} className="ml-1" /> : null}
                     </button>
                   );
                 })}
               </div>
 
-              {selectedAccountName ? (
+              {accounts.find((a) => a.id === accountId)?.name ? (
                 <div className="text-xs text-gray-900/55 ml-1">
-                  เลือกบัญชี: <span className="font-extrabold text-gray-900">{selectedAccountName}</span>
+                  เลือกบัญชี:{" "}
+                  <span className="font-extrabold text-gray-900">{accounts.find((a) => a.id === accountId)?.name}</span>
                 </div>
               ) : null}
             </div>
@@ -1788,7 +1824,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                     key={cat.id}
                     onClick={() => setCategoryId(cat.id)}
                     className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
-                      categoryId === cat.id ? "glass-card ring-2 ring-gray-900/80 border-white/20" : "glass-chip border-white/15 hover:bg-white/10"
+                      categoryId === cat.id
+                        ? "glass-card ring-2 ring-gray-900/80 border-white/20"
+                        : "glass-chip border-white/15 hover:bg-white/10"
                     }`}
                     type="button"
                   >
@@ -1798,7 +1836,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                     >
                       {cat.icon}
                     </div>
-                    <span className="text-[10px] font-extrabold text-gray-900/70 truncate w-full text-center">{cat.name}</span>
+                    <span className="text-[10px] font-extrabold text-gray-900/70 truncate w-full text-center">
+                      {cat.name}
+                    </span>
                   </button>
                 ))}
               </div>

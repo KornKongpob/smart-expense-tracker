@@ -102,6 +102,12 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     evidence: d?.evidence ?? rawText ?? "",
     items: normalizeItems(d?.items),
     keywords: normalizeKeywords(d?.keywords),
+
+    // ✅ new optional fields (won't break existing features)
+    from_account_variants: d?.from_account_variants ?? null,
+    to_account_variants: d?.to_account_variants ?? null,
+    account_candidates: Array.isArray(d?.account_candidates) ? d.account_candidates : null,
+
     _rawText: rawText ?? "",
     _model: model ?? "",
     _endpointUsed: endpointUsed ?? "",

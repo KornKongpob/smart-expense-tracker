@@ -1,5 +1,5 @@
 // src/views/AccountsView.jsx
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Pencil,
@@ -189,10 +189,22 @@ function TypePills({ value, onChange }) {
   );
 }
 
+/**
+ * ✅ ModalShell update:
+ * - lock horizontal pan (touchAction: pan-y)
+ * - overflow-x-hidden on overlay + panel
+ * - overscrollBehavior contain (ลดการเด้ง/ลากเฉียงบนมือถือ)
+ */
 function ModalShell({ title, children, onClose }) {
   return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
+    <div
+      className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center overflow-hidden"
+      style={{ touchAction: "pan-y", overscrollBehavior: "contain" }}
+    >
+      <div
+        className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto overflow-x-hidden"
+        style={{ touchAction: "pan-y", overscrollBehavior: "contain" }}
+      >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
           <button
@@ -219,7 +231,7 @@ function IconPicker({ value, onChange }) {
   }, [groupId]);
 
   return (
-    <div className="glass-panel border border-white/20 rounded-2xl p-3">
+    <div className="glass-panel border border-white/20 rounded-2xl p-3 overflow-x-hidden" style={{ touchAction: "pan-y" }}>
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
           <Sparkles size={14} className="text-indigo-700" />
@@ -247,8 +259,8 @@ function IconPicker({ value, onChange }) {
         ))}
       </div>
 
-      <div className="max-h-44 overflow-y-auto no-scrollbar">
-        <div className="grid grid-cols-8 gap-2">
+      <div className="max-h-44 overflow-y-auto overflow-x-hidden no-scrollbar" style={{ touchAction: "pan-y" }}>
+        <div className="grid grid-cols-7 sm:grid-cols-8 gap-2">
           {group.emojis.map((e, idx) => (
             <button
               key={`${group.id}_${idx}`}
@@ -298,7 +310,7 @@ function ImagePickerInline({ value, onPickClick, onClear, disabled }) {
   const isImg = isImageIcon(value);
 
   return (
-    <div className="glass-panel border border-white/20 rounded-2xl p-3">
+    <div className="glass-panel border border-white/20 rounded-2xl p-3 overflow-x-hidden" style={{ touchAction: "pan-y" }}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-extrabold text-gray-800/70 flex items-center gap-2">
@@ -350,6 +362,47 @@ function ImagePickerInline({ value, onPickClick, onClear, disabled }) {
   );
 }
 
+/**
+ * ✅ Scroll lock for modal open:
+ * - prevent background/page from sliding sideways (especially iOS)
+ */
+function useLockDocScroll(locked) {
+  useEffect(() => {
+    if (!locked) return;
+
+    const el = document?.documentElement;
+    const body = document?.body;
+    if (!el || !body) return;
+
+    const prevHtmlOverflow = el.style.overflow;
+    const prevHtmlOverflowX = el.style.overflowX;
+    const prevHtmlTouch = el.style.touchAction;
+
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyOverflowX = body.style.overflowX;
+    const prevBodyTouch = body.style.touchAction;
+
+    // lock
+    el.style.overflow = "hidden";
+    el.style.overflowX = "hidden";
+    el.style.touchAction = "pan-y";
+
+    body.style.overflow = "hidden";
+    body.style.overflowX = "hidden";
+    body.style.touchAction = "pan-y";
+
+    return () => {
+      el.style.overflow = prevHtmlOverflow;
+      el.style.overflowX = prevHtmlOverflowX;
+      el.style.touchAction = prevHtmlTouch;
+
+      body.style.overflow = prevBodyOverflow;
+      body.style.overflowX = prevBodyOverflowX;
+      body.style.touchAction = prevBodyTouch;
+    };
+  }, [locked]);
+}
+
 export default function AccountsView({ showAlert, showConfirm }) {
   const { state, addAccount, updateAccount, deleteAccount, adjustAccountBalance } = useAppStore();
 
@@ -365,6 +418,9 @@ export default function AccountsView({ showAlert, showConfirm }) {
   const editImgRef = useRef(null);
 
   const [imgBusy, setImgBusy] = useState(false);
+
+  // ✅ lock scroll when any modal opens
+  useLockDocScroll(openCreate || openEdit);
 
   // create form
   const [cName, setCName] = useState("");
@@ -595,7 +651,10 @@ export default function AccountsView({ showAlert, showConfirm }) {
   }, [accounts, accountBalances]);
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh">
+    <div
+      className="pb-28 pt-6 px-4 min-h-dvh overflow-x-hidden"
+      style={{ overflowX: "hidden", touchAction: "pan-y" }}
+    >
       <header className="mb-5 flex justify-between items-start gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-extrabold text-gray-900">บัญชีของฉัน</h1>
@@ -612,7 +671,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
         </button>
       </header>
 
-      <div className="glass-card rounded-3xl p-5 mb-5">
+      <div className="glass-card rounded-3xl p-5 mb-5 overflow-x-hidden">
         <div className="text-xs font-extrabold text-gray-800/65">Net Balance (ไม่รวมบัตรเครดิต)</div>
         <div className={`text-3xl font-extrabold mt-1 ${netBalance < 0 ? "text-red-600" : "text-gray-900"}`}>
           {formatCurrency(netBalance)}
@@ -620,9 +679,9 @@ export default function AccountsView({ showAlert, showConfirm }) {
         <div className="text-[11px] text-gray-800/55 mt-1">รวมเฉพาะ เงินสด + ธนาคาร (และประเภทอื่นๆที่ไม่ใช่ Credit)</div>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-6 overflow-x-hidden">
         {groups.map((g) => (
-          <section key={g.type} className="space-y-3">
+          <section key={g.type} className="space-y-3 overflow-x-hidden">
             <GroupHeader type={g.type} count={g.items.length} subtitleRight={g.right} />
 
             <div className="space-y-3">
@@ -742,7 +801,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
+            <div className="min-w-0">
               <label className="text-xs font-bold text-gray-800/70 mb-1 block">ไอคอน (พิมพ์เองได้)</label>
               <input
                 value={cIcon}
@@ -753,7 +812,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
               <p className="text-[11px] text-gray-800/55 mt-1">ใช้คีย์บอร์ด Emoji บนมือถือได้เลย (หรือใส่ URL รูปก็ได้)</p>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="text-xs font-bold text-gray-800/70 mb-1 block">ยอดตั้งต้น</label>
               <input
                 value={cBalance}
@@ -870,7 +929,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
+            <div className="min-w-0">
               <label className="text-xs font-bold text-gray-800/70 mb-1 block">ไอคอน (พิมพ์เองได้)</label>
               <input
                 value={eIcon}
@@ -879,7 +938,7 @@ export default function AccountsView({ showAlert, showConfirm }) {
               />
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="text-xs font-bold text-gray-800/70 mb-1 block">ตั้งยอดใหม่</label>
               <input
                 value={eBalance}

@@ -356,6 +356,155 @@ function pickDominantCategoryFromItems(items) {
   return best;
 }
 
+/** =========================
+ * Account extraction helpers
+ * ========================= */
+function clampDigits(digits, { maxLen = 6, minLen = 3 } = {}) {
+  const d = normalizeDigits(digits);
+  if (!d) return null;
+  if (d.length < minLen) return null;
+  if (d.length <= maxLen) return d;
+  return d.slice(-maxLen);
+}
+
+function lastN(d, n) {
+  const s = normalizeDigits(d);
+  if (!s) return null;
+  if (s.length <= n) return s;
+  return s.slice(-n);
+}
+
+function makeAccountVariants(d) {
+  const s = normalizeDigits(d);
+  if (!s) return null;
+  return { last3: lastN(s, 3), last4: lastN(s, 4), last6: lastN(s, 6) };
+}
+
+function extractAccountCandidatesFromText(text) {
+  const raw = toArabicDigits(String(text || ""));
+  const lines = raw
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 220);
+
+  const KEY_FROM = ["จาก", "โอนจาก", "from", "ผู้โอน", "ผู้ส่ง", "sender"];
+  const KEY_TO = ["ไปยัง", "ไปที่", "to", "ผู้รับ", "receiver", "บัญชีรับ", "บัญชีรับชำระ", "เข้าบัญชี", "โอนไป"];
+  const KEY_ACCOUNT = ["บัญชี", "account", "เลขบัญชี", "a/c", "acc"];
+  const KEY_CARD = ["บัตร", "card", "หมายเลขบัตร", "เลขบัตร", "credit", "debit"];
+  const KEY_REF = ["รหัสอ้างอิง", "ref", "reference", "trx", "transaction", "เลขที่รายการ", "หมายเลขอ้างอิง", "รหัสธุรกรรม"];
+  const KEY_BILLER = ["biller", "biller id", "รหัสร้านค้า", "merchant id", "kb", "promptpay id"];
+
+  const hasAny = (s, arr) => arr.some((k) => s.includes(k));
+  const candidates = [];
+
+  const rxCardMasked = /\b\d{4,8}[Xx*•]{2,14}\d{4}\b/g;
+  const rxMaskedAcct = /(?:\d{2,4}[- ]?\d{0,2}[- ]?(?:[Xx*•]{2,}|\*{2,}|x{2,})[- ]?\d{2,8}(?:[- ]?\d{1,3})?)/g;
+  const rxHyphenAcct = /\b\d{2,4}-\d{1,2}-\d{2,8}-\d{1,2}\b/g;
+  const rxPlainDigits = /\b\d{3,16}\b/g;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const low = line.toLowerCase();
+
+    const isRefLine = hasAny(low, KEY_REF);
+    const isBillerLine = hasAny(low, KEY_BILLER);
+
+    const allowPlainDigits = hasAny(low, KEY_FROM) || hasAny(low, KEY_TO) || hasAny(low, KEY_ACCOUNT) || hasAny(low, KEY_CARD);
+
+    const tokens = [];
+    for (const m of line.matchAll(rxCardMasked)) tokens.push({ token: m[0], kind: "card_masked" });
+    for (const m of line.matchAll(rxHyphenAcct)) tokens.push({ token: m[0], kind: "acct_hyphen" });
+    for (const m of line.matchAll(rxMaskedAcct)) tokens.push({ token: m[0], kind: "acct_masked" });
+    if (allowPlainDigits) for (const m of line.matchAll(rxPlainDigits)) tokens.push({ token: m[0], kind: "digits" });
+
+    for (const { token, kind } of tokens) {
+      const dAll = normalizeDigits(token);
+      if (!dAll || dAll.length < 3) continue;
+
+      const isCard = kind === "card_masked" || hasAny(low, KEY_CARD);
+      const normalized = isCard ? lastN(dAll, 4) : clampDigits(dAll, { maxLen: 6, minLen: 3 });
+      if (!normalized) continue;
+
+      let score = 1;
+      const hintFrom = hasAny(low, KEY_FROM);
+      const hintTo = hasAny(low, KEY_TO);
+      const hintAcct = hasAny(low, KEY_ACCOUNT);
+      const hintCard = hasAny(low, KEY_CARD);
+
+      if (hintFrom) score += 6;
+      if (hintTo) score += 6;
+      if (hintAcct) score += 2;
+      if (hintCard) score += 4;
+      if (isRefLine) score -= 8;
+      if (isBillerLine) score -= 5;
+
+      if (!isCard && dAll.length > 8) score -= 3;
+
+      const role =
+        hintFrom && !hintTo ? "from" : hintTo && !hintFrom ? "to" : hintCard && !hintFrom ? "to" : "unknown";
+
+      candidates.push({
+        role,
+        digits: normalized,
+        raw: token,
+        line,
+        lineIndex: i,
+        score,
+        isCard: !!isCard,
+        variants: makeAccountVariants(normalized),
+      });
+    }
+  }
+
+  const bestByKey = new Map();
+  for (const c of candidates) {
+    const k = `${c.role}|${c.digits}`;
+    const prev = bestByKey.get(k);
+    if (!prev || c.score > prev.score) bestByKey.set(k, c);
+  }
+  return [...bestByKey.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 12);
+}
+
+function chooseFromToByCandidates({ candidates, modelFrom, modelTo, tx_type }) {
+  const list = Array.isArray(candidates) ? candidates.slice() : [];
+
+  const mf = clampDigits(modelFrom, { maxLen: 6, minLen: 3 });
+  const mt = clampDigits(modelTo, { maxLen: 6, minLen: 3 });
+  if (mf) list.push({ role: "from", digits: mf, score: 0.5, raw: String(modelFrom || ""), line: "", isCard: false, variants: makeAccountVariants(mf) });
+  if (mt) list.push({ role: "to", digits: mt, score: 0.5, raw: String(modelTo || ""), line: "", isCard: false, variants: makeAccountVariants(mt) });
+
+  const fromCandidates = list.filter((c) => c.role === "from").sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const toCandidates = list.filter((c) => c.role === "to").sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+  let from = fromCandidates[0]?.digits || mf || null;
+  let to = toCandidates[0]?.digits || mt || null;
+
+  if (tx_type === "transfer") {
+    const bestToCard = toCandidates.find((c) => c.isCard && c.digits);
+    if (bestToCard?.digits) to = bestToCard.digits;
+  }
+
+  if (from && to && from === to) {
+    const altTo = toCandidates.find((c) => c.digits && c.digits !== from);
+    if (altTo?.digits) to = altTo.digits;
+  }
+
+  return {
+    from_account: from || null,
+    to_account: to || null,
+    from_account_variants: from ? makeAccountVariants(from) : null,
+    to_account_variants: to ? makeAccountVariants(to) : null,
+  };
+}
+
+function enhanceAccounts({ rawText, evidence, parsedFrom, parsedTo, tx_type }) {
+  const combined = `${String(evidence || "")}\n${String(rawText || "")}`.trim();
+  const candidates = extractAccountCandidatesFromText(combined);
+  const picked = chooseFromToByCandidates({ candidates, modelFrom: parsedFrom, modelTo: parsedTo, tx_type });
+  return { candidates, picked };
+}
+
 function normalizeScanResult(parsed, rawText) {
   const tx_type = String(parsed?.tx_type || "").toLowerCase();
   const safeType = tx_type === "income" || tx_type === "transfer" ? tx_type : "expense";
@@ -382,7 +531,7 @@ function normalizeScanResult(parsed, rawText) {
     category = "transfer";
   }
 
-  return {
+  const normalized = {
     tx_type: safeType,
     amount: Number.isFinite(amount) ? amount : null,
     date: parsed?.date ? String(parsed.date).slice(0, 10) : null,
@@ -393,8 +542,8 @@ function normalizeScanResult(parsed, rawText) {
     category,
     items,
 
-    from_account: parsed?.from_account != null && String(parsed.from_account).trim() ? normalizeDigits(parsed.from_account) : null,
-    to_account: parsed?.to_account != null && String(parsed.to_account).trim() ? normalizeDigits(parsed.to_account) : null,
+    from_account: parsed?.from_account != null && String(parsed.from_account).trim() ? clampDigits(parsed.from_account, { maxLen: 6, minLen: 3 }) : null,
+    to_account: parsed?.to_account != null && String(parsed.to_account).trim() ? clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }) : null,
 
     evidence:
       parsed?.evidence != null
@@ -403,6 +552,31 @@ function normalizeScanResult(parsed, rawText) {
         ? String(rawText).slice(0, 220)
         : null,
   };
+
+  // ✅ Enhancement: robust account mapping
+  const enhanced = enhanceAccounts({
+    rawText,
+    evidence: normalized.evidence,
+    parsedFrom: normalized.from_account,
+    parsedTo: normalized.to_account,
+    tx_type: normalized.tx_type,
+  });
+
+  normalized.from_account = enhanced.picked.from_account;
+  normalized.to_account = enhanced.picked.to_account;
+  normalized.from_account_variants = enhanced.picked.from_account_variants;
+  normalized.to_account_variants = enhanced.picked.to_account_variants;
+
+  normalized.account_candidates = enhanced.candidates?.map((c) => ({
+    role: c.role,
+    digits: c.digits,
+    score: c.score,
+    raw: c.raw,
+    line: String(c.line || "").slice(0, 140),
+    isCard: !!c.isCard,
+  }));
+
+  return normalized;
 }
 
 export default async function handler(req, res) {
@@ -478,11 +652,15 @@ export default async function handler(req, res) {
       "}\n" +
       "Rules:\n" +
       "- If unsure, use null.\n" +
-      "- tx_type: use 'transfer' only if clearly a transfer between accounts.\n" +
+      "- tx_type: use 'transfer' only if clearly a transfer/bill-payment between accounts.\n" +
       "- amount: grand total paid.\n" +
       "- If receipt has multiple line items, fill items[] with as many as you can (max 30). If none, use [].\n" +
       "- For each item.category_key: best guess from item name.\n" +
-      "- from_account / to_account: extract last 4-6 digits of account/card if present (digits only; Thai digits ok).\n" +
+      "- from_account / to_account:\n" +
+      "  * MUST be ONLY last 3-6 digits of account number (digits only; Thai digits ok).\n" +
+      "  * For card number, return last 4 digits ONLY.\n" +
+      '  * Direction: "จาก/From/ผู้โอน" => from_account, "ไปยัง/To/ผู้รับ/บัญชีรับชำระ/หมายเลขบัตร" => to_account.\n' +
+      "  * Do NOT use reference/biller/merchant ids as account.\n" +
       "- evidence: short key lines used (<= 220 chars).\n";
 
     const r = await fetch(OPENAI_URL, {
@@ -493,7 +671,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.2,
+        temperature: 0, // ✅ make it deterministic for extraction
         input: [
           {
             role: "user",
