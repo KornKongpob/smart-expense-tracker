@@ -357,6 +357,31 @@ function pickDominantCategoryFromItems(items) {
 }
 
 /** =========================
+ * Credit card payment detection
+ * ========================= */
+function isCreditCardPaymentText(text) {
+  const t = safeString(text).toLowerCase();
+  if (!t) return false;
+
+  const keys = [
+    "ชำระบัตร",
+    "ชำระค่าบัตร",
+    "บัตรเครดิต",
+    "บัตรกดเงินสด",
+    "credit card",
+    "debit card",
+    "cardx",
+    "หมายเลขบัตร",
+    "เลขบัตร",
+    "บัญชีรับชำระ",
+    "ชำระขั้นต่ำ",
+    "ยอดชำระ",
+    "ค่างวด",
+  ];
+  return keys.some((k) => t.includes(k));
+}
+
+/** =========================
  * Account extraction helpers
  * ========================= */
 function clampDigits(digits, { maxLen = 6, minLen = 3 } = {}) {
@@ -466,7 +491,7 @@ function extractAccountCandidatesFromText(text) {
   return [...bestByKey.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 12);
 }
 
-function chooseFromToByCandidates({ candidates, modelFrom, modelTo, tx_type }) {
+function chooseFromToByCandidates({ candidates, modelFrom, modelTo, preferCardTo = false }) {
   const list = Array.isArray(candidates) ? candidates.slice() : [];
 
   const mf = clampDigits(modelFrom, { maxLen: 6, minLen: 3 });
@@ -480,7 +505,7 @@ function chooseFromToByCandidates({ candidates, modelFrom, modelTo, tx_type }) {
   let from = fromCandidates[0]?.digits || mf || null;
   let to = toCandidates[0]?.digits || mt || null;
 
-  if (tx_type === "transfer") {
+  if (preferCardTo) {
     const bestToCard = toCandidates.find((c) => c.isCard && c.digits);
     if (bestToCard?.digits) to = bestToCard.digits;
   }
@@ -498,19 +523,38 @@ function chooseFromToByCandidates({ candidates, modelFrom, modelTo, tx_type }) {
   };
 }
 
-function enhanceAccounts({ rawText, evidence, parsedFrom, parsedTo, tx_type }) {
+function enhanceAccounts({ rawText, evidence, parsedFrom, parsedTo, preferCardTo = false }) {
   const combined = `${String(evidence || "")}\n${String(rawText || "")}`.trim();
   const candidates = extractAccountCandidatesFromText(combined);
-  const picked = chooseFromToByCandidates({ candidates, modelFrom: parsedFrom, modelTo: parsedTo, tx_type });
+  const picked = chooseFromToByCandidates({ candidates, modelFrom: parsedFrom, modelTo: parsedTo, preferCardTo });
   return { candidates, picked };
 }
 
+function refineTxTypeAndSubtype({ parsedTxType, evidence, rawText }) {
+  const safeType = parsedTxType === "income" || parsedTxType === "transfer" ? parsedTxType : "expense";
+  const combined = `${String(evidence || "")}\n${String(rawText || "")}`.trim();
+  const isCC = isCreditCardPaymentText(combined);
+
+  if (isCC) return { tx_type: "expense", tx_subtype: "credit_card_payment", is_credit_card_payment: true };
+  return { tx_type: safeType, tx_subtype: safeType === "transfer" ? "transfer" : null, is_credit_card_payment: false };
+}
+
 function normalizeScanResult(parsed, rawText) {
-  const tx_type = String(parsed?.tx_type || "").toLowerCase();
-  const safeType = tx_type === "income" || tx_type === "transfer" ? tx_type : "expense";
+  const parsedType = String(parsed?.tx_type || "").toLowerCase();
+  const evidence0 =
+    parsed?.evidence != null
+      ? String(parsed.evidence).slice(0, 220)
+      : rawText
+      ? String(rawText).slice(0, 220)
+      : null;
+
+  const refined = refineTxTypeAndSubtype({
+    parsedTxType: parsedType,
+    evidence: evidence0,
+    rawText,
+  });
 
   const amount = typeof parsed?.amount === "number" ? parsed.amount : parsed?.amount != null ? Number(parsed.amount) : null;
-
   const merchant = parsed?.merchant != null ? String(parsed.merchant) : null;
   const note = parsed?.note != null ? String(parsed.note) : merchant != null ? String(merchant) : null;
 
@@ -519,12 +563,13 @@ function normalizeScanResult(parsed, rawText) {
   let category =
     normalizeCategoryKey(parsed?.category_key) ||
     normalizeCategoryKey(parsed?.category) ||
-    (safeType === "transfer" ? "transfer" : null);
+    (refined.tx_type === "transfer" ? "transfer" : null);
 
-  if (safeType !== "transfer") {
+  if (refined.is_credit_card_payment) {
+    if (!category || category === "transfer") category = "bills";
+  } else if (refined.tx_type !== "transfer") {
     const fromItems = pickDominantCategoryFromItems(items);
     const fromText = inferCategoryFromText(`${merchant || ""} ${note || ""} ${rawText || ""}`);
-
     if (!category) category = fromItems || fromText || "other";
     if (category === "other") category = fromItems || fromText || "other";
   } else {
@@ -532,7 +577,10 @@ function normalizeScanResult(parsed, rawText) {
   }
 
   const normalized = {
-    tx_type: safeType,
+    tx_type: refined.tx_type,
+    tx_subtype: refined.tx_subtype,
+    is_credit_card_payment: refined.is_credit_card_payment,
+
     amount: Number.isFinite(amount) ? amount : null,
     date: parsed?.date ? String(parsed.date).slice(0, 10) : null,
     merchant,
@@ -545,21 +593,15 @@ function normalizeScanResult(parsed, rawText) {
     from_account: parsed?.from_account != null && String(parsed.from_account).trim() ? clampDigits(parsed.from_account, { maxLen: 6, minLen: 3 }) : null,
     to_account: parsed?.to_account != null && String(parsed.to_account).trim() ? clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }) : null,
 
-    evidence:
-      parsed?.evidence != null
-        ? String(parsed.evidence).slice(0, 220)
-        : rawText
-        ? String(rawText).slice(0, 220)
-        : null,
+    evidence: evidence0,
   };
 
-  // ✅ Enhancement: robust account mapping
   const enhanced = enhanceAccounts({
     rawText,
     evidence: normalized.evidence,
     parsedFrom: normalized.from_account,
     parsedTo: normalized.to_account,
-    tx_type: normalized.tx_type,
+    preferCardTo: refined.is_credit_card_payment,
   });
 
   normalized.from_account = enhanced.picked.from_account;
@@ -652,14 +694,12 @@ export default async function handler(req, res) {
       "}\n" +
       "Rules:\n" +
       "- If unsure, use null.\n" +
-      "- tx_type: use 'transfer' only if clearly a transfer/bill-payment between accounts.\n" +
+      "- Use tx_type='transfer' only if clearly a transfer between accounts.\n" +
+      "- For credit card payment slips (ชำระบัตร/บัตรเครดิต/CardX/หมายเลขบัตร/บัญชีรับชำระ), still output best guess fields; server will classify.\n" +
       "- amount: grand total paid.\n" +
-      "- If receipt has multiple line items, fill items[] with as many as you can (max 30). If none, use [].\n" +
-      "- For each item.category_key: best guess from item name.\n" +
       "- from_account / to_account:\n" +
       "  * MUST be ONLY last 3-6 digits of account number (digits only; Thai digits ok).\n" +
       "  * For card number, return last 4 digits ONLY.\n" +
-      '  * Direction: "จาก/From/ผู้โอน" => from_account, "ไปยัง/To/ผู้รับ/บัญชีรับชำระ/หมายเลขบัตร" => to_account.\n' +
       "  * Do NOT use reference/biller/merchant ids as account.\n" +
       "- evidence: short key lines used (<= 220 chars).\n";
 
@@ -671,7 +711,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model,
-        temperature: 0, // ✅ make it deterministic for extraction
+        temperature: 0,
         input: [
           {
             role: "user",

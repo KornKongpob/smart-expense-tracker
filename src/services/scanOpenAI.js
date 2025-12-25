@@ -3,7 +3,7 @@
 // Optional env: VITE_SCAN_API_URL (default: /api/scan)
 // รองรับได้ทั้ง:
 // - /api/scan  (รับ { imageDataUrl } และตอบ { ok, data, rawText, model })
-// - /api/scan-receipt (รับ { base64, mimeType } และตอบ { tx_type, amount, ... } หรือ { error, ... })
+// - /api/scan-receipt (รับ { base64, mimeType } และตอบ { ok, data, rawText, model })
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -37,8 +37,6 @@ function safeParseAmount(v) {
   if (v == null) return null;
   const s = String(v).trim();
   if (!s) return null;
-
-  // รองรับ "1,234.50" / "1234" / "1 234"
   const cleaned = s.replace(/[, ]+/g, "");
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
@@ -48,7 +46,6 @@ function safeISODate(v) {
   if (!v) return null;
   const s = String(v).trim();
   if (!s) return null;
-  // ตัดให้เหลือ YYYY-MM-DD ถ้ามาเป็น ISO datetime
   return s.slice(0, 10);
 }
 
@@ -103,7 +100,9 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     items: normalizeItems(d?.items),
     keywords: normalizeKeywords(d?.keywords),
 
-    // ✅ new optional fields (won't break existing features)
+    // ✅ new fields (safe additions)
+    tx_subtype: d?.tx_subtype ?? null,
+    is_credit_card_payment: !!d?.is_credit_card_payment,
     from_account_variants: d?.from_account_variants ?? null,
     to_account_variants: d?.to_account_variants ?? null,
     account_candidates: Array.isArray(d?.account_candidates) ? d.account_candidates : null,
@@ -225,9 +224,9 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
     onStatus?.("done");
 
     return normalizeScanResult({
-      data: json,
-      rawText: "",
-      model: "",
+      data: json?.data ?? json, // support both {data:...} and plain object
+      rawText: json?.rawText ?? "",
+      model: json?.model ?? "",
       endpointUsed: fallbackUrl,
     });
   }

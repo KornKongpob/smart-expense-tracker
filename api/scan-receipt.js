@@ -428,6 +428,32 @@ function pickDominantCategoryFromItems(items) {
 }
 
 /** =========================
+ * Credit card payment detection
+ * ========================= */
+function isCreditCardPaymentText(text) {
+  const t = safeString(text).toLowerCase();
+  if (!t) return false;
+
+  const keys = [
+    "ชำระบัตร",
+    "ชำระค่าบัตร",
+    "บัตรเครดิต",
+    "บัตรกดเงินสด",
+    "credit card",
+    "debit card",
+    "cardx",
+    "หมายเลขบัตร",
+    "เลขบัตร",
+    "บัญชีรับชำระ",
+    "ชำระขั้นต่ำ",
+    "ยอดชำระ",
+    "ค่างวด",
+  ];
+
+  return keys.some((k) => t.includes(k));
+}
+
+/** =========================
  * Account extraction helpers
  * ========================= */
 function clampDigits(digits, { maxLen = 6, minLen = 3 } = {}) {
@@ -461,7 +487,7 @@ function extractAccountCandidatesFromText(text) {
     .split(/\r?\n/)
     .map((x) => x.trim())
     .filter(Boolean)
-    .slice(0, 220); // limit for safety
+    .slice(0, 220);
 
   const KEY_FROM = ["จาก", "โอนจาก", "from", "ผู้โอน", "ผู้ส่ง", "sender"];
   const KEY_TO = ["ไปยัง", "ไปที่", "to", "ผู้รับ", "receiver", "บัญชีรับ", "บัญชีรับชำระ", "เข้าบัญชี", "โอนไป"];
@@ -485,8 +511,6 @@ function extractAccountCandidatesFromText(text) {
     const isRefLine = hasAny(low, KEY_REF);
     const isBillerLine = hasAny(low, KEY_BILLER);
 
-    // We only allow "plain digits" candidates if context looks like accounts,
-    // otherwise we risk picking reference IDs.
     const allowPlainDigits = hasAny(low, KEY_FROM) || hasAny(low, KEY_TO) || hasAny(low, KEY_ACCOUNT) || hasAny(low, KEY_CARD);
 
     const tokens = [];
@@ -501,13 +525,12 @@ function extractAccountCandidatesFromText(text) {
 
       const isCard = kind === "card_masked" || hasAny(low, KEY_CARD);
 
-      // Normalize to what app will map:
-      // - card -> last4 (most common mapping by last4)
-      // - account -> clamp to last up to 6
+      // Normalize:
+      // - card -> last4
+      // - account -> last up to 6
       const normalized = isCard ? lastN(dAll, 4) : clampDigits(dAll, { maxLen: 6, minLen: 3 });
       if (!normalized) continue;
 
-      // score by context
       let score = 1;
       const hintFrom = hasAny(low, KEY_FROM);
       const hintTo = hasAny(low, KEY_TO);
@@ -521,7 +544,6 @@ function extractAccountCandidatesFromText(text) {
       if (isRefLine) score -= 8;
       if (isBillerLine) score -= 5;
 
-      // Penalize long-ish numbers unless card context
       if (!isCard && dAll.length > 8) score -= 3;
 
       const role =
@@ -547,13 +569,14 @@ function extractAccountCandidatesFromText(text) {
     const prev = bestByKey.get(k);
     if (!prev || c.score > prev.score) bestByKey.set(k, c);
   }
+
   return [...bestByKey.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 12);
 }
 
-function chooseFromToByCandidates({ candidates, modelFrom, modelTo, tx_type }) {
+function chooseFromToByCandidates({ candidates, modelFrom, modelTo, preferCardTo = false }) {
   const list = Array.isArray(candidates) ? candidates.slice() : [];
 
-  // add model outputs as low-priority fallbacks (still useful if OCR text is thin)
+  // add model outputs as low-priority fallbacks
   const mf = clampDigits(modelFrom, { maxLen: 6, minLen: 3 });
   const mt = clampDigits(modelTo, { maxLen: 6, minLen: 3 });
   if (mf) list.push({ role: "from", digits: mf, score: 0.5, raw: String(modelFrom || ""), line: "", isCard: false, variants: makeAccountVariants(mf) });
@@ -565,13 +588,12 @@ function chooseFromToByCandidates({ candidates, modelFrom, modelTo, tx_type }) {
   let from = fromCandidates[0]?.digits || mf || null;
   let to = toCandidates[0]?.digits || mt || null;
 
-  // For transfer: if there is a strong card candidate on "to", prefer it (credit card payment flow)
-  if (tx_type === "transfer") {
+  // ✅ credit card payment: prefer card last4 for "to"
+  if (preferCardTo) {
     const bestToCard = toCandidates.find((c) => c.isCard && c.digits);
     if (bestToCard?.digits) to = bestToCard.digits;
   }
 
-  // avoid same digits for from/to if possible
   if (from && to && from === to) {
     const altTo = toCandidates.find((c) => c.digits && c.digits !== from);
     if (altTo?.digits) to = altTo.digits;
@@ -585,11 +607,29 @@ function chooseFromToByCandidates({ candidates, modelFrom, modelTo, tx_type }) {
   };
 }
 
-function enhanceAccounts({ rawText, evidence, parsedFrom, parsedTo, tx_type }) {
+function enhanceAccounts({ rawText, evidence, parsedFrom, parsedTo, preferCardTo = false }) {
   const combined = `${String(evidence || "")}\n${String(rawText || "")}`.trim();
   const candidates = extractAccountCandidatesFromText(combined);
-  const picked = chooseFromToByCandidates({ candidates, modelFrom: parsedFrom, modelTo: parsedTo, tx_type });
+  const picked = chooseFromToByCandidates({ candidates, modelFrom: parsedFrom, modelTo: parsedTo, preferCardTo });
   return { candidates, picked };
+}
+
+/** =========================
+ * tx type refinement helpers
+ * ========================= */
+function refineTxTypeAndSubtype({ parsedTxType, evidence, rawText }) {
+  const safeType = parsedTxType === "income" || parsedTxType === "transfer" ? parsedTxType : "expense";
+
+  const combined = `${String(evidence || "")}\n${String(rawText || "")}`.trim();
+  const isCC = isCreditCardPaymentText(combined);
+
+  if (isCC) {
+    // ✅ Separate credit card payment out of transfer
+    return { tx_type: "expense", tx_subtype: "credit_card_payment", is_credit_card_payment: true };
+  }
+
+  // default
+  return { tx_type: safeType, tx_subtype: safeType === "transfer" ? "transfer" : null, is_credit_card_payment: false };
 }
 
 async function callOpenAI({ base64, mimeType }) {
@@ -628,10 +668,10 @@ async function callOpenAI({ base64, mimeType }) {
     `  "evidence": string|null\n` +
     `}\n` +
     `Rules:\n` +
-    `- amount = grand total paid (not VAT line).\n` +
+    `- amount = grand total paid.\n` +
     `- If date is Buddhist Era (>=2400), convert to AD.\n` +
-    `- If it's a bank transfer slip OR bill payment slip with reference/trx id -> tx_type must be "transfer".\n` +
-    `- If receipt has multiple items, fill items[] with as many as you can (max 30), else [].\n` +
+    `- Use tx_type="transfer" only if clearly a transfer between accounts.\n` +
+    `- For credit card payment slips (ชำระบัตร/บัตรเครดิต/CardX/หมายเลขบัตร/บัญชีรับชำระ), still output best guess fields; server will classify.\n` +
     `- ref: extract transaction reference / TRX / Ref / เลขที่รายการ if present, else null.\n` +
     `- from_account / to_account:\n` +
     `  * MUST be ONLY last 3-6 digits of account number (digits only; Thai digits ok).\n` +
@@ -695,8 +735,15 @@ async function callOpenAI({ base64, mimeType }) {
     };
   }
 
-  const tx_type = String(parsed.tx_type || "").toLowerCase();
-  const safeType = tx_type === "income" || tx_type === "transfer" ? tx_type : "expense";
+  const parsedType = String(parsed.tx_type || "").toLowerCase();
+  const evidence0 = String(parsed.evidence ?? outputText ?? "").slice(0, 220);
+
+  // ✅ Separate credit card payment out of transfer
+  const refined = refineTxTypeAndSubtype({
+    parsedTxType: parsedType,
+    evidence: evidence0,
+    rawText: outputText,
+  });
 
   const amount = typeof parsed.amount === "number" ? parsed.amount : parsed.amount != null ? Number(parsed.amount) : null;
 
@@ -708,12 +755,14 @@ async function callOpenAI({ base64, mimeType }) {
   let category =
     normalizeCategoryKey(parsed?.category_key) ||
     normalizeCategoryKey(parsed?.category) ||
-    (safeType === "transfer" ? "transfer" : null);
+    (refined.tx_type === "transfer" ? "transfer" : null);
 
-  if (safeType !== "transfer") {
+  // if credit card payment => bills (unless already set)
+  if (refined.is_credit_card_payment) {
+    if (!category || category === "transfer") category = "bills";
+  } else if (refined.tx_type !== "transfer") {
     const fromItems = pickDominantCategoryFromItems(items);
     const fromText = inferCategoryFromText(`${merchant || ""} ${note || ""} ${outputText || ""}`);
-
     if (!category) category = fromItems || fromText || "other";
     if (category === "other") category = fromItems || fromText || "other";
   } else {
@@ -721,7 +770,10 @@ async function callOpenAI({ base64, mimeType }) {
   }
 
   const normalized = {
-    tx_type: safeType,
+    tx_type: refined.tx_type,
+    tx_subtype: refined.tx_subtype,
+    is_credit_card_payment: refined.is_credit_card_payment,
+
     amount: Number.isFinite(amount) ? amount : null,
     date: parsed.date ? String(parsed.date).slice(0, 10) : null,
     merchant,
@@ -733,16 +785,16 @@ async function callOpenAI({ base64, mimeType }) {
 
     from_account: parsed.from_account ? clampDigits(parsed.from_account, { maxLen: 6, minLen: 3 }) : null,
     to_account: parsed.to_account ? clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }) : null,
-    evidence: String(parsed.evidence ?? outputText ?? "").slice(0, 220),
+    evidence: evidence0,
   };
 
-  // ✅ Enhancement: robust account mapping from OCR text + context
+  // ✅ Enhancement: robust account mapping (prefer card last4 when credit card payment)
   const enhanced = enhanceAccounts({
     rawText: outputText,
     evidence: normalized.evidence,
     parsedFrom: normalized.from_account,
     parsedTo: normalized.to_account,
-    tx_type: normalized.tx_type,
+    preferCardTo: refined.is_credit_card_payment,
   });
 
   normalized.from_account = enhanced.picked.from_account;
