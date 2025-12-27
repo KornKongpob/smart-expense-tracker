@@ -357,7 +357,7 @@ function pickDominantCategoryFromItems(items) {
 }
 
 /** =========================
- * Credit card payment detection
+ * Credit card payment detection (fallback)
  * ========================= */
 function isCreditCardPaymentText(text) {
   const t = safeString(text).toLowerCase();
@@ -377,6 +377,8 @@ function isCreditCardPaymentText(text) {
     "ชำระขั้นต่ำ",
     "ยอดชำระ",
     "ค่างวด",
+    "statement",
+    "credit",
   ];
   return keys.some((k) => t.includes(k));
 }
@@ -496,8 +498,26 @@ function chooseFromToByCandidates({ candidates, modelFrom, modelTo, preferCardTo
 
   const mf = clampDigits(modelFrom, { maxLen: 6, minLen: 3 });
   const mt = clampDigits(modelTo, { maxLen: 6, minLen: 3 });
-  if (mf) list.push({ role: "from", digits: mf, score: 0.5, raw: String(modelFrom || ""), line: "", isCard: false, variants: makeAccountVariants(mf) });
-  if (mt) list.push({ role: "to", digits: mt, score: 0.5, raw: String(modelTo || ""), line: "", isCard: false, variants: makeAccountVariants(mt) });
+  if (mf)
+    list.push({
+      role: "from",
+      digits: mf,
+      score: 0.5,
+      raw: String(modelFrom || ""),
+      line: "",
+      isCard: false,
+      variants: makeAccountVariants(mf),
+    });
+  if (mt)
+    list.push({
+      role: "to",
+      digits: mt,
+      score: 0.5,
+      raw: String(modelTo || ""),
+      line: "",
+      isCard: false,
+      variants: makeAccountVariants(mt),
+    });
 
   const fromCandidates = list.filter((c) => c.role === "from").sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const toCandidates = list.filter((c) => c.role === "to").sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
@@ -530,13 +550,48 @@ function enhanceAccounts({ rawText, evidence, parsedFrom, parsedTo, preferCardTo
   return { candidates, picked };
 }
 
-function refineTxTypeAndSubtype({ parsedTxType, evidence, rawText }) {
-  const safeType = parsedTxType === "income" || parsedTxType === "transfer" ? parsedTxType : "expense";
-  const combined = `${String(evidence || "")}\n${String(rawText || "")}`.trim();
-  const isCC = isCreditCardPaymentText(combined);
+/** =========================
+ * Tx refinement:
+ * - Prefer AI signal (tx_subtype / is_credit_card_payment) when present
+ * - Fallback: detect by keywords in evidence/raw text
+ * ========================= */
+function normalizeTxSubtype(v) {
+  const s = safeString(v).toLowerCase();
+  if (!s) return null;
+  if (s === "credit_card_payment" || s === "creditcard_payment" || s === "credit_payment") return "credit_card_payment";
+  if (s === "transfer" || s === "normal_transfer") return "transfer";
+  return null;
+}
 
-  if (isCC) return { tx_type: "expense", tx_subtype: "credit_card_payment", is_credit_card_payment: true };
-  return { tx_type: safeType, tx_subtype: safeType === "transfer" ? "transfer" : null, is_credit_card_payment: false };
+function coerceBool(v) {
+  if (typeof v === "boolean") return v;
+  const s = safeString(v).toLowerCase();
+  if (!s) return false;
+  if (s === "true" || s === "1" || s === "yes" || s === "y") return true;
+  return false;
+}
+
+function refineTxTypeAndSubtype({ parsedTxType, parsedTxSubtype, parsedIsCreditPayment, evidence, rawText }) {
+  const safeType = parsedTxType === "income" || parsedTxType === "transfer" ? parsedTxType : "expense";
+  const subtype = normalizeTxSubtype(parsedTxSubtype);
+  const isCreditFromAI = coerceBool(parsedIsCreditPayment) || subtype === "credit_card_payment";
+
+  const combined = `${String(evidence || "")}\n${String(rawText || "")}`.trim();
+  const isCreditFromText = isCreditCardPaymentText(combined);
+
+  const isCredit = isCreditFromAI || isCreditFromText;
+
+  if (isCredit) {
+    // ✅ สำคัญ: ให้ “ชำระบัตรเครดิต” เป็น 2 legs แบบ transfer แต่มี subtype เฉพาะ
+    return { tx_type: "transfer", tx_subtype: "credit_card_payment", is_credit_card_payment: true };
+  }
+
+  // normal
+  return {
+    tx_type: safeType,
+    tx_subtype: safeType === "transfer" ? "transfer" : null,
+    is_credit_card_payment: false,
+  };
 }
 
 function normalizeScanResult(parsed, rawText) {
@@ -550,6 +605,8 @@ function normalizeScanResult(parsed, rawText) {
 
   const refined = refineTxTypeAndSubtype({
     parsedTxType: parsedType,
+    parsedTxSubtype: parsed?.tx_subtype,
+    parsedIsCreditPayment: parsed?.is_credit_card_payment,
     evidence: evidence0,
     rawText,
   });
@@ -565,14 +622,13 @@ function normalizeScanResult(parsed, rawText) {
     normalizeCategoryKey(parsed?.category) ||
     (refined.tx_type === "transfer" ? "transfer" : null);
 
-  if (refined.is_credit_card_payment) {
-    if (!category || category === "transfer") category = "bills";
-  } else if (refined.tx_type !== "transfer") {
+  if (refined.tx_type !== "transfer") {
     const fromItems = pickDominantCategoryFromItems(items);
     const fromText = inferCategoryFromText(`${merchant || ""} ${note || ""} ${rawText || ""}`);
     if (!category) category = fromItems || fromText || "other";
     if (category === "other") category = fromItems || fromText || "other";
   } else {
+    // ✅ ทั้ง transfer ปกติ และ credit_card_payment ใช้ category = transfer เหมือนเดิม
     category = "transfer";
   }
 
@@ -590,8 +646,15 @@ function normalizeScanResult(parsed, rawText) {
     category,
     items,
 
-    from_account: parsed?.from_account != null && String(parsed.from_account).trim() ? clampDigits(parsed.from_account, { maxLen: 6, minLen: 3 }) : null,
-    to_account: parsed?.to_account != null && String(parsed.to_account).trim() ? clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }) : null,
+    from_account:
+      parsed?.from_account != null && String(parsed.from_account).trim()
+        ? clampDigits(parsed.from_account, { maxLen: 6, minLen: 3 })
+        : null,
+    to_account:
+      parsed?.to_account != null && String(parsed.to_account).trim()
+        ? // ถ้าเป็นบัตรเครดิต ให้เก็บ last4 ได้ (แต่ยังยอมรับ 3-6 ถ้า slip เป็น “เลขบัญชีรับชำระ”)
+          (refined.is_credit_card_payment ? (lastN(parsed.to_account, 4) || clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 })) : clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }))
+        : null,
 
     evidence: evidence0,
   };
@@ -669,6 +732,10 @@ export default async function handler(req, res) {
 
     const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
+    // ✅ ปรับ prompt ให้ AI “ส่งสัญญาณ” ชำระบัตรเครดิตมาเลย
+    // - ถ้าเป็นสลิปชำระบัตรเครดิต/โอนเข้าบัตรเครดิต: tx_type="transfer", tx_subtype="credit_card_payment", is_credit_card_payment=true
+    // - ถ้าเป็น transfer ปกติ: tx_type="transfer", tx_subtype="transfer", is_credit_card_payment=false
+    // - ถ้าเป็นใบเสร็จ: expense/income ตามเดิม
     const prompt =
       "You are an OCR+parser for Thai receipts and bank/payment slips used in a personal expense tracker.\n" +
       "Return STRICT JSON ONLY. No markdown. No extra text.\n" +
@@ -676,9 +743,12 @@ export default async function handler(req, res) {
       "- expense: food, transport, shopping, bills, health, entertainment, other\n" +
       "- income: salary, bonus, investment, refund, other\n" +
       "- transfer: transfer\n" +
+      "\n" +
       "Schema:\n" +
       "{\n" +
       '  "tx_type": "expense"|"income"|"transfer",\n' +
+      '  "tx_subtype": "transfer"|"credit_card_payment"|null,\n' +
+      '  "is_credit_card_payment": boolean|null,\n' +
       '  "amount": number|null,\n' +
       '  "date": "YYYY-MM-DD"|null,\n' +
       '  "merchant": string|null,\n' +
@@ -692,16 +762,26 @@ export default async function handler(req, res) {
       '  "to_account": string|null,\n' +
       '  "evidence": string|null\n' +
       "}\n" +
+      "\n" +
       "Rules:\n" +
       "- If unsure, use null.\n" +
-      "- Use tx_type='transfer' only if clearly a transfer between accounts.\n" +
-      "- For credit card payment slips (ชำระบัตร/บัตรเครดิต/CardX/หมายเลขบัตร/บัญชีรับชำระ), still output best guess fields; server will classify.\n" +
       "- amount: grand total paid.\n" +
-      "- from_account / to_account:\n" +
-      "  * MUST be ONLY last 3-6 digits of account number (digits only; Thai digits ok).\n" +
-      "  * For card number, return last 4 digits ONLY.\n" +
-      "  * Do NOT use reference/biller/merchant ids as account.\n" +
-      "- evidence: short key lines used (<= 220 chars).\n";
+      "- evidence: include the key lines you used (<= 220 chars).\n" +
+      "\n" +
+      "Classification:\n" +
+      "- If it is clearly a transfer between accounts: tx_type MUST be 'transfer'.\n" +
+      "- If it is a CREDIT CARD PAYMENT slip (Thai/EN keywords like ชำระบัตร, บัตรเครดิต, CardX, credit card, หมายเลขบัตร, บัญชีรับชำระ, ยอดชำระ, ชำระขั้นต่ำ):\n" +
+      "  * tx_type MUST be 'transfer'\n" +
+      "  * tx_subtype MUST be 'credit_card_payment'\n" +
+      "  * is_credit_card_payment MUST be true\n" +
+      "- Otherwise for normal transfer: tx_type='transfer', tx_subtype='transfer', is_credit_card_payment=false.\n" +
+      "- For receipts (not transfer): tx_type='expense' or 'income'. tx_subtype should be null.\n" +
+      "\n" +
+      "Account digits extraction:\n" +
+      "- from_account / to_account MUST be digits only (Thai digits ok).\n" +
+      "- For bank account: return ONLY last 3-6 digits.\n" +
+      "- For card number: return ONLY last 4 digits.\n" +
+      "- Do NOT use reference/biller/merchant ids as account.\n";
 
     const r = await fetch(OPENAI_URL, {
       method: "POST",

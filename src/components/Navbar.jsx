@@ -36,75 +36,89 @@ export default function Navbar() {
      * - Navbar อยู่ z-[40] เพื่อไม่ชน modal
      */
     <div className="fixed inset-x-0 bottom-0 z-[40] px-4 pb-safe pointer-events-none">
+      {/*
+        ✅ Bottom scrim: ช่วย “ปิด” คอนเทนต์ด้านหลังที่โผล่ทะลุผ่าน glass navbar
+        - ทำให้มองแล้วไม่แปลกตาเวลามี list/การ์ดอยู่ด้านล่าง
+        - ยังเก็บฟีล glass + blur ไว้ที่ตัวแถบจริง
+      */}
+      <div
+        className="absolute inset-x-0 bottom-0 h-36 pointer-events-none"
+        style={{
+          background:
+            "linear-gradient(to top, rgba(247,247,251,0.98), rgba(247,247,251,0.82) 45%, rgba(247,247,251,0))",
+        }}
+      />
+
       {/* ✅ Only actual bar is clickable */}
-      <nav
-        className="mx-auto w-full max-w-md pb-3 pointer-events-auto"
-        aria-label="Bottom navigation"
-      >
+      <nav className="mx-auto w-full max-w-md pb-3 pointer-events-auto" aria-label="Bottom navigation">
         <div
           className="
+            relative
             rounded-3xl
-            bg-white/22
-            backdrop-blur-2xl
-            border border-white/30
-            shadow-[0_-8px_30px_-12px_rgba(0,0,0,0.35)]
-            px-3 py-2
-            flex items-end justify-between
+            overflow-hidden
+            border border-white/35
+            shadow-[0_-10px_36px_-16px_rgba(0,0,0,0.45)]
           "
         >
-          <Item
-            active={currentView === "dashboard"}
-            onClick={() => actions.navigate("dashboard")}
-            icon={<Home size={22} />}
-            label="หน้าแรก"
-          />
+          {/* Underlay: ลดความโปร่งใส เพื่อไม่ให้เห็นของด้านหลังชัดเกินไป */}
+          <div className="absolute inset-0 bg-white/80 backdrop-blur-2xl" />
+          <div className="absolute inset-0 bg-gradient-to-b from-white/95 via-white/85 to-white/75" />
 
-          <Item
-            active={currentView === "stats"}
-            onClick={() => actions.navigate("stats")}
-            icon={<Activity size={22} />}
-            label="สรุปผล"
-          />
+          <div className="relative px-3 py-2 flex items-end justify-between">
+            <Item
+              active={currentView === "dashboard"}
+              onClick={() => actions.navigate("dashboard")}
+              icon={<Home size={22} />}
+              label="หน้าแรก"
+            />
 
-          {/* Center FAB */}
-          <div className="w-16 flex items-center justify-center">
-            <button
-              onClick={() => actions.startNewTransaction()}
-              aria-label="Add transaction"
-              type="button"
-              className="
-                -mt-10
-                w-14 h-14
-                rounded-full
-                flex items-center justify-center
-                bg-gradient-to-tr from-indigo-600/95 to-purple-600/95
-                text-white
-                shadow-[0_14px_35px_-14px_rgba(99,102,241,0.9)]
-                border border-white/30
-                ring-4 ring-white/40
-                backdrop-blur-xl
-                active:scale-95 transition-all
-                focus:outline-none
-                focus-visible:ring-4 focus-visible:ring-indigo-300/40
-              "
-            >
-              <Plus size={28} />
-            </button>
+            <Item
+              active={currentView === "stats"}
+              onClick={() => actions.navigate("stats")}
+              icon={<Activity size={22} />}
+              label="สรุปผล"
+            />
+
+            {/* Center FAB */}
+            <div className="w-16 flex items-center justify-center">
+              <button
+                onClick={() => actions.startNewTransaction()}
+                aria-label="Add transaction"
+                type="button"
+                className="
+                  -mt-10
+                  w-14 h-14
+                  rounded-full
+                  flex items-center justify-center
+                  bg-gradient-to-tr from-indigo-600/95 to-purple-600/95
+                  text-white
+                  shadow-[0_14px_35px_-14px_rgba(99,102,241,0.9)]
+                  border border-white/30
+                  ring-4 ring-white/40
+                  backdrop-blur-xl
+                  active:scale-95 transition-all
+                  focus:outline-none
+                  focus-visible:ring-4 focus-visible:ring-indigo-300/40
+                "
+              >
+                <Plus size={28} />
+              </button>
+            </div>
+
+            <Item
+              active={currentView === "accounts"}
+              onClick={() => actions.navigate("accounts")}
+              icon={<CreditCard size={22} />}
+              label="บัญชี"
+            />
+
+            <Item
+              active={currentView === "more"}
+              onClick={() => actions.navigate("more")}
+              icon={<MoreHorizontal size={22} />}
+              label="อื่นๆ"
+            />
           </div>
-
-          <Item
-            active={currentView === "accounts"}
-            onClick={() => actions.navigate("accounts")}
-            icon={<CreditCard size={22} />}
-            label="บัญชี"
-          />
-
-          <Item
-            active={currentView === "more"}
-            onClick={() => actions.navigate("more")}
-            icon={<MoreHorizontal size={22} />}
-            label="อื่นๆ"
-          />
         </div>
       </nav>
     </div>

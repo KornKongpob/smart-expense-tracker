@@ -1,159 +1,185 @@
 // src/components/TransactionCard.jsx
 import React, { useMemo } from "react";
-import { ChevronRight, ArrowRightLeft } from "lucide-react";
-import { formatCurrency } from "../utils/format";
+import { ArrowRightLeft, ChevronRight, CreditCard } from "lucide-react";
+import { isCreditAccount, getAccountLastDigits } from "../utils/accountMatch";
+import { useAppStore } from "../store/store";
+import { formatCurrency, formatDateShort } from "../utils/format";
 
-/**
- * ✅ Date label ที่ปลอดภัยกว่าเดิม
- * - รองรับทั้ง ISO (YYYY-MM-DD) / datetime string
- * - ถ้า parse ไม่ได้ จะ fallback เป็นตัด 10 ตัวอักษรแรก (YYYY-MM-DD)
- */
-function safeDateLabel(isoLike) {
-  const raw = String(isoLike || "").trim();
-  if (!raw) return "";
+// ---------- small helpers ----------
+const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
-  // ถ้าเป็น YYYY-MM-DD อยู่แล้ว ใช้ได้เลย
-  const short = raw.slice(0, 10);
-  const d = new Date(raw);
-
-  if (Number.isNaN(d.getTime())) return short || raw;
-  return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short" });
+function safeDateLabel(d) {
+  try {
+    return formatDateShort(d);
+  } catch {
+    return String(d || "");
+  }
 }
 
-/**
- * ✅ TransactionCard (Glassmorphism + UX polish)
- * สิ่งที่ปรับ:
- * 1) คลิกง่ายขึ้น: เพิ่ม focus ring / hover / active feedback
- * 2) ป้องกันข้อมูลแปลก: จำนวนเงินติดลบหรือเป็น NaN จะ normalize
- * 3) Transfer logic: ทำให้ consistent (ใช้ isTransfer ก่อน, แล้วค่อยดู type)
- * 4) Icon bubble: ให้ gradient + ขอบกระจก เนียนขึ้น + สีตามหมวด
- * 5) Badge: โทนชัด และแยก Transfer/Income/Expense ให้สื่อความหมาย
- */
+function isCreditAccount(acc) {
+  const t = String(acc?.type || "").toLowerCase().trim();
+  if (t === "credit") return true;
+  if (Number(acc?.creditLimit || 0) > 0) return true;
+  return false;
+}
+
+function accountHint(acc) {
+  if (!acc) return "";
+  const d =
+    String(acc?.digits || "").trim() ||
+    digitsOnly(acc?.accountNumber || acc?.number || "").slice(-4);
+  return d ? `•••• ${d}` : "";
+}
+
 export default function TransactionCard({ tx, category, accountName, onClick }) {
-  const type = String(tx?.type || "expense");
-  const isTransfer = !!tx?.isTransfer || tx?.category === "transfer";
+  const store = useAppStore();
+  const { state } = store;
 
-  // ✅ สำหรับ transfer ให้ถือว่าไม่ใช่ income/expense ปกติ (เพื่อ UI ไม่สับสน)
-  const isIncome = !isTransfer && type === "income";
+  const accounts = state.accounts || [];
+  const allTx = state.transactions || [];
 
-  // ✅ normalize amount
-  const amountRaw = Number(tx?.amount);
-  const amount = Number.isFinite(amountRaw) ? Math.abs(amountRaw) : 0;
+  const isTransfer = !!tx?.isTransfer;
 
-  // ✅ Sign/tone/badge based on final interpretation
-  const sign = isTransfer ? "" : isIncome ? "+" : "-";
-  const tone = isTransfer ? "text-indigo-700" : isIncome ? "text-emerald-700" : "text-red-600";
-  const badge = isTransfer ? "Transfer" : isIncome ? "Income" : "Expense";
+  // หา pair ของ transfer (2 legs) เพื่อแสดงครั้งเดียว + แสดง from → to
+  const transferPair = useMemo(() => {
+    if (!isTransfer) return null;
+    const transferId = String(tx?.transferId || "").trim();
+    if (!transferId) return null;
 
-  const dateLabel = useMemo(() => safeDateLabel(tx?.date), [tx?.date]);
+    const siblings = (allTx || []).filter((t) => String(t?.transferId || "").trim() === transferId);
+    if (!siblings.length) return null;
 
-  const badgeClass = isTransfer
-    ? "bg-indigo-500/15 text-indigo-800 border-indigo-200/40"
-    : isIncome
-    ? "bg-emerald-500/15 text-emerald-800 border-emerald-200/40"
-    : "bg-red-500/15 text-red-700 border-red-200/40";
+    const outTx = siblings.find((t) => t?.type === "expense") || null;
+    const inTx = siblings.find((t) => t?.type === "income") || null;
 
-  // ✅ icon bubble background hint
-  const catColor = String(category?.color || "#E5E7EB");
-  const iconBg = `${catColor}20`; // 12.5% alpha-ish
+    // บางครั้ง edit/scan อาจมี 2 ตัวไม่ครบ ให้ fallback แบบไม่พัง
+    return { outTx, inTx };
+  }, [isTransfer, tx?.transferId, allTx]);
 
-  const title = isTransfer ? category?.name || "Transfer" : category?.name || "ไม่ระบุ";
-  const note = String(tx?.note || "").trim() || "—";
-  const ref = tx?.ref ? String(tx.ref).trim() : "";
+  // ✅ ซ่อนขา income ของ transfer (ให้แสดงครั้งเดียว)
+  // ถ้าเจอ pair ชัดเจน → แสดงเฉพาะ outTx
+  // ถ้าไม่เจอ pair → อย่างน้อยซ่อนกรณี isTransfer + income
+  const shouldHide = useMemo(() => {
+    if (!isTransfer) return false;
+    if (transferPair?.outTx?.id) return String(tx?.id) !== String(transferPair.outTx.id);
+    return tx?.type === "income";
+  }, [isTransfer, transferPair, tx?.id, tx?.type]);
+
+  if (shouldHide) return null;
+
+  const isIncome = tx?.type === "income";
+
+  const amountText = formatCurrency(tx?.amount || 0);
+  let amountPrefix = isIncome ? "+" : "-";
+  let amountClass = isIncome ? "text-emerald-700" : "text-red-700";
+
+  // ชื่อ/ไอคอน/สีแสดงผล
+  let title = category?.name || "รายการ";
+  let subtitle = `${accountName || "—"} • ${safeDateLabel(tx?.date)}`;
+
+  let leadingIsLucide = false;
+  let leadingIcon = category?.icon || "🧾";
+  let leadingBg = category?.color ? `${category.color}20` : "rgba(255,255,255,0.25)";
+  let badgeText = "";
+
+  // -------- Transfer / Credit Card Payment (special rendering) --------
+  if (isTransfer) {
+    // ใช้ outTx เป็นตัวแทนในการแสดงยอด (neutral)
+    const outTx = transferPair?.outTx || (tx?.type === "expense" ? tx : null) || tx;
+    const inTx = transferPair?.inTx || null;
+
+    const fromAcc = accounts.find((a) => String(a.id) === String(outTx?.accountId)) || null;
+    const toAcc = accounts.find((a) => String(a.id) === String(inTx?.accountId)) || null;
+
+    const fromName = fromAcc?.name || accountName || "บัญชีต้นทาง";
+    const toName = toAcc?.name || "บัญชีปลายทาง";
+
+    const fromHint = accountHint(fromAcc);
+    const toHint = accountHint(toAcc);
+
+    // Detect credit card payment:
+    // - flag/field
+    // - note contains keywords
+    // - or destination is credit account (common case: bank -> credit)
+    const noteLower = String(outTx?.note || tx?.note || "").toLowerCase();
+    const isCcPayment =
+      !!(outTx?.isCreditCardPayment || outTx?.is_credit_card_payment || outTx?.subtype === "credit_card_payment") ||
+      !!(tx?.isCreditCardPayment || tx?.is_credit_card_payment || tx?.subtype === "credit_card_payment") ||
+      noteLower.includes("ชำระบัตร") ||
+      noteLower.includes("ชำระยอด") ||
+      noteLower.includes("credit") ||
+      (toAcc && isCreditAccount(toAcc) && (!fromAcc || !isCreditAccount(fromAcc)));
+
+    title = isCcPayment
+      ? toAcc?.name
+        ? `ชำระบัตรเครดิต • ${toAcc.name}`
+        : "ชำระบัตรเครดิต"
+      : "Transfer";
+
+    subtitle = `${fromName}${fromHint ? ` (${fromHint})` : ""} → ${toName}${toHint ? ` (${toHint})` : ""} • ${safeDateLabel(
+      outTx?.date || tx?.date
+    )}`;
+
+    // transfer/payments should be neutral in UI (ไม่ใช่รายจ่ายจริง)
+    amountPrefix = "";
+    amountClass = "text-gray-900";
+
+    leadingIsLucide = true;
+    leadingIcon = isCcPayment ? CreditCard : ArrowRightLeft;
+    leadingBg = "rgba(99,102,241,0.10)"; // indigo-ish
+    badgeText = isCcPayment ? "PAYMENT" : "TRANSFER";
+  }
+
+  const Leading = leadingIsLucide ? leadingIcon : null;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className="
-        w-full text-left
-        rounded-3xl
-        bg-white/20
-        backdrop-blur-2xl
-        border border-white/28
-        shadow-[0_10px_28px_-18px_rgba(0,0,0,0.35)]
-        p-4
-        transition-all
-        active:scale-[0.99]
-        hover:bg-white/24
-        focus:outline-none
-        focus:ring-4 focus:ring-indigo-300/35
-      "
-      aria-label={`transaction ${title}`}
+      className="w-full glass-card rounded-3xl p-4 text-left hover:scale-[1.01] active:scale-[0.99] transition-transform"
     >
       <div className="flex items-center gap-3">
-        {/* Icon bubble */}
+        {/* leading */}
         <div
-          className="
-            w-12 h-12 rounded-2xl shrink-0
-            flex items-center justify-center text-xl
-            bg-white/22
-            border border-white/30
-            shadow-sm
-            relative overflow-hidden
-          "
-          style={{ backgroundColor: iconBg }}
+          className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border border-white/15"
+          style={{ backgroundColor: leadingBg }}
+          aria-hidden="true"
         >
-          {/* subtle highlight */}
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/25 via-white/10 to-white/0" />
-
-          <div className="relative">
-            {isTransfer ? "🔁" : category?.icon || "🧾"}
-          </div>
+          {leadingIsLucide ? (
+            <Leading size={18} className={isTransfer ? "text-indigo-700" : "text-gray-900"} />
+          ) : (
+            <span className="text-xl leading-none">{leadingIcon}</span>
+          )}
         </div>
 
-        <div className="min-w-0 flex-1">
+        <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-3">
-            {/* Left */}
             <div className="min-w-0">
-              <div className="font-extrabold text-gray-900 truncate flex items-center gap-2">
-                {isTransfer ? (
-                  <span className="inline-flex items-center gap-2 min-w-0">
-                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-indigo-500/15 border border-indigo-200/40 shrink-0">
-                      <ArrowRightLeft size={14} className="text-indigo-700" />
-                    </span>
-                    <span className="truncate">{title}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="text-sm font-extrabold text-gray-900 truncate">{title}</div>
+                {badgeText ? (
+                  <span className="shrink-0 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-white/30 border border-white/15 text-gray-900/80">
+                    {badgeText}
                   </span>
-                ) : (
-                  <span className="truncate">{title}</span>
-                )}
-              </div>
-
-              <div className="text-xs text-gray-700/70 mt-1 truncate">
-                {note}
-                {ref ? <span className="ml-2 text-gray-500/70">• Ref {ref}</span> : null}
-              </div>
-
-              <div className="mt-2 flex items-center gap-2 min-w-0 flex-wrap">
-                <span className="text-[11px] text-gray-700/55 font-bold">{dateLabel}</span>
-
-                {accountName ? (
-                  <span className="text-[11px] text-gray-700/55 font-bold truncate">• {accountName}</span>
                 ) : null}
-
-                <span className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full border ${badgeClass}`}>
-                  {badge}
-                </span>
               </div>
+              <div className="text-xs text-gray-800/60 truncate">{subtitle}</div>
             </div>
 
-            {/* Right */}
-            <div className="shrink-0 text-right">
-              <div className={`text-base font-extrabold ${tone}`}>
-                {sign}
-                {formatCurrency(amount)}
+            <div className="shrink-0 flex items-center gap-2">
+              <div className={`text-sm font-extrabold ${amountClass}`}>
+                {amountPrefix}
+                {amountText}
               </div>
-
-              <div className="mt-1 inline-flex items-center justify-center w-8 h-8 rounded-full bg-white/20 border border-white/28 text-gray-700/40">
-                <ChevronRight size={18} />
-              </div>
+              <ChevronRight size={16} className="text-gray-900/35" aria-hidden="true" />
             </div>
           </div>
+
+          {tx?.note ? (
+            <div className="mt-1 text-xs text-gray-800/70 truncate">{String(tx.note)}</div>
+          ) : null}
         </div>
       </div>
-
-      {/* ✅ Optional: micro-divider (ช่วยแยก card ใน list) */}
-      <div className="mt-3 h-px bg-white/10" />
     </button>
   );
 }
