@@ -1,5 +1,6 @@
 // src/views/AddTransactionView.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Trash2,
@@ -64,144 +65,189 @@ function AccountDropdown({
   accounts,
   value,
   onChange,
-  title = "เลือกบัญชี",
   placeholder = "เลือกบัญชี",
+  title = "เลือกบัญชี",
   filterFn,
-  disabled = false,
 }) {
   const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-
-  const selected = useMemo(() => accounts.find((a) => a.id === value) || null, [accounts, value]);
-  const selectedVisual = useMemo(() => getAccountVisual(selected), [selected]);
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
 
   const filtered = useMemo(() => {
-    let list = accounts || [];
-    if (typeof filterFn === "function") list = list.filter(filterFn);
+    const arr = Array.isArray(accounts) ? accounts : [];
+    return typeof filterFn === "function" ? arr.filter(filterFn) : arr;
+  }, [accounts, filterFn]);
 
-    const needle = String(q || "").trim().toLowerCase();
-    if (!needle) return list;
+  // ถ้า value ไม่อยู่ใน filtered (เช่น filterFn เปลี่ยน) ให้ยังพยายามหาใน accounts ทั้งหมดเพื่อโชว์ชื่อถูกต้อง
+  const selected = useMemo(() => {
+    const all = Array.isArray(accounts) ? accounts : [];
+    return all.find((a) => a.id === value) || null;
+  }, [accounts, value]);
 
-    return list.filter((a) => {
-      const name = String(a?.name || "").toLowerCase();
-      const digits = String(a?.accountNumber || "").toLowerCase();
-      const type = String(a?.type || "").toLowerCase();
-      return name.includes(needle) || digits.includes(needle) || type.includes(needle);
+  const updatePos = () => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({
+      top: Math.min(window.innerHeight - 16, r.bottom + 8),
+      left: Math.max(8, Math.min(window.innerWidth - r.width - 8, r.left)),
+      width: r.width,
     });
-  }, [accounts, filterFn, q]);
+  };
 
-  // lock background scroll when modal open (prevents weird overlap/scroll feel)
+  // ✅ อัปเดตตำแหน่งตอนเปิด + จับ scroll/resize แบบ capture (แก้ซ้อน/คลิกไม่ได้)
   useEffect(() => {
     if (!open) return;
-    const el = document?.documentElement;
-    if (!el) return;
+    updatePos();
 
-    const prev = el.style.overflow;
-    el.style.overflow = "hidden";
+    const onWin = () => updatePos();
+    window.addEventListener("resize", onWin);
+    window.addEventListener("scroll", onWin, true);
+
     return () => {
-      el.style.overflow = prev;
+      window.removeEventListener("resize", onWin);
+      window.removeEventListener("scroll", onWin, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // ✅ Lock scroll + ESC ปิด dropdown
+  useEffect(() => {
+    if (!open) return;
+
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = prev;
     };
   }, [open]);
 
-  return (
-    <>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-        className={`w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900 bg-white/30 flex items-center justify-between gap-3 ${
-          disabled ? "opacity-60" : "active:scale-[0.99]"
-        }`}
+  const layer = open ? (
+    <div
+      className="fixed inset-0 z-[9999]"
+      onMouseDown={() => setOpen(false)}
+      onTouchStart={() => setOpen(false)}
+      style={{ touchAction: "none" }}
+    >
+      {/* backdrop */}
+      <div className="absolute inset-0 bg-black/45" />
+
+      {/* desktop anchored dropdown */}
+      <div
+        className="hidden sm:block fixed z-[10000] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl"
+        style={{ top: pos.top, left: pos.left, width: pos.width }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="w-8 h-8 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center">
-            {selected ? (
-              selectedVisual.kind === "img" ? (
-                <img src={selectedVisual.src} alt="acc" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-lg leading-none">{selectedVisual.value}</span>
-              )
-            ) : (
-              <span className="text-lg leading-none">🏦</span>
-            )}
-          </span>
-          <span className="truncate">{selected ? selected.name : placeholder}</span>
+        <div className="px-4 py-3 border-b">
+          <div className="text-sm font-medium">{title}</div>
         </div>
-        <span className="text-gray-900/45 text-xs">▼</span>
+        <div className="max-h-72 overflow-auto">
+          {filtered.length === 0 ? (
+            <div className="p-4 text-sm text-gray-500">ไม่พบบัญชี</div>
+          ) : (
+            filtered.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => {
+                  onChange?.(a.id);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${
+                  a.id === value ? "bg-gray-50" : ""
+                }`}
+              >
+                <div className="text-sm font-medium">{a.name}</div>
+                <div className="text-xs text-gray-500">
+                  {a.type} • {a.currency}
+                  {a.digits ? ` • •••• ${a.digits}` : ""}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* mobile bottom sheet */}
+      <div
+        className="sm:hidden fixed left-0 right-0 bottom-0 z-[10000] rounded-t-3xl bg-white shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        style={{ touchAction: "pan-y" }}
+      >
+        <div className="px-4 pt-3 pb-2">
+          <div className="mx-auto h-1.5 w-12 rounded-full bg-gray-200" />
+          <div className="mt-2 text-sm font-medium">{title}</div>
+        </div>
+        <div className="max-h-[60vh] overflow-auto px-2 pb-3">
+          {filtered.length === 0 ? (
+            <div className="p-3 text-sm text-gray-500">ไม่พบบัญชี</div>
+          ) : (
+            filtered.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => {
+                  onChange?.(a.id);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-3 py-3 rounded-xl hover:bg-gray-50 ${
+                  a.id === value ? "bg-gray-50" : ""
+                }`}
+              >
+                <div className="text-sm font-medium">{a.name}</div>
+                <div className="text-xs text-gray-500">
+                  {a.type} • {a.currency}
+                  {a.digits ? ` • •••• ${a.digits}` : ""}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+        <div className="px-4 pb-4">
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="w-full rounded-2xl border px-4 py-3 text-sm"
+          >
+            ปิด
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full rounded-2xl border px-4 py-3 text-left"
+      >
+        <div className="text-sm font-medium">
+          {selected ? selected.name : placeholder}
+        </div>
+        {selected && (
+          <div className="text-xs text-gray-500">
+            {selected.type} • {selected.currency}
+            {selected.digits ? ` • •••• ${selected.digits}` : ""}
+          </div>
+        )}
       </button>
 
-      {open ? (
-        <div className="fixed inset-0 z-[80] bg-black/45 flex items-end sm:items-center justify-center">
-          <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-lg font-extrabold text-gray-900">{title}</div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-                aria-label="close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="glass-input rounded-2xl px-3 py-2 flex items-center gap-2 mb-3">
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="ค้นหาชื่อบัญชี / เลขท้าย / ประเภท"
-                className="w-full outline-none text-sm bg-transparent text-gray-800 placeholder:text-gray-500"
-              />
-            </div>
-
-            <div className="space-y-2">
-              {filtered.map((acc) => {
-                const v = getAccountVisual(acc);
-                const isSel = acc.id === value;
-                return (
-                  <button
-                    key={acc.id}
-                    type="button"
-                    onClick={() => {
-                      onChange?.(acc.id);
-                      setOpen(false);
-                    }}
-                    className={`w-full rounded-2xl p-3 border text-left flex items-center gap-3 active:scale-[0.99] transition-all ${
-                      isSel
-                        ? "glass-card border-white/20 ring-2 ring-gray-900/70"
-                        : "glass-panel border-white/15 hover:bg-white/10"
-                    }`}
-                  >
-                    <span className="w-10 h-10 rounded-2xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center">
-                      {v.kind === "img" ? (
-                        <img src={v.src} alt="acc" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="text-xl leading-none">{v.value}</span>
-                      )}
-                    </span>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="font-extrabold text-gray-900 truncate">{acc.name}</div>
-                      <div className="text-[11px] text-gray-800/55 truncate">
-                        {acc.accountNumber ? `เลขท้าย: ${acc.accountNumber}` : "—"}
-                        {String(acc.type || "").trim() ? ` • ${String(acc.type)}` : ""}
-                      </div>
-                    </div>
-
-                    {isSel ? <Check size={18} className="text-gray-900" /> : null}
-                  </button>
-                );
-              })}
-              {!filtered.length ? (
-                <div className="text-center text-sm text-gray-900/60 py-8">ไม่พบบัญชี</div>
-              ) : null}
-            </div>
-
-            <div className="h-3 pb-safe" />
-          </div>
-        </div>
-      ) : null}
-    </>
+      {open && typeof document !== "undefined"
+        ? createPortal(layer, document.body)
+        : null}
+    </div>
   );
 }
 
@@ -250,25 +296,62 @@ function hashString(str) {
   return h;
 }
 
-/** ===== account matching helpers ===== */
+/** ===== account matching helpers =====
+ * รองรับการ map ด้วย:
+ * - accountNumber (เลขบัญชีเต็ม)
+ * - digits (มักเป็นเลขท้าย 4-6)
+ * - cardNumber / cardDigits / last4 (กรณีบัตร)
+ */
+function getAccountDigitCandidates(a) {
+  const raw = [
+    a?.accountNumber,
+    a?.digits,
+    a?.cardNumber,
+    a?.cardDigits,
+    a?.last4,
+    a?.lastDigits,
+    a?.number,
+  ]
+    .filter(Boolean)
+    .map((x) => digitsOnly(String(x)))
+    .filter((x) => x && x.length >= 3);
+
+  // dedupe
+  return Array.from(new Set(raw));
+}
+
 function bestMatchAccountCandidate(accounts, digits) {
   const d = digitsOnly(digits);
   if (!d || d.length < 3) return { id: "", score: 0 };
 
   let best = { id: "", score: 0 };
+
   for (const a of accounts || []) {
-    const n = digitsOnly(a.accountNumber);
-    if (!n) continue;
+    const cands = getAccountDigitCandidates(a);
+    if (!cands.length) continue;
 
-    const aLast = n.slice(-Math.min(n.length, 12));
-    const dLast = d.slice(-Math.min(d.length, 12));
+    for (const n0 of cands) {
+      // ให้พิจารณาท้ายยาวสุดไม่เกิน 12 เพื่อกัน false positive
+      const aLast = n0.slice(-Math.min(n0.length, 12));
+      const dLast = d.slice(-Math.min(d.length, 12));
 
-    let score = 0;
-    if (aLast.endsWith(dLast)) score = dLast.length;
-    else if (dLast.endsWith(aLast)) score = aLast.length;
+      let score = 0;
 
-    if (score > best.score) best = { id: a.id, score };
+      // match แบบ suffix
+      if (aLast.endsWith(dLast)) score = dLast.length;
+      else if (dLast.endsWith(aLast)) score = aLast.length;
+
+      // ถ้าคะแนนเท่ากัน เลือกอันที่ id ยังไม่ตั้ง / หรือ match ยาวกว่า
+      if (score > best.score) best = { id: a.id, score };
+    }
   }
+
+  // ลด false positive สำหรับเลขสั้นมาก
+  if (best.score > 0 && best.score < 4) {
+    // ถ้า match ได้แค่ 3 ตัว ให้ถือว่าอ่อนมาก (แต่ยังคืนค่าได้เพื่อ fallback)
+    return best;
+  }
+
   return best;
 }
 
@@ -320,6 +403,34 @@ function mapKnownCategoryId(type, key) {
   return type === "income" ? incomeMap[k] || "" : expenseMap[k] || "";
 }
 
+function looksLikeCreditPaymentText(text) {
+  const t = String(text || "").toLowerCase();
+  return (
+    t.includes("ชำระ") ||
+    t.includes("ชำระยอด") ||
+    t.includes("บัตรเครดิต") ||
+    t.includes("credit card") ||
+    t.includes("card payment") ||
+    t.includes("payment") ||
+    t.includes("pay bill") ||
+    t.includes("pay card")
+  );
+}
+
+function looksLikeTransferText(text) {
+  const t = String(text || "").toLowerCase();
+  return (
+    t.includes("โอน") ||
+    t.includes("transfer") ||
+    t.includes("พร้อมเพย์") ||
+    t.includes("promptpay") ||
+    t.includes("trx") ||
+    t.includes("transaction") ||
+    t.includes("ref") ||
+    t.includes("เลขที่รายการ")
+  );
+}
+
 export default function AddTransactionView({ showAlert, showConfirm }) {
   const store = useAppStore();
   const { state, navigate, upsertTransaction, bulkUpsertTransactions, deleteTransaction, addCategory } = store;
@@ -340,12 +451,46 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return { outTx, inTx };
   }, [initialData?.isTransfer, initialData?.transferId, state.transactions]);
 
+  const transferKindForEdit = useMemo(() => {
+    if (!transferPair) return null;
+
+    const explicit =
+      String(transferPair?.outTx?.transferKind || transferPair?.inTx?.transferKind || "")
+        .trim()
+        .toLowerCase() || "";
+
+    if (explicit === "credit_payment") return "credit_payment";
+
+    // infer by account types (to = credit, from = non-credit)
+    const fromAcc = accounts.find((a) => a.id === transferPair?.outTx?.accountId) || null;
+    const toAcc = accounts.find((a) => a.id === transferPair?.inTx?.accountId) || null;
+
+    if (fromAcc && toAcc && isCreditAccount(toAcc) && !isCreditAccount(fromAcc)) return "credit_payment";
+
+    return "transfer";
+  }, [transferPair, accounts]);
+
+  const isEditingTransferLike = !!(isEditMode && initialData?.isTransfer);
+  const isEditingCreditPayment = isEditingTransferLike && transferKindForEdit === "credit_payment";
+
   // ===== modes =====
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan"); // scan | manual
 
   // ===== manual form states =====
-  const initialType = initialData?.isTransfer ? "transfer" : initialData?.type || "expense";
-  const [type, setType] = useState(initialType); // expense | income | transfer
+  const initialType = useMemo(() => {
+    if (initialData?.isTransfer) return transferKindForEdit === "credit_payment" ? "credit_payment" : "transfer";
+    return initialData?.type || "expense";
+  }, [initialData?.isTransfer, initialData?.type, transferKindForEdit]);
+
+  const [type, setType] = useState(initialType); // expense | income | transfer | credit_payment
+
+  // keep type synced in edit mode if inferred kind changes (e.g., accounts loaded)
+  useEffect(() => {
+    if (!isEditMode) return;
+    setType(initialType);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialType]);
+
   const [amountDigits, setAmountDigits] = useState(() => {
     const n = transferPair?.outTx?.amount ?? initialData?.amount ?? 0;
     return n ? String(Math.round(Math.abs(n))) : "";
@@ -582,8 +727,70 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     if (expandedId === id) setExpandedId(null);
   };
 
+  // ===== credit card payment helpers (manual/scan) =====
+  const creditAccounts = useMemo(() => accounts.filter(isCreditAccount), [accounts]);
+  const nonCreditAccounts = useMemo(() => accounts.filter((a) => !isCreditAccount(a)), [accounts]);
+
+  const creditDebtById = useMemo(() => {
+    const m = new Map();
+    for (const a of creditAccounts) {
+      const bal = calcAccountBalance(accounts, state.transactions || [], a.id);
+      m.set(a.id, Math.max(0, -Number(bal || 0)));
+    }
+    return m;
+  }, [creditAccounts, accounts, state.transactions]);
+
+  const selectedToAcc = useMemo(() => accounts.find((a) => a.id === toAccountId) || null, [accounts, toAccountId]);
+  const creditDebt = useMemo(() => {
+    if (!selectedToAcc) return 0;
+    if (!isCreditAccount(selectedToAcc)) return 0;
+    return creditDebtById.get(selectedToAcc.id) || 0;
+  }, [selectedToAcc, creditDebtById]);
+
+  // auto-fix accounts when choose credit_payment
+  useEffect(() => {
+    if (type !== "credit_payment") return;
+
+    const toAcc = accounts.find((a) => a.id === toAccountId) || null;
+    const fromAcc = accounts.find((a) => a.id === fromAccountId) || null;
+
+    const firstCredit = creditAccounts?.[0]?.id || "";
+    const firstNonCredit = nonCreditAccounts?.[0]?.id || accounts?.[0]?.id || "";
+
+    if (firstCredit && (!toAcc || !isCreditAccount(toAcc))) {
+      setToAccountId(firstCredit);
+    }
+    if (firstNonCredit && fromAcc && isCreditAccount(fromAcc)) {
+      setFromAccountId(firstNonCredit);
+    }
+  }, [type, accounts, creditAccounts, nonCreditAccounts, fromAccountId, toAccountId]);
+
+  const applyPayFull = () => {
+    if (!selectedToAcc || !isCreditAccount(selectedToAcc)) {
+      showAlert?.("กรุณาเลือกบัญชีบัตรเครดิตก่อน");
+      return;
+    }
+    if (!creditDebt || creditDebt <= 0) {
+      showAlert?.("บัตรนี้ไม่มียอดค้างชำระ");
+      return;
+    }
+    setAmountDigits(String(Math.round(creditDebt)));
+    // เติม note แบบไม่ทับของเดิมถ้ามีแล้ว
+    setNote((prev) => {
+      const p = String(prev || "").trim();
+      if (p) return p;
+      return `ชำระบัตรเครดิต • ${selectedToAcc.name || "Credit Card"}`;
+    });
+  };
+
+  const applyPayFullForQueue = (qid, toAccId) => {
+    const debt = creditDebtById.get(toAccId) || 0;
+    if (!debt || debt <= 0) return;
+    updateQueueItem(qid, { amount: Math.round(debt), splitByCategory: false });
+  };
+
   // ✅ เปลี่ยนประเภทใน Queue (หลัง scan)
-  // ✅ FIX: Transfer -> Expense/Income จะ auto-select account เดียวจากเลขบัญชีในสลิป (เลือก match สูงสุด)
+  // ✅ รองรับ credit_payment
   const handleQueueTypeChange = (qid, nextType) => {
     setQueue((prev) =>
       prev.map((x) => {
@@ -594,7 +801,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         const fromDigits = String(x.fromDigits || "").trim();
         const toDigits = String(x.toDigits || "").trim();
 
-        // transfer -> reset fields
         if (nextType === "transfer") {
           return {
             ...x,
@@ -609,17 +815,43 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           };
         }
 
+        if (nextType === "credit_payment") {
+          const pickedFrom =
+            (!x.fromAccountId || isCreditAccount(accounts.find((a) => a.id === x.fromAccountId))) &&
+            nonCreditAccounts?.[0]?.id
+              ? nonCreditAccounts[0].id
+              : x.fromAccountId || x.accountId || nonCreditAccounts?.[0]?.id || fallbackAcc;
+
+          const pickedTo =
+            isCreditAccount(accounts.find((a) => a.id === x.toAccountId)) && x.toAccountId
+              ? x.toAccountId
+              : creditAccounts?.[0]?.id || x.toAccountId || fallbackAcc;
+
+          return {
+            ...x,
+            txType: "credit_payment",
+            splitByCategory: false,
+            groups: [],
+            categoryId: "transfer",
+            fromAccountId: pickedFrom,
+            toAccountId: pickedTo,
+            accountId: x.accountId || pickedFrom || fallbackAcc,
+            suggestedCategoryId: "",
+            suggestedReason: "",
+            note: x.note || x.merchant ? x.note : "ชำระบัตรเครดิต",
+          };
+        }
+
         // expense/income
         const suggested =
           categoryMemory?.suggestCategoryId?.(nextType, merchant, fromDigits, toDigits, expenseCats, incomeCats) || "";
 
-        // pick a safe category id
         let nextCategoryId = suggested || x.categoryId || "";
         if (!nextCategoryId || nextCategoryId === "transfer") {
           nextCategoryId = ensureCategory(nextType, "other");
         }
 
-        // ✅ auto pick single accountId by best match digits (compare from/to)
+        // auto pick single accountId by best match digits
         const candFrom = bestMatchAccountCandidate(accounts, fromDigits);
         const candTo = bestMatchAccountCandidate(accounts, toDigits);
 
@@ -702,7 +934,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             items: [],
             groups: [],
             splitByCategory: false,
-
             fromDigits: "",
             toDigits: "",
             suggestedCategoryId: "",
@@ -716,7 +947,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             onStatus: (s) => setScanStatus(s || `กำลังอ่าน: ${file.name}`),
           });
 
-          const txType =
+          const aiTxType =
             result?.tx_type === "transfer" ? "transfer" : result?.tx_type === "income" ? "income" : "expense";
 
           const amount =
@@ -736,13 +967,46 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const fromDigits = digitsOnly(result?.from_account);
           const toDigits = digitsOnly(result?.to_account);
 
+          // map account ids by digits (support both account digits and card digits)
+          const matchedFromId = bestMatchAccountId(accounts, fromDigits);
+          const matchedToId = bestMatchAccountId(accounts, toDigits);
+          const matchedFromAcc = matchedFromId ? accounts.find((a) => a.id === matchedFromId) : null;
+          const matchedToAcc = matchedToId ? accounts.find((a) => a.id === matchedToId) : null;
+
+          const hasTwoSides = !!(matchedFromId && matchedToId && matchedFromId !== matchedToId);
+
+          // infer credit payment: to=credit and from=non-credit
+          let finalTxType = aiTxType;
+
+          if (aiTxType === "transfer" && matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) {
+            finalTxType = "credit_payment";
+          } else if (hasTwoSides && matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) {
+            finalTxType = "credit_payment";
+          } else if (aiTxType !== "income" && looksLikeCreditPaymentText(contextText) && matchedToAcc && isCreditAccount(matchedToAcc)) {
+            finalTxType = "credit_payment";
+          } else if (aiTxType !== "transfer" && hasTwoSides && looksLikeTransferText(contextText)) {
+            // กัน slip โอนที่โมเดลตีเป็น expense
+            finalTxType = "transfer";
+          }
+
           let detectedAccountId = "";
           let detectedFromId = "";
           let detectedToId = "";
 
-          if (txType === "transfer") {
-            detectedFromId = bestMatchAccountId(accounts, fromDigits) || accounts?.[0]?.id || "";
-            detectedToId = bestMatchAccountId(accounts, toDigits) || accounts?.[0]?.id || "";
+          if (finalTxType === "transfer" || finalTxType === "credit_payment") {
+            detectedFromId = matchedFromId || accounts?.[0]?.id || "";
+            detectedToId = matchedToId || accounts?.[0]?.id || "";
+
+            // ถ้าเป็น credit_payment แต่จับ from/to ไม่ครบ ให้ fallback ให้ถูกชนิด
+            if (finalTxType === "credit_payment") {
+              const fromAcc = accounts.find((a) => a.id === detectedFromId) || null;
+              const toAcc = accounts.find((a) => a.id === detectedToId) || null;
+              const fallbackFrom = nonCreditAccounts?.[0]?.id || accounts?.[0]?.id || "";
+              const fallbackTo = creditAccounts?.[0]?.id || detectedToId || "";
+
+              if (!fromAcc || isCreditAccount(fromAcc)) detectedFromId = fallbackFrom;
+              if (!toAcc || !isCreditAccount(toAcc)) detectedToId = fallbackTo;
+            }
           } else {
             detectedAccountId =
               bestMatchAccountId(accounts, fromDigits) ||
@@ -760,12 +1024,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           let groups = [];
           let primaryKey = fallbackKey;
 
-          if (txType === "expense" || txType === "income") {
-            const grouped = groupReceiptItemsToCategory(txType, scannedItems, contextText, fallbackKey);
+          // สำหรับ credit_payment/transfer: ไม่ split หมวด
+          if (finalTxType === "expense" || finalTxType === "income") {
+            const grouped = groupReceiptItemsToCategory(finalTxType, scannedItems, contextText, fallbackKey);
             primaryKey = grouped.primaryKey || fallbackKey;
 
             groups = (grouped.groups || []).map((g) => {
-              const catId = ensureCategory(txType, g.key || "other");
+              const catId = ensureCategory(finalTxType, g.key || "other");
               return {
                 key: g.key || "other",
                 categoryId: catId,
@@ -779,7 +1044,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const aiTotal = Number.isFinite(Number(amount)) ? Number(amount) : 0;
 
           let splitByCategory = false;
-          if (txType === "expense" && groups.length >= 2) {
+          if (finalTxType === "expense" && groups.length >= 2) {
             const g0 = groups[0]?.amount || 0;
             const g1 = groups[1]?.amount || 0;
             const total = groupSum || aiTotal || 1;
@@ -789,15 +1054,15 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           }
 
           let detectedCategoryId = "";
-          if (txType === "expense") detectedCategoryId = ensureCategory("expense", primaryKey || "other");
-          if (txType === "income") detectedCategoryId = ensureCategory("income", primaryKey || "other");
+          if (finalTxType === "expense") detectedCategoryId = ensureCategory("expense", primaryKey || "other");
+          if (finalTxType === "income") detectedCategoryId = ensureCategory("income", primaryKey || "other");
 
           let suggestedCategoryId = "";
           let suggestedReason = "";
-          if ((txType === "expense" || txType === "income") && !splitByCategory) {
+          if ((finalTxType === "expense" || finalTxType === "income") && !splitByCategory) {
             const sug =
               categoryMemory?.suggestCategoryId?.(
-                txType,
+                finalTxType,
                 merchant || mergedNote,
                 fromDigits,
                 toDigits,
@@ -820,13 +1085,21 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
           updateQueueItem(qid, {
             status: "ready",
-            txType,
-            amount: splitByCategory ? groupSum || aiTotal || null : Number.isFinite(amount) ? amount : groupSum || null,
+            txType: finalTxType,
+            amount:
+              finalTxType === "transfer" || finalTxType === "credit_payment"
+                ? (Number.isFinite(amount) ? amount : aiTotal || null)
+                : splitByCategory
+                ? groupSum || aiTotal || null
+                : Number.isFinite(amount)
+                ? amount
+                : groupSum || null,
             date: d,
             note: mergedNote,
             merchant,
             ref: rref,
-            categoryId: txType === "transfer" ? "transfer" : detectedCategoryId,
+            categoryId:
+              finalTxType === "transfer" || finalTxType === "credit_payment" ? "transfer" : detectedCategoryId,
             accountId: detectedAccountId || (accounts?.[0]?.id || ""),
             fromAccountId: detectedFromId || (accounts?.[0]?.id || ""),
             toAccountId: detectedToId || (accounts?.[0]?.id || ""),
@@ -835,9 +1108,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             evidence: evidenceText.slice(0, 240),
             items: scannedItems,
             groups,
-            splitByCategory: txType === "transfer" ? false : splitByCategory,
+            splitByCategory: finalTxType === "transfer" || finalTxType === "credit_payment" ? false : splitByCategory,
             error: "",
-
             fromDigits,
             toDigits,
             suggestedCategoryId,
@@ -868,10 +1140,17 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     }
 
     for (const q of ready) {
-      if (q.txType === "transfer") {
-        if (!q.fromAccountId || !q.toAccountId) return showAlert?.("Transfer ต้องเลือกบัญชีต้นทาง/ปลายทาง");
+      if (q.txType === "transfer" || q.txType === "credit_payment") {
+        if (!q.fromAccountId || !q.toAccountId) return showAlert?.("ต้องเลือกบัญชีต้นทาง/ปลายทางให้ครบ");
         if (q.fromAccountId === q.toAccountId)
-          return showAlert?.("Transfer ห้ามเลือกบัญชีต้นทางและปลายทางเป็นบัญชีเดียวกัน");
+          return showAlert?.("ห้ามเลือกบัญชีต้นทางและปลายทางเป็นบัญชีเดียวกัน");
+
+        if (q.txType === "credit_payment") {
+          const fromAcc = accounts.find((a) => a.id === q.fromAccountId) || null;
+          const toAcc = accounts.find((a) => a.id === q.toAccountId) || null;
+          if (!toAcc || !isCreditAccount(toAcc)) return showAlert?.("ชำระบัตร: บัญชีปลายทางต้องเป็นบัตรเครดิต");
+          if (fromAcc && isCreditAccount(fromAcc)) return showAlert?.("ชำระบัตร: บัญชีต้นทางควรเป็นบัญชีปกติ (ไม่ใช่บัตร)");
+        }
       } else {
         if (!q.accountId) return showAlert?.("กรุณาเลือกบัญชีให้ครบ");
 
@@ -896,8 +1175,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
       const baseNote = appendEvidenceToNote(baseNoteRaw, q.evidence, 180);
 
-      if (q.txType === "transfer") {
+      if (q.txType === "transfer" || q.txType === "credit_payment") {
         const transferId = generateTransferId();
+        const kind = q.txType === "credit_payment" ? "credit_payment" : "transfer";
+        const defaultNote =
+          kind === "credit_payment"
+            ? `ชำระบัตรเครดิต • ${(accounts.find((a) => a.id === q.toAccountId)?.name || "Credit Card").trim()}`
+            : "Transfer";
 
         txs.push({
           id: generateId(),
@@ -906,11 +1190,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           category: "transfer",
           accountId: q.fromAccountId,
           date: d,
-          note: baseNote || "Transfer",
+          note: baseNote || defaultNote,
           isTransfer: true,
           transferId,
           ref: q.ref || null,
           source: "scan",
+          transferKind: kind,
 
           merchant: merchant || null,
           evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -926,11 +1211,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           category: "transfer",
           accountId: q.toAccountId,
           date: d,
-          note: baseNote || "Transfer",
+          note: baseNote || defaultNote,
           isTransfer: true,
           transferId,
           ref: q.ref || null,
           source: "scan",
+          transferKind: kind,
 
           merchant: merchant || null,
           evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -1010,13 +1296,28 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     const d = String(date || toISODate(new Date())).slice(0, 10);
     const noteText = String(note || "").trim();
 
-    if (type === "transfer") {
+    if (type === "transfer" || type === "credit_payment") {
       if (!fromAccountId || !toAccountId) return showAlert?.("กรุณาเลือกบัญชีต้นทางและปลายทาง");
       if (fromAccountId === toAccountId) return showAlert?.("บัญชีต้นทาง/ปลายทางต้องไม่ใช่บัญชีเดียวกัน");
+
+      const fromAcc = accounts.find((a) => a.id === fromAccountId) || null;
+      const toAcc = accounts.find((a) => a.id === toAccountId) || null;
+
+      if (type === "credit_payment") {
+        if (!creditAccounts.length) return showAlert?.("ยังไม่มีบัญชีประเภทบัตรเครดิตในระบบ");
+        if (!toAcc || !isCreditAccount(toAcc)) return showAlert?.("ชำระบัตร: บัญชีปลายทางต้องเป็นบัตรเครดิต");
+        if (fromAcc && isCreditAccount(fromAcc)) return showAlert?.("ชำระบัตร: บัญชีต้นทางควรเป็นบัญชีปกติ (ไม่ใช่บัตร)");
+      }
 
       const transferId = transferPair?.outTx?.transferId || generateTransferId();
       const outId = transferPair?.outTx?.id || generateId();
       const inId = transferPair?.inTx?.id || generateId();
+
+      const kind = type === "credit_payment" ? "credit_payment" : "transfer";
+      const defaultNote =
+        kind === "credit_payment"
+          ? `ชำระบัตรเครดิต • ${(toAcc?.name || "Credit Card").trim()}`
+          : "Transfer";
 
       bulkUpsertTransactions([
         {
@@ -1026,11 +1327,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           category: "transfer",
           accountId: fromAccountId,
           date: d,
-          note: noteText || "Transfer",
+          note: noteText || defaultNote,
           isTransfer: true,
           transferId,
           ref: String(ref || "").trim() || null,
-          source: "transfer",
+          source: kind,
+          transferKind: kind,
         },
         {
           id: inId,
@@ -1039,11 +1341,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           category: "transfer",
           accountId: toAccountId,
           date: d,
-          note: noteText || "Transfer",
+          note: noteText || defaultNote,
           isTransfer: true,
           transferId,
           ref: String(ref || "").trim() || null,
-          source: "transfer",
+          source: kind,
+          transferKind: kind,
         },
       ]);
       return;
@@ -1072,8 +1375,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
     if (initialData.isTransfer && transferPair) {
       showConfirm?.(
-        "ลบ Transfer",
-        "ต้องการลบ Transfer นี้ใช่ไหม? (จะลบทั้งขาออก/ขาเข้า)",
+        isEditingCreditPayment ? "ลบชำระบัตร" : "ลบ Transfer",
+        "ต้องการลบรายการนี้ใช่ไหม? (จะลบทั้งขาออก/ขาเข้า)",
         () => {
           deleteTransaction(transferPair.outTx.id);
           deleteTransaction(transferPair.inTx.id);
@@ -1102,37 +1405,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     navigate("dashboard");
   };
 
-  // ===== credit card payment helpers (manual transfer) =====
-  const creditAccounts = useMemo(() => accounts.filter(isCreditAccount), [accounts]);
-  const nonCreditAccounts = useMemo(() => accounts.filter((a) => !isCreditAccount(a)), [accounts]);
-
-  const selectedToAcc = useMemo(() => accounts.find((a) => a.id === toAccountId) || null, [accounts, toAccountId]);
-
-  const creditDebt = useMemo(() => {
-    if (!selectedToAcc) return 0;
-    if (!isCreditAccount(selectedToAcc)) return 0;
-    const bal = calcAccountBalance(accounts, state.transactions || [], selectedToAcc.id);
-    return Math.max(0, -Number(bal || 0));
-  }, [selectedToAcc, accounts, state.transactions]);
-
-  const applyPayFull = () => {
-    if (!selectedToAcc || !isCreditAccount(selectedToAcc)) {
-      showAlert?.("กรุณาเลือกบัญชีบัตรเครดิตก่อน");
-      return;
-    }
-    if (!creditDebt || creditDebt <= 0) {
-      showAlert?.("บัตรนี้ไม่มียอดค้างชำระ");
-      return;
-    }
-    setAmountDigits(String(Math.round(creditDebt)));
-    // เติม note แบบไม่ทับของเดิมถ้ามีแล้ว
-    setNote((prev) => {
-      const p = String(prev || "").trim();
-      if (p) return p;
-      return `ชำระบัตรเครดิต • ${selectedToAcc.name || "Credit Card"}`;
-    });
-  };
-
   return (
     <div
       className="pb-28 pt-6 px-4 min-h-dvh overflow-x-hidden"
@@ -1153,7 +1425,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         </button>
 
         <h2 className="text-lg font-extrabold text-gray-900">
-          {isEditMode ? (initialData.isTransfer ? "แก้ไข Transfer" : "แก้ไขรายการ") : "เพิ่มรายการ"}
+          {isEditMode
+            ? initialData.isTransfer
+              ? isEditingCreditPayment
+                ? "แก้ไขชำระบัตร"
+                : "แก้ไข Transfer"
+              : "แก้ไขรายการ"
+            : "เพิ่มรายการ"}
         </h2>
 
         {isEditMode ? (
@@ -1216,7 +1494,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   Scan ใบเสร็จ / Slip
                 </div>
                 <div className="text-xs text-gray-800/60 mt-1">
-                  เลือกได้หลายรูป • แนบ evidence ลง note อัตโนมัติ • จำหมวดจากร้าน/เลขบัญชีเดิมได้ • เปลี่ยนประเภทได้
+                  เลือกได้หลายรูป • แนบ evidence ลง note อัตโนมัติ • จำหมวดจากร้าน/เลขบัญชีเดิมได้ • เปลี่ยนประเภทได้ •
+                  โอนเข้าบัตรเครดิตจะถูกจัดเป็น “ชำระบัตร”
                 </div>
               </div>
 
@@ -1274,7 +1553,14 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               <div className="space-y-3">
                 {queue.map((q) => {
                   const isOpen = expandedId === q.id;
-                  const badge = q.txType === "transfer" ? "Transfer" : q.txType === "income" ? "Income" : "Expense";
+                  const badge =
+                    q.txType === "credit_payment"
+                      ? "ชำระบัตร"
+                      : q.txType === "transfer"
+                      ? "Transfer"
+                      : q.txType === "income"
+                      ? "Income"
+                      : "Expense";
                   const hasGroups = Array.isArray(q.groups) && q.groups.length >= 2;
 
                   return (
@@ -1370,6 +1656,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                 { id: "expense", label: "Expense" },
                                 { id: "income", label: "Income" },
                                 { id: "transfer", label: "Transfer" },
+                                { id: "credit_payment", label: "ชำระบัตร" },
                               ].map((t) => (
                                 <button
                                   key={t.id}
@@ -1387,7 +1674,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                               ))}
                             </div>
                             <div className="text-[11px] text-gray-900/55 mt-2">
-                              เปลี่ยน Transfer → Expense แล้วระบบจะ auto เลือกบัญชีเดี่ยวให้จากเลขบัญชีในสลิป (เลือก match ที่สุด)
+                              - “ชำระบัตร” จะสร้าง 2 legs เหมือน Transfer แต่จัดชนิดเป็นการจ่ายยอดบัตร (กันซ้ำกับรายการรูด) <br />
+                              - เปลี่ยน Transfer → Expense แล้วระบบจะ auto เลือกบัญชีเดี่ยวให้จากเลขบัญชีในสลิป (เลือก match ที่สุด)
                             </div>
                           </div>
 
@@ -1491,7 +1779,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
                           {/* Accounts / Categories */}
                           <div className="mt-3">
-                            {q.txType === "transfer" ? (
+                            {q.txType === "transfer" || q.txType === "credit_payment" ? (
                               <div className="grid grid-cols-1 gap-3">
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                   <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
@@ -1503,7 +1791,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                     onChange={(v) => updateQueueItem(q.id, { fromAccountId: v })}
                                     title="เลือกบัญชีต้นทาง"
                                     placeholder="เลือกบัญชีต้นทาง"
+                                    filterFn={q.txType === "credit_payment" ? (a) => !isCreditAccount(a) : undefined}
                                   />
+                                  {q.txType === "credit_payment" ? (
+                                    <div className="text-[11px] text-gray-900/55 mt-1">
+                                      ชำระบัตร: ต้นทางควรเป็นบัญชีปกติ
+                                    </div>
+                                  ) : null}
                                 </div>
 
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
@@ -1516,7 +1810,24 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                     onChange={(v) => updateQueueItem(q.id, { toAccountId: v })}
                                     title="เลือกบัญชีปลายทาง"
                                     placeholder="เลือกบัญชีปลายทาง"
+                                    filterFn={q.txType === "credit_payment" ? (a) => isCreditAccount(a) : undefined}
                                   />
+
+                                  {q.txType === "credit_payment" ? (
+                                    <div className="mt-2 flex items-center justify-between gap-3">
+                                      <div className="text-[11px] text-gray-900/60 min-w-0 truncate">
+                                        ยอดค้าง: {formatCurrency(creditDebtById.get(q.toAccountId) || 0)}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => applyPayFullForQueue(q.id, q.toAccountId)}
+                                        className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+                                        disabled={(creditDebtById.get(q.toAccountId) || 0) <= 0}
+                                      >
+                                        จ่ายเต็มยอดค้าง
+                                      </button>
+                                    </div>
+                                  ) : null}
                                 </div>
                               </div>
                             ) : (
@@ -1650,12 +1961,17 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               { id: "expense", label: "รายจ่าย" },
               { id: "income", label: "รายรับ" },
               { id: "transfer", label: "Transfer" },
+              { id: "credit_payment", label: "ชำระบัตร" },
             ].map((t) => (
               <button
                 key={t.id}
                 onClick={() => {
+                  if (t.id === "credit_payment" && !creditAccounts.length) {
+                    showAlert?.("ยังไม่มีบัญชีประเภทบัตรเครดิตในระบบ (เพิ่มบัญชีบัตรก่อน)");
+                    return;
+                  }
                   setType(t.id);
-                  if (t.id === "transfer") setCategoryId("transfer");
+                  if (t.id === "transfer" || t.id === "credit_payment") setCategoryId("transfer");
                 }}
                 className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
                   type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
@@ -1668,7 +1984,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           </div>
 
           {/* Amount */}
-          <AmountField value={amountDigits} onChange={setAmountDigits} variant={type} label="จำนวนเงิน" helper={budgetHint} />
+          <AmountField
+            value={amountDigits}
+            onChange={setAmountDigits}
+            variant={type === "credit_payment" ? "transfer" : type}
+            label="จำนวนเงิน"
+            helper={budgetHint}
+          />
 
           {/* Accounts */}
           {type === "transfer" ? (
@@ -1676,71 +1998,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               <div className="text-xs font-bold text-gray-900/60 uppercase mb-3 flex items-center gap-2">
                 <ArrowRightLeft size={14} /> Transfer Accounts
               </div>
-
-              {/* ✅ Credit Card Payment helper */}
-              {creditAccounts.length ? (
-                <div className="glass-panel border border-indigo-500/15 rounded-2xl p-4 mb-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
-                        <CreditCard size={16} className="text-indigo-700" /> ชำระบัตรเครดิต
-                      </div>
-                      <div className="text-[12px] text-gray-900/60 mt-1">
-                        ใช้ Transfer เดิม แต่ช่วยแนะนำการ “จ่ายยอดค้าง” ของบัญชีที่เป็นบัตรเครดิต
-                      </div>
-                    </div>
-                    {selectedToAcc && isCreditAccount(selectedToAcc) ? (
-                      <div className="text-right shrink-0">
-                        <div className="text-[11px] text-gray-900/55">ยอดค้างชำระ</div>
-                        <div className="text-sm font-extrabold text-gray-900">{formatCurrency(creditDebt)}</div>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-1 gap-3">
-                    <div>
-                      <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีที่จ่าย</div>
-                      <AccountDropdown
-                        accounts={accounts}
-                        value={fromAccountId}
-                        onChange={setFromAccountId}
-                        title="เลือกบัญชีที่จ่าย"
-                        placeholder="เลือกบัญชีที่จ่าย"
-                        filterFn={(a) => !isCreditAccount(a) || nonCreditAccounts.length === 0}
-                      />
-                      <div className="text-[11px] text-gray-900/55 mt-1">แนะนำ: ใช้บัญชีธนาคาร/เงินสด (ไม่ใช่บัตร)</div>
-                    </div>
-
-                    <div>
-                      <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัตรเครดิตที่ต้องการชำระ</div>
-                      <AccountDropdown
-                        accounts={accounts}
-                        value={toAccountId}
-                        onChange={setToAccountId}
-                        title="เลือกบัตรเครดิต"
-                        placeholder="เลือกบัตรเครดิต"
-                        filterFn={(a) => isCreditAccount(a)}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-[12px] text-gray-900/60 min-w-0 truncate">
-                        {selectedToAcc && isCreditAccount(selectedToAcc)
-                          ? `ยอดค้างชำระปัจจุบันของ ${selectedToAcc.name}: ${formatCurrency(creditDebt)}`
-                          : "เลือกบัญชีปลายทางเป็น “บัตรเครดิต” เพื่อให้แสดงยอดค้างชำระ"}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={applyPayFull}
-                        className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
-                        disabled={!selectedToAcc || !isCreditAccount(selectedToAcc) || creditDebt <= 0}
-                      >
-                        จ่ายเต็มยอดค้าง
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
 
               <div className="space-y-3">
                 <div>
@@ -1770,11 +2027,84 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 Transfer จะไม่ถูกนับเป็นรายรับ/รายจ่ายในสถิติ (เพื่อให้ยอดสุทธิไม่เพี้ยน)
               </div>
             </div>
+          ) : type === "credit_payment" ? (
+            <div className="glass-card rounded-3xl p-5 mb-6">
+              <div className="text-xs font-bold text-gray-900/60 uppercase mb-3 flex items-center gap-2">
+                <CreditCard size={14} /> Credit Card Payment
+              </div>
+
+              <div className="glass-panel border border-indigo-500/15 rounded-2xl p-4 mb-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
+                      <CreditCard size={16} className="text-indigo-700" /> ชำระบัตรเครดิต
+                    </div>
+                    <div className="text-[12px] text-gray-900/60 mt-1">
+                      ระบบจะสร้าง 2 legs (เงินออกจากบัญชีจ่าย + เงินเข้าไปลดหนี้บัตร) แต่เป็น “ชำระบัตร” ไม่ใช่ “รายจ่าย”
+                      เพื่อกันซ้ำกับรายการรูดที่คุณบันทึกอยู่แล้ว
+                    </div>
+                  </div>
+                  {selectedToAcc && isCreditAccount(selectedToAcc) ? (
+                    <div className="text-right shrink-0">
+                      <div className="text-[11px] text-gray-900/55">ยอดค้างชำระ</div>
+                      <div className="text-sm font-extrabold text-gray-900">{formatCurrency(creditDebt)}</div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-3">
+                  <div>
+                    <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีที่จ่าย</div>
+                    <AccountDropdown
+                      accounts={accounts}
+                      value={fromAccountId}
+                      onChange={setFromAccountId}
+                      title="เลือกบัญชีที่จ่าย"
+                      placeholder="เลือกบัญชีที่จ่าย"
+                      filterFn={(a) => !isCreditAccount(a) || nonCreditAccounts.length === 0}
+                    />
+                    <div className="text-[11px] text-gray-900/55 mt-1">แนะนำ: ใช้บัญชีธนาคาร/เงินสด (ไม่ใช่บัตร)</div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัตรเครดิตที่ต้องการชำระ</div>
+                    <AccountDropdown
+                      accounts={accounts}
+                      value={toAccountId}
+                      onChange={setToAccountId}
+                      title="เลือกบัตรเครดิต"
+                      placeholder="เลือกบัตรเครดิต"
+                      filterFn={(a) => isCreditAccount(a)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] text-gray-900/60 min-w-0 truncate">
+                      {selectedToAcc && isCreditAccount(selectedToAcc)
+                        ? `ยอดค้างชำระปัจจุบันของ ${selectedToAcc.name}: ${formatCurrency(creditDebt)}`
+                        : "เลือกบัญชีปลายทางเป็น “บัตรเครดิต” เพื่อให้แสดงยอดค้างชำระ"}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={applyPayFull}
+                      className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+                      disabled={!selectedToAcc || !isCreditAccount(selectedToAcc) || creditDebt <= 0}
+                    >
+                      จ่ายเต็มยอดค้าง
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 text-[12px] text-gray-900/60">
+                ชำระบัตรจะถูกจัดเป็นหมวด transfer ภายในระบบ แต่ติดป้ายชนิดเป็น credit_payment เพื่อให้หน้า Recent แสดง “ครั้งเดียว”
+              </div>
+            </div>
           ) : (
             <div className="mb-6">
               <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">บัญชีที่ใช้</h3>
 
-              {/* ✅ เปลี่ยนจาก scroll แนวนอน -> wrap เพื่อกันการเลื่อนซ้าย/ขวาทั้งหน้า */}
+              {/* ✅ wrap เพื่อกันการเลื่อนซ้าย/ขวาทั้งหน้า */}
               <div className="flex flex-wrap gap-3 pb-2">
                 {accounts.map((acc) => {
                   const isSelected = accountId === acc.id;
@@ -1815,7 +2145,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           )}
 
           {/* Categories */}
-          {type !== "transfer" ? (
+          {type !== "transfer" && type !== "credit_payment" ? (
             <>
               <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">หมวดหมู่</h3>
               <div className="grid grid-cols-4 gap-3 mb-6">
@@ -1867,7 +2197,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 type="text"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="โน้ต (ชื่อร้าน/รายละเอียด)"
+                placeholder={type === "credit_payment" ? "โน้ต (ธนาคาร/บัตร/รายละเอียด)" : "โน้ต (ชื่อร้าน/รายละเอียด)"}
                 className="flex-1 outline-none text-gray-900 bg-transparent font-extrabold"
               />
             </div>
