@@ -16,12 +16,6 @@ function safeDateLabel(d) {
   }
 }
 
-function isCreditAccount(acc) {
-  const t = String(acc?.type || "").toLowerCase().trim();
-  if (t === "credit") return true;
-  if (Number(acc?.creditLimit || 0) > 0) return true;
-  return false;
-}
 
 function accountHint(acc) {
   if (!acc) return "";

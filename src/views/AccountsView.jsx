@@ -1,7 +1,7 @@
 // src/views/AccountsView.jsx
 import { useEffect, useMemo, useState } from "react";
 import { parseDigitsList, choosePrimaryDigits, formatDigitsSummary } from "../utils/accountMatch";
-import useStore from "../store/store";
+import { useAppStore } from "../store/store";
 import {
   Plus,
   Trash2,
@@ -23,55 +23,7 @@ import {
  * - Supports matching digits for better auto-mapping from OCR/receipt parsing
  */
 
-const toArabicDigits = (input) => {
-  const s = String(input || "");
-  // Thai digits ๐-๙ -> 0-9 (รองรับการพิมพ์/คัดลอกตัวเลขไทยจากสลิป)
-  return s.replace(/[๐-๙]/g, (ch) => String("๐๑๒๓๔๕๖๗๘๙".indexOf(ch)));
-};
-
-const digitsOnly = (s) => toArabicDigits(s).replace(/[^\d]/g, "");
-
-function parseDigitsList(input) {
-  const raw = toArabicDigits(input);
-
-  // รองรับคั่นด้วย , ; | เว้นวรรค หรือขึ้นบรรทัดใหม่
-  const parts = raw
-    .split(/[,;|\n]+/g)
-    .flatMap((p) => p.split(/\s+/g))
-    .map((p) => digitsOnly(p))
-    .filter(Boolean);
-
-  const out = [];
-  const seen = new Set();
-  for (const d of parts) {
-    const dd = String(d || "").trim();
-    if (!dd) continue;
-    if (dd.length < 3) continue; // อย่างน้อย 3 หลักเพื่อกัน noise
-    if (dd.length > 19) continue; // กันข้อมูลผิดพลาดยาวเกิน
-    if (seen.has(dd)) continue;
-    seen.add(dd);
-    out.push(dd);
-  }
-  return out;
-}
-
-function choosePrimaryDigits(list) {
-  const arr = Array.isArray(list) ? list.map((x) => String(x || "").trim()).filter(Boolean) : [];
-  if (!arr.length) return "";
-
-  // ถ้ามีเลขยาว (เช่น เลขบัญชีเต็ม 10+ หลัก) ให้ใช้เลขที่ยาวที่สุดเป็นตัวหลัก
-  // เพื่อให้การ match แบบ "ลงท้าย" (last digits) ทำงานได้ดีที่สุด
-  const maxLen = Math.max(...arr.map((x) => x.length));
-  if (maxLen > 6) {
-    for (let i = arr.length - 1; i >= 0; i--) {
-      if (arr[i].length === maxLen) return arr[i];
-    }
-  }
-
-  // ถ้าเป็นเลขสั้น (เช่น 4-6 หลัก) ให้ใช้ "ตัวท้ายสุด" เป็นตัวหลัก
-  // (เหมาะกับเคสใส่หลายชุด เช่น 6345, 4373 โดยอยากให้ตัวท้ายสุดเป็นตัวที่เห็นบ่อยบนสลิป)
-  return arr[arr.length - 1];
-}
+// digits parsing helpers are centralized in src/utils/accountMatch.js (parseDigitsList, choosePrimaryDigits)
 
 function formatDigitsChip(d) {
   const s = String(d || "").trim();

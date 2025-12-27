@@ -1,6 +1,6 @@
 // src/views/AddTransactionView.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { bestMatchAccountId, matchFromToAccounts } from "../utils/accountMatch";
+import { bestMatchAccountCandidate, bestMatchAccountId, getAccountDigitCandidates, matchFromToAccounts } from "../utils/accountMatch";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -297,68 +297,7 @@ function hashString(str) {
   return h;
 }
 
-/** ===== account matching helpers =====
- * รองรับการ map ด้วย:
- * - accountNumber (เลขบัญชีเต็ม)
- * - digits (มักเป็นเลขท้าย 4-6)
- * - cardNumber / cardDigits / last4 (กรณีบัตร)
- */
-function getAccountDigitCandidates(a) {
-  const raw = [
-    a?.accountNumber,
-    a?.digits,
-    a?.cardNumber,
-    a?.cardDigits,
-    a?.last4,
-    a?.lastDigits,
-    a?.number,
-  ]
-    .filter(Boolean)
-    .map((x) => digitsOnly(String(x)))
-    .filter((x) => x && x.length >= 3);
-
-  // dedupe
-  return Array.from(new Set(raw));
-}
-
-function bestMatchAccountCandidate(accounts, digits) {
-  const d = digitsOnly(digits);
-  if (!d || d.length < 3) return { id: "", score: 0 };
-
-  let best = { id: "", score: 0 };
-
-  for (const a of accounts || []) {
-    const cands = getAccountDigitCandidates(a);
-    if (!cands.length) continue;
-
-    for (const n0 of cands) {
-      // ให้พิจารณาท้ายยาวสุดไม่เกิน 12 เพื่อกัน false positive
-      const aLast = n0.slice(-Math.min(n0.length, 12));
-      const dLast = d.slice(-Math.min(d.length, 12));
-
-      let score = 0;
-
-      // match แบบ suffix
-      if (aLast.endsWith(dLast)) score = dLast.length;
-      else if (dLast.endsWith(aLast)) score = aLast.length;
-
-      // ถ้าคะแนนเท่ากัน เลือกอันที่ id ยังไม่ตั้ง / หรือ match ยาวกว่า
-      if (score > best.score) best = { id: a.id, score };
-    }
-  }
-
-  // ลด false positive สำหรับเลขสั้นมาก
-  if (best.score > 0 && best.score < 4) {
-    // ถ้า match ได้แค่ 3 ตัว ให้ถือว่าอ่อนมาก (แต่ยังคืนค่าได้เพื่อ fallback)
-    return best;
-  }
-
-  return best;
-}
-
-function bestMatchAccountId(accounts, digits) {
-  return bestMatchAccountCandidate(accounts, digits).id || "";
-}
+/** ===== account matching helpers (centralized in src/utils/accountMatch.js) ===== */
 
 function categoryNameFromKey(key) {
   const k = sanitizeCategoryKey(key);
