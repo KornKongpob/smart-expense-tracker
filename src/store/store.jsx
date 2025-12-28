@@ -7,6 +7,7 @@ import { loadAll, saveAll, clearAll } from "../services/storage";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
 import { ACCOUNT_ICONS } from "../constants/presets.jsx"; // ✅ for iconId validation + future UI usage
 import { generateId } from "../utils/id";
+import { parseDigitsList as parseDigitsListUtil, choosePrimaryDigits } from "../utils/accountMatch";
 import { calcAccountBalance, parseDateSafe } from "./selectors";
 import { toISODate } from "../utils/format";
 
@@ -50,7 +51,13 @@ const ensureCategories = (cats) => {
   };
 };
 
-const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
+const digitsOnly = (s) => {
+  // support Thai digits ๐-๙ as well
+  const th = "๐๑๒๓๔๕๖๗๘๙";
+  return String(s || "")
+    .replace(/[๐-๙]/g, (ch) => String(th.indexOf(ch)))
+    .replace(/[^\d]/g, "");
+};
 
 const slugifyId = (s) =>
   String(s || "")
@@ -102,6 +109,38 @@ function normalizeAccount(a) {
 
   const openingBalance = safeNum(a?.openingBalance, 0);
 
+  // ✅ currency default
+  const currency = String(a?.currency || "THB").trim().toUpperCase() || "THB";
+
+  // ✅ unify digit fields for:
+  // - UI display (a.digits)
+  // - matching from OCR (digitsList / matchDigits)
+  const digitsInput = [
+    Array.isArray(a?.digitsList) ? a.digitsList.join(" ") : "",
+    Array.isArray(a?.matchDigits) ? a.matchDigits.join(" ") : "",
+    a?.digits || "",
+    a?.matchDigits || "",
+    a?.accountNumber || "",
+    a?.cardNumber || "",
+    a?.cardDigits || "",
+    a?.lastDigits || "",
+    a?.cardLast4 || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const digitsList = parseDigitsListUtil(digitsInput);
+  const primaryDigits = choosePrimaryDigits(digitsList);
+  const digits = primaryDigits ? String(primaryDigits).slice(-4) : "";
+
+  // Prefer explicit accountNumber, otherwise derive from primary digits
+  let accountNumber = a?.accountNumber ? digitsOnly(a.accountNumber) : "";
+  if (!accountNumber && primaryDigits) accountNumber = digitsOnly(primaryDigits).slice(-16);
+
+  // Prefer explicit cardLast4, otherwise derive from digits for credit accounts
+  let cardLast4 = a?.cardLast4 ? digitsOnly(a.cardLast4) : "";
+  if (!cardLast4 && type === "credit" && digits) cardLast4 = digitsOnly(digits);
+
   return {
     ...a,
     id,
@@ -111,12 +150,18 @@ function normalizeAccount(a) {
     icon,
     iconId,
     openingBalance,
+    currency,
 
-    accountNumber: a?.accountNumber ? digitsOnly(a.accountNumber) : "",
+    // ✅ matching-friendly fields (backward compatible)
+    digits,
+    digitsList,
+    matchDigits: digitsList,
+
+    accountNumber,
     creditLimit: safeNum(a?.creditLimit, 0),
     statementDay: clampInt(a?.statementDay, 1, 31, 1),
     dueDay: clampInt(a?.dueDay, 1, 31, 25),
-    cardLast4: a?.cardLast4 ? digitsOnly(a.cardLast4) : "",
+    cardLast4,
   };
 }
 
@@ -318,8 +363,9 @@ export function reducer(state, action) {
     case ACTIONS.DELETE_ACCOUNT: {
       const id = action.payload;
       const accounts = state.accounts.filter((a) => a.id !== id);
-      const transactions = state.transactions.filter((t) => t.accountId !== id);
-      return { ...state, accounts, transactions };
+      // ✅ keep historical transactions (UI expects transactions to remain)
+      // They will display with accountName = "—" if the account is deleted.
+      return { ...state, accounts };
     }
 
     case ACTIONS.ADD_CATEGORY: {

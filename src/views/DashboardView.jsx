@@ -166,13 +166,12 @@ export default function DashboardView() {
   }, [state.transactions, state.accounts, state.categories, filterAccount, q, allCats]);
 
   const startNewTransaction = () => {
-    store.dispatch({ type: "CLEAR_EDITING_TRANSACTION" });
-    navigate("addTransaction");
+    store.startNewTransaction();
   };
 
   const startEditTransaction = (id) => {
-    store.dispatch({ type: "START_EDIT_TRANSACTION", payload: id });
-    navigate("addTransaction");
+    if (!id) return;
+    store.startEditTransaction(id);
   };
 
   const accounts = state.accounts || [];

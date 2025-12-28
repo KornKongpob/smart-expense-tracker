@@ -107,12 +107,19 @@ export function getAccountDigitCandidates(acc) {
     for (const d of acc.digitsList) candidates.push(...parseDigitsList(d));
   }
 
+  // 1b) backward-compat: older builds used matchDigits
+  if (Array.isArray(acc.matchDigits)) {
+    for (const d of acc.matchDigits) candidates.push(...parseDigitsList(d));
+  }
+  candidates.push(...parseDigitsList(acc.matchDigits));
+
   // 2) common fields
   candidates.push(...parseDigitsList(acc.digits));
   candidates.push(...parseDigitsList(acc.accountNumber));
   candidates.push(...parseDigitsList(acc.cardNumber));
   candidates.push(...parseDigitsList(acc.cardDigits));
   candidates.push(...parseDigitsList(acc.lastDigits));
+  candidates.push(...parseDigitsList(acc.cardLast4));
 
   // 3) fallback: if account object already stores "digits" as a short token
   if (typeof acc.digits === "string" && acc.digits.trim()) {

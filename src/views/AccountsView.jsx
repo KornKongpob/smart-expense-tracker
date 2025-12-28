@@ -85,10 +85,9 @@ const generateId = () => {
 };
 
 export default function AccountsView() {
-  const accounts = useStore((s) => s.accounts);
-  const addAccount = useStore((s) => s.addAccount);
-  const updateAccount = useStore((s) => s.updateAccount);
-  const deleteAccount = useStore((s) => s.deleteAccount);
+  const store = useAppStore();
+  const accounts = store.state.accounts || [];
+  const { addAccount, updateAccount, deleteAccount } = store;
 
   const [q, setQ] = useState("");
 
@@ -207,7 +206,7 @@ export default function AccountsView() {
     const matchDigits = parseDigitsList(eAccountNumber);
     const primaryDigits = choosePrimaryDigits(matchDigits);
 
-    updateAccount(eEditing, {
+    updateAccount({ id: eEditing,
       name: eName.trim(),
       icon: (eIcon || "💳").trim() || "💳",
       color: eColor,
