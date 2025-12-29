@@ -641,7 +641,39 @@ async function callOpenAI({ base64, mimeType }) {
     };
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-5";
+  // Users sometimes set OPENAI_MODEL to informal names like "chatgpt 5.0".
+  // Normalize to valid model IDs.
+  const normalizeOpenAIModel = (raw) => {
+    const s = String(raw || "").trim();
+    if (!s) return "gpt-5-chat-latest";
+
+    const low = s.toLowerCase();
+
+    // Common informal variants → ChatGPT snapshot model id
+    if (
+      low === "5" ||
+      low === "5.0" ||
+      low === "gpt5" ||
+      low === "gpt-5.0" ||
+      low === "gpt-5.0.0" ||
+      low === "chatgpt-5" ||
+      low === "chatgpt-5.0" ||
+      low === "chat gpt 5" ||
+      low === "chat gpt 5.0" ||
+      low === "chatgpt 5" ||
+      low === "chatgpt 5.0"
+    ) {
+      return "gpt-5-chat-latest";
+    }
+
+    // Normalize dotted version to the stable id
+    if (low === "gpt-5.0") return "gpt-5";
+
+    // Otherwise trust caller value
+    return s;
+  };
+
+  const model = normalizeOpenAIModel(process.env.OPENAI_MODEL);
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
   const prompt =
@@ -707,14 +739,21 @@ async function callOpenAI({ base64, mimeType }) {
   const json = await r.json().catch(() => null);
 
   if (!r.ok) {
+    const msg = json?.error?.message || "OpenAI request failed";
+    const tip =
+      /model/i.test(msg) && /not found|does not exist|unknown/i.test(msg)
+        ? "Check OPENAI_MODEL. Valid examples: gpt-5-chat-latest, gpt-5, gpt-5.1."
+        : null;
+
     return {
       status: r.status,
       body: {
         ok: false,
         code: "openai_error",
-        message: "OpenAI request failed",
-        raw: json || null,
+        message: msg,
         model,
+        tip,
+        raw: json || null,
       },
     };
   }

@@ -730,7 +730,39 @@ export default async function handler(req, res) {
       });
     }
 
-    const model = process.env.OPENAI_MODEL || "gpt-5";
+    // Users sometimes set OPENAI_MODEL to informal names like "chatgpt 5.0".
+    // Normalize to valid model IDs.
+    const normalizeOpenAIModel = (raw) => {
+      const s = String(raw || "").trim();
+      if (!s) return "gpt-5-chat-latest";
+
+      const low = s.toLowerCase();
+
+      // Common informal variants → ChatGPT snapshot model id
+      if (
+        low === "5" ||
+        low === "5.0" ||
+        low === "gpt5" ||
+        low === "gpt-5.0" ||
+        low === "gpt-5.0.0" ||
+        low === "chatgpt-5" ||
+        low === "chatgpt-5.0" ||
+        low === "chat gpt 5" ||
+        low === "chat gpt 5.0" ||
+        low === "chatgpt 5" ||
+        low === "chatgpt 5.0"
+      ) {
+        return "gpt-5-chat-latest";
+      }
+
+      // Normalize dotted version to the stable id
+      if (low === "gpt-5.0") return "gpt-5";
+
+      // Otherwise trust caller value
+      return s;
+    };
+
+    const model = normalizeOpenAIModel(process.env.OPENAI_MODEL);
 
     // ✅ ปรับ prompt ให้ AI “ส่งสัญญาณ” ชำระบัตรเครดิตมาเลย
     // - ถ้าเป็นสลิปชำระบัตรเครดิต/โอนเข้าบัตรเครดิต: tx_type="transfer", tx_subtype="credit_card_payment", is_credit_card_payment=true
@@ -807,10 +839,18 @@ export default async function handler(req, res) {
     const data = await r.json().catch(() => null);
 
     if (!r.ok) {
+      const msg = data?.error?.message || "OpenAI request failed";
+      const tip =
+        /model/i.test(msg) && /not found|does not exist|unknown/i.test(msg)
+          ? "Check OPENAI_MODEL. Valid examples: gpt-5-chat-latest, gpt-5, gpt-5.1."
+          : null;
+
       return res.status(r.status).json({
         ok: false,
         code: "openai_error",
-        message: data?.error?.message || "OpenAI request failed",
+        message: msg,
+        model,
+        tip,
         raw: data || null,
       });
     }
