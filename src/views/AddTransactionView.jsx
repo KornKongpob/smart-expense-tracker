@@ -380,6 +380,93 @@ function looksLikeTransferText(text) {
   );
 }
 
+function looksLikeIncomeText(text) {
+  const t = String(text || "").toLowerCase();
+  return (
+    t.includes("เงินเข้า") ||
+    t.includes("รับโอน") ||
+    t.includes("โอนเข้า") ||
+    t.includes("deposit") ||
+    t.includes("credited") ||
+    t.includes("receive") ||
+    t.includes("received") ||
+    t.includes("incoming") ||
+    t.includes("refund") ||
+    t.includes("salary") ||
+    t.includes("เงินเดือน")
+  );
+}
+
+function looksLikeExpenseText(text) {
+  const t = String(text || "").toLowerCase();
+  return (
+    t.includes("โอนออก") ||
+    t.includes("ชำระ") ||
+    t.includes("ชำระยอด") ||
+    t.includes("จ่าย") ||
+    t.includes("debit") ||
+    t.includes("paid") ||
+    t.includes("withdraw") ||
+    t.includes("withdrawal") ||
+    t.includes("purchase") ||
+    t.includes("ซื้อ") ||
+    t.includes("ถอน")
+  );
+}
+
+/**
+ * Enhance model-detected tx type using:
+ * - Whether from/to accounts are recognized in the user's account list
+ * - Credit-account direction (deposit -> credit) to detect credit card payments
+ * - Lightweight keyword hints for income vs expense when only one side is recognized
+ */
+function enhanceScannedTxType({
+  currentType,
+  aiTxType,
+  matchedFromId,
+  matchedToId,
+  matchedFromAcc,
+  matchedToAcc,
+  contextText,
+}) {
+  if (currentType === "credit_payment") return "credit_payment";
+
+  const internalFrom = !!matchedFromAcc;
+  const internalTo = !!matchedToAcc;
+
+  const fromIsCredit = internalFrom && isCreditAccount(matchedFromAcc);
+  const toIsCredit = internalTo && isCreditAccount(matchedToAcc);
+
+  const twoInternal =
+    internalFrom && internalTo && matchedFromId && matchedToId && matchedFromId !== matchedToId;
+
+  // If we can validate both sides as internal accounts, it's a transfer (or credit payment).
+  if (twoInternal) {
+    if (toIsCredit && !fromIsCredit) return "credit_payment";
+    return "transfer";
+  }
+
+  // If text strongly indicates paying a credit card and destination looks like credit, prefer credit_payment.
+  if (looksLikeCreditPaymentText(contextText) && toIsCredit && !fromIsCredit) return "credit_payment";
+
+  // If model says transfer but we can't validate both sides, infer direction:
+  // - internalFrom only  => likely expense (money leaving your account)
+  // - internalTo only    => likely income (money entering your account)
+  if (currentType === "transfer") {
+    if (internalFrom && !internalTo) return looksLikeIncomeText(contextText) ? "income" : "expense";
+    if (!internalFrom && internalTo) return looksLikeExpenseText(contextText) ? "expense" : "income";
+    return "transfer";
+  }
+
+  // Direction consistency fixes:
+  // - If destination is internal but source isn't, it's likely income.
+  if (currentType === "expense" && !internalFrom && internalTo) return "income";
+  // - If source is internal but destination isn't, it's likely expense.
+  if (currentType === "income" && internalFrom && !internalTo) return "expense";
+
+  return currentType || aiTxType || "expense";
+}
+
 export default function AddTransactionView({ showAlert, showConfirm }) {
   const store = useAppStore();
   const {
@@ -1061,19 +1148,45 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
           const hasTwoSides = !!(matchedFromId && matchedToId && matchedFromId !== matchedToId);
 
-          // infer credit payment: to=credit and from=non-credit
+          // ===== Enhanced tx type detection (accounts presence + keywords) =====
           let finalTxType = aiTxType;
 
-          if (aiTxType === "transfer" && matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) {
+          // Strong signals first: credit card payment and real transfer slips
+          if (
+            (aiTxType === "transfer" &&
+              matchedToAcc &&
+              isCreditAccount(matchedToAcc) &&
+              matchedFromAcc &&
+              !isCreditAccount(matchedFromAcc)) ||
+            (hasTwoSides &&
+              matchedToAcc &&
+              isCreditAccount(matchedToAcc) &&
+              matchedFromAcc &&
+              !isCreditAccount(matchedFromAcc))
+          ) {
             finalTxType = "credit_payment";
-          } else if (hasTwoSides && matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) {
-            finalTxType = "credit_payment";
-          } else if (aiTxType !== "income" && looksLikeCreditPaymentText(contextText) && matchedToAcc && isCreditAccount(matchedToAcc)) {
+          } else if (
+            aiTxType !== "income" &&
+            looksLikeCreditPaymentText(contextText) &&
+            matchedToAcc &&
+            isCreditAccount(matchedToAcc)
+          ) {
             finalTxType = "credit_payment";
           } else if (aiTxType !== "transfer" && hasTwoSides && looksLikeTransferText(contextText)) {
             // กัน slip โอนที่โมเดลตีเป็น expense
             finalTxType = "transfer";
           }
+
+          // Refine using account presence (internal/external) and lightweight direction keywords.
+          finalTxType = enhanceScannedTxType({
+            currentType: finalTxType,
+            aiTxType,
+            matchedFromId,
+            matchedToId,
+            matchedFromAcc,
+            matchedToAcc,
+            contextText,
+          });
 
           let detectedAccountId = "";
           let detectedFromId = "";

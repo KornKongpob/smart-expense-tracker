@@ -299,7 +299,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" className="absolute inset-0 bg-black/40" onClick={onClose} aria-label="Close" />
-      <div className="relative w-full max-w-md glass-card rounded-3xl p-5 border border-white/20 max-h-[90vh] overflow-y-auto overscroll-contain">
+      <div className="relative w-full max-w-md glass-card rounded-3xl p-5 border border-white/20 max-h-[90vh] overflow-y-auto overflow-x-hidden overscroll-contain">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-lg font-extrabold text-gray-900">Edit Inbox item</h3>
@@ -333,9 +333,9 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
           </div>
         ) : null}
 
-        <div className="mt-4 grid gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <label className="text-xs font-bold text-gray-900/60">
+        <div className="mt-4 grid gap-3 min-w-0 overflow-x-hidden">
+          <div className="grid grid-cols-2 gap-3 min-w-0">
+            <label className="text-xs font-bold text-gray-900/60 min-w-0">
               Type
               <select
                 value={draft.type}
@@ -357,7 +357,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
               </select>
             </label>
 
-            <label className="text-xs font-bold text-gray-900/60">
+            <label className="text-xs font-bold text-gray-900/60 min-w-0">
               Amount
               <input
                 type="number"
@@ -369,7 +369,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             </label>
           </div>
 
-          <label className="text-xs font-bold text-gray-900/60">
+          <label className="text-xs font-bold text-gray-900/60 min-w-0">
             Date
             <input
               type="date"
@@ -379,7 +379,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             />
           </label>
 
-          <label className="text-xs font-bold text-gray-900/60">
+          <label className="text-xs font-bold text-gray-900/60 min-w-0">
             Merchant
             <input
               type="text"
@@ -391,8 +391,8 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
           </label>
 
           {txType === "transfer" || txType === "credit_payment" ? (
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs font-bold text-gray-900/60">
+            <div className="grid grid-cols-2 gap-3 min-w-0">
+              <label className="text-xs font-bold text-gray-900/60 min-w-0">
                 From
                 <select
                   value={draft.fromAccountId}
@@ -408,7 +408,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 </select>
               </label>
 
-              <label className="text-xs font-bold text-gray-900/60">
+              <label className="text-xs font-bold text-gray-900/60 min-w-0">
                 To
                 <select
                   value={draft.toAccountId}
@@ -426,7 +426,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             </div>
           ) : (
             <>
-              <label className="text-xs font-bold text-gray-900/60">
+              <label className="text-xs font-bold text-gray-900/60 min-w-0">
                 Account
                 <select
                   value={draft.accountId}
@@ -442,7 +442,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 </select>
               </label>
 
-              <label className="text-xs font-bold text-gray-900/60">
+              <label className="text-xs font-bold text-gray-900/60 min-w-0">
                 Category
                 <select
                   value={draft.categoryId}
@@ -460,7 +460,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             </>
           )}
 
-          <label className="text-xs font-bold text-gray-900/60">
+          <label className="text-xs font-bold text-gray-900/60 min-w-0">
             Note
             <input
               type="text"
@@ -471,7 +471,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             />
           </label>
 
-          <label className="text-xs font-bold text-gray-900/60">
+          <label className="text-xs font-bold text-gray-900/60 min-w-0">
             Reference ID
             <input
               type="text"
@@ -851,7 +851,7 @@ export default function InboxView({ showAlert, showConfirm }) {
           </div>
         </div>
       ) : (
-        <div className="mt-4 grid gap-3">
+        <div className="mt-4 grid gap-3 min-w-0 overflow-x-hidden">
           {filtered.map((it) => {
             const txType = normalizeTxType(it?.type || it?.txType);
             const { label, icon: Icon } = typeBadge(txType);
