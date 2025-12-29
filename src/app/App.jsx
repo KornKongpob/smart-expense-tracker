@@ -14,6 +14,9 @@ import MoreView from "../views/MoreView.jsx";
 import CategoriesView from "../views/CategoriesView.jsx";
 import BudgetsView from "../views/BudgetsView.jsx";
 import RecurringView from "../views/RecurringView.jsx";
+import InboxView from "../views/InboxView.jsx";
+import RulesView from "../views/RulesView.jsx";
+import MerchantLibraryView from "../views/MerchantLibraryView.jsx";
 
 /**
  * UI spacing for fixed bottom navbar
@@ -199,6 +202,15 @@ export default function App() {
       case "recurring":
         return <RecurringView showAlert={showAlert} showConfirm={showConfirm} />;
 
+      case "inbox":
+        return <InboxView showAlert={showAlert} showConfirm={showConfirm} />;
+
+      case "rules":
+        return <RulesView showAlert={showAlert} showConfirm={showConfirm} />;
+
+      case "merchants":
+        return <MerchantLibraryView showAlert={showAlert} showConfirm={showConfirm} />;
+
       default:
         return <DashboardView />;
     }
@@ -209,7 +221,7 @@ export default function App() {
    * - add: หน้ากรอก/บันทึกรายการ
    * - categories/budgets/recurring: หน้าตั้งค่าลึก + มักมี modal/bottom actions
    */
-  const showNavbar = !["categories", "budgets", "recurring", "add"].includes(view);
+  const showNavbar = !["categories", "budgets", "recurring", "rules", "merchants", "add"].includes(view);
 
   /**
    * ✅ Critical fix: Reserve space for fixed navbar so it won't block clicks.

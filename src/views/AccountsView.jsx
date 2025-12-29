@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { parseDigitsList, choosePrimaryDigits, formatDigitsSummary } from "../utils/accountMatch";
 import { useAppStore } from "../store/store";
+import { calcAccountBalance } from "../store/selectors";
+import { formatCurrency } from "../utils/format";
 import {
   Plus,
   Trash2,
@@ -87,7 +89,7 @@ const generateId = () => {
 export default function AccountsView() {
   const store = useAppStore();
   const accounts = store.state.accounts || [];
-  const { addAccount, updateAccount, deleteAccount } = store;
+  const { addAccount, updateAccount, deleteAccount, adjustAccountBalance } = store;
 
   const [q, setQ] = useState("");
 
@@ -169,6 +171,12 @@ export default function AccountsView() {
   const [eStatementDay, setEStatementDay] = useState(20);
   const [eDueDay, setEDueDay] = useState(5);
 
+  // ✅ Adjust balance UI
+  const [eDesiredBalance, setEDesiredBalance] = useState("");
+  const [openAdjustConfirm, setOpenAdjustConfirm] = useState(false);
+  const [pendingEdit, setPendingEdit] = useState(null);
+  const [pendingAdjust, setPendingAdjust] = useState(null);
+
   const openEditModal = (acc) => {
     setEEditing(acc?.id || null);
     setEName(acc?.name || "");
@@ -181,6 +189,11 @@ export default function AccountsView() {
     setECreditLimit(acc?.creditLimit != null ? String(acc.creditLimit) : "");
     setEStatementDay(acc?.statementDay != null ? Number(acc.statementDay) : 20);
     setEDueDay(acc?.dueDay != null ? Number(acc.dueDay) : 5);
+
+    setEDesiredBalance("");
+    setOpenAdjustConfirm(false);
+    setPendingEdit(null);
+    setPendingAdjust(null);
 
     setOpenEdit(true);
   };
@@ -206,7 +219,8 @@ export default function AccountsView() {
     const matchDigits = parseDigitsList(eAccountNumber);
     const primaryDigits = choosePrimaryDigits(matchDigits);
 
-    updateAccount({ id: eEditing,
+    const partial = {
+      id: eEditing,
       name: eName.trim(),
       icon: (eIcon || "💳").trim() || "💳",
       color: eColor,
@@ -219,10 +233,38 @@ export default function AccountsView() {
       creditLimit: eType === "credit" ? Number(eCreditLimit || 0) : undefined,
       statementDay: eType === "credit" ? Number(eStatementDay || 1) : undefined,
       dueDay: eType === "credit" ? Number(eDueDay || 1) : undefined,
-    });
+    };
 
-    closeEditModal();
-    showAlert?.("บันทึกแล้ว");
+    const desiredRaw = String(eDesiredBalance || "").trim().replace(/,/g, "");
+    if (!desiredRaw) {
+      updateAccount(partial);
+      closeEditModal();
+      showAlert?.("บันทึกแล้ว");
+      return;
+    }
+
+    const desired = Number(desiredRaw);
+    if (!Number.isFinite(desired)) return showAlert?.("ยอดบัญชีใหม่ไม่ถูกต้อง");
+
+    const current = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
+    const delta = desired - current;
+
+    if (Math.abs(delta) < 0.000001) {
+      updateAccount(partial);
+      closeEditModal();
+      showAlert?.("บันทึกแล้ว");
+      return;
+    }
+
+    setPendingEdit(partial);
+    setPendingAdjust({
+      accountId: eEditing,
+      currency: eCurrency || "THB",
+      current,
+      desired,
+      delta,
+    });
+    setOpenAdjustConfirm(true);
   };
 
   const del = (id) => {
@@ -772,6 +814,38 @@ export default function AccountsView() {
             <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
               รองรับหลายชุด (คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค) • ใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิปได้เลย
               — ถ้าเป็นบัตรเครดิต แนะนำใส่ทั้งเลขที่สลิปแสดงและเลขท้ายหน้าบัตร เช่น <span className="font-bold">6345, 4373</span>
+
+            {/* ✅ Adjust balance */}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="col-span-2 sm:col-span-1">
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
+                  ยอดปัจจุบัน (คำนวณ)
+                </label>
+                <div className="w-full rounded-2xl px-4 py-3 bg-white/20 border border-white/20 font-extrabold text-gray-900">
+                  {(() => {
+                    const n = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
+                    return (eCurrency || "THB") === "THB" ? formatCurrency(n) : `${Number(n || 0).toLocaleString()} ${(eCurrency || "").toUpperCase()}`;
+                  })()}
+                </div>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1">
+                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
+                  ตั้งยอดบัญชีใหม่ (ไม่บังคับ)
+                </label>
+                <input
+                  value={eDesiredBalance}
+                  onChange={(e) => setEDesiredBalance(e.target.value)}
+                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                  placeholder="เช่น 505"
+                  inputMode="decimal"
+                />
+                <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
+                  ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (นับเป็น Income/Expense) หรือไม่
+                </p>
+              </div>
+            </div>
+
             </p>
 
             {(() => {
@@ -877,6 +951,80 @@ export default function AccountsView() {
                   บันทึก
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ✅ Adjust balance confirmation */}
+      {openAdjustConfirm && pendingAdjust ? (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/35 p-3">
+          <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl">
+            <div className="text-lg font-black text-gray-900">ปรับยอดบัญชี</div>
+            <div className="text-xs text-gray-800/70 font-bold mt-2 leading-relaxed">
+              ยอดจะเปลี่ยนจาก{" "}
+              <span className="font-black text-gray-900">
+                {pendingAdjust.currency === "THB" ? formatCurrency(pendingAdjust.current) : `${Number(pendingAdjust.current || 0).toLocaleString()} ${pendingAdjust.currency}`}
+              </span>{" "}
+              เป็น{" "}
+              <span className="font-black text-gray-900">
+                {pendingAdjust.currency === "THB" ? formatCurrency(pendingAdjust.desired) : `${Number(pendingAdjust.desired || 0).toLocaleString()} ${pendingAdjust.currency}`}
+              </span>
+              <br />
+              ส่วนต่าง{" "}
+              <span className="font-black text-gray-900">
+                {pendingAdjust.currency === "THB" ? formatCurrency(Math.abs(pendingAdjust.delta)) : `${Number(Math.abs(pendingAdjust.delta) || 0).toLocaleString()} ${pendingAdjust.currency}`}
+              </span>{" "}
+              ({pendingAdjust.delta > 0 ? "เพิ่ม" : "ลด"})
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  // commit: update account fields first
+                  if (pendingEdit) updateAccount(pendingEdit);
+                  adjustAccountBalance({
+                    accountId: pendingAdjust.accountId,
+                    desiredBalance: pendingAdjust.desired,
+                    recordAsTransaction: true,
+                  });
+                  setOpenAdjustConfirm(false);
+                  closeEditModal();
+                  showAlert?.("บันทึกแล้ว (มีรายการปรับยอด)");
+                }}
+                className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
+              >
+                บันทึกส่วนต่างเป็นรายการ (Income/Expense)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (pendingEdit) updateAccount(pendingEdit);
+                  adjustAccountBalance({
+                    accountId: pendingAdjust.accountId,
+                    desiredBalance: pendingAdjust.desired,
+                    recordAsTransaction: false,
+                  });
+                  setOpenAdjustConfirm(false);
+                  closeEditModal();
+                  showAlert?.("บันทึกแล้ว");
+                }}
+                className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+              >
+                ไม่บันทึกเป็นรายการ (ปรับยอดเงียบๆ)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenAdjustConfirm(false);
+                }}
+                className="w-full px-4 py-3 rounded-2xl bg-white/15 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+              >
+                ยกเลิก
+              </button>
             </div>
           </div>
         </div>

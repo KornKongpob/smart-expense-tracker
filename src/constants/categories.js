@@ -45,6 +45,7 @@ export const DEFAULT_CATEGORIES = {
 
     // Finance
     { id: "fees", name: "ค่าธรรมเนียม/ดอกเบี้ย", icon: "🏦", color: "#EF4444" },
+    { id: "adjust_balance", name: "ปรับยอดบัญชี", icon: "🧮", color: "#6B7280" },
     { id: "insurance", name: "ประกัน", icon: "🛡️", color: "#0EA5E9" },
     { id: "donation", name: "บริจาค", icon: "❤️", color: "#F43F5E" },
     { id: "gift", name: "ของขวัญ", icon: "🎁", color: "#E879F9" },
@@ -65,6 +66,7 @@ export const DEFAULT_CATEGORIES = {
     // Investments
     { id: "investment", name: "ลงทุน", icon: "📈", color: "#54A0FF" },
     { id: "interest", name: "ดอกเบี้ย", icon: "🏦", color: "#0EA5E9" },
+    { id: "adjust_balance", name: "ปรับยอดบัญชี", icon: "🧮", color: "#6B7280" },
     { id: "dividend", name: "เงินปันผล", icon: "🪙", color: "#F59E0B" },
 
     // Other

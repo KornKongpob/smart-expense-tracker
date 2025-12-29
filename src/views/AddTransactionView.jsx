@@ -18,22 +18,31 @@ import {
   Trash,
   Sparkles,
   CreditCard,
+  Inbox,
 } from "lucide-react";
 
 import { useAppStore } from "../store/store";
 import AmountField from "../components/AmountField";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
+import { putBlob, getBlobUrl } from "../services/blobStore";
 import { formatCurrency, toISODate } from "../utils/format";
 import { generateId, generateTransferId } from "../utils/id";
+import { useBlobUrl } from "../utils/useBlobUrl";
 import { PRESET_COLORS } from "../constants/presets.jsx";
 import {
   isDuplicateByRef,
+  findFuzzyDuplicate,
   toMonthKey,
   calcSpentByCategoryInMonth,
   getBudget,
   calcAccountBalance,
 } from "../store/selectors";
 import { groupReceiptItemsToCategory, sanitizeCategoryKey } from "../utils/receiptCategorizer";
+import { deriveAutomationPatch } from "../utils/rulesEngine";
+import {
+  resolveMerchantCanonical,
+  deriveMerchantAutofillPatch,
+} from "../utils/merchantDictionary";
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
@@ -373,7 +382,16 @@ function looksLikeTransferText(text) {
 
 export default function AddTransactionView({ showAlert, showConfirm }) {
   const store = useAppStore();
-  const { state, navigate, upsertTransaction, bulkUpsertTransactions, deleteTransaction, addCategory } = store;
+  const {
+    state,
+    navigate,
+    upsertTransaction,
+    bulkUpsertTransactions,
+    deleteTransaction,
+    addCategory,
+    addScanInboxItems,
+    learnMerchant,
+  } = store;
 
   const initialData = store.getEditingTransaction();
   const isEditMode = !!initialData;
@@ -412,6 +430,18 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   const isEditingTransferLike = !!(isEditMode && initialData?.isTransfer);
   const isEditingCreditPayment = isEditingTransferLike && transferKindForEdit === "credit_payment";
+
+  // ===== attachment (persisted in IndexedDB) =====
+  const initialAttachmentId = useMemo(() => {
+    const direct = String(initialData?.attachmentId || "").trim();
+    if (direct) return direct;
+    const out = String(transferPair?.outTx?.attachmentId || "").trim();
+    if (out) return out;
+    const inn = String(transferPair?.inTx?.attachmentId || "").trim();
+    return inn || "";
+  }, [initialData, transferPair]);
+
+  const attachmentUrl = useBlobUrl(initialAttachmentId);
 
   // ===== modes =====
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan"); // scan | manual
@@ -476,6 +506,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [scanStatus, setScanStatus] = useState("");
   const [queue, setQueue] = useState([]); // queue items
   const [expandedId, setExpandedId] = useState(null);
+
+  // post-scan action modal (per scan batch)
+  const scanBatchIdRef = useRef(0);
+  const [postScanBatchId, setPostScanBatchId] = useState(null);
+  const [handledBatchId, setHandledBatchId] = useState(null);
+  const [postScanModalOpen, setPostScanModalOpen] = useState(false);
+  const [dupDecisionOpen, setDupDecisionOpen] = useState(false);
 
   const existingRefSet = useMemo(() => {
     const set = new Set();
@@ -590,6 +627,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     setQueue([]);
     setExpandedId(null);
     setScanStatus("");
+    setPostScanBatchId(null);
+    setHandledBatchId(null);
+    setPostScanModalOpen(false);
+    setDupDecisionOpen(false);
     createdCatRef.current = { expense: new Map(), income: new Map() };
   };
 
@@ -637,6 +678,49 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return id;
   };
 
+  // Apply derived automation patch onto a queue item patch, while keeping fields consistent.
+  const applyAutomationToQueuePatch = (basePatch, autoPatch) => {
+    let next = { ...basePatch, ...(autoPatch || {}) };
+
+    const t = next.txType;
+    const defaultAcc = accounts?.[0]?.id || "";
+
+    // Normalize based on type
+    if (t === "transfer" || t === "credit_payment") {
+      next.categoryId = "transfer";
+      next.splitByCategory = false;
+      next.groups = [];
+      next.fromAccountId = next.fromAccountId || next.accountId || defaultAcc;
+      next.toAccountId = next.toAccountId || defaultAcc;
+
+      // credit_payment hint: prefer toAccount = credit, fromAccount = non-credit
+      if (t === "credit_payment") {
+        const credit = (accounts || []).find((a) => a?.type === "credit");
+        const nonCredit = (accounts || []).find((a) => a?.type !== "credit");
+        const toAcc = (accounts || []).find((a) => a?.id === next.toAccountId);
+        const fromAcc = (accounts || []).find((a) => a?.id === next.fromAccountId);
+        if (credit && toAcc?.type !== "credit") next.toAccountId = credit.id;
+        if (nonCredit && fromAcc?.type === "credit") next.fromAccountId = nonCredit.id;
+      }
+    } else {
+      // expense / income
+      next.accountId = next.accountId || defaultAcc;
+      if (t === "income") {
+        next.splitByCategory = false;
+        next.groups = [];
+      }
+      // Ensure categoryId exists at least to prevent blank UI
+      if (!next.categoryId || next.categoryId === "transfer") {
+        next.categoryId = ensureCategory(t === "income" ? "income" : "expense", "other");
+      }
+    }
+
+    // Ignore inappropriate category in transfer types
+    if (t === "transfer" || t === "credit_payment") next.categoryId = "transfer";
+
+    return next;
+  };
+
   const updateQueueItem = (id, patch) => {
     setQueue((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   };
@@ -665,6 +749,30 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       return prev.filter((x) => x.id !== id);
     });
     if (expandedId === id) setExpandedId(null);
+  };
+
+  // Remove many queue items at once (used by inbox/duplicate flows)
+  const removeQueueItems = (ids) => {
+    const setIds = new Set(Array.isArray(ids) ? ids.filter(Boolean) : []);
+    if (!setIds.size) return;
+
+    setQueue((prev) => {
+      const next = [];
+      for (const it of prev) {
+        if (setIds.has(it.id)) {
+          if (it?.previewUrl?.startsWith("blob:")) {
+            try {
+              URL.revokeObjectURL(it.previewUrl);
+            } catch {}
+          }
+          continue;
+        }
+        next.push(it);
+      }
+      return next;
+    });
+
+    if (expandedId && setIds.has(expandedId)) setExpandedId(null);
   };
 
   // ===== credit card payment helpers (manual/scan) =====
@@ -843,19 +951,46 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     setIsScanning(true);
     setScanStatus("เตรียมสแกน...");
 
+    const batchId = Date.now();
+    scanBatchIdRef.current = batchId;
+
     const batchRefSet = new Set(existingRefSet);
+    // ✅ Keep a light pool of already-scanned (same batch) items for fuzzy duplicate detection
+    const batchFuzzyPool = [];
 
     try {
       for (const file of files) {
         const qid = generateId();
-        const previewUrl = URL.createObjectURL(file);
+        // Persist attachment in IndexedDB (offline-first)
+        const attachmentId = `att_${qid}`;
+
+        // Provide immediate preview while we persist
+        const tmpUrl = URL.createObjectURL(file);
+        let previewUrl = tmpUrl;
+
+        try {
+          await putBlob(attachmentId, file);
+          const persistedUrl = await getBlobUrl(attachmentId);
+          if (persistedUrl) {
+            previewUrl = persistedUrl;
+            try {
+              URL.revokeObjectURL(tmpUrl);
+            } catch {
+              // ignore
+            }
+          }
+        } catch {
+          // If IndexedDB fails (private mode / quota), keep in-memory preview.
+        }
 
         setQueue((prev) => [
           ...prev,
           {
             id: qid,
+            batchId,
             fileName: file.name,
             previewUrl,
+            attachmentId,
             status: "scanning",
             error: "",
             txType: "expense",
@@ -1000,6 +1135,34 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           let suggestedCategoryId = "";
           let suggestedReason = "";
           if ((finalTxType === "expense" || finalTxType === "income") && !splitByCategory) {
+            // Prefer Merchant Library if we already learned a strong mapping
+            try {
+              const merchants = state?.merchants || [];
+              const canon = resolveMerchantCanonical(merchant || mergedNote, merchants);
+              const md = deriveMerchantAutofillPatch(
+                {
+                  merchant: canon || merchant || mergedNote,
+                  txType: finalTxType,
+                  categoryId: "other",
+                  accountId: "",
+                },
+                merchants
+              );
+
+              const list = finalTxType === "income" ? incomeCats : expenseCats;
+              const mdCat = String(md?.categoryId || "");
+              if (mdCat && list?.some((c) => String(c?.id) === mdCat)) {
+                suggestedCategoryId = mdCat;
+                suggestedReason = canon ? `Merchant Library: ${canon}` : "Merchant Library";
+                detectedCategoryId = mdCat;
+              }
+            } catch {
+              // ignore
+            }
+
+            if (suggestedCategoryId) {
+              // already filled by Merchant Library
+            } else {
             const sug =
               categoryMemory?.suggestCategoryId?.(
                 finalTxType,
@@ -1018,17 +1181,20 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 : "จำจากประวัติ";
               detectedCategoryId = sug;
             }
+            }
           }
 
-          const dup = rref ? batchRefSet.has(rref) || isDuplicateByRef(state.transactions || [], rref) : false;
+          const dupByRef = rref ? batchRefSet.has(rref) || isDuplicateByRef(state.transactions || [], rref) : false;
           if (rref) batchRefSet.add(rref);
 
-          updateQueueItem(qid, {
+          let patch = {
             status: "ready",
             txType: finalTxType,
             amount:
               finalTxType === "transfer" || finalTxType === "credit_payment"
-                ? (Number.isFinite(amount) ? amount : aiTotal || null)
+                ? Number.isFinite(amount)
+                  ? amount
+                  : aiTotal || null
                 : splitByCategory
                 ? groupSum || aiTotal || null
                 : Number.isFinite(amount)
@@ -1038,13 +1204,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             note: mergedNote,
             merchant,
             ref: rref,
-            categoryId:
-              finalTxType === "transfer" || finalTxType === "credit_payment" ? "transfer" : detectedCategoryId,
+            categoryId: finalTxType === "transfer" || finalTxType === "credit_payment" ? "transfer" : detectedCategoryId,
             accountId: detectedAccountId || (accounts?.[0]?.id || ""),
             fromAccountId: detectedFromId || (accounts?.[0]?.id || ""),
             toAccountId: detectedToId || (accounts?.[0]?.id || ""),
-            duplicate: dup,
-            includeDuplicate: !dup,
+            duplicate: dupByRef,
+            includeDuplicate: !dupByRef,
             evidence: evidenceText.slice(0, 240),
             items: scannedItems,
             groups,
@@ -1054,7 +1219,123 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             toDigits,
             suggestedCategoryId,
             suggestedReason,
+          };
+
+          // ✅ Advanced automation rules: run after scan and auto-fill fields
+          try {
+            const bankText = `${fromName || ""} ${toName || ""}`.trim();
+            const autoCtx = {
+              text: `${merchant || ""} ${mergedNote || ""} ${bankText} ${evidenceText || ""}`,
+              rawText: evidenceText || "",
+              merchant,
+              note: mergedNote,
+              evidence: evidenceText,
+              ref: rref,
+              amount: patch.amount,
+              fromDigits,
+              toDigits,
+            };
+            const autoPatch = deriveAutomationPatch(state?.rules || [], autoCtx);
+            if (autoPatch && Object.keys(autoPatch).length) {
+              patch = applyAutomationToQueuePatch(patch, autoPatch);
+            }
+          } catch {
+            // ignore automation errors
+          }
+
+          // ✅ Smart Merchant Dictionary
+          // - normalize merchant (e.g., "7-11 (branch...)" -> "7-ELEVEN")
+          // - optionally auto-fill category/account from learned prefs
+          try {
+            const merchants = state?.merchants || [];
+            const canon = resolveMerchantCanonical(patch.merchant || merchant || mergedNote, merchants);
+            if (canon) patch = { ...patch, merchant: canon };
+
+            const hadStrongAccountMatch =
+              !!bestMatchAccountId(accounts, fromDigits) ||
+              !!bestMatchAccountId(accounts, toDigits) ||
+              !!accountId;
+            const accountForAutofill = !hadStrongAccountMatch ? "" : patch.accountId;
+
+            const mdPatch = deriveMerchantAutofillPatch(
+              {
+                merchant: patch.merchant,
+                txType: patch.txType,
+                categoryId: patch.categoryId,
+                accountId: accountForAutofill,
+              },
+              merchants
+            );
+
+            const beforeCat = patch.categoryId;
+            const beforeAcc = patch.accountId;
+            patch = { ...patch, ...mdPatch };
+
+            // show a hint only when the dictionary actually fills something
+            if (
+              (mdPatch?.categoryId && mdPatch.categoryId !== beforeCat) ||
+              (mdPatch?.accountId && mdPatch.accountId !== beforeAcc)
+            ) {
+              patch.suggestedCategoryId = mdPatch?.categoryId || patch.suggestedCategoryId;
+              patch.suggestedReason = patch.merchant ? `Merchant Library: ${patch.merchant}` : "Merchant Library";
+            }
+          } catch {
+            // ignore merchant dictionary errors
+          }
+
+          // ✅ Fuzzy duplicate detection (date proximity + amount closeness + merchant/ref/digits)
+          try {
+            const pool = [...(state.transactions || []), ...batchFuzzyPool];
+            const fuzzy = findFuzzyDuplicate(pool, {
+              ...patch,
+              id: qid,
+              // normalize possible reference keys
+              ref: patch.ref || rref,
+              referenceId: patch.ref || rref,
+            });
+
+            const dupFuzzy = !!fuzzy?.isDuplicate;
+            const finalDup = !!dupByRef || dupFuzzy;
+
+            patch = {
+              ...patch,
+              duplicate: finalDup,
+              includeDuplicate: !finalDup,
+              duplicateInfo: finalDup
+                ? dupByRef
+                  ? { kind: "ref", matchId: fuzzy?.matchId || null, score: 1, reasons: ["ref exact match"] }
+                  : {
+                      kind: "fuzzy",
+                      matchId: fuzzy?.matchId || null,
+                      score: fuzzy?.score || 0,
+                      reasons: fuzzy?.reasons || [],
+                    }
+                : null,
+            };
+          } catch {
+            // ignore fuzzy errors
+          }
+
+          // add to batch pool so next files can fuzzy-match within the same batch
+          batchFuzzyPool.push({
+            id: qid,
+            txType: patch.txType,
+            type: patch.txType,
+            amount: patch.amount,
+            date: patch.date,
+            merchant: patch.merchant,
+            note: patch.note,
+            ref: patch.ref,
+            referenceId: patch.ref,
+            accountId: patch.accountId,
+            fromAccountId: patch.fromAccountId,
+            toAccountId: patch.toAccountId,
+            fromDigits: patch.fromDigits,
+            toDigits: patch.toDigits,
+            isTransfer: patch.txType === "transfer" || patch.txType === "credit_payment",
           });
+
+          updateQueueItem(qid, patch);
         } catch (err) {
           const msg = String(err?.message || err);
           updateQueueItem(qid, { status: "error", error: msg || "scan_failed" });
@@ -1063,20 +1344,162 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     } finally {
       setIsScanning(false);
       setScanStatus("");
+      setPostScanBatchId(batchId);
     }
   };
 
   const canCreateFromQueue = useMemo(() => {
-    const valid = queue.filter((q) => q.status === "ready" && q.amount && q.amount > 0 && q.includeDuplicate);
-    return valid.length > 0;
+    // ✅ Allow "Save now" as long as there is at least one ready item.
+    // Duplicates will be blocked until the user explicitly confirms.
+    return (queue || []).some((q) => q.status === "ready" && q.amount && q.amount > 0);
   }, [queue]);
 
-  const createTransactionsFromQueue = () => {
-    const ready = queue.filter((q) => q.status === "ready" && q.amount && q.amount > 0 && q.includeDuplicate);
+  const canSendToInbox = useMemo(() => {
+    return (queue || []).some((q) => q.status === "ready");
+  }, [queue]);
+
+  useEffect(() => {
+    if (isScanning) return;
+    if (!postScanBatchId) return;
+    if (handledBatchId === postScanBatchId) return;
+    const hasReadyInBatch = (queue || []).some((q) => q.status === "ready" && q.batchId === postScanBatchId);
+    if (hasReadyInBatch) setPostScanModalOpen(true);
+  }, [isScanning, postScanBatchId, handledBatchId, queue]);
+
+  const duplicateReadyCount = useMemo(() => {
+    return (queue || []).filter((q) => q.status === "ready" && q.duplicate).length;
+  }, [queue]);
+
+  const sendQueueToInbox = () => {
+    const ready = (queue || []).filter((q) => q.status === "ready");
+    if (!ready.length) {
+      showAlert?.("ไม่มีรายการที่พร้อมส่งเข้า Inbox");
+      return false;
+    }
+
+    const createdAt = Date.now();
+    const serializable = ready.map((q) => {
+      const { previewUrl, batchId, status, error, ...rest } = q || {};
+      const type = rest?.type || rest?.txType || "expense";
+      const referenceId = rest?.referenceId || rest?.ref || "";
+      return {
+        ...rest,
+        id: rest?.id || generateId(),
+        createdAt,
+        status: "pending",
+        type,
+        referenceId,
+      };
+    });
+
+    addScanInboxItems(serializable);
+    clearQueue();
+    setHandledBatchId(postScanBatchId);
+    setPostScanModalOpen(false);
+    setDupDecisionOpen(false);
+    navigate("inbox");
+    showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
+    return true;
+  };
+
+  // Send only duplicate-ready items to Inbox (used when user chose "Save now" but wants to handle duplicates later)
+  const sendDuplicateQueueToInbox = () => {
+    const dups = (queue || []).filter((q) => q.status === "ready" && !!q.duplicate);
+    if (!dups.length) {
+      showAlert?.("ไม่มีรายการซ้ำให้ส่งเข้า Inbox");
+      return false;
+    }
+
+    const createdAt = Date.now();
+    const serializable = dups.map((q) => {
+      const { previewUrl, batchId, status, error, ...rest } = q || {};
+      const type = rest?.type || rest?.txType || "expense";
+      const referenceId = rest?.referenceId || rest?.ref || "";
+      return {
+        ...rest,
+        id: rest?.id || generateId(),
+        createdAt,
+        status: "pending",
+        type,
+        referenceId,
+      };
+    });
+
+    addScanInboxItems(serializable);
+    removeQueueItems(dups.map((q) => q.id));
+    setDupDecisionOpen(false);
+    navigate("inbox");
+    showAlert?.(`ส่งรายการซ้ำเข้า Inbox ${serializable.length} รายการแล้ว`);
+    return true;
+  };
+
+  const closePostScanModal = () => {
+    setPostScanModalOpen(false);
+    if (postScanBatchId) setHandledBatchId(postScanBatchId);
+  };
+
+  const handlePostScanSaveNow = () => {
+    setPostScanModalOpen(false);
+    if (postScanBatchId) setHandledBatchId(postScanBatchId);
+    if (duplicateReadyCount > 0) {
+      // ✅ Save non-duplicates immediately, then ask what to do with duplicates.
+      createTransactionsFromQueue({ scope: "nonDuplicates", duplicateMode: "includeAll", navigateToDashboard: false });
+      setDupDecisionOpen(true);
+      return;
+    }
+    createTransactionsFromQueue();
+  };
+
+  const handlePostScanSendToInbox = () => {
+    sendQueueToInbox();
+  };
+
+  const handleDupDecision = (action) => {
+    if (action === "send") {
+      sendDuplicateQueueToInbox();
+      return;
+    }
+
+    if (action === "skip") {
+      const dupIds = (queue || []).filter((q) => q.status === "ready" && !!q.duplicate).map((q) => q.id);
+      if (dupIds.length) removeQueueItems(dupIds);
+      setDupDecisionOpen(false);
+      showAlert?.(`ข้ามรายการซ้ำ ${dupIds.length} รายการแล้ว`);
+      navigate("dashboard");
+      return;
+    }
+
+    // default: save duplicates
+    const ok = createTransactionsFromQueue({ scope: "duplicates", duplicateMode: "includeAll", navigateToDashboard: true });
+    if (ok) setDupDecisionOpen(false);
+  };
+
+  const backToPostScanModal = () => {
+    setDupDecisionOpen(false);
+    setPostScanModalOpen(true);
+  };
+
+  const createTransactionsFromQueue = (
+    {
+      duplicateMode = "respect", // respect | includeAll | excludeAll
+      scope = "all", // all | duplicates | nonDuplicates
+      navigateToDashboard = true,
+    } = {}
+  ) => {
+    let base = (queue || []).filter((q) => q.status === "ready" && q.amount && q.amount > 0);
+
+    if (scope === "duplicates") base = base.filter((q) => !!q.duplicate);
+    if (scope === "nonDuplicates") base = base.filter((q) => !q.duplicate);
+    const ready = base.filter((q) => {
+      if (duplicateMode === "includeAll") return true;
+      if (duplicateMode === "excludeAll") return !q.duplicate;
+      return !!q.includeDuplicate;
+    });
 
     if (!ready.length) {
-      showAlert?.("ไม่มีรายการที่พร้อมสร้าง (หรือถูกติ๊กว่าเป็นรายการซ้ำ)");
-      return;
+      if (scope === "duplicates") return showAlert?.("ไม่มีรายการซ้ำที่ต้องบันทึก");
+      if (scope === "nonDuplicates") return showAlert?.("ไม่มีรายการที่ไม่ซ้ำให้บันทึก");
+      return showAlert?.("ไม่มีรายการที่พร้อมสร้าง (หรือถูกติ๊กว่าเป็นรายการซ้ำ)");
     }
 
     for (const q of ready) {
@@ -1136,6 +1559,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           ref: q.ref || null,
           source: "scan",
           transferKind: kind,
+          attachmentId: q.attachmentId || null,
 
           merchant: merchant || null,
           evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -1157,6 +1581,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           ref: q.ref || null,
           source: "scan",
           transferKind: kind,
+          attachmentId: q.attachmentId || null,
 
           merchant: merchant || null,
           evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -1192,6 +1617,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             transferId: null,
             ref: idx === 0 ? (q.ref || null) : null,
             source: "scan",
+            attachmentId: q.attachmentId || null,
 
             merchant: merchant || null,
             evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -1216,6 +1642,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         transferId: null,
         ref: q.ref || null,
         source: "scan",
+        attachmentId: q.attachmentId || null,
 
         merchant: merchant || null,
         evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -1225,8 +1652,26 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       });
     }
 
-    bulkUpsertTransactions(txs);
-    clearQueue();
+    bulkUpsertTransactions(txs, { navigateToDashboard });
+
+    // ✅ Smart Merchant Dictionary: learn mapping from confirmed saved transactions
+    try {
+      for (const tx of txs) {
+        const t = String(tx?.type || "").toLowerCase();
+        if (t !== "expense" && t !== "income") continue;
+        const m = String(tx?.merchant || "").trim();
+        if (!m) continue;
+        learnMerchant?.({ merchant: m, txType: t, categoryId: String(tx?.category || ""), accountId: String(tx?.accountId || "") });
+      }
+    } catch {
+      // ignore
+    }
+
+    // ✅ remove only the queue items we actually saved (so duplicates can remain blocked/pending)
+    removeQueueItems(ready.map((q) => q.id));
+
+    showAlert?.(`บันทึก ${txs.length} รายการแล้ว`);
+    return true;
   };
 
   // ===== manual save/delete =====
@@ -1273,6 +1718,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           ref: String(ref || "").trim() || null,
           source: kind,
           transferKind: kind,
+          attachmentId: initialAttachmentId || null,
         },
         {
           id: inId,
@@ -1287,6 +1733,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           ref: String(ref || "").trim() || null,
           source: kind,
           transferKind: kind,
+          attachmentId: initialAttachmentId || null,
         },
       ]);
       return;
@@ -1307,6 +1754,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       transferId: null,
       ref: String(ref || "").trim() || null,
       source: "manual",
+      attachmentId: initialAttachmentId || null,
     });
   };
 
@@ -2115,6 +2563,28 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             </>
           ) : null}
 
+          {/* Attachment preview (from scan / inbox) */}
+          {initialAttachmentId ? (
+            <div className="glass-card rounded-3xl p-4 mb-4 border border-white/20">
+              <div className="text-xs font-bold text-gray-900/55 mb-3 uppercase">Attachment</div>
+              {attachmentUrl ? (
+                <a
+                  href={attachmentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
+                >
+                  <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
+                </a>
+              ) : (
+                <div className="text-sm text-gray-900/60">Loading image…</div>
+              )}
+              <div className="mt-2 text-[11px] text-gray-900/50">
+                ไฟล์แนบถูกเก็บแบบถาวรในเครื่อง (IndexedDB)
+              </div>
+            </div>
+          ) : null}
+
           {/* Date / Note / Ref */}
           <div className="glass-card rounded-3xl overflow-hidden mb-24">
             <div className="flex items-center border-b border-white/15 p-4">
@@ -2168,21 +2638,135 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         </>
       ) : null}
 
-      {/* Fixed Create from queue (scan mode) */}
+      {/* Fixed actions (scan mode) */}
       {!isEditMode && entryMode === "scan" && queue.length ? (
-        <button
-          onClick={createTransactionsFromQueue}
-          className={`fixed bottom-6 left-4 right-4 py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
-            canCreateFromQueue
-              ? "bg-indigo-600 text-white shadow-indigo-200"
-              : "bg-white/30 text-gray-700/60 border border-white/20"
-          }`}
-          type="button"
-          disabled={!canCreateFromQueue}
-        >
-          <Check size={18} />
-          สร้างรายการจากคิว
-        </button>
+        <div className="fixed bottom-6 left-4 right-4 grid grid-cols-2 gap-2">
+          <button
+            onClick={sendQueueToInbox}
+            className={`py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
+              canSendToInbox
+                ? "bg-gray-900/90 text-white"
+                : "bg-white/30 text-gray-700/60 border border-white/20"
+            }`}
+            type="button"
+            disabled={!canSendToInbox}
+          >
+            <Inbox size={18} />
+            Send to Inbox
+          </button>
+
+          <button
+            onClick={handlePostScanSaveNow}
+            className={`py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
+              canCreateFromQueue
+                ? "bg-indigo-600 text-white shadow-indigo-200"
+                : "bg-white/30 text-gray-700/60 border border-white/20"
+            }`}
+            type="button"
+            disabled={!canCreateFromQueue}
+          >
+            <Check size={18} />
+            Save now
+          </button>
+        </div>
+      ) : null}
+
+      {/* Post-scan action modal */}
+      {postScanModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button type="button" className="absolute inset-0 bg-black/40" onClick={closePostScanModal} aria-label="Close" />
+          <div className="relative w-full max-w-sm glass-card rounded-3xl p-5 border border-white/20">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-extrabold text-gray-900">หลังสแกนเสร็จ</h3>
+                <p className="mt-1 text-sm text-gray-900/70">ต้องการบันทึกทันทีหรือส่งเข้า Inbox?</p>
+                {duplicateReadyCount ? (
+                  <p className="mt-2 text-xs font-extrabold text-amber-700 inline-flex items-center gap-1">
+                    <AlertTriangle size={14} /> Possible duplicate {duplicateReadyCount} รายการ
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={closePostScanModal}
+                className="p-2 rounded-xl bg-white/30 border border-white/20 text-gray-900/70 active:scale-95"
+                aria-label="close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              <button
+                type="button"
+                onClick={handlePostScanSaveNow}
+                className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-indigo-200 active:scale-95"
+              >
+                Save now
+              </button>
+              <button
+                type="button"
+                onClick={handlePostScanSendToInbox}
+                className="w-full py-4 rounded-2xl bg-gray-900/90 text-white font-extrabold shadow-xl active:scale-95"
+              >
+                Send to Inbox
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Duplicate decision modal (Save now) */}
+      {dupDecisionOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setDupDecisionOpen(false)}
+            aria-label="Close"
+          />
+          <div className="relative w-full max-w-sm glass-card rounded-3xl p-5 border border-white/20">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-extrabold text-gray-900">พบ Possible duplicate</h3>
+                <p className="mt-1 text-sm text-gray-900/70">มี {duplicateReadyCount} รายการที่อาจซ้ำ ต้องการทำอย่างไร?</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDupDecisionOpen(false)}
+                className="p-2 rounded-xl bg-white/30 border border-white/20 text-gray-900/70 active:scale-95"
+                aria-label="close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              <button
+                type="button"
+                onClick={() => handleDupDecision("send")}
+                className="w-full py-4 rounded-2xl bg-gray-900/90 text-white font-extrabold shadow-xl active:scale-95"
+              >
+                Send duplicates to Inbox
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDupDecision("skip")}
+                className="w-full py-4 rounded-2xl bg-white/30 text-gray-900 font-extrabold border border-white/20 active:scale-95"
+              >
+                Skip duplicates
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDupDecision("save")}
+                className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-indigo-200 active:scale-95"
+              >
+                Save duplicates now
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

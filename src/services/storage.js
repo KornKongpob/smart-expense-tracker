@@ -85,13 +85,37 @@ function normalizeBoot(data, defaults = {}) {
     ? defaults.defaultRecurring
     : [];
 
+  const scanInbox = Array.isArray(root.scanInbox)
+    ? root.scanInbox
+    : Array.isArray(defaults.defaultScanInbox)
+    ? defaults.defaultScanInbox
+    : [];
+
+  const inbox = Array.isArray(root.inbox)
+    ? root.inbox
+    : Array.isArray(defaults.defaultInbox)
+    ? defaults.defaultInbox
+    : [];
+
   const ui = isPlainObject(root.ui)
     ? root.ui
     : isPlainObject(defaults.defaultUI)
     ? defaults.defaultUI
     : undefined;
 
-  return { transactions, accounts, categories, budgets, recurring, ui };
+  const rules = Array.isArray(root.rules)
+    ? root.rules
+    : Array.isArray(defaults.defaultRules)
+    ? defaults.defaultRules
+    : [];
+
+  const merchants = Array.isArray(root.merchants)
+    ? root.merchants
+    : Array.isArray(defaults.defaultMerchants)
+    ? defaults.defaultMerchants
+    : [];
+
+  return { transactions, accounts, categories, budgets, recurring, inbox, scanInbox, rules, merchants, ui };
 }
 
 /**
@@ -133,6 +157,11 @@ export function saveAll(payload) {
       categories: ensureCategoriesShape(data.categories),
       budgets: ensureArray(data.budgets, []),
       recurring: ensureArray(data.recurring, []),
+      rules: ensureArray(data.rules, []),
+      merchants: ensureArray(data.merchants, []),
+      inbox: ensureArray(data.inbox, ensureArray(data.scanInbox, [])),
+      // backward compatibility: keep writing scanInbox too
+      scanInbox: ensureArray(data.scanInbox, ensureArray(data.inbox, [])),
       ui: isPlainObject(data.ui) ? data.ui : undefined,
     },
   };

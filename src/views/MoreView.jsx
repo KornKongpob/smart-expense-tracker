@@ -1,6 +1,6 @@
 // src/views/MoreView.jsx
 import { useMemo, useRef } from "react";
-import { Settings, Upload, Trash2, ChevronRight, Bell, Repeat, PlayCircle } from "lucide-react";
+import { Settings, Upload, Trash2, ChevronRight, Bell, Repeat, PlayCircle, Inbox, Wand2, Store } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { downloadBackupJSON } from "../services/storage";
 import { toISODate } from "../utils/format";
@@ -10,12 +10,39 @@ export default function MoreView({ showAlert, showConfirm }) {
   const { state, navigate, exportBackup, importBackup, resetAll, runRecurringNow } = useAppStore();
   const fileRef = useRef(null);
 
+  const merchantCount = Array.isArray(state?.merchants) ? state.merchants.length : 0;
+
+  const inboxList = useMemo(() => {
+    if (Array.isArray(state?.inbox)) return state.inbox;
+    if (Array.isArray(state?.scanInbox)) return state.scanInbox;
+    return [];
+  }, [state?.inbox, state?.scanInbox]);
+
+  const inboxPendingCount = useMemo(() => {
+    return (inboxList || []).filter((it) => String(it?.status || 'pending').toLowerCase() !== 'approved').length;
+  }, [inboxList]);
+
+  const inboxApprovedCount = useMemo(() => {
+    return (inboxList || []).filter((it) => String(it?.status || '').toLowerCase() === 'approved').length;
+  }, [inboxList]);
+
+
+  const inboxDupCount = useMemo(() => {
+    return (inboxList || []).filter((it) => !!it?.duplicate && String(it?.status || 'pending').toLowerCase() !== 'approved').length;
+  }, [inboxList]);
   // ✅ small status helper: how many recurring rules exist / enabled
   const recurringStats = useMemo(() => {
     const list = state?.recurring || [];
     const enabled = list.filter((r) => r?.enabled !== false).length;
     return { total: list.length, enabled };
   }, [state?.recurring]);
+
+  // ✅ automation rules status
+  const rulesStats = useMemo(() => {
+    const list = Array.isArray(state?.rules) ? state.rules : [];
+    const enabled = list.filter((r) => r?.enabled !== false).length;
+    return { total: list.length, enabled };
+  }, [state?.rules]);
 
   const onExport = () => {
     const data = exportBackup();
@@ -86,7 +113,7 @@ export default function MoreView({ showAlert, showConfirm }) {
     return `มี ${dueish} กฎที่อาจถึงรอบ (กด Run เพื่อสร้างทันที)`;
   }, [state?.recurring]);
 
-  const Row = ({ icon, title, subtitle, onClick, danger, noBorder }) => (
+  const Row = ({ icon, title, subtitle, badge, onClick, danger, noBorder }) => (
     <button
       onClick={onClick}
       className={`w-full flex items-center justify-between p-4 hover:bg-white/10 ${noBorder ? "" : "border-b glass-divider"}`}
@@ -105,7 +132,14 @@ export default function MoreView({ showAlert, showConfirm }) {
           {subtitle ? <div className="text-xs text-gray-600 mt-0.5">{subtitle}</div> : null}
         </div>
       </div>
-      <ChevronRight size={20} className={danger ? "text-red-300" : "text-gray-500"} />
+      <div className="flex items-center gap-2">
+        {badge ? (
+          <div className="min-w-[28px] h-7 px-2 rounded-full bg-indigo-600 text-white text-xs font-extrabold flex items-center justify-center">
+            {badge}
+          </div>
+        ) : null}
+        <ChevronRight size={20} className={danger ? "text-red-300" : "text-gray-500"} />
+      </div>
     </button>
   );
 
@@ -121,6 +155,32 @@ export default function MoreView({ showAlert, showConfirm }) {
       </div>
 
       <div className="glass-card rounded-2xl overflow-hidden mb-4">
+        <Row
+          icon={<Inbox size={20} />}
+          title="Inbox"
+          subtitle={
+            inboxPendingCount || inboxApprovedCount
+              ? `${inboxPendingCount} Pending${inboxApprovedCount ? ` • ${inboxApprovedCount} Approved` : ''}${inboxDupCount ? ` • possible duplicate ${inboxDupCount}` : ''}`
+              : 'ยังไม่มีรายการใน Inbox'
+          }
+          badge={inboxPendingCount}
+          onClick={() => navigate("inbox")}
+        />
+
+        <Row
+          icon={<Wand2 size={20} />}
+          title="Automation Rules"
+          subtitle={rulesStats.total ? `${rulesStats.enabled} Enabled • ${rulesStats.total} Total` : "ตั้งกฎเพื่อ auto-fill หลังสแกน"}
+          onClick={() => navigate("rules")}
+        />
+
+        <Row
+          icon={<Store size={20} />}
+          title="Merchant Library"
+          subtitle={merchantCount ? `${merchantCount} merchants` : "จำร้าน → หมวด/บัญชี แบบฉลาด"}
+          onClick={() => navigate("merchants")}
+        />
+
         <Row icon={<Settings size={20} />} title="จัดการหมวดหมู่" onClick={() => navigate("categories")} />
         <Row icon={<Bell size={20} />} title="Budget Alert" onClick={() => navigate("budgets")} />
 
