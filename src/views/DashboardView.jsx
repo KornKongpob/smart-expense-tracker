@@ -6,11 +6,28 @@ import { useAppStore } from "../store/store";
 import { calcTotals, calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
 
-function getTxOrderKey(t) {
-  const d = t?.date ? new Date(String(t.date).slice(0, 10)).getTime() : 0;
-  // fallback tie-breaker so stable ordering even when same date
-  const idScore = String(t?.id || "").split("").reduce((s, ch) => s + ch.charCodeAt(0), 0);
-  return d * 1000 + (idScore % 1000);
+function getTxDateMs(t) {
+  return t?.date ? new Date(String(t.date).slice(0, 10)).getTime() : 0;
+}
+
+function getTxCreatedAt(t) {
+  return Number(t?.createdAt || t?.updatedAt || 0) || 0;
+}
+
+function compareTxNewestFirst(a, b) {
+  const da = getTxDateMs(a);
+  const db = getTxDateMs(b);
+  if (db !== da) return db - da;
+
+  // Same date: most recently added/updated should be on top
+  const ca = getTxCreatedAt(a);
+  const cb = getTxCreatedAt(b);
+  if (cb !== ca) return cb - ca;
+
+  // Final stable tie-breaker
+  const ia = String(a?.id || "");
+  const ib = String(b?.id || "");
+  return ib.localeCompare(ia);
 }
 
 export default function DashboardView() {
@@ -71,8 +88,8 @@ export default function DashboardView() {
 
     base = base.filter(matchQuery);
 
-    // keep ordering (latest first)
-    base.sort((a, b) => getTxOrderKey(b) - getTxOrderKey(a));
+    // keep ordering (latest date first; same date: latest added first)
+    base.sort(compareTxNewestFirst);
 
     // 2) index transfer pairs from ALL txs (so we can still show From→To even when filterAccount is set)
     const byTransferId = new Map();
@@ -141,6 +158,8 @@ export default function DashboardView() {
           transferKind: isCardPayment ? "card_payment" : "transfer",
           isCardPayment,
           note: displayNote,
+          // For ordering: if same date, prefer the leg that was added most recently
+          createdAt: Math.max(getTxCreatedAt(rep), getTxCreatedAt(outTx), getTxCreatedAt(inTx)),
         };
 
         const cat =

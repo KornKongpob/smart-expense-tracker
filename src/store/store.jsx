@@ -268,8 +268,31 @@ function normalizeRules(list) {
   return withP.map((r, idx) => ({ ...r, priority: idx + 1 }));
 }
 
+// ---------- transaction normalization ----------
+function normalizeTransaction(raw) {
+  const t = raw && typeof raw === "object" ? raw : {};
+  const id = String(t.id || generateId());
+  const amount = safeNum(t.amount, 0);
+  const date = t?.date ? String(t.date).slice(0, 10) : toISODate(new Date());
+  // Prefer explicit createdAt/updatedAt, else fall back to date (midnight) for stable sorting
+  const dateMs = date ? new Date(date).getTime() : 0;
+  const createdAt = Number(t.createdAt || t.addedAt || t.updatedAt || dateMs || Date.now());
+  const updatedAt = Number(t.updatedAt || createdAt);
+
+  return {
+    ...t,
+    id,
+    amount,
+    date,
+    note: String(t.note || ""),
+    createdAt,
+    updatedAt,
+    isTransfer: !!t.isTransfer,
+  };
+}
+
 export function createInitialState(boot = {}) {
-  const tx = toArray(boot?.transactions);
+  const tx = toArray(boot?.transactions).map(normalizeTransaction);
   const acc = toArray(boot?.accounts);
   const cats = ensureCategories(boot?.categories);
 
@@ -851,12 +874,18 @@ export function AppStoreProvider({ children }) {
       const amount = safeNum(tx?.amount, 0);
       const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
 
+      const now = Date.now();
+      const prev = (state.transactions || []).find((t) => t?.id === id) || null;
+      const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
+
       const cleaned = {
         ...tx,
         id,
         amount,
         date,
         note: String(tx?.note || ""),
+        createdAt,
+        updatedAt: now,
         isTransfer: !!tx?.isTransfer,
       };
 
@@ -865,18 +894,24 @@ export function AppStoreProvider({ children }) {
 
     const bulkUpsertTransactions = (txs, { navigateToDashboard = true } = {}) => {
       const list = Array.isArray(txs) ? txs : [];
+      const now = Date.now();
+      const prevById = new Map((state.transactions || []).map((t) => [String(t?.id || ""), t]));
       dispatch({
         type: ACTIONS.BULK_UPSERT_TRANSACTIONS,
         payload: list.map((tx) => {
           const id = tx?.id || generateId();
           const amount = safeNum(tx?.amount, 0);
           const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
+          const prev = prevById.get(String(id)) || null;
+          const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
           return {
             ...tx,
             id,
             amount,
             date,
             note: String(tx?.note || ""),
+            createdAt,
+            updatedAt: now,
             isTransfer: !!tx?.isTransfer,
           };
         }),

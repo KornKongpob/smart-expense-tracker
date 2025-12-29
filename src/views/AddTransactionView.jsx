@@ -614,10 +614,14 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   const cleanupQueuePreviews = () => {
     for (const it of queue) {
-      if (it.previewUrl?.startsWith("blob:")) {
+      // Only revoke in-memory previews. Persisted (blobStore) URLs must NOT be revoked here,
+      // otherwise attachments will break later when viewing Inbox/Transactions.
+      if (it?.previewUrlSource === "temp" && it.previewUrl?.startsWith("blob:")) {
         try {
           URL.revokeObjectURL(it.previewUrl);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
     }
   };
@@ -741,10 +745,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const removeQueueItem = (id) => {
     setQueue((prev) => {
       const it = prev.find((x) => x.id === id);
-      if (it?.previewUrl?.startsWith("blob:")) {
+      if (it?.previewUrlSource === "temp" && it?.previewUrl?.startsWith("blob:")) {
         try {
           URL.revokeObjectURL(it.previewUrl);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
       return prev.filter((x) => x.id !== id);
     });
@@ -760,10 +766,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       const next = [];
       for (const it of prev) {
         if (setIds.has(it.id)) {
-          if (it?.previewUrl?.startsWith("blob:")) {
+          if (it?.previewUrlSource === "temp" && it?.previewUrl?.startsWith("blob:")) {
             try {
               URL.revokeObjectURL(it.previewUrl);
-            } catch {}
+            } catch {
+              // ignore
+            }
           }
           continue;
         }
@@ -967,12 +975,14 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         // Provide immediate preview while we persist
         const tmpUrl = URL.createObjectURL(file);
         let previewUrl = tmpUrl;
+        let previewUrlSource = "temp"; // temp = in-memory object URL, idb = persisted (blobStore)
 
         try {
           await putBlob(attachmentId, file);
           const persistedUrl = await getBlobUrl(attachmentId);
           if (persistedUrl) {
             previewUrl = persistedUrl;
+            previewUrlSource = "idb";
             try {
               URL.revokeObjectURL(tmpUrl);
             } catch {
@@ -990,6 +1000,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             batchId,
             fileName: file.name,
             previewUrl,
+            previewUrlSource,
             attachmentId,
             status: "scanning",
             error: "",
@@ -1379,7 +1390,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
     const createdAt = Date.now();
     const serializable = ready.map((q) => {
-      const { previewUrl, batchId, status, error, ...rest } = q || {};
+      const { previewUrl, previewUrlSource, batchId, status, error, ...rest } = q || {};
       const type = rest?.type || rest?.txType || "expense";
       const referenceId = rest?.referenceId || rest?.ref || "";
       return {
@@ -1412,7 +1423,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
     const createdAt = Date.now();
     const serializable = dups.map((q) => {
-      const { previewUrl, batchId, status, error, ...rest } = q || {};
+      const { previewUrl, previewUrlSource, batchId, status, error, ...rest } = q || {};
       const type = rest?.type || rest?.txType || "expense";
       const referenceId = rest?.referenceId || rest?.ref || "";
       return {

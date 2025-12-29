@@ -299,7 +299,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" className="absolute inset-0 bg-black/40" onClick={onClose} aria-label="Close" />
-      <div className="relative w-full max-w-md glass-card rounded-3xl p-5 border border-white/20">
+      <div className="relative w-full max-w-md glass-card rounded-3xl p-5 border border-white/20 max-h-[90vh] overflow-y-auto overscroll-contain">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-lg font-extrabold text-gray-900">Edit Inbox item</h3>

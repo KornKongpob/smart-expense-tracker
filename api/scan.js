@@ -1,7 +1,7 @@
 // api/scan.js
 // Vercel Serverless Function: POST /api/scan
 // Required env: OPENAI_API_KEY
-// Optional env: OPENAI_MODEL (default: gpt-4.1-mini)
+// Optional env: OPENAI_MODEL (default: gpt-5)
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -730,7 +730,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const model = process.env.OPENAI_MODEL || "gpt-5";
 
     // ✅ ปรับ prompt ให้ AI “ส่งสัญญาณ” ชำระบัตรเครดิตมาเลย
     // - ถ้าเป็นสลิปชำระบัตรเครดิต/โอนเข้าบัตรเครดิต: tx_type="transfer", tx_subtype="credit_card_payment", is_credit_card_payment=true

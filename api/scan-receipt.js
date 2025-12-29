@@ -641,7 +641,7 @@ async function callOpenAI({ base64, mimeType }) {
     };
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-5";
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
   const prompt =

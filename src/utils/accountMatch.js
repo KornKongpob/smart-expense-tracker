@@ -48,10 +48,15 @@ export function parseDigitsList(input, { minLen = 3, maxLen = 19 } = {}) {
     out.push(token);
   }
 
-  // Extra: if nothing matched but string contains digits with separators, collapse everything
-  if (!out.length) {
-    const collapsed = digitsOnly(s);
-    if (collapsed.length >= minLen) return [collapsed.slice(0, maxLen)];
+  // Extra: also include a fully-collapsed digits token (handles cases like "XX-XXX1-555" => "1555")
+  // We include this EVEN if other tokens matched, because OCR often inserts separators.
+  const collapsed = digitsOnly(s);
+  if (collapsed && collapsed.length >= minLen) {
+    const c = collapsed.slice(0, maxLen);
+    if (c && !seen.has(c)) {
+      seen.add(c);
+      out.push(c);
+    }
   }
 
   return out;
