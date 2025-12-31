@@ -56,6 +56,7 @@ export default function RulesView({ showAlert, showConfirm }) {
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // form
   const [name, setName] = useState("");
@@ -76,6 +77,7 @@ export default function RulesView({ showAlert, showConfirm }) {
   const [setToAccountId, setSetToAccountId] = useState("");
 
   const resetForm = () => {
+    setShowAdvanced(false);
     setEditingId("");
     setName("");
     setEnabled(true);
@@ -119,6 +121,78 @@ export default function RulesView({ showAlert, showConfirm }) {
     setSetToAccountId(rule.actions?.setToAccountId || "");
     setOpen(true);
   };
+
+const applyTemplate = (tpl) => {
+  // Quick-start templates (fill sensible defaults, user can edit)
+  const t = String(tpl || "");
+  if (t === "expense") {
+    setName("Expense: keyword");
+    setEnabled(true);
+    setKeywordContains("7-11");
+    setRegex("");
+    setAmountMin("");
+    setAmountMax("");
+    setBankContains("");
+    setRefContains("");
+    setFromDigitsEndsWith("");
+    setToDigitsEndsWith("");
+
+    setSetType("expense");
+    setSetCategoryId("");
+    setSetAccountId("");
+    setSetFromAccountId("");
+    setSetToAccountId("");
+
+    setShowAdvanced(false);
+    return;
+  }
+
+  if (t === "transfer") {
+    setName("Transfer: between my accounts");
+    setEnabled(true);
+    setKeywordContains("");
+    setRegex("");
+    setAmountMin("");
+    setAmountMax("");
+    setBankContains("");
+    setRefContains("");
+    // ใส่เลขท้ายเป็นตัวอย่างให้เห็นรูปแบบ (แก้เป็นของคุณได้)
+    setFromDigitsEndsWith("1234");
+    setToDigitsEndsWith("5678");
+
+    setSetType("transfer");
+    setSetCategoryId("transfer");
+    setSetAccountId("");
+    setSetFromAccountId("");
+    setSetToAccountId("");
+
+    setShowAdvanced(true);
+    return;
+  }
+
+  if (t === "credit_payment") {
+    setName("Pay credit card");
+    setEnabled(true);
+    setKeywordContains("PAYMENT");
+    setRegex("");
+    setAmountMin("");
+    setAmountMax("");
+    setBankContains("");
+    setRefContains("");
+    setFromDigitsEndsWith("");
+    setToDigitsEndsWith("");
+
+    setSetType("credit_payment");
+    setSetCategoryId("transfer");
+    setSetAccountId("");
+    setSetFromAccountId("");
+    setSetToAccountId("");
+
+    setShowAdvanced(false);
+    return;
+  }
+};
+
 
   const onSave = () => {
     const payload = {
@@ -337,51 +411,82 @@ export default function RulesView({ showAlert, showConfirm }) {
             </button>
 
             <div className="glass-card rounded-2xl p-4">
-              <div className="text-sm font-extrabold text-gray-900 mb-3">Conditions (AND)</div>
+  <div className="flex items-center justify-between gap-2 mb-3">
+    <div className="text-sm font-extrabold text-gray-900">สร้างแบบเร็ว</div>
+    <div className="text-[11px] font-bold text-gray-800/60">กดเพื่อเติมค่าเริ่มต้น แล้วแก้ต่อได้</div>
+  </div>
+  <div className="flex flex-wrap gap-2">
+    <button type="button" onClick={() => applyTemplate("expense")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95">
+      Expense ตาม keyword
+    </button>
+    <button type="button" onClick={() => applyTemplate("transfer")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95">
+      Transfer ระหว่างบัญชี
+    </button>
+    <button type="button" onClick={() => applyTemplate("credit_payment")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95">
+      จ่ายบัตรเครดิต
+    </button>
+  </div>
+</div>
+
+<div className="glass-card rounded-2xl p-4">
+  <div className="flex items-center justify-between gap-2 mb-3">
+    <div className="text-sm font-extrabold text-gray-900">เงื่อนไข (AND)</div>
+    <button
+      type="button"
+      onClick={() => setShowAdvanced((v) => !v)}
+      className="px-3 py-1.5 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95"
+    >
+      {showAdvanced ? "ซ่อนขั้นสูง" : "แสดงขั้นสูง"}
+    </button>
+  </div>
+
 
               <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">keyword contains</div>
-                  <input value={keywordContains} onChange={(e) => setKeywordContains(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: 7-11" />
+                  <div className="text-xs font-extrabold text-gray-900 mb-1">ข้อความมีคำว่า (keyword)</div>
+                  <input value={keywordContains} onChange={(e) => setKeywordContains(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: 7-11 / GRAB / LINE MAN" />
+                  <div className="text-[11px] text-gray-700/60 mt-1">ใส่คำที่มักเจอบนสลิป/ใบเสร็จ (ไม่ต้องใส่ตัวพิมพ์ใหญ่-เล็กให้เป๊ะ)</div>
                 </div>
-
+                {showAdvanced ? (
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">regex</div>
+                  <div className="text-xs font-extrabold text-gray-900 mb-1">Regex (ขั้นสูง)</div>
                   <input value={regex} onChange={(e) => setRegex(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder='เช่น: /kbank|kasikorn/i' />
                   <div className="text-[11px] text-gray-700/60 mt-1">รองรับ /pattern/flags หรือใส่เป็น pattern ตรงๆ (default i)</div>
                 </div>
+                ) : null}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">amountMin</div>
+                    <div className="text-xs font-extrabold text-gray-900 mb-1">จำนวนเงินขั้นต่ำ</div>
                     <input value={amountMin} onChange={(e) => setAmountMin(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" inputMode="decimal" placeholder="เช่น: 100" />
                   </div>
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">amountMax</div>
+                    <div className="text-xs font-extrabold text-gray-900 mb-1">จำนวนเงินขั้นสูง</div>
                     <input value={amountMax} onChange={(e) => setAmountMax(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" inputMode="decimal" placeholder="เช่น: 500" />
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">bank contains</div>
+                  <div className="text-xs font-extrabold text-gray-900 mb-1">ชื่อธนาคารมีคำว่า</div>
                   <input value={bankContains} onChange={(e) => setBankContains(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: SCB" />
                 </div>
 
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">ref contains</div>
+                  <div className="text-xs font-extrabold text-gray-900 mb-1">อ้างอิง/Ref มีคำว่า</div>
                   <input value={refContains} onChange={(e) => setRefContains(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: QR" />
                 </div>
-
+                {showAdvanced ? (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">fromDigitsEndsWith</div>
+                    <div className="text-xs font-extrabold text-gray-900 mb-1">เลขท้ายบัญชีต้นทาง (endsWith)</div>
                     <input value={fromDigitsEndsWith} onChange={(e) => setFromDigitsEndsWith(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: 1234,5678" />
                   </div>
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">toDigitsEndsWith</div>
+                    <div className="text-xs font-extrabold text-gray-900 mb-1">เลขท้ายบัญชีปลายทาง (endsWith)</div>
                     <input value={toDigitsEndsWith} onChange={(e) => setToDigitsEndsWith(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: 4321" />
                   </div>
                 </div>
+                ) : null}
               </div>
             </div>
 
@@ -390,7 +495,7 @@ export default function RulesView({ showAlert, showConfirm }) {
 
               <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">setType</div>
+                  <div className="text-xs font-extrabold text-gray-900 mb-1">ตั้งประเภท (Type)</div>
                   <select value={setType} onChange={(e) => setSetType(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
                     {TYPE_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -401,7 +506,7 @@ export default function RulesView({ showAlert, showConfirm }) {
                 </div>
 
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">setCategoryId</div>
+                  <div className="text-xs font-extrabold text-gray-900 mb-1">หมวดหมู่ (Category)</div>
                   <select value={setCategoryId} onChange={(e) => setSetCategoryId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
                     <option value="">(ไม่ตั้งค่า)</option>
                     {categoryOptions.map((o) => (
@@ -411,9 +516,9 @@ export default function RulesView({ showAlert, showConfirm }) {
                     ))}
                   </select>
                 </div>
-
+                {setType !== "transfer" && setType !== "credit_payment" ? (
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">setAccountId</div>
+                  <div className="text-xs font-extrabold text-gray-900 mb-1">บัญชี (Account)</div>
                   <select value={setAccountId} onChange={(e) => setSetAccountId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
                     <option value="">(ไม่ตั้งค่า)</option>
                     {accounts.map((a) => (
@@ -423,10 +528,11 @@ export default function RulesView({ showAlert, showConfirm }) {
                     ))}
                   </select>
                 </div>
-
+                ) : null}
+                {(setType === "transfer" || setType === "credit_payment" || showAdvanced) ? (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">setFromAccountId</div>
+                    <div className="text-xs font-extrabold text-gray-900 mb-1">จากบัญชี (From)</div>
                     <select value={setFromAccountId} onChange={(e) => setSetFromAccountId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
                       <option value="">(ไม่ตั้งค่า)</option>
                       {accounts.map((a) => (
@@ -437,7 +543,7 @@ export default function RulesView({ showAlert, showConfirm }) {
                     </select>
                   </div>
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">setToAccountId</div>
+                    <div className="text-xs font-extrabold text-gray-900 mb-1">ไปบัญชี (To)</div>
                     <select value={setToAccountId} onChange={(e) => setSetToAccountId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
                       <option value="">(ไม่ตั้งค่า)</option>
                       {accounts.map((a) => (
@@ -448,6 +554,7 @@ export default function RulesView({ showAlert, showConfirm }) {
                     </select>
                   </div>
                 </div>
+                ) : null}
               </div>
             </div>
 

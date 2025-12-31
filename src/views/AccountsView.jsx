@@ -97,10 +97,18 @@ export default function AccountsView() {
   const [alertMsg, setAlertMsg] = useState("");
   const [alertType, setAlertType] = useState("ok"); // ok | warn
   const showAlert = (msg, type = "ok") => {
+
     setAlertMsg(msg);
     setAlertType(type);
     window.clearTimeout(showAlert._t);
     showAlert._t = window.setTimeout(() => setAlertMsg(""), 2400);
+  };
+
+  const toggleSignedNumberString = (val) => {
+    const s = String(val || "").trim();
+    if (!s) return "-";
+    if (s === "-") return "";
+    return s.startsWith("-") ? s.slice(1) : `-${s}`;
   };
 
   // Create modal
@@ -112,6 +120,12 @@ export default function AccountsView() {
   const [cIcon, setCIcon] = useState("💳");
   const [cColor, setCColor] = useState(randomColor());
 
+  // ✅ Opening balance (create)
+  const [cInitialBalance, setCInitialBalance] = useState("");
+  const [openCreateAdjustConfirm, setOpenCreateAdjustConfirm] = useState(false);
+  const [pendingCreateAccount, setPendingCreateAccount] = useState(null);
+  const [pendingCreateAdjust, setPendingCreateAdjust] = useState(null);
+
   // credit-only fields
   const [cCreditLimit, setCCreditLimit] = useState("");
   const [cStatementDay, setCStatementDay] = useState(20);
@@ -122,6 +136,10 @@ export default function AccountsView() {
     setCType("bank");
     setCCurrency("THB");
     setCAccountNumber("");
+    setCInitialBalance("");
+    setOpenCreateAdjustConfirm(false);
+    setPendingCreateAccount(null);
+    setPendingCreateAdjust(null);
     setCIcon("💳");
     setCColor(randomColor());
     setCCreditLimit("");
@@ -129,32 +147,56 @@ export default function AccountsView() {
     setCDueDay(5);
   };
 
-  const create = () => {
-    if (!cName.trim()) return showAlert?.("กรุณาใส่ชื่อบัญชี");
+const create = () => {
+  if (!cName.trim()) return showAlert?.("กรุณาใส่ชื่อบัญชี");
 
-    const matchDigits = parseDigitsList(cAccountNumber);
-    const primaryDigits = choosePrimaryDigits(matchDigits);
+  const matchDigits = parseDigitsList(cAccountNumber);
+  const primaryDigits = choosePrimaryDigits(matchDigits);
 
-    addAccount({
-      id: generateId(),
-      name: cName.trim(),
-      icon: (cIcon || "💳").trim() || "💳",
-      color: cColor,
-      type: cType,
-      currency: cCurrency,
-      accountNumber: primaryDigits ? String(primaryDigits).slice(-16) : "",
-      matchDigits,
+  const baseAccount = {
+    id: generateId(),
+    name: cName.trim(),
+    icon: (cIcon || "💳").trim() || "💳",
+    color: cColor,
+    type: cType,
+    currency: cCurrency,
+    accountNumber: primaryDigits ? String(primaryDigits).slice(-16) : "",
+    matchDigits,
 
-      // credit only
-      creditLimit: cType === "credit" ? Number(cCreditLimit || 0) : undefined,
-      statementDay: cType === "credit" ? Number(cStatementDay || 1) : undefined,
-      dueDay: cType === "credit" ? Number(cDueDay || 1) : undefined,
-    });
+    // credit only
+    creditLimit: cType === "credit" ? Number(cCreditLimit || 0) : undefined,
+    statementDay: cType === "credit" ? Number(cStatementDay || 1) : undefined,
+    dueDay: cType === "credit" ? Number(cDueDay || 1) : undefined,
 
-    resetCreate();
-    setOpenCreate(false);
-    showAlert?.("เพิ่มบัญชีแล้ว");
+    // default openingBalance will be set based on user's choice
+    openingBalance: 0,
   };
+
+  const initRaw = String(cInitialBalance || "").trim().replace(/,/g, "");
+  if (initRaw) {
+    const desired = Number(initRaw);
+    if (!Number.isFinite(desired)) return showAlert?.("ยอดตั้งต้นไม่ถูกต้อง");
+    if (Math.abs(desired) > 0.000001) {
+      setPendingCreateAccount(baseAccount);
+      setPendingCreateAdjust({
+        accountId: baseAccount.id,
+        currency: cCurrency || "THB",
+        current: 0,
+        desired,
+        delta: desired,
+      });
+      setOpenCreateAdjustConfirm(true);
+      return;
+    }
+  }
+
+  addAccount(baseAccount);
+
+  resetCreate();
+  setOpenCreate(false);
+  showAlert?.("เพิ่มบัญชีแล้ว");
+};
+
 
   // Edit modal
   const [openEdit, setOpenEdit] = useState(false);
@@ -372,39 +414,130 @@ export default function AccountsView() {
         </div>
       ) : null}
 
-      {/* Accounts list */}
-      <div className="mt-4 space-y-3">
-        {filtered.length ? (
-          filtered.map((acc) => (
-            <div
-              key={acc.id}
-              className="glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-xl"
-            >
+{/* Accounts balance + grouped list */}
+<div className="mt-4 space-y-4">
+  {(() => {
+    const accs = Array.isArray(filtered) ? filtered : [];
+    const txs = store.state.transactions || [];
+    const allAccs = store.state.accounts || [];
+
+    const withBalance = accs.map((a) => ({
+      ...a,
+      balance: calcAccountBalance(allAccs, txs, a.id),
+    }));
+
+    const normalizeType = (t) => {
+      const s = String(t || "").toLowerCase().trim();
+      if (s === "cash") return "cash";
+      if (s === "bank") return "bank";
+      if (s === "credit") return "credit";
+      return "other";
+    };
+
+    const order = ["cash", "bank", "credit", "other"];
+    const groups = { cash: [], bank: [], credit: [], other: [] };
+    for (const a of withBalance) groups[normalizeType(a.type)].push(a);
+
+    const formatByCurrency = (totalsByCur) => {
+      const entries = Object.entries(totalsByCur || {});
+      if (!entries.length) return "—";
+      return entries
+        .map(([cur, val]) => {
+          if (String(cur).toUpperCase() === "THB") return formatCurrency(val);
+          return `${Number(val || 0).toLocaleString()} ${String(cur).toUpperCase()}`;
+        })
+        .join(" • ");
+    };
+
+    const sumByCurrency = (items) => {
+      const out = {};
+      for (const a of items) {
+        const cur = String(a.currency || "THB").toUpperCase();
+        out[cur] = (out[cur] || 0) + Number(a.balance || 0);
+      }
+      return out;
+    };
+
+    const groupLabel = (t) => {
+      if (t === "cash") return "เงินสด";
+      if (t === "bank") return "บัญชีธนาคาร";
+      if (t === "credit") return "บัตรเครดิต";
+      return "อื่นๆ";
+    };
+
+    const groupIcon = (t) => {
+      if (t === "cash") return <Banknote size={18} />;
+      if (t === "bank") return <Wallet size={18} />;
+      if (t === "credit") return <CreditCard size={18} />;
+      return <Wallet size={18} />;
+    };
+
+    const hasAny = order.some((t) => groups[t].length);
+    if (!hasAny) {
+      return (
+        <div className="glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-xl text-center">
+          <div className="text-sm font-extrabold text-gray-900">
+            ยังไม่มีบัญชี หรือไม่พบผลลัพธ์
+          </div>
+          <div className="text-xs text-gray-800/60 font-bold mt-1">
+            กดปุ่ม “เพิ่ม” เพื่อสร้างบัญชีใหม่
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        {order.map((t) => {
+          const items = groups[t];
+          if (!items.length) return null;
+          const totals = sumByCurrency(items);
+
+          return (
+            <div key={t} className="glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-xl overflow-hidden">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-lg border border-white/20"
-                    style={{ background: acc.color || "#111827", color: "white" }}
-                    title={acc.name}
-                  >
-                    <span className="drop-shadow">{acc.icon || "💳"}</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-2xl bg-white/30 border border-white/20 flex items-center justify-center text-gray-900">
+                    {groupIcon(t)}
                   </div>
-
                   <div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-base font-black text-gray-900">
-                        {acc.name || "-"}
-                      </div>
-                      <div className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
-                        {typeIcon(acc.type)}
-                        {typeLabel(acc.type)}
-                      </div>
-                      <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
-                        {currencyLabel(acc.currency)}
-                      </div>
+                    <div className="text-base font-black text-gray-900">{groupLabel(t)}</div>
+                    <div className="text-[11px] text-gray-800/55 font-bold">
+                      รวม {items.length} บัญชี • {formatByCurrency(totals)}
                     </div>
+                  </div>
+                </div>
+              </div>
 
-                    {(() => {
+              <div className="mt-4 space-y-3">
+                {items.map((acc) => (
+                  <div
+                    key={acc.id}
+                    className="glass-panel rounded-3xl p-4 bg-white/20 border border-white/20"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div
+                          className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg border border-white/20"
+                          style={{ background: acc.color || "#111827", color: "white" }}
+                          title={acc.name}
+                        >
+                          <span className="drop-shadow text-[22px] leading-none">{acc.icon || "💳"}</span>
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <div className="text-base font-black text-gray-900 truncate">{acc.name || "-"}</div>
+                            <div className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
+                              {typeIcon(acc.type)}
+                              {typeLabel(acc.type)}
+                            </div>
+                            <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
+                              {currencyLabel(acc.currency)}
+                            </div>
+                          </div>
+
+                          {(() => {
                             const list =
                               Array.isArray(acc.matchDigits) && acc.matchDigits.length
                                 ? acc.matchDigits
@@ -415,7 +548,6 @@ export default function AccountsView() {
                             if (!list.length) return null;
 
                             const primary = choosePrimaryDigits(list);
-
                             const shortList = list.slice(0, 4).map((d) => formatDigitsChip(d));
                             const more = list.length > 4 ? ` +${list.length - 4}` : "";
 
@@ -433,62 +565,68 @@ export default function AccountsView() {
                             );
                           })()}
 
-                    {acc.type === "credit" ? (
-                      <div className="text-[11px] text-gray-800/55 mt-2 leading-relaxed">
-                        <span className="font-bold">วงเงิน:</span>{" "}
-                        <span className="font-extrabold text-gray-900">
-                          {formatMoney(acc.creditLimit || 0, acc.currency)}
-                        </span>
-                        <span className="mx-2">•</span>
-                        <span className="font-bold">ตัดรอบ:</span>{" "}
-                        <span className="font-extrabold text-gray-900">
-                          ทุกวันที่ {acc.statementDay || 20}
-                        </span>
-                        <span className="mx-2">•</span>
-                        <span className="font-bold">ชำระภายใน:</span>{" "}
-                        <span className="font-extrabold text-gray-900">
-                          วันที่ {acc.dueDay || 5}
-                        </span>
+                          {acc.type === "credit" ? (
+                            <div className="text-[11px] text-gray-800/55 mt-2 leading-relaxed">
+                              <span className="font-bold">วงเงิน:</span>{" "}
+                              <span className="font-extrabold text-gray-900">
+                                {formatMoney(acc.creditLimit || 0, acc.currency)}
+                              </span>
+                              <span className="mx-2">•</span>
+                              <span className="font-bold">ตัดรอบ:</span>{" "}
+                              <span className="font-extrabold text-gray-900">
+                                ทุกวันที่ {acc.statementDay || 20}
+                              </span>
+                              <span className="mx-2">•</span>
+                              <span className="font-bold">ชำระภายใน:</span>{" "}
+                              <span className="font-extrabold text-gray-900">
+                                วันที่ {acc.dueDay || 5}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                    ) : null}
-                  </div>
-                </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openEditModal(acc)}
-                    className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
-                    title="แก้ไข"
-                  >
-                    <Pencil size={18} />
-                  </button>
-                  <button
-                    onClick={() => del(acc.id)}
-                    className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
-                    title="ลบ"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
+                      <div className="flex flex-col items-end gap-2 shrink-0">
+                        <div className="text-sm font-black text-gray-900">
+                          {String(acc.currency || "THB").toUpperCase() === "THB"
+                            ? formatCurrency(acc.balance || 0)
+                            : `${Number(acc.balance || 0).toLocaleString()} ${String(acc.currency || "").toUpperCase()}`}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => openEditModal(acc)}
+                            className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
+                            title="แก้ไข"
+                          >
+                            <Pencil size={18} />
+                          </button>
+                          <button
+                            onClick={() => del(acc.id)}
+                            className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
+                            title="ลบ"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          ))
-        ) : (
-          <div className="glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-xl text-center">
-            <div className="text-sm font-extrabold text-gray-900">
-              ยังไม่มีบัญชี หรือไม่พบผลลัพธ์
-            </div>
-            <div className="text-xs text-gray-800/60 font-bold mt-1">
-              กดปุ่ม “เพิ่ม” เพื่อสร้างบัญชีใหม่
-            </div>
-          </div>
-        )}
-      </div>
+          );
+        })}
+      </>
+    );
+  })()}
+</div>
 
-      {/* Create Modal */}
+{/* Create Modal */}
+
       {openCreate ? (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3">
-          <div className="w-full max-w-lg glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
+          <div className="w-full max-w-lg glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="text-lg font-black text-gray-900">เพิ่มบัญชี</div>
@@ -548,6 +686,7 @@ export default function AccountsView() {
                 </select>
               </div>
             </div>
+
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div>
@@ -625,7 +764,36 @@ export default function AccountsView() {
             })()}
           </div>
 
-            {/* Credit-only */}
+            <div className="mt-4">
+  <label className="text-xs font-bold text-gray-800/70 mb-1 block">
+    ยอดตั้งต้นในบัญชี (ไม่บังคับ)
+  </label>
+  <div className="flex items-center gap-2 min-w-0">
+    <input
+      value={cInitialBalance}
+      onChange={(e) => setCInitialBalance(e.target.value)}
+      className="flex-1 min-w-0 glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+      placeholder={cType === "credit" ? "เช่น -5000" : "เช่น 500"}
+      inputMode="decimal"
+    />
+    {cType === "credit" ? (
+      <button
+        type="button"
+        onClick={() => setCInitialBalance(toggleSignedNumberString(cInitialBalance))}
+        className="shrink-0 w-12 h-12 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+        title="สลับเครื่องหมายบวก/ลบ"
+      >
+        ±
+      </button>
+    ) : null}
+  </div>
+  <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
+    ถ้ากรอก ระบบจะถามว่าจะบันทึกยอดตั้งต้นเป็นรายการ{" "}
+    <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
+  </p>
+</div>
+
+{/* Credit-only */}
             {cType === "credit" ? (
               <div className="mt-4 glass-card rounded-3xl p-4 bg-white/20 border border-white/20">
                 <div className="text-sm font-black text-gray-900 flex items-center gap-2">
@@ -699,10 +867,93 @@ export default function AccountsView() {
         </div>
       ) : null}
 
-      {/* Edit Modal */}
+      
+{/* ✅ Opening balance confirmation (create) */}
+{openCreateAdjustConfirm && pendingCreateAdjust && pendingCreateAccount ? (
+  <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
+    <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl overflow-x-hidden">
+      <div className="text-lg font-black text-gray-900">ยอดตั้งต้นในบัญชี</div>
+      <div className="text-xs text-gray-800/70 font-bold mt-2 leading-relaxed">
+        ยอดตั้งต้น{" "}
+        <span className="font-black text-gray-900">
+          {pendingCreateAdjust.currency === "THB"
+            ? formatCurrency(pendingCreateAdjust.desired)
+            : `${Number(pendingCreateAdjust.desired || 0).toLocaleString()} ${pendingCreateAdjust.currency}`}
+        </span>{" "}
+        ({pendingCreateAdjust.desired < 0 ? "ติดลบ/หนี้" : "บวก"})
+        <br />
+        ต้องการให้บันทึกเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่?
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            // 1) create account with openingBalance=0
+            addAccount({ ...pendingCreateAccount, openingBalance: 0 });
+            // 2) record adjust tx
+            const desired = Number(pendingCreateAdjust.desired || 0);
+            const isIncome = desired > 0;
+            store.upsertTransaction({
+              id: generateId(),
+              type: isIncome ? "income" : "expense",
+              amount: Math.abs(desired),
+              category: "adjust_balance",
+              accountId: pendingCreateAccount.id,
+              date: new Date().toISOString().slice(0, 10),
+              note: "ยอดตั้งต้น",
+              isTransfer: false,
+              meta: { kind: "opening_balance" },
+            });
+
+            setOpenCreateAdjustConfirm(false);
+            setPendingCreateAccount(null);
+            setPendingCreateAdjust(null);
+            setOpenCreate(false);
+            resetCreate();
+            showAlert?.("เพิ่มบัญชีแล้ว (มีรายการยอดตั้งต้น)");
+          }}
+          className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
+        >
+          บันทึกยอดตั้งต้นเป็นรายการ (Income/Expense)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            // create account with openingBalance = desired (silent)
+            addAccount({ ...pendingCreateAccount, openingBalance: Number(pendingCreateAdjust.desired || 0) });
+
+            setOpenCreateAdjustConfirm(false);
+            setPendingCreateAccount(null);
+            setPendingCreateAdjust(null);
+            setOpenCreate(false);
+            resetCreate();
+            showAlert?.("เพิ่มบัญชีแล้ว");
+          }}
+          className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+        >
+          ไม่บันทึกเป็นรายการ (ปรับยอดเงียบๆ)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setOpenCreateAdjustConfirm(false);
+          }}
+          className="w-full px-4 py-3 rounded-2xl bg-white/15 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+        >
+          ยกเลิก
+        </button>
+      </div>
+    </div>
+  </div>
+) : null}
+
+{/* Edit Modal */}
       {openEdit ? (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3">
-          <div className="w-full max-w-lg glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
+          <div className="w-full max-w-lg glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="text-lg font-black text-gray-900">แก้ไขบัญชี</div>
@@ -799,79 +1050,94 @@ export default function AccountsView() {
               </div>
             </div>
 
-            <div className="mt-4">
-            <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-              เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)
-            </label>
-            <input
-              value={eAccountNumber}
-              onChange={(e) => setEAccountNumber(e.target.value)}
-              className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-              placeholder="เช่น 6345, 4373 หรือ 1234567890"
-              inputMode="numeric"
-              autoComplete="off"
-            />
-            <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
-              รองรับหลายชุด (คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค) • ใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิปได้เลย
-              — ถ้าเป็นบัตรเครดิต แนะนำใส่ทั้งเลขที่สลิปแสดงและเลขท้ายหน้าบัตร เช่น <span className="font-bold">6345, 4373</span>
+                        <div className="mt-4 min-w-0">
+                          <label className="text-xs font-bold text-gray-800/70 mb-1 block">
+                            เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)
+                          </label>
+                          <input
+                            value={eAccountNumber}
+                            onChange={(e) => setEAccountNumber(e.target.value)}
+                            className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+                            placeholder="เช่น 6345, 4373 หรือ 1234567890"
+                            inputMode="numeric"
+                            autoComplete="off"
+                          />
+                          <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
+                            รองรับหลายชุด (คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค) • ใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิปได้เลย — ถ้าเป็นบัตรเครดิต แนะนำใส่ทั้งเลขที่สลิปแสดงและเลขท้ายหน้าบัตร เช่น{" "}
+                            <span className="font-bold">6345, 4373</span>
+                          </p>
 
-            {/* ✅ Adjust balance */}
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="col-span-2 sm:col-span-1">
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  ยอดปัจจุบัน (คำนวณ)
-                </label>
-                <div className="w-full rounded-2xl px-4 py-3 bg-white/20 border border-white/20 font-extrabold text-gray-900">
-                  {(() => {
-                    const n = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
-                    return (eCurrency || "THB") === "THB" ? formatCurrency(n) : `${Number(n || 0).toLocaleString()} ${(eCurrency || "").toUpperCase()}`;
-                  })()}
-                </div>
-              </div>
+                          {/* ✅ Adjust balance */}
+                          <div className="mt-4 grid grid-cols-2 gap-3 min-w-0">
+                            <div className="col-span-2 sm:col-span-1 min-w-0">
+                              <label className="text-xs font-bold text-gray-800/70 mb-1 block">
+                                ยอดปัจจุบัน (คำนวณ)
+                              </label>
+                              <div className="w-full rounded-2xl px-4 py-3 bg-white/20 border border-white/20 font-extrabold text-gray-900">
+                                {(() => {
+                                  const n = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
+                                  return (eCurrency || "THB") === "THB"
+                                    ? formatCurrency(n)
+                                    : `${Number(n || 0).toLocaleString()} ${(eCurrency || "").toUpperCase()}`;
+                                })()}
+                              </div>
+                            </div>
 
-              <div className="col-span-2 sm:col-span-1">
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  ตั้งยอดบัญชีใหม่ (ไม่บังคับ)
-                </label>
-                <input
-                  value={eDesiredBalance}
-                  onChange={(e) => setEDesiredBalance(e.target.value)}
-                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                  placeholder="เช่น 505"
-                  inputMode="decimal"
-                />
-                <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
-                  ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (นับเป็น Income/Expense) หรือไม่
-                </p>
-              </div>
-            </div>
+                            <div className="col-span-2 sm:col-span-1 min-w-0">
+                              <label className="text-xs font-bold text-gray-800/70 mb-1 block">
+                                ตั้งยอดบัญชีใหม่ (ไม่บังคับ)
+                              </label>
 
-            </p>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <input
+                                  value={eDesiredBalance}
+                                  onChange={(e) => setEDesiredBalance(e.target.value)}
+                                  className="flex-1 min-w-0 glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                                  placeholder={eType === "credit" ? "เช่น -5000" : "เช่น 505"}
+                                  inputMode="decimal"
+                                />
+                                {eType === "credit" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setEDesiredBalance(toggleSignedNumberString(eDesiredBalance))}
+                                    className="shrink-0 w-12 h-12 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+                                    title="สลับเครื่องหมายบวก/ลบ"
+                                  >
+                                    ±
+                                  </button>
+                                ) : null}
+                              </div>
 
-            {(() => {
-              const list = parseDigitsList(eAccountNumber);
-              const primary = choosePrimaryDigits(list);
-              if (!list.length) return null;
-              return (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {list.map((d) => (
-                    <span
-                      key={d}
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
-                        d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/30 text-gray-900 border-white/20"
-                      }`}
-                      title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
-                    >
-                      {formatDigitsChip(d)}
-                      {d === primary ? <span className="ml-1 opacity-90">• หลัก</span> : null}
-                    </span>
-                  ))}
-                </div>
-              );
-            })()}
-          </div>
+                              <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
+                                ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ{" "}
+                                <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (นับเป็น Income/Expense) หรือไม่
+                              </p>
+                            </div>
+                          </div>
 
-            {/* Credit-only */}
+                          {(() => {
+                            const list = parseDigitsList(eAccountNumber);
+                            const primary = choosePrimaryDigits(list);
+                            if (!list.length) return null;
+                            return (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {list.map((d) => (
+                                  <span
+                                    key={d}
+                                    className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
+                                      d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/30 text-gray-900 border-white/20"
+                                    }`}
+                                    title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
+                                  >
+                                    {formatDigitsChip(d)}
+                                    {d === primary ? <span className="ml-1 opacity-90">• หลัก</span> : null}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+{/* Credit-only */}
             {eType === "credit" ? (
               <div className="mt-4 glass-card rounded-3xl p-4 bg-white/20 border border-white/20">
                 <div className="text-sm font-black text-gray-900 flex items-center gap-2">

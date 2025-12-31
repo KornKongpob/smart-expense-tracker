@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Filter, TrendingDown, TrendingUp, FileText, Search, AlertTriangle } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import { useAppStore } from "../store/store";
-import { calcTotals, calcAccountBalance } from "../store/selectors";
+import { calcTotals } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
 
 function getTxDateMs(t) {
@@ -195,13 +195,6 @@ export default function DashboardView() {
 
   const accounts = state.accounts || [];
 
-  const balances = useMemo(() => {
-    return accounts.map((acc) => ({
-      ...acc,
-      balance: calcAccountBalance(accounts, state.transactions || [], acc.id),
-    }));
-  }, [accounts, state.transactions]);
-
   return (
     <div className="p-4 pb-24">
       <div className="flex items-center justify-between mb-4">
@@ -229,31 +222,6 @@ export default function DashboardView() {
             <TrendingDown size={14} /> รายจ่าย
           </div>
           <div className="text-lg font-extrabold text-red-700">{formatCurrency(totals.expense)}</div>
-        </div>
-      </div>
-
-      {/* Accounts balance preview */}
-      <div className="glass-card rounded-3xl p-4 mb-5">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-extrabold text-gray-900">ยอดคงเหลือแต่ละบัญชี</div>
-          <button
-            onClick={() => navigate("accounts")}
-            className="text-xs font-extrabold text-indigo-700"
-            type="button"
-          >
-            จัดการบัญชี
-          </button>
-        </div>
-        <div className="mt-3 space-y-2">
-          {balances.slice(0, 4).map((acc) => (
-            <div key={acc.id} className="flex items-center justify-between text-sm">
-              <div className="font-extrabold text-gray-900 truncate">{acc.name}</div>
-              <div className="font-extrabold text-gray-900">{formatCurrency(acc.balance)}</div>
-            </div>
-          ))}
-          {balances.length > 4 ? (
-            <div className="text-[11px] text-gray-900/55">และอีก {balances.length - 4} บัญชี</div>
-          ) : null}
         </div>
       </div>
 
