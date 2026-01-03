@@ -1,5 +1,7 @@
 // src/utils/format.js
 
+import { ensureSatangInt, satangToBahtNumber } from "./money";
+
 /**
  * ✅ Formatting utilities (Currency + Dates)
  * - เน้น “ปลอดภัย” กับข้อมูลที่มาจากหลายแหล่ง (input, storage, OCR/scan)
@@ -12,14 +14,10 @@
 // Currency
 // ==============================
 
-const THB_FORMATTER = new Intl.NumberFormat("th-TH", {
-  style: "currency",
-  currency: "THB",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
+// ✅ Canonical storage unit = satang (integer)
+// formatCurrency expects SATANG and displays THB with 2 decimals.
 
-const THB_FORMATTER_2D = new Intl.NumberFormat("th-TH", {
+const THB_FORMATTER = new Intl.NumberFormat("th-TH", {
   style: "currency",
   currency: "THB",
   minimumFractionDigits: 2,
@@ -27,33 +25,35 @@ const THB_FORMATTER_2D = new Intl.NumberFormat("th-TH", {
 });
 
 /**
- * formatCurrency(1200) => "฿1,200"
- * - ปลอดภัยกับค่า null/undefined/NaN
- * - ค่า default = 0
+ * formatCurrency(120000) => "฿1,200.00"
+ * - input is SATANG (integer)
  */
-export const formatCurrency = (amount) => {
-  const n = Number(amount);
+export const formatCurrency = (satang) => {
+  const s = ensureSatangInt(satang, 0);
+  return THB_FORMATTER.format(satangToBahtNumber(s));
+};
+
+/**
+ * formatCurrencyFromBaht(12.5) => "฿12.50"
+ * - input is THB major units (legacy / convenience)
+ */
+export const formatCurrencyFromBaht = (baht) => {
+  const n = Number(baht);
   return THB_FORMATTER.format(Number.isFinite(n) ? n : 0);
 };
 
-/**
- * formatCurrency2(12.5) => "฿12.50"
- * - เผื่อบางหน้าต้องแสดงทศนิยม
- */
-export const formatCurrency2 = (amount) => {
-  const n = Number(amount);
-  return THB_FORMATTER_2D.format(Number.isFinite(n) ? n : 0);
-};
+// Backward-compat alias (some older code may import formatCurrency2)
+export const formatCurrency2 = formatCurrencyFromBaht;
 
 /**
  * formatSignedCurrency
- * - ใช้ใน UI บางจุดที่ต้องการ + / - หน้าจำนวนเงิน
+ * - use when you want explicit + / - prefix
+ * - input is SATANG (integer)
  */
-export const formatSignedCurrency = (amount, { plusSign = true } = {}) => {
-  const n = Number(amount);
-  const safe = Number.isFinite(n) ? n : 0;
-  const sign = safe > 0 && plusSign ? "+" : safe < 0 ? "-" : "";
-  return `${sign}${formatCurrency(Math.abs(safe))}`;
+export const formatSignedCurrency = (satang, { plusSign = true } = {}) => {
+  const s = ensureSatangInt(satang, 0);
+  const sign = s > 0 && plusSign ? "+" : s < 0 ? "-" : "";
+  return `${sign}${formatCurrency(Math.abs(s))}`;
 };
 
 // ==============================

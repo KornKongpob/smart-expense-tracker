@@ -11,6 +11,7 @@ import { generateId } from "../utils/id";
 import { parseDigitsList as parseDigitsListUtil, choosePrimaryDigits } from "../utils/accountMatch";
 import { calcAccountBalance, parseDateSafe } from "./selectors";
 import { toISODate } from "../utils/format";
+import { parseMoneyToSatang, ensureSatangInt } from "../utils/money";
 import {
   normalizeMerchants,
   normalizeMerchantEntry,
@@ -97,6 +98,18 @@ const safeNum = (v, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const safeSatang = (v, fallback = 0) => {
+  const n = safeNum(v, NaN);
+  return Number.isFinite(n) ? Math.round(n) : fallback;
+};
+
+const normalizeMoneyFromUnit = (v, unit) => {
+  const u = String(unit || '').toLowerCase();
+  if (u === 'satang') return safeSatang(v, 0);
+  // legacy: treat as THB major units
+  return parseMoneyToSatang(v);
+};
+
 const clampInt = (v, min, max, fallback) => {
   const n = Math.trunc(safeNum(v, fallback));
   if (!Number.isFinite(n)) return fallback;
@@ -132,7 +145,7 @@ function normalizeAccount(a) {
   // if invalid -> keep but also allow UI to fallback to emoji
   const iconId = hasValidIconId(a?.iconId) ? String(a.iconId) : "";
 
-  const openingBalance = safeNum(a?.openingBalance, 0);
+  const openingBalance = safeSatang(a?.openingBalance, 0);
 
   // ✅ currency default
   const currency = String(a?.currency || "THB").trim().toUpperCase() || "THB";
@@ -183,7 +196,7 @@ function normalizeAccount(a) {
     matchDigits: digitsList,
 
     accountNumber,
-    creditLimit: safeNum(a?.creditLimit, 0),
+    creditLimit: safeSatang(a?.creditLimit, 0),
     statementDay: clampInt(a?.statementDay, 1, 31, 1),
     dueDay: clampInt(a?.dueDay, 1, 31, 25),
     cardLast4,
@@ -191,19 +204,65 @@ function normalizeAccount(a) {
 }
 
 function normalizeBoot(boot) {
-  const transactions = toArray(boot?.transactions);
+  const fromUnit = String(boot?.moneyUnit || '').toLowerCase() === 'satang' ? 'satang' : 'baht';
+
+  const convertAmount = (v) => normalizeMoneyFromUnit(v, fromUnit);
+
+  const transactions = toArray(boot?.transactions).map((t) => ({
+    ...(t && typeof t === 'object' ? t : {}),
+    amount: convertAmount(t?.amount),
+  }));
 
   const accountsRaw = toArray(boot?.accounts);
-  const accounts = (accountsRaw.length ? accountsRaw : DEFAULT_ACCOUNTS).map(normalizeAccount);
+  const accountsSeed = accountsRaw.length ? accountsRaw : DEFAULT_ACCOUNTS;
+  const accounts = accountsSeed.map((a) =>
+    normalizeAccount({
+      ...(a && typeof a === 'object' ? a : {}),
+      openingBalance: convertAmount(a?.openingBalance),
+      creditLimit: convertAmount(a?.creditLimit),
+    })
+  );
 
   const cats = boot?.categories && typeof boot.categories === "object" ? boot.categories : DEFAULT_CATEGORIES;
   const categories = ensureCategories(cats);
 
-  const budgets = toArray(boot?.budgets);
-  const recurring = toArray(boot?.recurring);
-  const scanInbox = toArray(boot?.scanInbox);
-  const inbox = toArray(boot?.inbox);
-  const rules = toArray(boot?.rules);
+  const budgets = toArray(boot?.budgets).map((b) => ({
+    ...(b && typeof b === 'object' ? b : {}),
+    limit: convertAmount(b?.limit),
+  }));
+
+  const recurring = toArray(boot?.recurring).map((r) => ({
+    ...(r && typeof r === 'object' ? r : {}),
+    amount: convertAmount(r?.amount),
+  }));
+
+  const convertInboxItem = (it) => {
+    const o = it && typeof it === 'object' ? { ...it } : {};
+    o.amount = convertAmount(o.amount);
+    // split/lines inside inbox items
+    if (Array.isArray(o.lines)) {
+      o.lines = o.lines.map((l) => ({
+        ...(l && typeof l === 'object' ? l : {}),
+        amount: convertAmount(l?.amount),
+      }));
+    }
+    return o;
+  };
+
+  const scanInbox = toArray(boot?.scanInbox).map(convertInboxItem);
+  const inbox = toArray(boot?.inbox).map(convertInboxItem);
+
+  const rules = toArray(boot?.rules).map((r) => {
+    const rr = r && typeof r === 'object' ? { ...r } : {};
+    const c = rr.conditions && typeof rr.conditions === 'object' ? { ...rr.conditions } : {};
+    // amountMin/Max are stored as SATANG after migration
+    if (c.amountMin != null && String(c.amountMin).trim() !== "") c.amountMin = convertAmount(c.amountMin);
+    else c.amountMin = null;
+    if (c.amountMax != null && String(c.amountMax).trim() !== "") c.amountMax = convertAmount(c.amountMax);
+    else c.amountMax = null;
+    rr.conditions = c;
+    return rr;
+  });
 
   const ui = boot?.ui && typeof boot.ui === "object" ? boot.ui : undefined;
 
@@ -217,6 +276,8 @@ function normalizeBoot(boot) {
     scanInbox,
     rules,
     ui,
+    // ✅ from now on, we store all money fields in satang
+    moneyUnit: 'satang',
   };
 }
 
@@ -240,8 +301,8 @@ function normalizeRule(raw, fallbackPriority = 1000) {
     conditions: {
       keywordContains: String(conditions.keywordContains || "").trim(),
       regex: String(conditions.regex || "").trim(),
-      amountMin: conditions.amountMin != null && String(conditions.amountMin).trim() !== "" ? safeNum(conditions.amountMin, NaN) : null,
-      amountMax: conditions.amountMax != null && String(conditions.amountMax).trim() !== "" ? safeNum(conditions.amountMax, NaN) : null,
+      amountMin: conditions.amountMin != null && String(conditions.amountMin).trim() !== "" ? safeSatang(conditions.amountMin, NaN) : null,
+      amountMax: conditions.amountMax != null && String(conditions.amountMax).trim() !== "" ? safeSatang(conditions.amountMax, NaN) : null,
       bankContains: String(conditions.bankContains || "").trim(),
       refContains: String(conditions.refContains || "").trim(),
       fromDigitsEndsWith: String(conditions.fromDigitsEndsWith || "").trim(),
@@ -272,7 +333,7 @@ function normalizeRules(list) {
 function normalizeTransaction(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
   const id = String(t.id || generateId());
-  const amount = safeNum(t.amount, 0);
+  const amount = safeSatang(t.amount, 0);
   const date = t?.date ? String(t.date).slice(0, 10) : toISODate(new Date());
   // Prefer explicit createdAt/updatedAt, else fall back to date (midnight) for stable sorting
   const dateMs = date ? new Date(date).getTime() : 0;
@@ -300,6 +361,7 @@ export function createInitialState(boot = {}) {
   const normalizedAccounts = acc.length ? acc.map(normalizeAccount) : DEFAULT_ACCOUNTS.map(normalizeAccount);
 
   return {
+    moneyUnit: String(boot?.moneyUnit || 'satang'),
     transactions: tx,
     accounts: normalizedAccounts,
     categories: cats,
@@ -383,7 +445,7 @@ function normalizeInboxItem(raw) {
   const status = (String(it.status || '') || '').toLowerCase() === 'approved' ? 'approved' : 'pending';
 
   const type = String(it.type || it.txType || 'expense');
-  const amount = safeNum(it.amount, 0);
+  const amount = safeSatang(it.amount, 0);
   const date = it.date ? String(it.date).slice(0, 10) : toISODate(new Date());
 
   return {
@@ -453,7 +515,7 @@ function generateDueTransactionsForRecurring(r, todayISO) {
     txs.push({
       id: generateId(),
       type: r.type === "income" ? "income" : "expense",
-      amount: safeNum(r.amount, 0),
+      amount: safeSatang(r.amount, 0),
       category: r.categoryId,
       accountId: r.accountId,
       date: iso,
@@ -586,7 +648,7 @@ export function reducer(state, action) {
         id: finalId,
         month: String(b.month || ""),
         categoryId: String(b.categoryId || ""),
-        limit: safeNum(b.limit, 0),
+        limit: safeSatang(b.limit, 0),
         alertPct: clampInt(b.alertPct, 1, 100, 90),
       };
 
@@ -609,7 +671,7 @@ export function reducer(state, action) {
         id,
         enabled: r.enabled !== false,
         type: r.type === "income" ? "income" : "expense",
-        amount: safeNum(r.amount, 0),
+        amount: safeSatang(r.amount, 0),
         categoryId: String(r.categoryId || ""),
         accountId: String(r.accountId || ""),
         note: String(r.note || "Recurring").trim() || "Recurring",
@@ -828,6 +890,7 @@ export function AppStoreProvider({ children }) {
   // ✅ persist (include ui to keep view/editingId stable)
   useEffect(() => {
     saveAll({
+      moneyUnit: state.moneyUnit || "satang",
       transactions: state.transactions,
       accounts: state.accounts,
       categories: state.categories,
@@ -850,6 +913,7 @@ export function AppStoreProvider({ children }) {
     state.rules,
     state.inbox,
     state.ui,
+    state.moneyUnit,
   ]);
 
   const getEditingTransaction = useMemo(() => {
@@ -871,7 +935,7 @@ export function AppStoreProvider({ children }) {
 
     const upsertTransaction = (tx) => {
       const id = tx?.id || generateId();
-      const amount = safeNum(tx?.amount, 0);
+      const amount = safeSatang(tx?.amount, 0);
       const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
 
       const now = Date.now();
@@ -879,7 +943,9 @@ export function AppStoreProvider({ children }) {
       const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
 
       const cleaned = {
-        ...tx,
+        // ✅ preserve fields that the current form doesn't edit (e.g., merchant/evidence/attachment)
+        ...(prev || {}),
+        ...(tx || {}),
         id,
         amount,
         date,
@@ -900,12 +966,14 @@ export function AppStoreProvider({ children }) {
         type: ACTIONS.BULK_UPSERT_TRANSACTIONS,
         payload: list.map((tx) => {
           const id = tx?.id || generateId();
-          const amount = safeNum(tx?.amount, 0);
+          const amount = safeSatang(tx?.amount, 0);
           const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
           const prev = prevById.get(String(id)) || null;
           const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
           return {
-            ...tx,
+            // ✅ preserve fields that the current form doesn't edit (e.g., merchant/evidence/attachment)
+            ...(prev || {}),
+            ...(tx || {}),
             id,
             amount,
             date,
@@ -920,6 +988,12 @@ export function AppStoreProvider({ children }) {
     };
 
     const deleteTransaction = (id) => dispatch({ type: ACTIONS.DELETE_TRANSACTION, payload: id });
+
+    const deleteManyTransactions = (ids, { navigateToDashboard = true } = {}) => {
+      const list = Array.isArray(ids) ? ids.filter(Boolean).map(String) : [];
+      if (!list.length) return;
+      dispatch({ type: ACTIONS.DELETE_MANY_TRANSACTIONS, payload: list, meta: { navigateToDashboard } });
+    };
 
     const addAccount = (account) => {
       const next = normalizeAccount({
@@ -942,12 +1016,12 @@ export function AppStoreProvider({ children }) {
      * - recordAsTransaction = false: modify openingBalance to match desired (silent fix)
      */
     const adjustAccountBalance = ({ accountId, desiredBalance, recordAsTransaction }) => {
-      const desired = safeNum(desiredBalance, NaN);
+      const desired = safeSatang(desiredBalance, NaN);
       if (!Number.isFinite(desired)) return;
 
-      const current = calcAccountBalance(state.accounts, state.transactions, accountId);
+      const current = safeSatang(calcAccountBalance(state.accounts, state.transactions, accountId), 0);
       const delta = desired - current;
-      if (Math.abs(delta) < 0.000001) return;
+      if (!delta) return;
 
       const acc = state.accounts.find((a) => a.id === accountId);
       if (!acc) return;
@@ -967,9 +1041,8 @@ export function AppStoreProvider({ children }) {
           isTransfer: false,
           meta: { kind: "adjust_balance" },
         });
-
       } else {
-        const opening = safeNum(acc.openingBalance, 0);
+        const opening = safeSatang(acc.openingBalance, 0);
         updateAccount({ id: accountId, openingBalance: opening + delta });
       }
     };
@@ -1117,6 +1190,7 @@ export function AppStoreProvider({ children }) {
       upsertTransaction,
       bulkUpsertTransactions,
       deleteTransaction,
+      deleteManyTransactions,
 
       addAccount,
       updateAccount,

@@ -2,6 +2,8 @@
 import { useMemo, useState } from "react";
 import { ArrowLeft, Plus, Trash2, Edit2, ArrowUp, ArrowDown, X, Check, ToggleLeft, ToggleRight, Wand2 } from "lucide-react";
 import { useAppStore } from "../store/store";
+import { formatCurrency } from "../utils/format";
+import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { validateAutomationRule } from "../utils/rulesEngine";
 
 function ModalShell({ title, children, onClose }) {
@@ -108,8 +110,8 @@ export default function RulesView({ showAlert, showConfirm }) {
     setEnabled(rule.enabled !== false);
     setKeywordContains(rule.conditions?.keywordContains || "");
     setRegex(rule.conditions?.regex || "");
-    setAmountMin(rule.conditions?.amountMin != null ? String(rule.conditions.amountMin) : "");
-    setAmountMax(rule.conditions?.amountMax != null ? String(rule.conditions.amountMax) : "");
+    setAmountMin(rule.conditions?.amountMin != null ? formatMoneyInputFromSatang(rule.conditions.amountMin, { emptyIfZero: true }) : "");
+    setAmountMax(rule.conditions?.amountMax != null ? formatMoneyInputFromSatang(rule.conditions.amountMax, { emptyIfZero: true }) : "");
     setBankContains(rule.conditions?.bankContains || "");
     setRefContains(rule.conditions?.refContains || "");
     setFromDigitsEndsWith(rule.conditions?.fromDigitsEndsWith || "");
@@ -202,8 +204,8 @@ const applyTemplate = (tpl) => {
       conditions: {
         keywordContains: keywordContains.trim(),
         regex: regex.trim(),
-        amountMin: amountMin.trim() === "" ? null : Number(amountMin),
-        amountMax: amountMax.trim() === "" ? null : Number(amountMax),
+        amountMin: amountMin.trim() === "" ? null : parseMoneyToSatang(amountMin),
+        amountMax: amountMax.trim() === "" ? null : parseMoneyToSatang(amountMax),
         bankContains: bankContains.trim(),
         refContains: refContains.trim(),
         fromDigitsEndsWith: fromDigitsEndsWith.trim(),
@@ -251,7 +253,7 @@ const applyTemplate = (tpl) => {
     if (c.bankContains) parts.push(`bank contains "${c.bankContains}"`);
     if (c.refContains) parts.push(`ref contains "${c.refContains}"`);
     if (c.amountMin != null || c.amountMax != null) {
-      const a = `${c.amountMin != null ? c.amountMin : "-"}…${c.amountMax != null ? c.amountMax : "-"}`;
+      const a = `${c.amountMin != null ? formatCurrency(c.amountMin) : '-'}…${c.amountMax != null ? formatCurrency(c.amountMax) : '-'}`;
       parts.push(`amount ${a}`);
     }
     if (c.fromDigitsEndsWith) parts.push(`from endsWith ${c.fromDigitsEndsWith}`);
@@ -458,7 +460,7 @@ const applyTemplate = (tpl) => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <div className="text-xs font-extrabold text-gray-900 mb-1">จำนวนเงินขั้นต่ำ</div>
-                    <input value={amountMin} onChange={(e) => setAmountMin(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" inputMode="decimal" placeholder="เช่น: 100" />
+                    <input value={amountMin} onChange={(e) => setAmountMin(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))} className="w-full px-3 py-2 rounded-xl glass-input" inputMode="decimal" placeholder="เช่น: 100.00" />
                   </div>
                   <div>
                     <div className="text-xs font-extrabold text-gray-900 mb-1">จำนวนเงินขั้นสูง</div>

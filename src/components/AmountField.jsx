@@ -2,8 +2,7 @@
 import React, { useId, useMemo } from "react";
 import { TrendingDown, TrendingUp, ArrowRightLeft } from "lucide-react";
 import { formatCurrency } from "../utils/format";
-
-const digitsOnly = (s) => String(s ?? "").replace(/[^\d]/g, "");
+import { parseMoneyToSatang, sanitizeMoneyInput } from "../utils/money";
 
 export default function AmountField({
   value,
@@ -11,12 +10,11 @@ export default function AmountField({
   variant = "expense", // expense | income | transfer
   label = "จำนวนเงิน",
   helper = "",
+  disabled = false,
 }) {
   const inputId = useId();
 
-  // ✅ keep input as digits-only string (controlled)
-  const digits = useMemo(() => digitsOnly(value), [value]);
-  const amount = useMemo(() => Number(digits || 0) || 0, [digits]);
+  const satang = useMemo(() => parseMoneyToSatang(value), [value]);
 
   const meta = useMemo(() => {
     if (variant === "income") {
@@ -52,17 +50,13 @@ export default function AmountField({
     };
   }, [variant]);
 
-  const chipLabel =
-    variant === "income" ? "INCOME" : variant === "transfer" ? "TRANSFER" : "EXPENSE";
+  const chipLabel = variant === "income" ? "INCOME" : variant === "transfer" ? "TRANSFER" : "EXPENSE";
 
   return (
     <section className="glass-card rounded-3xl p-5 mb-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
-        <label
-          htmlFor={inputId}
-          className="text-xs font-bold text-gray-900/55 uppercase"
-        >
+        <label htmlFor={inputId} className="text-xs font-bold text-gray-900/55 uppercase">
           {label}
         </label>
 
@@ -83,14 +77,9 @@ export default function AmountField({
       {/* Preview */}
       <div className="mt-4">
         <div className="text-[11px] text-gray-900/55 font-bold">แสดงผล</div>
-        <div
-          className={[
-            "text-3xl font-extrabold text-gray-900 mt-1 drop-shadow-sm",
-            meta.glow,
-          ].join(" ")}
-        >
-          {formatCurrency(amount)}
-        </div>
+        <div className={["text-3xl font-extrabold text-gray-900 mt-1 drop-shadow-sm", meta.glow].join(" ")}>{
+          formatCurrency(Math.abs(satang))
+        }</div>
       </div>
 
       {/* Input */}
@@ -99,27 +88,32 @@ export default function AmountField({
 
         <input
           id={inputId}
-          value={digits}
-          onChange={(e) => onChange?.(digitsOnly(e.target.value))}
-          inputMode="numeric"
+          value={value ?? ""}
+          onChange={(e) => {
+            if (disabled) return;
+            const cleaned = sanitizeMoneyInput(e.target.value, { maxDecimals: 2 });
+            onChange?.(cleaned);
+          }}
+          inputMode="decimal"
           autoComplete="off"
-          pattern="[0-9]*"
           enterKeyHint="done"
+          disabled={disabled}
           aria-label={label}
           className={[
             "w-full mt-2 rounded-2xl px-4 py-4 outline-none text-lg font-extrabold text-gray-900",
             "bg-white/30 border border-white/20 shadow-sm",
             "placeholder:text-gray-900/35",
+            disabled ? "opacity-60 cursor-not-allowed" : "",
             "focus:bg-white/40",
             "focus-visible:ring-4",
             meta.inputRing,
             meta.inputBorder,
           ].join(" ")}
-          placeholder="เช่น 1200"
+          placeholder="เช่น 1200.50"
         />
 
         <div className="mt-2 text-[11px] text-gray-900/55">
-          * ระบบจะรับเฉพาะตัวเลข (ไม่ต้องใส่ , หรือ .)
+          * ใส่ได้ถึง 2 ตำแหน่งทศนิยม (สตางค์)
         </div>
 
         {helper ? (

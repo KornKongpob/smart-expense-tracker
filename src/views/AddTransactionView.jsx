@@ -19,6 +19,7 @@ import {
   Sparkles,
   CreditCard,
   Inbox,
+  Layers,
 } from "lucide-react";
 
 import { useAppStore } from "../store/store";
@@ -26,7 +27,8 @@ import AmountField from "../components/AmountField";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../services/blobStore";
 import { formatCurrency, toISODate } from "../utils/format";
-import { generateId, generateTransferId } from "../utils/id";
+import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput } from "../utils/money";
+import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { useBlobUrl } from "../utils/useBlobUrl";
 import { PRESET_COLORS } from "../constants/presets.jsx";
 import {
@@ -475,6 +477,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     upsertTransaction,
     bulkUpsertTransactions,
     deleteTransaction,
+    deleteManyTransactions,
     addCategory,
     addScanInboxItems,
     learnMerchant,
@@ -565,7 +568,159 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [note, setNote] = useState(initialData?.note || "");
   const [ref, setRef] = useState(initialData?.ref || "");
 
-  const amountNumber = useMemo(() => Number(digitsOnly(amountDigits || "0")) || 0, [amountDigits]);
+  // ===== split group (edit / manual) =====
+  const splitGroupTransactions = useMemo(() => {
+    const gid = String(initialData?.splitGroupId || "").trim();
+    if (!gid) return [];
+    return (state.transactions || []).filter((t) => String(t?.splitGroupId || "").trim() === gid && !t?.isTransfer);
+  }, [initialData?.splitGroupId, state.transactions]);
+
+  const isEditingSplitGroup = useMemo(() => {
+    if (!isEditMode) return false;
+    if (initialData?.isTransfer) return false;
+    const gid = String(initialData?.splitGroupId || "").trim();
+    if (!gid) return false;
+    return splitGroupTransactions.length >= 2;
+  }, [isEditMode, initialData?.isTransfer, initialData?.splitGroupId, splitGroupTransactions.length]);
+
+  const makeEmptySplitLine = () => ({
+    txId: "",
+    amountDigits: "",
+    categoryId: "",
+    lineNote: "",
+  });
+
+  const [isSplitMode, setIsSplitMode] = useState(isEditingSplitGroup);
+  const [splitLabel, setSplitLabel] = useState(String(initialData?.splitLabel || ""));
+
+  const [splitLines, setSplitLines] = useState(() => {
+    if (isEditingSplitGroup && splitGroupTransactions.length) {
+      const sorted = [...splitGroupTransactions].sort((a, b) => {
+        const ai = Number(a?.splitIndex || 0);
+        const bi = Number(b?.splitIndex || 0);
+        if (ai && bi) return ai - bi;
+        return (b?.amount || 0) - (a?.amount || 0);
+      });
+      return sorted.map((t) => ({
+        txId: String(t?.id || ""),
+        amountDigits: t?.amount != null ? formatMoneyInputFromSatang(Math.abs(Number(t.amount))) : "",
+        categoryId: String(t?.category || ""),
+        lineNote: String(t?.note || ""),
+      }));
+    }
+    // new / non-split edit: start with 2 lines to encourage splitting
+    const seed = initialData && !initialData?.isTransfer ? {
+      txId: String(initialData?.id || ""),
+      amountDigits: initialData?.amount != null ? formatMoneyInputFromSatang(Math.abs(Number(initialData.amount))) : "",
+      categoryId: String(initialData?.category || ""),
+      lineNote: String(initialData?.note || ""),
+    } : makeEmptySplitLine();
+    return [seed, makeEmptySplitLine()];
+  });
+
+  // Keep split states synced when switching editing target
+  useEffect(() => {
+    if (type === "transfer" || type === "credit_payment") {
+      setIsSplitMode(false);
+      return;
+    }
+    if (!isEditMode) return;
+
+    if (isEditingSplitGroup) {
+      setIsSplitMode(true);
+      const sorted = [...splitGroupTransactions].sort((a, b) => {
+        const ai = Number(a?.splitIndex || 0);
+        const bi = Number(b?.splitIndex || 0);
+        if (ai && bi) return ai - bi;
+        return (b?.amount || 0) - (a?.amount || 0);
+      });
+      setSplitLabel(String(sorted?.[0]?.splitLabel || initialData?.splitLabel || ""));
+      setSplitLines(
+        sorted.map((t) => ({
+          txId: String(t?.id || ""),
+          amountDigits: t?.amount != null ? formatMoneyInputFromSatang(Math.abs(Number(t.amount))) : "",
+          categoryId: String(t?.category || ""),
+          lineNote: String(t?.note || ""),
+        }))
+      );
+    } else {
+      setSplitLabel(String(initialData?.splitLabel || ""));
+      setSplitLines([
+        {
+          txId: String(initialData?.id || ""),
+          amountDigits: initialData?.amount != null ? formatMoneyInputFromSatang(Math.abs(Number(initialData.amount))) : "",
+          categoryId: String(initialData?.category || ""),
+          lineNote: String(initialData?.note || ""),
+        },
+        makeEmptySplitLine(),
+      ]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditMode, initialData?.id, isEditingSplitGroup, type]);
+
+  const splitTotalNumber = useMemo(() => {
+    if (!isSplitMode) return 0;
+    return (splitLines || []).reduce((sum, l) => sum + parseMoneyToSatang(l?.amountDigits || ""), 0);
+  }, [isSplitMode, splitLines]);
+
+  const splitTotalDigits = useMemo(() => {
+    if (!isSplitMode) return amountDigits;
+    return splitTotalNumber ? formatMoneyInputFromSatang(splitTotalNumber) : "";
+  }, [isSplitMode, splitTotalNumber, amountDigits]);
+
+  const updateSplitLine = (index, patch) => {
+    setSplitLines((ls) => (ls || []).map((l, i) => (i === index ? { ...l, ...patch } : l)));
+  };
+
+  const addSplitLine = () => setSplitLines((ls) => [...(ls || []), makeEmptySplitLine()]);
+
+  const removeSplitLine = (index) => {
+    setSplitLines((ls) => {
+      const next = (ls || []).filter((_, i) => i !== index);
+      return next.length ? next : [makeEmptySplitLine(), makeEmptySplitLine()];
+    });
+  };
+
+  const toggleSplitMode = () => {
+    if (type === "transfer" || type === "credit_payment") return;
+    setIsSplitMode((prev) => {
+      const next = !prev;
+      if (next) {
+        // turning ON: seed first line from current single tx fields (when possible)
+        setCategoryId("");
+        setSplitLines((ls) => {
+          const curr = Array.isArray(ls) && ls.length ? ls : [makeEmptySplitLine(), makeEmptySplitLine()];
+          const first = curr[0] || makeEmptySplitLine();
+          const seededFirst = {
+            ...first,
+            txId: first.txId || (isEditMode ? String(initialData?.id || "") : ""),
+            amountDigits: first.amountDigits || amountDigits || "",
+            categoryId: first.categoryId || String(categoryId || ""),
+            lineNote: first.lineNote || "",
+          };
+          const second = curr[1] || makeEmptySplitLine();
+          return [seededFirst, second, ...curr.slice(2)];
+        });
+      } else {
+        // turning OFF: pull back to single tx from first line
+        const first = (splitLines || [])[0];
+        if (first) {
+          if (String(first.amountDigits || "").trim()) setAmountDigits(String(first.amountDigits));
+          if (String(first.categoryId || "").trim()) setCategoryId(String(first.categoryId));
+          if (String(first.lineNote || "").trim()) setNote(String(first.lineNote));
+        }
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (type === "transfer" || type === "credit_payment") {
+      setIsSplitMode(false);
+    }
+  }, [type]);
+
+  const amountNumber = useMemo(() => parseMoneyToSatang(amountDigits), [amountDigits]);
 
   // ===== budget hint for manual expense =====
   const monthKey = useMemo(() => toMonthKey(date), [date]);
@@ -576,6 +731,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   );
 
   const budgetHint = useMemo(() => {
+    if (isSplitMode) return "";
     if (type !== "expense") return "";
     if (!categoryId) return "";
     const b = getBudget(state.budgets || [], monthKey, categoryId);
@@ -585,7 +741,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     const pct = Math.round((next / b.limit) * 100);
     if (pct >= b.alertPct) return `⚠️ งบ ${formatCurrency(b.limit)} • ใช้แล้ว ${formatCurrency(next)} (${pct}%)`;
     return `งบ ${formatCurrency(b.limit)} • ใช้แล้ว ${formatCurrency(next)} (${pct}%)`;
-  }, [type, categoryId, state.budgets, monthKey, spentMap, amountNumber]);
+  }, [isSplitMode, type, categoryId, state.budgets, monthKey, spentMap, amountNumber]);
 
   // ===== scan queue =====
   const fileInputRef = useRef(null);
@@ -917,7 +1073,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       showAlert?.("บัตรนี้ไม่มียอดค้างชำระ");
       return;
     }
-    setAmountDigits(String(Math.round(creditDebt)));
+    setAmountDigits(formatMoneyInputFromSatang(Math.abs(Number(creditDebt))));
     // เติม note แบบไม่ทับของเดิมถ้ามีแล้ว
     setNote((prev) => {
       const p = String(prev || "").trim();
@@ -1126,6 +1282,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const amount =
             typeof result?.amount === "number" ? result.amount : result?.amount != null ? Number(result.amount) : null;
 
+          const amountSatang = amount != null ? parseMoneyToSatang(amount) : null;
+
           const d = result?.date ? String(result.date).slice(0, 10) : toISODate(new Date());
 
           const merchant = String(result?.merchant || "").trim();
@@ -1233,14 +1391,14 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               return {
                 key: g.key || "other",
                 categoryId: catId,
-                amount: Math.round((Number(g.amount) || 0) * 100) / 100,
+                amount: parseMoneyToSatang(g.amount),
                 names: Array.isArray(g.names) ? g.names.slice(0, 6) : [],
               };
             });
           }
 
           const groupSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
-          const aiTotal = Number.isFinite(Number(amount)) ? Number(amount) : 0;
+          const aiTotal = amountSatang != null ? amountSatang : 0;
 
           let splitByCategory = false;
           if (finalTxType === "expense" && groups.length >= 2) {
@@ -1311,19 +1469,21 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const dupByRef = rref ? batchRefSet.has(rref) || isDuplicateByRef(state.transactions || [], rref) : false;
           if (rref) batchRefSet.add(rref);
 
+
+          const pickedAmount = (() => {
+            const a = amountSatang != null && amountSatang > 0 ? amountSatang : null;
+            const g = groupSum && groupSum > 0 ? groupSum : null;
+            const t = aiTotal && aiTotal > 0 ? aiTotal : null;
+
+            if (finalTxType === "transfer" || finalTxType === "credit_payment") return a ?? t ?? g;
+            if (splitByCategory) return g ?? a ?? t;
+            return a ?? g ?? t;
+          })();
+
           let patch = {
             status: "ready",
             txType: finalTxType,
-            amount:
-              finalTxType === "transfer" || finalTxType === "credit_payment"
-                ? Number.isFinite(amount)
-                  ? amount
-                  : aiTotal || null
-                : splitByCategory
-                ? groupSum || aiTotal || null
-                : Number.isFinite(amount)
-                ? amount
-                : groupSum || null,
+            amount: pickedAmount,
             date: d,
             note: mergedNote,
             merchant,
@@ -1344,6 +1504,19 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             suggestedCategoryId,
             suggestedReason,
           };
+
+          // ✅ Ensure split groups have a stable group id + label for Inbox & UI grouping
+          if (
+            patch.splitByCategory &&
+            Array.isArray(patch.groups) &&
+            patch.groups.length >= 2
+          ) {
+            patch.splitGroupId = String(patch.splitGroupId || "").trim() || generateSplitGroupId();
+            patch.splitLabel =
+              String(patch.splitLabel || merchant || mergedNote || "Split")
+                .trim()
+                .slice(0, 80) || "Split";
+          }
 
           // ✅ Advanced automation rules: run after scan and auto-fill fields
           try {
@@ -1724,6 +1897,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
         groups.sort((a, b) => b.amount - a.amount);
 
+        const splitGroupId = String(q?.splitGroupId || "").trim() || generateSplitGroupId();
+        const splitCount = groups.length;
+        const groupLabel = String(q?.splitLabel || merchant || baseNoteRaw || "Split").trim().slice(0, 80) || "Split";
+
         groups.forEach((g, idx) => {
           const itemsTxt = Array.isArray(g.names) && g.names.length ? ` • ${g.names.join(", ")}` : "";
           const groupNoteRaw = `${baseNoteRaw} • ${categoryNameFromKey(g.key)}${itemsTxt}`.slice(0, 180);
@@ -1742,6 +1919,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             ref: idx === 0 ? (q.ref || null) : null,
             source: "scan",
             attachmentId: q.attachmentId || null,
+
+            // ✅ Split grouping fields (for UI)
+            splitGroupId,
+            splitIndex: idx + 1,
+            splitCount,
+            splitLabel: groupLabel,
+            isSplit: true,
 
             merchant: merchant || null,
             evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -1800,12 +1984,12 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   // ===== manual save/delete =====
   const handleSaveManual = () => {
-    if (!amountNumber || amountNumber <= 0) return showAlert?.("กรุณาระบุจำนวนเงินให้ถูกต้อง");
-
     const d = String(date || toISODate(new Date())).slice(0, 10);
     const noteText = String(note || "").trim();
+    const refText = String(ref || "").trim();
 
     if (type === "transfer" || type === "credit_payment") {
+      if (!amountNumber || amountNumber <= 0) return showAlert?.("กรุณาระบุจำนวนเงินให้ถูกต้อง");
       if (!fromAccountId || !toAccountId) return showAlert?.("กรุณาเลือกบัญชีต้นทางและปลายทาง");
       if (fromAccountId === toAccountId) return showAlert?.("บัญชีต้นทาง/ปลายทางต้องไม่ใช่บัญชีเดียวกัน");
 
@@ -1863,8 +2047,78 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       return;
     }
 
+    // ✅ Split transactions (expense/income)
+    if (isSplitMode) {
+      if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
+
+      const cleanedLines = (splitLines || [])
+        .map((l) => ({
+          txId: String(l?.txId || "").trim(),
+          categoryId: String(l?.categoryId || "").trim(),
+          amount: parseMoneyToSatang(l?.amountDigits),
+          lineNote: String(l?.lineNote || "").trim(),
+        }))
+        .filter((l) => l.amount > 0 || l.categoryId || l.lineNote || l.txId);
+
+      if (cleanedLines.length < 2) return showAlert?.("Split ต้องมีอย่างน้อย 2 บรรทัด (ยอดเงิน > 0)");
+      for (const l of cleanedLines) {
+        if (!l.categoryId) return showAlert?.("กรุณาเลือกหมวดหมู่ให้ครบ (ในรายการ Split)");
+        if (!Number.isFinite(l.amount) || l.amount <= 0) return showAlert?.("กรุณาระบุยอดเงินให้ถูกต้อง (ในรายการ Split)");
+      }
+
+      const splitGroupId = String(initialData?.splitGroupId || "").trim() || generateSplitGroupId();
+      const splitCount = cleanedLines.length;
+      const groupLabel = String(splitLabel || "").trim().slice(0, 80);
+
+      const txs = cleanedLines.map((l, idx) => {
+        const finalNote = l.lineNote
+          ? noteText
+            ? noteText === l.lineNote
+              ? noteText
+              : `${noteText} • ${l.lineNote}`
+            : l.lineNote
+          : noteText;
+
+        return {
+          id: l.txId || generateId(),
+          type: type === "income" ? "income" : "expense",
+          amount: l.amount,
+          category: l.categoryId,
+          accountId,
+          date: d,
+          note: finalNote,
+          isTransfer: false,
+          transferId: null,
+          ref: idx === 0 ? (refText || null) : null,
+          source: "manual",
+          attachmentId: initialAttachmentId || null,
+
+          splitGroupId,
+          splitIndex: idx + 1,
+          splitCount,
+          splitLabel: groupLabel || null,
+          isSplit: true,
+        };
+      });
+
+      // delete removed lines (when editing an existing split group)
+      const existingIds = new Set(
+        (splitGroupTransactions || []).map((t) => String(t?.id || "")).filter(Boolean)
+      );
+      const nextIds = new Set(txs.map((t) => String(t.id)));
+      const removedIds = [...existingIds].filter((id) => !nextIds.has(id));
+
+      if (removedIds.length) {
+        deleteManyTransactions(removedIds, { navigateToDashboard: false });
+      }
+      bulkUpsertTransactions(txs, { navigateToDashboard: true });
+      return;
+    }
+
     if (!categoryId) return showAlert?.("กรุณาเลือกหมวดหมู่");
     if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
+
+    if (!amountNumber || amountNumber <= 0) return showAlert?.("กรุณาระบุจำนวนเงินให้ถูกต้อง");
 
     upsertTransaction({
       id: initialData?.id,
@@ -1876,7 +2130,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       note: noteText,
       isTransfer: false,
       transferId: null,
-      ref: String(ref || "").trim() || null,
+      ref: refText || null,
       source: "manual",
       attachmentId: initialAttachmentId || null,
     });
@@ -1896,6 +2150,24 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         true
       );
       return;
+    }
+
+    const gid = String(initialData?.splitGroupId || "").trim();
+    if (gid) {
+      const groupIds = (state.transactions || [])
+        .filter((t) => String(t?.splitGroupId || "").trim() === gid && !t?.isTransfer)
+        .map((t) => String(t?.id || ""))
+        .filter(Boolean);
+
+      if (groupIds.length >= 2) {
+        showConfirm?.(
+          "ลบ Split Group",
+          "ต้องการลบรายการแบบ Split ทั้งกลุ่มใช่ไหม?",
+          () => deleteManyTransactions(groupIds, { navigateToDashboard: true }),
+          true
+        );
+        return;
+      }
     }
 
     showConfirm?.("ลบรายการ", "ต้องการลบรายการนี้ใช่ไหม?", () => deleteTransaction(initialData.id), true);
@@ -2247,13 +2519,15 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                             <div className="glass-panel border border-white/20 rounded-2xl p-3">
                               <div className="text-xs font-bold text-gray-900/70 mb-1">จำนวนเงิน</div>
                               <input
-                                type="number"
-                                value={q.amount ?? ""}
-                                onChange={(e) =>
-                                  updateQueueItem(q.id, { amount: Number(e.target.value || 0), splitByCategory: false })
-                                }
+                                type="text"
+                                inputMode="decimal"
+                                value={q.amount != null ? formatMoneyInputFromSatang(q.amount) : ""}
+                                onChange={(e) => {
+                                  const cleaned = sanitizeMoneyInput(e.target.value);
+                                  updateQueueItem(q.id, { amount: parseMoneyToSatang(cleaned), splitByCategory: false });
+                                }}
                                 className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
-                                placeholder="0"
+                                placeholder="0.00"
                               />
                               <div className="text-[11px] text-gray-800/55 mt-1">* แก้ยอดตรงนี้จะปิดโหมดแยกหมวด</div>
                             </div>
@@ -2387,9 +2661,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                                             <div className="col-span-2">
                                               <div className="text-[11px] text-gray-900/60 font-bold mb-1">ยอด</div>
                                               <input
-                                                type="number"
-                                                value={g.amount ?? 0}
-                                                onChange={(e) => updateQueueGroup(q.id, idx, { amount: Number(e.target.value || 0) })}
+                                                type="text"
+                                                inputMode="decimal"
+                                                value={formatMoneyInputFromSatang(g.amount ?? 0)}
+                                                onChange={(e) => {
+                                                  const cleaned = sanitizeMoneyInput(e.target.value);
+                                                  updateQueueGroup(q.id, idx, { amount: parseMoneyToSatang(cleaned) });
+                                                }}
                                                 className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
                                               />
                                               <div className="text-[10px] text-gray-900/55 mt-1 truncate">
@@ -2497,11 +2775,15 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
           {/* Amount */}
           <AmountField
-            value={amountDigits}
-            onChange={setAmountDigits}
+            value={isSplitMode ? splitTotalDigits : amountDigits}
+            onChange={(v) => {
+              if (isSplitMode) return;
+              setAmountDigits(v);
+            }}
             variant={type === "credit_payment" ? "transfer" : type}
-            label="จำนวนเงิน"
-            helper={budgetHint}
+            label={isSplitMode ? "ยอดรวม (Split)" : "จำนวนเงิน"}
+            helper={isSplitMode ? "Split: ยอดรวมจะคำนวณจากรายการย่อยด้านล่าง" : budgetHint}
+            disabled={isSplitMode}
           />
 
           {/* Accounts */}
@@ -2656,34 +2938,157 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             </div>
           )}
 
-          {/* Categories */}
+          {/* Split + Categories */}
           {type !== "transfer" && type !== "credit_payment" ? (
             <>
-              <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">หมวดหมู่</h3>
-              <div className="grid grid-cols-4 gap-3 mb-6">
-                {(type === "income" ? incomeCats : expenseCats).map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setCategoryId(cat.id)}
-                    className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
-                      categoryId === cat.id
-                        ? "glass-card ring-2 ring-gray-900/80 border-white/20"
-                        : "glass-chip border-white/15 hover:bg-white/10"
-                    }`}
-                    type="button"
-                  >
-                    <div
-                      className="w-12 h-12 rounded-full flex items-center justify-center text-xl mb-2"
-                      style={{ backgroundColor: `${cat.color}20` }}
-                    >
-                      {cat.icon}
+              <div className="glass-card rounded-3xl p-5 mb-6 border border-white/20">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-gray-900/60 uppercase flex items-center gap-2">
+                      <Layers size={14} /> Split Transactions
                     </div>
-                    <span className="text-[10px] font-extrabold text-gray-900/70 truncate w-full text-center">
-                      {cat.name}
-                    </span>
+                    <div className="text-[11px] text-gray-900/55 mt-1 break-words">
+                      แยกรายการเป็นหลายหมวด แต่ยังคงเก็บเป็น “transactions จริง” เพื่อให้รายงาน/สถิติ/งบ ทำงานถูกต้องทันที
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={toggleSplitMode}
+                    className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
+                      isSplitMode
+                        ? "bg-emerald-600/90 text-white border-emerald-500/20 shadow-sm"
+                        : "glass-chip text-gray-900 border-white/15 hover:bg-white/10"
+                    }`}
+                  >
+                    {isSplitMode ? "ON" : "OFF"}
                   </button>
-                ))}
+                </div>
+
+                {isSplitMode ? (
+                  <div className="mt-4 space-y-3">
+                    <div className="glass-panel border border-white/20 rounded-2xl p-3">
+                      <div className="text-xs font-bold text-gray-900/70 mb-1">Split label (optional)</div>
+                      <input
+                        value={splitLabel}
+                        onChange={(e) => setSplitLabel(e.target.value)}
+                        className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
+                        placeholder='เช่น "Lotus receipt"'
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      {splitLines.map((l, idx) => (
+                        <div key={`${l.txId || "new"}-${idx}`} className="rounded-2xl bg-white/10 border border-white/15 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-[11px] text-gray-900/65 font-extrabold">
+                              Line {idx + 1}
+                              <span className="font-bold">/{splitLines.length}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeSplitLine(idx)}
+                              className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/15 flex items-center justify-center text-red-700 active:scale-95"
+                              aria-label="remove split line"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-5 gap-2 items-start mt-2">
+                            <div className="col-span-3">
+                              <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
+                              <select
+                                value={l.categoryId || ""}
+                                onChange={(e) => updateSplitLine(idx, { categoryId: e.target.value })}
+                                className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                              >
+                                <option value="" disabled>
+                                  เลือกหมวด
+                                </option>
+                                {(type === "income" ? incomeCats : expenseCats).map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.icon} {c.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="col-span-2">
+                              <div className="text-[11px] text-gray-900/60 font-bold mb-1">ยอด</div>
+                              <input
+                                value={l.amountDigits || ""}
+                                onChange={(e) => updateSplitLine(idx, { amountDigits: sanitizeMoneyInput(e.target.value) })}
+                                inputMode="decimal"
+                                className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                                placeholder="0.00"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="mt-2">
+                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">Note (optional)</div>
+                            <input
+                              value={l.lineNote || ""}
+                              onChange={(e) => updateSplitLine(idx, { lineNote: e.target.value })}
+                              className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                              placeholder="รายละเอียดเฉพาะบรรทัด (ถ้ามี)"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={addSplitLine}
+                        className="px-4 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95 flex items-center gap-2"
+                      >
+                        <Plus size={14} /> เพิ่มบรรทัด
+                      </button>
+
+                      <div className="text-[12px] text-gray-900/65 font-bold">
+                        รวม: <span className="text-gray-900">{formatCurrency(splitTotalNumber)}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-gray-900/55">
+                      * Split จะบันทึกเป็นหลาย transactions (เพื่อให้ Export/งบ/สถิติ ถูกต้อง) แต่ในหน้า Recent จะแสดงเป็น 1 การ์ด
+                    </div>
+                  </div>
+                ) : null}
               </div>
+
+              {!isSplitMode ? (
+                <>
+                  <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">หมวดหมู่</h3>
+                  <div className="grid grid-cols-4 gap-3 mb-6">
+                    {(type === "income" ? incomeCats : expenseCats).map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setCategoryId(cat.id)}
+                        className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
+                          categoryId === cat.id
+                            ? "glass-card ring-2 ring-gray-900/80 border-white/20"
+                            : "glass-chip border-white/15 hover:bg-white/10"
+                        }`}
+                        type="button"
+                      >
+                        <div
+                          className="w-12 h-12 rounded-full flex items-center justify-center text-xl mb-2"
+                          style={{ backgroundColor: `${cat.color}20` }}
+                        >
+                          {cat.icon}
+                        </div>
+                        <span className="text-[10px] font-extrabold text-gray-900/70 truncate w-full text-center">
+                          {cat.name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </>
           ) : null}
 
@@ -2731,7 +3136,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 type="text"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder={type === "credit_payment" ? "โน้ต (ธนาคาร/บัตร/รายละเอียด)" : "โน้ต (ชื่อร้าน/รายละเอียด)"}
+                placeholder={
+                  type === "credit_payment"
+                    ? "โน้ต (ธนาคาร/บัตร/รายละเอียด)"
+                    : isSplitMode
+                      ? "โน้ตสำหรับทั้งกลุ่ม Split (optional)"
+                      : "โน้ต (ชื่อร้าน/รายละเอียด)"
+                }
                 className="flex-1 outline-none text-gray-900 bg-transparent font-extrabold"
               />
             </div>

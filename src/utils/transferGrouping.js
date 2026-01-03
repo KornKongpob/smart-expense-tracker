@@ -9,7 +9,7 @@
 
 import { isCreditAccount } from "./accountMatch";
 
-const EPS = 0.01;
+const EPS = 1; // 1 satang
 
 function safeString(v) {
   return v == null ? "" : String(v).trim();
@@ -23,7 +23,8 @@ function safeNumber(v) {
 function normMoney(v) {
   const n = safeNumber(v);
   if (n == null) return null;
-  return Math.round(n * 100) / 100;
+  // Amounts are stored as SATANG (integer)
+  return Math.round(n);
 }
 
 function moneyEq(a, b, eps = EPS) {

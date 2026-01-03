@@ -14,8 +14,9 @@ import {
 
 import { useAppStore } from "../store/store";
 import { findFuzzyDuplicate } from "../store/selectors";
-import { generateId, generateTransferId } from "../utils/id";
+import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, toISODate } from "../utils/format";
+import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { useBlobUrl } from "../utils/useBlobUrl";
 import {
   resolveMerchantCanonical,
@@ -43,6 +44,11 @@ function isPositiveNumber(n) {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
 }
 
+function asSatang(v) {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.round(v);
+  return parseMoneyToSatang(v);
+}
+
 function normalizeTxType(t) {
   const x = String(t || "").toLowerCase();
   if (x === "income" || x === "expense" || x === "transfer" || x === "credit_payment") return x;
@@ -61,10 +67,14 @@ function buildTransactionsFromInboxItem(item) {
     const accountId = item?.accountId || "";
     if (!accountId) throw new Error("ยังไม่ได้เลือก Account สำหรับรายการแบบ Split");
 
+    const splitGroupId = String(item?.splitGroupId || "").trim() || generateSplitGroupId();
+    const splitCount = item.groups.length;
+    const splitLabel = String(item?.splitLabel || merchant || item?.note || "Split").trim().slice(0, 80) || "Split";
+
     const txs = [];
     for (let i = 0; i < item.groups.length; i++) {
       const g = item.groups[i];
-      const amount = Number(g?.amount);
+      const amount = asSatang(g?.amount);
       if (!isPositiveNumber(amount)) throw new Error("ยอดเงินในกลุ่ม Split ต้องมากกว่า 0");
       const categoryId = g?.categoryId || item?.categoryId || "";
       if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับกลุ่ม Split");
@@ -83,6 +93,13 @@ function buildTransactionsFromInboxItem(item) {
         transferId: null,
         attachmentId: item?.attachmentId || null,
         source: "inbox",
+
+        // ✅ Split grouping fields (for UI)
+        splitGroupId,
+        splitIndex: i + 1,
+        splitCount,
+        splitLabel,
+        isSplit: true,
       });
     }
     return txs;
@@ -92,7 +109,7 @@ function buildTransactionsFromInboxItem(item) {
   if (txType === "transfer" || txType === "credit_payment") {
     const fromAccountId = item?.fromAccountId || "";
     const toAccountId = item?.toAccountId || "";
-    const amount = Number(item?.amount);
+    const amount = asSatang(item?.amount);
 
     if (!fromAccountId || !toAccountId) throw new Error("Transfer ต้องมีทั้ง From และ To account");
     if (fromAccountId === toAccountId) throw new Error("Transfer ต้องเลือก From และ To คนละบัญชี");
@@ -139,7 +156,7 @@ function buildTransactionsFromInboxItem(item) {
 
   // Normal income/expense
   const accountId = item?.accountId || "";
-  const amount = Number(item?.amount);
+  const amount = asSatang(item?.amount);
   const categoryId = item?.categoryId || item?.category || "";
 
   if (!accountId) throw new Error("ยังไม่ได้เลือก Account");
@@ -231,10 +248,11 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     if (!item) return;
 
     const txType = normalizeTxType(item?.type || item?.txType);
+    const isSplit = !!item?.splitByCategory && Array.isArray(item?.groups) && item.groups.length >= 2;
     setDraft({
       ...item,
       type: txType,
-      amount: Number(item?.amount) || 0,
+      amount: item?.amount != null ? formatMoneyInputFromSatang(asSatang(item.amount)) : "",
       date: item?.date ? String(item.date).slice(0, 10) : toISODate(new Date()),
       merchant: String(item?.merchant || ""),
       categoryId: String(item?.categoryId || item?.category || (txType === "transfer" || txType === "credit_payment" ? "transfer" : "")),
@@ -243,6 +261,19 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       toAccountId: String(item?.toAccountId || ""),
       note: String(item?.note || ""),
       referenceId: String(item?.referenceId || item?.ref || ""),
+
+      // ✅ Split-by-category preview/edit in Inbox
+      splitByCategory: isSplit,
+      splitGroupId: String(item?.splitGroupId || ""),
+      splitLabel: String(item?.splitLabel || ""),
+      groups: isSplit
+        ? (item.groups || []).map((g) => ({
+            key: g?.key || "",
+            categoryId: String(g?.categoryId || ""),
+            amount: g?.amount != null ? formatMoneyInputFromSatang(asSatang(g.amount)) : "",
+            note: String(g?.note || ""),
+          }))
+        : [],
     });
   }, [open, item]);
 
@@ -253,8 +284,88 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
   const incomeCats = categories?.income || [];
   const catList = txType === "income" ? incomeCats : expenseCats;
 
+  const isSplitMode =
+    (txType === "expense" || txType === "income") &&
+    !!draft?.splitByCategory &&
+    Array.isArray(draft?.groups);
+
+  const splitTotal = useMemo(() => {
+    if (!isSplitMode) return parseMoneyToSatang(draft?.amount);
+    return (draft.groups || []).reduce((s, g) => s + parseMoneyToSatang(g?.amount), 0);
+  }, [isSplitMode, draft?.groups, draft?.amount]);
+
+  const toggleSplitMode = () => {
+    setDraft((d) => {
+      if (!d) return d;
+      const curType = normalizeTxType(d.type);
+      if (curType !== "expense" && curType !== "income") return d;
+
+      const nextOn = !d.splitByCategory;
+      if (nextOn) {
+        const seeded = Array.isArray(d.groups) && d.groups.length
+          ? d.groups
+          : [
+              {
+                key: "",
+                categoryId: String(d.categoryId || ""),
+                amount: String(d.amount ?? ""),
+                note: "",
+              },
+              { key: "", categoryId: "", amount: "", note: "" },
+            ];
+
+        return {
+          ...d,
+          splitByCategory: true,
+          groups: seeded,
+          splitGroupId: String(d.splitGroupId || "").trim() || generateSplitGroupId(),
+          splitLabel: String(d.splitLabel || d.merchant || d.note || "Split"),
+          // split uses per-line categories
+          categoryId: "",
+        };
+      }
+
+      // turn off split → collapse to single (take first line if possible)
+      const g0 = Array.isArray(d.groups) && d.groups.length ? d.groups[0] : null;
+      return {
+        ...d,
+        splitByCategory: false,
+        groups: [],
+        amount: String(g0?.amount ?? d.amount ?? ""),
+        categoryId: String(g0?.categoryId || d.categoryId || ""),
+        splitLabel: "",
+        splitGroupId: "",
+      };
+    });
+  };
+
+  const updateGroup = (idx, patch) => {
+    setDraft((d) => {
+      const groups = Array.isArray(d?.groups) ? [...d.groups] : [];
+      if (!groups[idx]) return d;
+      groups[idx] = { ...groups[idx], ...patch };
+      return { ...d, groups };
+    });
+  };
+
+  const addGroup = () => {
+    setDraft((d) => {
+      const groups = Array.isArray(d?.groups) ? [...d.groups] : [];
+      groups.push({ key: "", categoryId: "", amount: "", note: "" });
+      return { ...d, groups };
+    });
+  };
+
+  const removeGroup = (idx) => {
+    setDraft((d) => {
+      const groups = Array.isArray(d?.groups) ? [...d.groups] : [];
+      groups.splice(idx, 1);
+      return { ...d, groups };
+    });
+  };
+
   const commit = () => {
-    const amount = Number(draft.amount);
+    const amount = isSplitMode ? splitTotal : parseMoneyToSatang(draft?.amount);
     if (!isPositiveNumber(amount)) {
       showAlert?.("กรุณากรอกยอดเงินให้มากกว่า 0");
       return;
@@ -274,9 +385,28 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         showAlert?.("กรุณาเลือก Account");
         return;
       }
-      if (!draft.categoryId) {
+      if (!isSplitMode && !draft.categoryId) {
         showAlert?.("กรุณาเลือก Category");
         return;
+      }
+
+      if (isSplitMode) {
+        const groups = Array.isArray(draft.groups) ? draft.groups : [];
+        if (groups.length < 2) {
+          showAlert?.("Split ต้องมีอย่างน้อย 2 บรรทัด");
+          return;
+        }
+        for (const g of groups) {
+          const a = parseMoneyToSatang(g?.amount);
+          if (!isPositiveNumber(a)) {
+            showAlert?.("ยอดเงินในแต่ละบรรทัดของ Split ต้องมากกว่า 0");
+            return;
+          }
+          if (!String(g?.categoryId || "").trim()) {
+            showAlert?.("กรุณาเลือก Category ให้ครบทุกบรรทัดของ Split");
+            return;
+          }
+        }
       }
     }
 
@@ -287,11 +417,41 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       merchant: String(draft.merchant || "").trim(),
       note: String(draft.note || ""),
       referenceId: String(draft.referenceId || ""),
-      categoryId: txType === "transfer" || txType === "credit_payment" ? "transfer" : String(draft.categoryId || ""),
+      categoryId:
+        txType === "transfer" || txType === "credit_payment"
+          ? "transfer"
+          : isSplitMode
+            ? ""
+            : String(draft.categoryId || ""),
       accountId: txType === "transfer" || txType === "credit_payment" ? "" : String(draft.accountId || ""),
       fromAccountId: txType === "transfer" || txType === "credit_payment" ? String(draft.fromAccountId || "") : "",
       toAccountId: txType === "transfer" || txType === "credit_payment" ? String(draft.toAccountId || "") : "",
     };
+
+    if (isSplitMode) {
+      const gid = String(draft?.splitGroupId || "").trim() || generateSplitGroupId();
+      const label = String(draft?.splitLabel || draft?.merchant || draft?.note || "Split")
+        .trim()
+        .slice(0, 80) || "Split";
+
+      const groups = (draft.groups || []).map((g) => ({
+        key: g?.key || "",
+        categoryId: String(g?.categoryId || "").trim(),
+        amount: parseMoneyToSatang(g?.amount),
+        note: String(g?.note || ""),
+      }));
+
+      patch.splitByCategory = true;
+      patch.splitGroupId = gid;
+      patch.splitLabel = label;
+      patch.groups = groups;
+    } else {
+      // If user switched from split to single, clear split fields
+      patch.splitByCategory = false;
+      patch.splitGroupId = "";
+      patch.splitLabel = "";
+      patch.groups = [];
+    }
 
     onSave?.(draft.id, patch);
   };
@@ -341,12 +501,19 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 value={draft.type}
                 onChange={(e) => {
                   const next = normalizeTxType(e.target.value);
-                  setDraft((d) => ({
-                    ...d,
-                    type: next,
-                    categoryId:
-                      next === "transfer" || next === "credit_payment" ? "transfer" : String(d?.categoryId || ""),
-                  }));
+                  setDraft((d) => {
+                    const clearSplit = next === "transfer" || next === "credit_payment";
+                    return {
+                      ...d,
+                      type: next,
+                      categoryId:
+                        next === "transfer" || next === "credit_payment" ? "transfer" : String(d?.categoryId || ""),
+                      splitByCategory: clearSplit ? false : !!d?.splitByCategory,
+                      groups: clearSplit ? [] : Array.isArray(d?.groups) ? d.groups : [],
+                      splitLabel: clearSplit ? "" : String(d?.splitLabel || ""),
+                      splitGroupId: clearSplit ? "" : String(d?.splitGroupId || ""),
+                    };
+                  });
                 }}
                 className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
               >
@@ -360,12 +527,16 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             <label className="text-xs font-bold text-gray-900/60 min-w-0">
               Amount
               <input
-                type="number"
+                type="text"
                 inputMode="decimal"
-                value={draft.amount}
-                onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
-                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                value={isSplitMode ? formatMoneyInputFromSatang(splitTotal) : draft.amount}
+                onChange={(e) => setDraft((d) => ({ ...d, amount: sanitizeMoneyInput(e.target.value) }))}
+                disabled={isSplitMode}
+                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold disabled:opacity-70"
               />
+              {isSplitMode ? (
+                <div className="mt-1 text-[11px] text-gray-900/55">ยอดรวมจากบรรทัด Split</div>
+              ) : null}
             </label>
           </div>
 
@@ -442,21 +613,130 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 </select>
               </label>
 
-              <label className="text-xs font-bold text-gray-900/60 min-w-0">
-                Category
-                <select
-                  value={draft.categoryId}
-                  onChange={(e) => setDraft((d) => ({ ...d, categoryId: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+              {/* ✅ Split toggle */}
+              <div className="rounded-2xl bg-white/20 border border-white/20 p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-extrabold text-gray-900/70">
+                  <Layers size={16} className="text-purple-700" />
+                  Split
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleSplitMode}
+                  className={`w-12 h-7 rounded-full border border-white/20 bg-white/20 relative active:scale-95 transition-transform ${
+                    isSplitMode ? "bg-gray-900/80" : "bg-white/20"
+                  }`}
+                  aria-label="toggle split"
                 >
-                  <option value="">เลือกหมวดหมู่</option>
-                  {catList.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <span
+                    className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                      isSplitMode ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {isSplitMode ? (
+                <>
+                  <label className="text-xs font-bold text-gray-900/60 min-w-0">
+                    Split label (optional)
+                    <input
+                      type="text"
+                      value={draft.splitLabel}
+                      onChange={(e) => setDraft((d) => ({ ...d, splitLabel: e.target.value }))}
+                      className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                      placeholder="เช่น Lotus receipt"
+                    />
+                  </label>
+
+                  <div className="glass-panel border border-white/20 rounded-2xl p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-extrabold text-gray-900/60 uppercase tracking-wide">
+                        Breakdown ({Array.isArray(draft.groups) ? draft.groups.length : 0})
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addGroup}
+                        className="px-3 py-1.5 rounded-xl bg-white/30 border border-white/20 text-gray-900/80 text-xs font-extrabold active:scale-95"
+                      >
+                        + Add line
+                      </button>
+                    </div>
+
+                    <div className="mt-2 space-y-2 max-h-64 overflow-y-auto no-scrollbar pr-1">
+                      {(draft.groups || []).map((g, idx) => (
+                        <div key={`g-${idx}`} className="rounded-2xl bg-white/20 border border-white/15 p-3">
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
+                              <select
+                                value={g.categoryId || ""}
+                                onChange={(e) => updateGroup(idx, { categoryId: e.target.value })}
+                                className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                              >
+                                <option value="">เลือกหมวดหมู่</option>
+                                {catList.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={g.amount ?? ""}
+                                onChange={(e) => updateGroup(idx, { amount: sanitizeMoneyInput(e.target.value) })}
+                                placeholder="0.00"
+                                className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                              />
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeGroup(idx)}
+                              className={`p-2 rounded-xl border border-white/20 bg-white/20 text-gray-900/70 active:scale-95 ${
+                                (draft.groups || []).length <= 2 ? "opacity-40 pointer-events-none" : ""
+                              }`}
+                              title="Remove line"
+                              aria-label="remove"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+
+                          <input
+                            type="text"
+                            value={g.note || ""}
+                            onChange={(e) => updateGroup(idx, { note: e.target.value })}
+                            className="mt-2 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                            placeholder="note (optional)"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-between text-xs">
+                      <div className="text-gray-900/60 font-extrabold">Total</div>
+                      <div className="text-gray-900 font-black">{formatCurrency(splitTotal)}</div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <label className="text-xs font-bold text-gray-900/60 min-w-0">
+                  Category
+                  <select
+                    value={draft.categoryId}
+                    onChange={(e) => setDraft((d) => ({ ...d, categoryId: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  >
+                    <option value="">เลือกหมวดหมู่</option>
+                    {catList.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </>
           )}
 
@@ -856,6 +1136,12 @@ export default function InboxView({ showAlert, showConfirm }) {
             const txType = normalizeTxType(it?.type || it?.txType);
             const { label, icon: Icon } = typeBadge(txType);
 
+            const isSplitItem =
+              (txType === "expense" || txType === "income") &&
+              !!it?.splitByCategory &&
+              Array.isArray(it?.groups) &&
+              it.groups.length >= 2;
+
             const accountLabel = it?.accountId ? accountsById.get(it.accountId)?.name : "";
             const fromLabel = it?.fromAccountId ? accountsById.get(it.fromAccountId)?.name : "";
             const toLabel = it?.toAccountId ? accountsById.get(it.toAccountId)?.name : "";
@@ -905,27 +1191,66 @@ export default function InboxView({ showAlert, showConfirm }) {
                       {isPositiveNumber(Number(it?.amount)) ? formatCurrency(Number(it.amount)) : "—"}
                     </div>
 
-                    <div className="mt-1 text-sm text-gray-900/70 truncate">
+                    <div className="mt-1 text-sm text-gray-900/70 whitespace-normal break-words">
                       {it?.date || "(no date)"}
                       {it?.merchant ? ` • ${it.merchant}` : ""}
                     </div>
 
                     <AttachmentThumb attachmentId={it?.attachmentId} />
 
-                    <div className="mt-2 text-xs text-gray-900/60 space-y-1">
+                    <div className="mt-2 text-xs text-gray-900/60 space-y-1 min-w-0">
                       {txType === "transfer" || txType === "credit_payment" ? (
-                        <div className="truncate">
+                        <div className="whitespace-normal break-words">
                           {fromLabel || "(from?)"} → {toLabel || "(to?)"}
                         </div>
                       ) : (
-                        <div className="truncate">
+                        <div className="whitespace-normal break-words">
                           {accountLabel || "(account?)"}
-                          {catLabel ? ` • ${catLabel}` : ""}
+                          {!isSplitItem && catLabel ? ` • ${catLabel}` : ""}
+                          {isSplitItem ? ` • Split (${it.groups.length})` : ""}
                         </div>
                       )}
-                      {ref ? <div className="truncate">ref: {ref}</div> : null}
-                      {it?.note ? <div className="truncate">{it.note}</div> : null}
+                      {ref ? <div className="break-all">ref: {ref}</div> : null}
+                      {it?.note ? (
+                        <div className="whitespace-pre-wrap break-words">{it.note}</div>
+                      ) : null}
                     </div>
+
+                    {/* ✅ Full breakdown list (scroll inside card) */}
+                    {isSplitItem ? (
+                      <div
+                        className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-28 overflow-y-auto no-scrollbar"
+                      >
+                        <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
+                          Breakdown ({it.groups.length})
+                        </div>
+                        <div className="space-y-2">
+                          {it.groups.map((g, idx) => {
+                            const cat = categoriesById.get(String(g?.categoryId || "")) || null;
+                            const amt = formatCurrency(Number(g?.amount) || 0);
+                            const lineNote = String(g?.note || "").trim();
+                            return (
+                              <div key={`${it.id}-g-${idx}`} className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">
+                                    {cat?.name || "—"}
+                                  </div>
+                                  {lineNote ? (
+                                    <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">
+                                      {lineNote}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className={`shrink-0 text-xs font-black ${txType === "income" ? "text-emerald-700" : "text-red-700"}`}>
+                                  {txType === "income" ? "+" : "-"}
+                                  {amt}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="flex flex-col gap-2 shrink-0">
@@ -978,6 +1303,9 @@ export default function InboxView({ showAlert, showConfirm }) {
           const base = editingItem || (inbox || []).find((x) => x.id === id) || {};
           let nextItem = { ...base, ...patch, id };
 
+          const isSplit =
+            !!nextItem?.splitByCategory && Array.isArray(nextItem?.groups) && nextItem.groups.length >= 2;
+
           // ✅ Smart Merchant Dictionary: normalize + optional autofill
           try {
             const canon = resolveMerchantCanonical(nextItem.merchant || nextItem.note, state?.merchants || []);
@@ -995,6 +1323,11 @@ export default function InboxView({ showAlert, showConfirm }) {
               },
               state?.merchants || []
             );
+
+            // For split items, we never override the per-line categories
+            if (isSplit && mdPatch && typeof mdPatch === "object") {
+              delete mdPatch.categoryId;
+            }
 
             // Only apply autofill when it fills missing/generic fields
             if (mdPatch && Object.keys(mdPatch).length) {
@@ -1026,7 +1359,7 @@ export default function InboxView({ showAlert, showConfirm }) {
           // ✅ Learn mapping after user edits in Inbox (before approval)
           try {
             const t = String(nextItem?.type || nextItem?.txType || "").toLowerCase();
-            if ((t === "expense" || t === "income") && String(nextItem?.merchant || "").trim()) {
+            if (!isSplit && (t === "expense" || t === "income") && String(nextItem?.merchant || "").trim()) {
               learnMerchant?.({
                 merchant: String(nextItem.merchant || "").trim(),
                 txType: t,

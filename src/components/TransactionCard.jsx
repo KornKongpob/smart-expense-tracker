@@ -1,7 +1,7 @@
 // src/components/TransactionCard.jsx
 import React, { useMemo } from "react";
-import { ArrowRightLeft, ChevronRight, CreditCard } from "lucide-react";
-import { isCreditAccount, getAccountLastDigits } from "../utils/accountMatch";
+import { ArrowRightLeft, ChevronRight, CreditCard, Layers } from "lucide-react";
+import { isCreditAccount } from "../utils/accountMatch";
 import { useAppStore } from "../store/store";
 import { formatCurrency, formatDateShort } from "../utils/format";
 
@@ -31,8 +31,35 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
 
   const accounts = state.accounts || [];
   const allTx = state.transactions || [];
+  const categoriesObj = state.categories || { expense: [], income: [] };
+  const categoriesById = useMemo(() => {
+    const all = [...(categoriesObj?.expense || []), ...(categoriesObj?.income || [])];
+    return new Map(all.map((c) => [String(c.id), c]));
+  }, [categoriesObj]);
 
   const isTransfer = !!tx?.isTransfer;
+  const isSplitGroup = !!tx?.isSplitGroup || (String(tx?.splitGroupId || "").trim() && Array.isArray(tx?.splitLines));
+
+  const splitLines = useMemo(() => {
+    if (!isSplitGroup) return null;
+    let lines = Array.isArray(tx?.splitLines) ? tx.splitLines : null;
+    if (!lines || !lines.length) {
+      const gid = String(tx?.splitGroupId || "").trim();
+      lines = (allTx || []).filter((t) => String(t?.splitGroupId || "").trim() === gid && !t?.isTransfer);
+    }
+
+    const ordered = [...(lines || [])].sort((a, b) => {
+      const ai = Number(a?.splitIndex || 0);
+      const bi = Number(b?.splitIndex || 0);
+      if (ai && bi && ai !== bi) return ai - bi;
+      return (Number(b?.amount) || 0) - (Number(a?.amount) || 0);
+    });
+    return ordered;
+  }, [isSplitGroup, tx?.splitGroupId, tx?.splitLines, allTx]);
+
+  const groupNote = String(tx?.note || "").trim();
+  const groupLabel = String(tx?.splitLabel || "").trim();
+  const showGroupNote = isSplitGroup && groupNote && groupLabel && groupNote !== groupLabel;
 
   // หา pair ของ transfer (2 legs) เพื่อแสดงครั้งเดียว + แสดง from → to
   const transferPair = useMemo(() => {
@@ -63,7 +90,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
 
   const isIncome = tx?.type === "income";
 
-  const amountText = formatCurrency(tx?.amount || 0);
+  let amountText = formatCurrency(tx?.amount || 0);
   let amountPrefix = isIncome ? "+" : "-";
   let amountClass = isIncome ? "text-emerald-700" : "text-red-700";
 
@@ -124,7 +151,28 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     badgeText = isCcPayment ? "PAYMENT" : "TRANSFER";
   }
 
+  // -------- Split Group (special rendering) --------
+  if (!isTransfer && isSplitGroup) {
+    const total = (splitLines || []).reduce((s, t) => s + (Number(t?.amount) || 0), 0) || (Number(tx?.amount) || 0);
+    amountText = formatCurrency(total);
+
+    const label = String(tx?.splitLabel || "").trim();
+    title = label || `Split (${(splitLines || []).length})`;
+    subtitle = `${accountName || "—"} • ${safeDateLabel(tx?.date)}`;
+
+    leadingIcon = Layers;
+    leadingIsLucide = true;
+    leadingBg = "rgba(168,85,247,0.15)";
+    badgeText = "SPLIT";
+  }
+
   const Leading = leadingIsLucide ? leadingIcon : null;
+
+  const leadingIconClass = isTransfer
+    ? "text-indigo-700"
+    : isSplitGroup
+    ? "text-purple-700"
+    : "text-gray-900";
 
   return (
     <button
@@ -140,7 +188,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           aria-hidden="true"
         >
           {leadingIsLucide ? (
-            <Leading size={18} className={isTransfer ? "text-indigo-700" : "text-gray-900"} />
+            <Leading size={18} className={leadingIconClass} />
           ) : (
             <span className="text-xl leading-none">{leadingIcon}</span>
           )}
@@ -150,14 +198,16 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="text-sm font-extrabold text-gray-900 truncate">{title}</div>
+                <div className="text-sm font-extrabold text-gray-900 whitespace-normal break-words">
+                  {title}
+                </div>
                 {badgeText ? (
                   <span className="shrink-0 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-white/30 border border-white/15 text-gray-900/80">
                     {badgeText}
                   </span>
                 ) : null}
               </div>
-              <div className="text-xs text-gray-800/60 truncate">{subtitle}</div>
+              <div className="text-xs text-gray-800/60 whitespace-normal break-words">{subtitle}</div>
             </div>
 
             <div className="shrink-0 flex items-center gap-2">
@@ -170,7 +220,45 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           </div>
 
           {tx?.note ? (
-            <div className="mt-1 text-xs text-gray-800/70 truncate">{String(tx.note)}</div>
+            <div className="mt-1 text-xs text-gray-800/70 whitespace-normal break-words">{String(tx.note)}</div>
+          ) : null}
+
+          {/* ✅ Split breakdown (show all + scroll inside card) */}
+          {!isTransfer && isSplitGroup && Array.isArray(splitLines) && splitLines.length ? (
+            <div
+              className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-28 overflow-y-auto no-scrollbar"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
+                Breakdown ({splitLines.length})
+              </div>
+              <div className="space-y-2">
+                {splitLines.map((l) => {
+                  const cat = categoriesById.get(String(l?.category || "")) || null;
+                  const isIncomeLine = String(l?.type || "").toLowerCase() === "income";
+                  const prefix = isIncomeLine ? "+" : "-";
+                  const amt = formatCurrency(Number(l?.amount) || 0);
+                  const lineNote = String(l?.note || "").trim();
+                  return (
+                    <div key={String(l?.id || `${l?.splitIndex || ""}-${l?.category || ""}-${l?.amount || ""}`)} className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">
+                          {cat?.name || "—"}
+                        </div>
+                        {lineNote ? (
+                          <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{lineNote}</div>
+                        ) : null}
+                      </div>
+                      <div className={`shrink-0 text-xs font-black ${isIncomeLine ? "text-emerald-700" : "text-red-700"}`}>
+                        {prefix}
+                        {amt}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
         </div>
       </div>

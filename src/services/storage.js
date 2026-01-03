@@ -114,8 +114,10 @@ function normalizeBoot(data, defaults = {}) {
     : Array.isArray(defaults.defaultMerchants)
     ? defaults.defaultMerchants
     : [];
+  const moneyUnitRaw = String(root.moneyUnit || root.amountUnit || obj.moneyUnit || '').toLowerCase();
+  const moneyUnit = moneyUnitRaw === 'satang' ? 'satang' : 'baht';
 
-  return { transactions, accounts, categories, budgets, recurring, inbox, scanInbox, rules, merchants, ui };
+  return { transactions, accounts, categories, budgets, recurring, inbox, scanInbox, rules, merchants, ui, moneyUnit };
 }
 
 /**
@@ -152,6 +154,7 @@ export function saveAll(payload) {
     v: STORAGE_VERSION,
     updatedAt: Date.now(),
     data: {
+      moneyUnit: String(data.moneyUnit || "satang"),
       transactions: ensureArray(data.transactions, []),
       accounts: ensureArray(data.accounts, []),
       categories: ensureCategoriesShape(data.categories),

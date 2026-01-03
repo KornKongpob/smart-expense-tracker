@@ -101,12 +101,24 @@ export default function DashboardView() {
       byTransferId.get(tid).push(t);
     }
 
+    // 2.1) index split groups from ALL txs (เพื่อ group ใน UI แต่ยังเก็บ tx แยกจริง)
+    const bySplitGroupId = new Map();
+    for (const t of txsAll) {
+      if (isTransferLike(t)) continue;
+      const gid = String(t?.splitGroupId || "").trim();
+      if (!gid) continue;
+      if (!bySplitGroupId.has(gid)) bySplitGroupId.set(gid, []);
+      bySplitGroupId.get(gid).push(t);
+    }
+
     // 3) build display list (Transfer/ชำระบัตร: แสดงครั้งเดียว)
     const seenTransferIds = new Set();
+    const seenSplitGroupIds = new Set();
     const out = [];
 
     for (const t of base) {
       const tid = String(t.transferId || "").trim();
+      const gid = String(t?.splitGroupId || "").trim();
 
       if (isTransferLike(t) && tid) {
         if (seenTransferIds.has(tid)) continue;
@@ -168,6 +180,41 @@ export default function DashboardView() {
           null;
 
         out.push({ tx: displayTx, category: cat, accountName: accountLabel });
+      } else if (!isTransferLike(t) && gid) {
+        // ✅ Split group: แสดง 1 การ์ด (ยอดรวม) แล้ว list breakdown ในการ์ด
+        if (seenSplitGroupIds.has(gid)) continue;
+        seenSplitGroupIds.add(gid);
+
+        const group = bySplitGroupId.get(gid) || [t];
+        const groupSorted = [...group].sort((a, b) => {
+          const ia = Number(a?.splitIndex || 0) || 0;
+          const ib = Number(b?.splitIndex || 0) || 0;
+          if (ia && ib && ia !== ib) return ia - ib;
+          return Math.abs(Number(b?.amount || 0)) - Math.abs(Number(a?.amount || 0));
+        });
+
+        let rep = t;
+        if (filterAccount) rep = groupSorted.find((x) => x.accountId === filterAccount) || groupSorted[0] || t;
+        else rep = groupSorted[0] || t;
+
+        const total = groupSorted.reduce((s, x) => s + (Number(x?.amount) || 0), 0);
+        const label = String(rep?.splitLabel || groupSorted.find((x) => x?.splitLabel)?.splitLabel || "").trim();
+        const baseNote = String(rep?.note || "").trim();
+        const displayNote = label || baseNote || `Split (${groupSorted.length})`;
+
+        const displayTx = {
+          ...rep,
+          id: rep?.id || t.id,
+          amount: total,
+          note: displayNote,
+          isSplitGroup: true,
+          splitGroupId: gid,
+          splitLines: groupSorted,
+          createdAt: Math.max(...groupSorted.map((x) => getTxCreatedAt(x))),
+        };
+
+        const accName = accountsById.get(displayTx.accountId)?.name || "—";
+        out.push({ tx: displayTx, category: null, accountName: accName });
       } else {
         const cat =
           expenseCats.find((c) => c.id === t.category) ||
@@ -262,7 +309,7 @@ export default function DashboardView() {
         {filterAccount || q ? (
           <div className="mt-3 text-[11px] text-gray-900/60 flex items-center gap-2">
             <AlertTriangle size={12} />
-            กรองอยู่ • Transfer/ชำระบัตรเครดิต จะแสดงเป็น 1 รายการ (แม้ข้อมูลจริงเป็น 2 legs)
+            กรองอยู่ • Transfer/ชำระบัตรเครดิต และ Split จะถูกรวมแสดงเป็น 1 รายการ (ข้อมูลจริงยังเป็นหลาย transactions)
           </div>
         ) : null}
       </div>

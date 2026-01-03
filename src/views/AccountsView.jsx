@@ -4,6 +4,7 @@ import { parseDigitsList, choosePrimaryDigits, formatDigitsSummary } from "../ut
 import { useAppStore } from "../store/store";
 import { calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
+import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import {
   Plus,
   Trash2,
@@ -56,6 +57,7 @@ const typeIcon = (t) => {
 };
 
 const formatMoney = (n, currency = "THB") => {
+  if (String(currency || "THB").toUpperCase() === "THB") return formatCurrency(Number(n || 0));
   const v = Number(n || 0);
   try {
     return new Intl.NumberFormat("th-TH", {
@@ -164,7 +166,7 @@ const create = () => {
     matchDigits,
 
     // credit only
-    creditLimit: cType === "credit" ? Number(cCreditLimit || 0) : undefined,
+    creditLimit: cType === "credit" ? parseMoneyToSatang(cCreditLimit) : undefined,
     statementDay: cType === "credit" ? Number(cStatementDay || 1) : undefined,
     dueDay: cType === "credit" ? Number(cDueDay || 1) : undefined,
 
@@ -172,11 +174,10 @@ const create = () => {
     openingBalance: 0,
   };
 
-  const initRaw = String(cInitialBalance || "").trim().replace(/,/g, "");
+  const initRaw = String(cInitialBalance || "").trim();
   if (initRaw) {
-    const desired = Number(initRaw);
-    if (!Number.isFinite(desired)) return showAlert?.("ยอดตั้งต้นไม่ถูกต้อง");
-    if (Math.abs(desired) > 0.000001) {
+    const desired = parseMoneyToSatang(initRaw);
+    if (desired !== 0) {
       setPendingCreateAccount(baseAccount);
       setPendingCreateAdjust({
         accountId: baseAccount.id,
@@ -228,7 +229,7 @@ const create = () => {
     setEIcon(acc?.icon || "💳");
     setEColor(acc?.color || "#111827");
 
-    setECreditLimit(acc?.creditLimit != null ? String(acc.creditLimit) : "");
+    setECreditLimit(acc?.creditLimit != null ? formatMoneyInputFromSatang(acc.creditLimit, { emptyIfZero: true }) : "");
     setEStatementDay(acc?.statementDay != null ? Number(acc.statementDay) : 20);
     setEDueDay(acc?.dueDay != null ? Number(acc.dueDay) : 5);
 
@@ -272,12 +273,12 @@ const create = () => {
       matchDigits,
 
       // credit only
-      creditLimit: eType === "credit" ? Number(eCreditLimit || 0) : undefined,
+      creditLimit: eType === "credit" ? parseMoneyToSatang(eCreditLimit) : undefined,
       statementDay: eType === "credit" ? Number(eStatementDay || 1) : undefined,
       dueDay: eType === "credit" ? Number(eDueDay || 1) : undefined,
     };
 
-    const desiredRaw = String(eDesiredBalance || "").trim().replace(/,/g, "");
+    const desiredRaw = String(eDesiredBalance || "").trim();
     if (!desiredRaw) {
       updateAccount(partial);
       closeEditModal();
@@ -285,13 +286,12 @@ const create = () => {
       return;
     }
 
-    const desired = Number(desiredRaw);
-    if (!Number.isFinite(desired)) return showAlert?.("ยอดบัญชีใหม่ไม่ถูกต้อง");
+    const desired = parseMoneyToSatang(desiredRaw);
 
     const current = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
     const delta = desired - current;
 
-    if (Math.abs(delta) < 0.000001) {
+    if (delta === 0) {
       updateAccount(partial);
       closeEditModal();
       showAlert?.("บันทึกแล้ว");
@@ -771,9 +771,9 @@ const create = () => {
   <div className="flex items-center gap-2 min-w-0">
     <input
       value={cInitialBalance}
-      onChange={(e) => setCInitialBalance(e.target.value)}
+      onChange={(e) => setCInitialBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
       className="flex-1 min-w-0 glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-      placeholder={cType === "credit" ? "เช่น -5000" : "เช่น 500"}
+      placeholder={cType === "credit" ? "เช่น -5000.00" : "เช่น 500.00"}
       inputMode="decimal"
     />
     {cType === "credit" ? (
@@ -807,9 +807,9 @@ const create = () => {
                   </label>
                   <input
                     value={cCreditLimit}
-                    onChange={(e) => setCCreditLimit(e.target.value)}
+                    onChange={(e) => setCCreditLimit(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
                     className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                    placeholder="เช่น 50000"
+                    placeholder="เช่น 50000.00"
                     inputMode="decimal"
                   />
                 </div>
@@ -892,7 +892,7 @@ const create = () => {
             // 1) create account with openingBalance=0
             addAccount({ ...pendingCreateAccount, openingBalance: 0 });
             // 2) record adjust tx
-            const desired = Number(pendingCreateAdjust.desired || 0);
+            const desired = Number(pendingCreateAdjust.desired || 0); // satang
             const isIncome = desired > 0;
             store.upsertTransaction({
               id: generateId(),
@@ -1091,7 +1091,7 @@ const create = () => {
                               <div className="flex items-center gap-2 min-w-0">
                                 <input
                                   value={eDesiredBalance}
-                                  onChange={(e) => setEDesiredBalance(e.target.value)}
+                                  onChange={(e) => setEDesiredBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
                                   className="flex-1 min-w-0 glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
                                   placeholder={eType === "credit" ? "เช่น -5000" : "เช่น 505"}
                                   inputMode="decimal"
@@ -1151,9 +1151,9 @@ const create = () => {
                   </label>
                   <input
                     value={eCreditLimit}
-                    onChange={(e) => setECreditLimit(e.target.value)}
+                    onChange={(e) => setECreditLimit(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
                     className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                    placeholder="เช่น 50000"
+                    placeholder="เช่น 50000.00"
                     inputMode="decimal"
                   />
                 </div>

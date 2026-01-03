@@ -59,6 +59,13 @@ export const generateId = () => makeId("id");
 export const generateTransferId = () => makeId("tr");
 
 /**
+ * ✅ generateSplitGroupId
+ * - สำหรับ split transaction group id (sg_...)
+ * - ใช้ผูก tx หลายรายการเข้าด้วยกันเพื่อแสดงเป็น 1 กลุ่มใน UI
+ */
+export const generateSplitGroupId = () => makeId("sg");
+
+/**
  * (Optional helpers) ถ้าต้องการให้โค้ดส่วนอื่นเรียกได้สะดวกขึ้น
  * ไม่บังคับใช้ แต่ปลอดภัยที่จะมีไว้
  */

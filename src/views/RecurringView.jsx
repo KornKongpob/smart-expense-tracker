@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { ChevronRight, Plus, Trash2, Check, X, Repeat, Pencil, PlayCircle, CalendarClock } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { formatCurrency, toISODate } from "../utils/format";
+import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { parseDateSafe } from "../store/selectors";
 
 function ModalShell({ title, children, onClose }) {
@@ -104,7 +105,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
   const resetForm = () => {
     setEditingId(null);
     setRType("expense");
-    setAmount("0");
+    setAmount("0.00");
     setCategoryId(expenseCats?.[0]?.id || "other");
     setAccountId(accounts?.[0]?.id || "");
     setNote("Recurring");
@@ -121,7 +122,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
   const openEdit = (r) => {
     setEditingId(r?.id || null);
     setRType(r?.type === "income" ? "income" : "expense");
-    setAmount(String(safeNum(r?.amount, 0)));
+    setAmount(formatMoneyInputFromSatang(r?.amount ?? 0, { emptyIfZero: false }));
     setCategoryId(String(r?.categoryId || (r?.type === "income" ? incomeCats?.[0]?.id : expenseCats?.[0]?.id) || "other"));
     setAccountId(String(r?.accountId || accounts?.[0]?.id || ""));
     setNote(String(r?.note || "Recurring"));
@@ -132,7 +133,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
   };
 
   const save = () => {
-    const amt = Number(amount);
+    const amt = parseMoneyToSatang(amount);
     const itv = Number(interval);
 
     if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
@@ -390,8 +391,8 @@ export default function RecurringView({ showAlert, showConfirm }) {
           <label className="text-xs font-bold text-gray-700 mb-1 block">จำนวนเงิน</label>
           <input
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            type="number"
+            onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
+            inputMode="decimal"
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
           />
 

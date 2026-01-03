@@ -4,6 +4,7 @@ import { ChevronRight, Bell, Trash2, Check, X, ChevronLeft, Sparkles } from "luc
 import { useAppStore } from "../store/store";
 import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
+import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 
 function monthKeyToDate(monthKey) {
   const s = String(monthKey || "").trim(); // "YYYY-MM"
@@ -114,14 +115,14 @@ export default function BudgetsView({ showAlert, showConfirm }) {
   const openEdit = (catId) => {
     const b = getBudget(budgets, month, catId);
     setEditingCategoryId(catId);
-    setLimit(String(b?.limit ?? ""));
+    setLimit(b?.limit != null ? formatMoneyInputFromSatang(b.limit, { emptyIfZero: true }) : "");
     setAlertPct(String(b?.alertPct ?? 90));
     setOpen(true);
   };
 
   const save = () => {
     if (!editingCategoryId) return;
-    const lim = Number(limit);
+    const lim = parseMoneyToSatang(limit);
     const ap = Number(alertPct);
 
     if (!Number.isFinite(lim) || lim <= 0) return showAlert?.("กรุณาใส่วงเงินงบประมาณให้ถูกต้อง");
@@ -157,7 +158,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
   }, [spentMap, editingCategoryId]);
 
   const preview = useMemo(() => {
-    const lim = Number(limit);
+    const lim = parseMoneyToSatang(limit);
     const ap = Number(alertPct);
     if (!Number.isFinite(lim) || lim <= 0) return null;
 
@@ -399,10 +400,10 @@ export default function BudgetsView({ showAlert, showConfirm }) {
           <label className="text-xs font-bold text-gray-700 mb-1 block">วงเงินงบ (THB)</label>
           <input
             value={limit}
-            onChange={(e) => setLimit(e.target.value)}
-            type="number"
+            onChange={(e) => setLimit(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
+            inputMode="decimal"
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-            placeholder="เช่น 5000"
+            placeholder="เช่น 5000.00"
           />
 
           <div className="mt-2 flex gap-2 flex-wrap">
@@ -414,7 +415,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                 className="px-3 py-1.5 rounded-full glass-chip text-[12px] font-extrabold text-gray-900/80 border border-white/20 active:scale-95"
                 title={`ตั้ง ${v}`}
               >
-                {formatCurrency(v)}
+                {formatCurrency(v * 100)}
               </button>
             ))}
           </div>

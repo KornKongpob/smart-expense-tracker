@@ -169,6 +169,22 @@ export function reducer(state, action) {
       };
     }
 
+    case ACTIONS.DELETE_MANY_TRANSACTIONS: {
+      const ids = Array.isArray(a.payload) ? a.payload.map(String) : [];
+      if (!ids.length) return s;
+
+      const idSet = new Set(ids);
+      const transactions = toArray(s.transactions).filter((t) => !idSet.has(String(t?.id || "")));
+      const editingId = idSet.has(String(s?.ui?.editingId || "")) ? null : s?.ui?.editingId;
+
+      const navigateToDashboard = a?.meta?.navigateToDashboard !== false;
+      return {
+        ...s,
+        transactions,
+        ui: navigateToDashboard ? { ...s.ui, editingId, view: "dashboard" } : { ...s.ui, editingId },
+      };
+    }
+
     // accounts
     case ACTIONS.ADD_ACCOUNT: {
       const acc0 = a.payload || {};

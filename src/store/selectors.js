@@ -95,7 +95,7 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
   const options = {
     maxDays: Number(opts.maxDays) || 7,
     // A hard cap to avoid obviously-non-duplicate matches
-    maxAbsAmountDiff: Number(opts.maxAbsAmountDiff) || 20,
+    maxAbsAmountDiff: Number(opts.maxAbsAmountDiff) || 2000,
     // Relative cap (e.g., 5% of amount)
     maxRelAmountDiff: Number(opts.maxRelAmountDiff) || 0.05,
     threshold: Number(opts.threshold) || 0.62,
@@ -168,11 +168,11 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
   const scoreAmount = (a, b) => {
     const diff = Math.abs(a - b);
     const rel = diff / Math.max(Math.abs(a), Math.abs(b), 1);
-    if (diff <= 0.01) return 0.4;
-    if (diff <= 1) return 0.34;
-    if (diff <= 2) return 0.3;
-    if (diff <= 5) return 0.22;
-    if (diff <= 10) return 0.16;
+    if (diff <= 1) return 0.4; // 1 satang (0.01 THB)
+    if (diff <= 100) return 0.34; // 1 THB
+    if (diff <= 200) return 0.3; // 2 THB
+    if (diff <= 500) return 0.22; // 5 THB
+    if (diff <= 1000) return 0.16; // 10 THB
     if (rel <= 0.01) return 0.16;
     if (rel <= 0.02) return 0.1;
     return 0;
