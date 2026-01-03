@@ -289,10 +289,13 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     !!draft?.splitByCategory &&
     Array.isArray(draft?.groups);
 
-  const splitTotal = useMemo(() => {
+  // IMPORTANT: Avoid conditional hooks inside this modal.
+  // Using useMemo here would break the Rules of Hooks because the modal returns early
+  // before draft is initialized.
+  const splitTotal = (() => {
     if (!isSplitMode) return parseMoneyToSatang(draft?.amount);
     return (draft.groups || []).reduce((s, g) => s + parseMoneyToSatang(g?.amount), 0);
-  }, [isSplitMode, draft?.groups, draft?.amount]);
+  })();
 
   const toggleSplitMode = () => {
     setDraft((d) => {
