@@ -662,7 +662,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                       </button>
                     </div>
 
-                    <div className="mt-2 space-y-2 max-h-64 overflow-y-auto no-scrollbar pr-1">
+                    <div className="mt-2 space-y-2 max-h-64 overflow-y-auto overflow-x-hidden no-scrollbar pr-1">
                       {(draft.groups || []).map((g, idx) => (
                         <div key={`g-${idx}`} className="rounded-2xl bg-white/20 border border-white/15 p-3">
                           <div className="flex items-start gap-2">
@@ -992,7 +992,7 @@ export default function InboxView({ showAlert, showConfirm }) {
   const statusLine = tab === "pending" ? `${pendingCount} pending` : `${approved.length} approved`;
 
   return (
-    <div className="p-4 pb-28">
+    <div className="p-4 pb-28 min-w-0 overflow-x-hidden">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -1191,7 +1191,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                       {isPositiveNumber(Number(it?.amount)) ? formatCurrency(Number(it.amount)) : "—"}
                     </div>
 
-                    <div className="mt-1 text-sm text-gray-900/70 whitespace-normal break-words">
+                    <div className="mt-1 text-sm text-gray-900/70 whitespace-normal break-words wrap-anywhere">
                       {it?.date || "(no date)"}
                       {it?.merchant ? ` • ${it.merchant}` : ""}
                     </div>
@@ -1200,11 +1200,11 @@ export default function InboxView({ showAlert, showConfirm }) {
 
                     <div className="mt-2 text-xs text-gray-900/60 space-y-1 min-w-0">
                       {txType === "transfer" || txType === "credit_payment" ? (
-                        <div className="whitespace-normal break-words">
+                        <div className="whitespace-normal break-words wrap-anywhere">
                           {fromLabel || "(from?)"} → {toLabel || "(to?)"}
                         </div>
                       ) : (
-                        <div className="whitespace-normal break-words">
+                        <div className="whitespace-normal break-words wrap-anywhere">
                           {accountLabel || "(account?)"}
                           {!isSplitItem && catLabel ? ` • ${catLabel}` : ""}
                           {isSplitItem ? ` • Split (${it.groups.length})` : ""}
@@ -1212,14 +1212,14 @@ export default function InboxView({ showAlert, showConfirm }) {
                       )}
                       {ref ? <div className="break-all">ref: {ref}</div> : null}
                       {it?.note ? (
-                        <div className="whitespace-pre-wrap break-words">{it.note}</div>
+                        <div className="whitespace-pre-wrap break-words wrap-anywhere">{it.note}</div>
                       ) : null}
                     </div>
 
                     {/* ✅ Full breakdown list (scroll inside card) */}
                     {isSplitItem ? (
                       <div
-                        className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-28 overflow-y-auto no-scrollbar"
+                        className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-28 overflow-y-auto overflow-x-hidden no-scrollbar"
                       >
                         <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
                           Breakdown ({it.groups.length})
@@ -1231,12 +1231,12 @@ export default function InboxView({ showAlert, showConfirm }) {
                             const lineNote = String(g?.note || "").trim();
                             return (
                               <div key={`${it.id}-g-${idx}`} className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal wrap-anywhere">
                                     {cat?.name || "—"}
                                   </div>
                                   {lineNote ? (
-                                    <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">
+                                    <div className="text-[11px] text-gray-900/60 break-words whitespace-normal wrap-anywhere">
                                       {lineNote}
                                     </div>
                                   ) : null}
