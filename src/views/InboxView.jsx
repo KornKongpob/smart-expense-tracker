@@ -986,15 +986,18 @@ export default function InboxView({ showAlert, showConfirm }) {
 
   const editingItem = useMemo(() => {
     if (!editingId) return null;
-    return (inbox || []).find((x) => x.id === editingId) || null;
+    // Some callers may supply numeric ids; normalize to string to avoid "Edit does nothing".
+    const target = String(editingId);
+    return (inbox || []).find((x) => String(x?.id) === target) || null;
   }, [editingId, inbox]);
 
   const statusLine = tab === "pending" ? `${pendingCount} pending` : `${approved.length} approved`;
 
   return (
     <div className="p-4 pb-28 min-w-0 overflow-x-hidden">
-      <div className="flex items-start justify-between gap-3">
-        <div>
+      {/* Header: stack on small screens to prevent action buttons from overflowing (no horizontal scroll) */}
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 rounded-2xl bg-gray-900/10 flex items-center justify-center">
               <Inbox size={20} />
@@ -1011,11 +1014,11 @@ export default function InboxView({ showAlert, showConfirm }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 min-w-0 w-full sm:w-auto">
           <button
             type="button"
             onClick={() => startNewTransaction?.() ?? navigate("add")}
-            className="px-3 py-2 rounded-xl bg-white/30 border border-white/20 text-gray-900/70 font-bold active:scale-95"
+            className="w-full sm:w-auto px-3 py-2 rounded-xl bg-white/30 border border-white/20 text-gray-900/70 font-bold active:scale-95"
           >
             <span className="inline-flex items-center gap-2">
               <Check size={16} />
@@ -1028,14 +1031,17 @@ export default function InboxView({ showAlert, showConfirm }) {
               type="button"
               onClick={onClearApproved}
               disabled={!approved.length}
-              className={`px-3 py-2 rounded-xl font-bold active:scale-95 inline-flex items-center gap-2 ${
+              className={`w-full sm:w-auto px-3 py-2 rounded-xl font-bold active:scale-95 flex items-center justify-center gap-2 ${
                 approved.length
                   ? "bg-red-600 text-white shadow-red-200"
                   : "bg-white/20 text-gray-700/50 border border-white/20"
               }`}
             >
               <Trash2 size={16} />
-              Clear Approved
+              <span className="whitespace-normal break-words wrap-anywhere">
+                <span className="sm:hidden">Clear</span>
+                <span className="hidden sm:inline">Clear Approved</span>
+              </span>
             </button>
           ) : null}
         </div>
@@ -1258,7 +1264,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                       <>
                         <button
                           type="button"
-                          onClick={() => setEditingId(it.id)}
+                          onClick={() => setEditingId(String(it.id))}
                           className="px-4 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
                         >
                           <Edit2 size={16} />
