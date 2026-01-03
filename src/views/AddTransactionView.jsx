@@ -750,14 +750,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [queue, setQueue] = useState([]); // queue items
   const [expandedId, setExpandedId] = useState(null);
 
-  // post-scan action modal (per scan batch)
+  // scan batch
   const scanBatchIdRef = useRef(0);
-  const [postScanBatchId, setPostScanBatchId] = useState(null);
-  const [handledBatchId, setHandledBatchId] = useState(null);
-  const [postScanModalOpen, setPostScanModalOpen] = useState(false);
   const [dupDecisionOpen, setDupDecisionOpen] = useState(false);
-
-  const existingRefSet = useMemo(() => {
+const existingRefSet = useMemo(() => {
     const set = new Set();
     for (const t of state.transactions || []) {
       const r = String(t.ref || "").trim();
@@ -874,9 +870,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     setQueue([]);
     setExpandedId(null);
     setScanStatus("");
-    setPostScanBatchId(null);
-    setHandledBatchId(null);
-    setPostScanModalOpen(false);
     setDupDecisionOpen(false);
     createdCatRef.current = { expense: new Map(), income: new Map() };
   };
@@ -1641,7 +1634,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     } finally {
       setIsScanning(false);
       setScanStatus("");
-      setPostScanBatchId(batchId);
     }
   };
 
@@ -1655,14 +1647,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return (queue || []).some((q) => q.status === "ready");
   }, [queue]);
 
-  useEffect(() => {
-    if (isScanning) return;
-    if (!postScanBatchId) return;
-    if (handledBatchId === postScanBatchId) return;
-    const hasReadyInBatch = (queue || []).some((q) => q.status === "ready" && q.batchId === postScanBatchId);
-    if (hasReadyInBatch) setPostScanModalOpen(true);
-  }, [isScanning, postScanBatchId, handledBatchId, queue]);
-
+  
   const duplicateReadyCount = useMemo(() => {
     return (queue || []).filter((q) => q.status === "ready" && q.duplicate).length;
   }, [queue]);
@@ -1691,8 +1676,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
     addScanInboxItems(serializable);
     clearQueue();
-    setHandledBatchId(postScanBatchId);
-    setPostScanModalOpen(false);
     setDupDecisionOpen(false);
     navigate("inbox");
     showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
@@ -1730,14 +1713,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return true;
   };
 
-  const closePostScanModal = () => {
-    setPostScanModalOpen(false);
-    if (postScanBatchId) setHandledBatchId(postScanBatchId);
-  };
-
   const handlePostScanSaveNow = () => {
-    setPostScanModalOpen(false);
-    if (postScanBatchId) setHandledBatchId(postScanBatchId);
     if (duplicateReadyCount > 0) {
       // ✅ Save non-duplicates immediately, then ask what to do with duplicates.
       createTransactionsFromQueue({ scope: "nonDuplicates", duplicateMode: "includeAll", navigateToDashboard: false });
@@ -1745,10 +1721,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       return;
     }
     createTransactionsFromQueue();
-  };
-
-  const handlePostScanSendToInbox = () => {
-    sendQueueToInbox();
   };
 
   const handleDupDecision = (action) => {
@@ -1769,11 +1741,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     // default: save duplicates
     const ok = createTransactionsFromQueue({ scope: "duplicates", duplicateMode: "includeAll", navigateToDashboard: true });
     if (ok) setDupDecisionOpen(false);
-  };
-
-  const backToPostScanModal = () => {
-    setDupDecisionOpen(false);
-    setPostScanModalOpen(true);
   };
 
   const createTransactionsFromQueue = (
@@ -3203,51 +3170,6 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             <Check size={18} />
             Save now
           </button>
-        </div>
-      ) : null}
-
-      {/* Post-scan action modal */}
-      {postScanModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button type="button" className="absolute inset-0 bg-black/40" onClick={closePostScanModal} aria-label="Close" />
-          <div className="relative w-full max-w-sm glass-card rounded-3xl p-5 border border-white/20">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-extrabold text-gray-900">หลังสแกนเสร็จ</h3>
-                <p className="mt-1 text-sm text-gray-900/70">ต้องการบันทึกทันทีหรือส่งเข้า Inbox?</p>
-                {duplicateReadyCount ? (
-                  <p className="mt-2 text-xs font-extrabold text-amber-700 inline-flex items-center gap-1">
-                    <AlertTriangle size={14} /> Possible duplicate {duplicateReadyCount} รายการ
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                onClick={closePostScanModal}
-                className="p-2 rounded-xl bg-white/30 border border-white/20 text-gray-900/70 active:scale-95"
-                aria-label="close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="mt-5 grid gap-3">
-              <button
-                type="button"
-                onClick={handlePostScanSaveNow}
-                className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-indigo-200 active:scale-95"
-              >
-                Save now
-              </button>
-              <button
-                type="button"
-                onClick={handlePostScanSendToInbox}
-                className="w-full py-4 rounded-2xl bg-gray-900/90 text-white font-extrabold shadow-xl active:scale-95"
-              >
-                Send to Inbox
-              </button>
-            </div>
-          </div>
         </div>
       ) : null}
 
