@@ -68,14 +68,48 @@ function buildTransactionsFromInboxItem(item) {
     if (!accountId) throw new Error("ยังไม่ได้เลือก Account สำหรับรายการแบบ Split");
 
     const splitGroupId = String(item?.splitGroupId || "").trim() || generateSplitGroupId();
-    const splitCount = item.groups.length;
     const splitLabel = String(item?.splitLabel || merchant || item?.note || "Split").trim().slice(0, 80) || "Split";
 
+    // ✅ Ignore zero/invalid lines: only create split transactions for amount > 0
+    const usableGroups = (item.groups || [])
+      .map((g) => ({ ...g, amount: asSatang(g?.amount) }))
+      .filter((g) => isPositiveNumber(g.amount));
+
+    // If only 1 usable line remains, fallback to a single transaction instead of a split group
+    if (usableGroups.length === 1) {
+      const g0 = usableGroups[0];
+      const categoryId = g0?.categoryId || item?.categoryId || "";
+      if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับรายการนี้");
+
+      return [
+        {
+          id: generateId(),
+          type: txType,
+          amount: g0.amount,
+          date,
+          merchant,
+          note: g0?.note ? `${note ? note + "\n\n" : ""}${g0.note}` : note,
+          ref: ref || "",
+          category: categoryId,
+          accountId,
+          isTransfer: false,
+          transferId: null,
+          attachmentId: item?.attachmentId || null,
+          source: "inbox",
+        },
+      ];
+    }
+
+    if (usableGroups.length < 2) {
+      throw new Error("Split จะสร้างเฉพาะบรรทัดที่ยอดมากกว่า 0 และต้องเหลืออย่างน้อย 2 บรรทัด");
+    }
+
+    const splitCount = usableGroups.length;
+
     const txs = [];
-    for (let i = 0; i < item.groups.length; i++) {
-      const g = item.groups[i];
-      const amount = asSatang(g?.amount);
-      if (!isPositiveNumber(amount)) throw new Error("ยอดเงินในกลุ่ม Split ต้องมากกว่า 0");
+    for (let i = 0; i < usableGroups.length; i++) {
+      const g = usableGroups[i];
+      const amount = g.amount;
       const categoryId = g?.categoryId || item?.categoryId || "";
       if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับกลุ่ม Split");
 
@@ -267,7 +301,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       splitGroupId: String(item?.splitGroupId || ""),
       splitLabel: String(item?.splitLabel || ""),
       groups: isSplit
-        ? (item.groups || []).map((g) => ({
+        ? (item.groups || []).filter((g) => asSatang(g?.amount) > 0).map((g) => ({
             key: g?.key || "",
             categoryId: String(g?.categoryId || ""),
             amount: g?.amount != null ? formatMoneyInputFromSatang(asSatang(g.amount)) : "",
@@ -294,7 +328,10 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
   // before draft is initialized.
   const splitTotal = (() => {
     if (!isSplitMode) return parseMoneyToSatang(draft?.amount);
-    return (draft.groups || []).reduce((s, g) => s + parseMoneyToSatang(g?.amount), 0);
+    return (draft.groups || []).reduce((s, g) => {
+      const a = parseMoneyToSatang(g?.amount);
+      return a > 0 ? s + a : s;
+    }, 0);
   })();
 
   const toggleSplitMode = () => {
@@ -394,17 +431,18 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       }
 
       if (isSplitMode) {
-        const groups = Array.isArray(draft.groups) ? draft.groups : [];
+        const groupsRaw = Array.isArray(draft.groups) ? draft.groups : [];
+        // ✅ Ignore zero/invalid lines: only keep groups with amount > 0
+        const groups = groupsRaw
+          .map((g) => ({ ...g, amountSatang: parseMoneyToSatang(g?.amount) }))
+          .filter((g) => isPositiveNumber(g.amountSatang));
+
         if (groups.length < 2) {
-          showAlert?.("Split ต้องมีอย่างน้อย 2 บรรทัด");
+          showAlert?.("Split จะสร้างเฉพาะบรรทัดที่ยอดมากกว่า 0 และต้องเหลืออย่างน้อย 2 บรรทัด");
           return;
         }
+
         for (const g of groups) {
-          const a = parseMoneyToSatang(g?.amount);
-          if (!isPositiveNumber(a)) {
-            showAlert?.("ยอดเงินในแต่ละบรรทัดของ Split ต้องมากกว่า 0");
-            return;
-          }
           if (!String(g?.categoryId || "").trim()) {
             showAlert?.("กรุณาเลือก Category ให้ครบทุกบรรทัดของ Split");
             return;
@@ -437,12 +475,14 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         .trim()
         .slice(0, 80) || "Split";
 
-      const groups = (draft.groups || []).map((g) => ({
-        key: g?.key || "",
-        categoryId: String(g?.categoryId || "").trim(),
-        amount: parseMoneyToSatang(g?.amount),
-        note: String(g?.note || ""),
-      }));
+      const groups = (draft.groups || [])
+        .map((g) => ({
+          key: g?.key || "",
+          categoryId: String(g?.categoryId || "").trim(),
+          amount: parseMoneyToSatang(g?.amount),
+          note: String(g?.note || ""),
+        }))
+        .filter((g) => isPositiveNumber(g.amount));
 
       patch.splitByCategory = true;
       patch.splitGroupId = gid;

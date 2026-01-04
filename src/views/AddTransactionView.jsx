@@ -1387,7 +1387,7 @@ const existingRefSet = useMemo(() => {
                 amount: parseMoneyToSatang(g.amount),
                 names: Array.isArray(g.names) ? g.names.slice(0, 6) : [],
               };
-            });
+            }).filter((g) => Number(g?.amount || 0) > 0);
           }
 
           const groupSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
@@ -1782,7 +1782,16 @@ const existingRefSet = useMemo(() => {
         if (!q.accountId) return showAlert?.("กรุณาเลือกบัญชีให้ครบ");
 
         if (q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length) {
-          for (const g of q.groups) {
+          // ✅ Ignore zero/invalid lines: only create split transactions for amount > 0
+          const positives = q.groups
+            .map((g) => ({ ...g, amount: Number(g.amount) || 0 }))
+            .filter((g) => g.amount > 0);
+
+          if (positives.length < 2) {
+            return showAlert?.("Split จะสร้างเฉพาะบรรทัดที่ยอดมากกว่า 0 และต้องเหลืออย่างน้อย 2 บรรทัด");
+          }
+
+          for (const g of positives) {
             if (!g.categoryId) return showAlert?.("กรุณาเลือกหมวดหมู่ให้ครบ (ในกลุ่มแยกหมวด)");
             if (!Number.isFinite(Number(g.amount)) || Number(g.amount) <= 0)
               return showAlert?.("ยอดเงินในกลุ่มแยกหมวดไม่ถูกต้อง");
