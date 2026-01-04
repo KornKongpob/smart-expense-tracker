@@ -55,10 +55,11 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
   const {
     // ✅ More conservative (higher quality) defaults for better OCR accuracy.
     // If the image is still too large, we gradually reduce quality to stay under maxBytes.
-    maxDim = 2400,
-    maxBytes = 3_500_000, // ~3.5MB binary
-    qualityStart = 0.92,
-    qualityMin = 0.72,
+    // Keep more pixels for Thai small fonts, but still cap payload size.
+    maxDim = 2800,
+    maxBytes = 3_500_000, // ~3.5MB binary (base64 will be larger)
+    qualityStart = 0.96,
+    qualityMin = 0.78,
     qualityStep = 0.05,
   } = opts;
 

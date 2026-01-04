@@ -99,7 +99,13 @@ function safeNumber(v) {
   if (v == null) return null;
   const s = String(v).trim();
   if (!s) return null;
-  const cleaned = toArabicDigits(s).replace(/[฿$, ]+/g, "").replace(/,/g, "");
+  // Remove currency symbols/commas/spaces, then strip any trailing noise
+  // (e.g. 0.00N on some Thai receipts).
+  let cleaned = toArabicDigits(s).replace(/[฿$, ]+/g, "").replace(/,/g, "");
+  cleaned = cleaned.replace(/[^0-9.\-]/g, "");
+  // If multiple dots exist, keep the first.
+  const parts = cleaned.split(".");
+  if (parts.length > 2) cleaned = parts[0] + "." + parts.slice(1).join("");
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 }
@@ -427,7 +433,13 @@ function normalizeItems(items) {
     const unit_price = safeNumber(it.unit_price ?? it.unitPrice ?? it.price);
     const total = safeNumber(it.total ?? it.amount ?? it.line_total ?? it.lineTotal);
 
-    const cat = normalizeCategoryKey(it.category_key ?? it.category) || inferCategoryFromText(name) || null;
+    // IMPORTANT:
+    // - Do NOT force category_key to "other" when missing.
+    // - Do NOT infer category here.
+    //   We intentionally keep category_key as null/empty to let the client-side
+    //   receiptCategorizer infer categories from the (often Thai) item names.
+    //   This improves accuracy and avoids "everything becomes other".
+    const cat = normalizeCategoryKey(it.category_key ?? it.category) || null;
 
     let finalTotal = total;
     if (finalTotal == null && qty != null && unit_price != null) finalTotal = qty * unit_price;
@@ -749,6 +761,16 @@ function normalizeScanResult(parsed, rawText) {
     items = [];
   }
 
+  // For receipts: treat item.category_key="other" as unknown so the client can
+  // infer categories from Thai item names (much more accurate than forcing "other").
+  if (doc_type === "receipt" && Array.isArray(items) && items.length) {
+    items = items.map((it) => {
+      const k = normalizeCategoryKey(it?.category_key ?? it?.category);
+      if (k === "other") return { ...it, category_key: null };
+      return it;
+    });
+  }
+
   // ---- category ----
   let category =
     normalizeCategoryKey(parsed?.category_key) ||
@@ -952,10 +974,18 @@ export default async function handler(req, res) {
       return s;
     };
 
-    const primaryModel = normalizeOpenAIModel(process.env.OPENAI_MODEL);
+    // ✅ Default model choice
+    // We bias toward accuracy for OCR-heavy receipts (Thai small fonts) by defaulting to gpt-4o.
+    // You can override with OPENAI_MODEL.
+    const primaryModel = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-4o");
+
     // ✅ Optional fallback for higher accuracy OCR (especially small Thai fonts)
     // If OPENAI_MODEL_FALLBACK is not set, we default to gpt-4o (only used when needed).
     const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_MODEL_FALLBACK || "gpt-4o");
+
+    // ✅ Items-only extraction model (focused on reading receipt line items)
+    // You can override with OPENAI_ITEMS_MODEL (recommended: gpt-4o).
+    const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || fallbackModel || primaryModel);
 
     // ✅ ปรับ prompt ให้ AI “ส่งสัญญาณ” ชำระบัตรเครดิตมาเลย
     // - ถ้าเป็นสลิปชำระบัตรเครดิต/โอนเข้าบัตรเครดิต: tx_type="transfer", tx_subtype="credit_card_payment", is_credit_card_payment=true
@@ -1115,6 +1145,34 @@ Schema (ALL keys must exist; use null if unknown):
       },
     };
 
+    // Focused schema: extract ONLY purchased line items (no category burden, no transfer fields)
+    const items_only_format = {
+      type: "json_schema",
+      name: "receipt_items",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items"],
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["name", "qty", "unit_price", "line_total"],
+              properties: {
+                name: { type: "string" },
+                qty: { anyOf: [{ type: "number" }, { type: "null" }] },
+                unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
+                line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
+              },
+            },
+          },
+        },
+      },
+    };
+
     const callOpenAI = async (modelToUse, promptText) => {
       const r = await fetch(OPENAI_URL, {
         method: "POST",
@@ -1135,6 +1193,34 @@ Schema (ALL keys must exist; use null if unknown):
               ],
             },
           ],
+        }),
+      });
+
+      const data = await r.json().catch(() => null);
+      return { r, data, modelUsed: modelToUse };
+    };
+
+    const callOpenAIItemsOnly = async (modelToUse, promptText) => {
+      const r = await fetch(OPENAI_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: modelToUse,
+          input: [
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: promptText },
+                { type: "input_image", image_url: finalImage },
+              ],
+            },
+          ],
+          temperature: 0,
+          max_output_tokens: 1100,
+          text: { format: items_only_format },
         }),
       });
 
@@ -1191,7 +1277,8 @@ Schema (ALL keys must exist; use null if unknown):
         isReceipt &&
         (
           needsReview ||
-          itemsCount === 0 ||
+          // If receipt has <2 paid line items, treat OCR as weak (common when fonts are small)
+          itemsCount < 2 ||
           (typeof itemsConf === "number" && itemsConf < 0.55) ||
           (typeof overallConf === "number" && overallConf < 0.55) ||
           mismatch
@@ -1225,7 +1312,66 @@ Schema (ALL keys must exist; use null if unknown):
       });
     }
 
-    const normalized = normalizeScanResult(parsed, text);
+    // 3) Items-only pass (receipt line items) – focused on extracting purchased rows.
+    // The full schema asks the model for many fields at once; in practice, that can
+    // make items[] extraction brittle. This targeted pass dramatically improves
+    // "Split children" reliability.
+    let parsedForNormalize = parsed;
+    try {
+      const dt = safeString(parsedForNormalize?.doc_type ?? parsedForNormalize?.docType).toLowerCase();
+      const isReceipt = dt === "receipt";
+      if (isReceipt) {
+        const items0 = Array.isArray(parsedForNormalize?.items) ? parsedForNormalize.items : [];
+        const pos0 = items0
+          .map((it) => safeNumber(it?.line_total ?? it?.total ?? it?.amount))
+          .filter((n) => typeof n === "number" && Number.isFinite(n) && n > 0);
+        const itemsCount0 = pos0.length;
+
+        const amt0 = safeNumber(parsedForNormalize?.amount);
+        const sum0 = items0.reduce((s, it) => s + (safeNumber(it?.line_total ?? it?.total ?? it?.amount) || 0), 0);
+        const mismatch0 = amt0 != null && sum0 > 0 ? Math.abs(sum0 - amt0) > Math.max(10, amt0 * 0.15) : false;
+
+        // Trigger when items are missing/too few OR totals look inconsistent.
+        if (itemsCount0 < 2 || mismatch0) {
+          const itemsPrompt = `
+You are an OCR+receipt line-item extractor for Thai receipts.
+Return STRICT JSON ONLY. No markdown. No extra text.
+
+Task:
+- Extract ONLY purchased products/services (line items) from the image.
+- Include ONLY items with line_total > 0.
+- EXCLUDE any 0.00 lines (freebies, stamps, tasks, promotions), and EXCLUDE summary lines (TOTAL, VAT, discount, change).
+- Preserve item names as shown (Thai/English). Do not replace with generic labels.
+
+Output JSON schema: { "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null } ] }
+`;
+
+          const itemsPass = await callOpenAIItemsOnly(itemsModel, itemsPrompt);
+          if (itemsPass?.r?.ok) {
+            const itemsObj = findFirstParsedObject(itemsPass.data) || safeJsonParseMaybe(extractResponsesOutputText(itemsPass.data));
+            const extracted = Array.isArray(itemsObj?.items) ? itemsObj.items : [];
+            const cleaned = extracted
+              .map((it) => ({
+                name: safeString(it?.name ?? it?.title ?? it?.item),
+                qty: safeNumber(it?.qty ?? it?.quantity),
+                unit_price: safeNumber(it?.unit_price ?? it?.unitPrice ?? it?.price),
+                line_total: safeNumber(it?.line_total ?? it?.lineTotal ?? it?.total ?? it?.amount),
+              }))
+              .filter((it) => it.name && Number.isFinite(it.line_total) && it.line_total > 0)
+              .slice(0, 40);
+
+            if (cleaned.length >= 2) {
+              // Keep original parsed object but replace items with focused extraction.
+              parsedForNormalize = { ...parsedForNormalize, items: cleaned };
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore items-only errors; keep original parsed
+    }
+
+    const normalized = normalizeScanResult(parsedForNormalize, text);
 
     return res.status(200).json({
       ok: true,
