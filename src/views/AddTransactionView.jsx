@@ -1324,90 +1324,121 @@ const existingRefSet = useMemo(() => {
           const matchedToAcc = matchedToId ? accounts.find((a) => a.id === matchedToId) : null;
 
           const hasTwoSides = !!(matchedFromId && matchedToId && matchedFromId !== matchedToId);
+// ===== Robust doc type + tx type resolution (Hybrid Pipeline) =====
+const rawDocType = String(result?.doc_type ?? result?.docType ?? "").toLowerCase().trim();
 
-          // ===== Enhanced tx type detection (accounts presence + keywords) =====
-          let finalTxType = aiTxType;
+const hasLineItems =
+  Array.isArray(result?.items) &&
+  result.items.some((it) => {
+    const n = String(it?.name || it?.title || it?.desc || "").trim();
+    const amt =
+      Number(it?.line_total) ||
+      Number(it?.total) ||
+      Number(it?.amount) ||
+      Number(it?.lineTotal) ||
+      0;
+    return !!n && Number.isFinite(amt) && amt > 0;
+  });
 
-          // Strong signals first: credit card payment and real transfer slips
-          if (
-            (aiTxType === "transfer" &&
-              matchedToAcc &&
-              isCreditAccount(matchedToAcc) &&
-              matchedFromAcc &&
-              !isCreditAccount(matchedFromAcc)) ||
-            (hasTwoSides &&
-              matchedToAcc &&
-              isCreditAccount(matchedToAcc) &&
-              matchedFromAcc &&
-              !isCreditAccount(matchedFromAcc))
-          ) {
-            finalTxType = "credit_payment";
-          } else if (
-            aiTxType !== "income" &&
-            looksLikeCreditPaymentText(contextText) &&
-            matchedToAcc &&
-            isCreditAccount(matchedToAcc)
-          ) {
-            finalTxType = "credit_payment";
-          } else if (aiTxType !== "transfer" && hasTwoSides && looksLikeTransferText(contextText)) {
-            // กัน slip โอนที่โมเดลตีเป็น expense
-            finalTxType = "transfer";
-          }
+// Prefer model doc_type, but if we clearly see priced line items, treat it as a receipt.
+const docType = (() => {
+  if (hasLineItems) return "receipt";
+  if (rawDocType) return rawDocType;
+  if (aiTxType === "transfer" || aiTxType === "credit_payment") return "transfer_slip";
+  return "unknown";
+})();
 
-          // Refine using account presence (internal/external) and lightweight direction keywords.
-          finalTxType = enhanceScannedTxType({
-            currentType: finalTxType,
-            aiTxType,
-            matchedFromId,
-            matchedToId,
-            matchedFromAcc,
-            matchedToAcc,
-            contextText,
-          });
+// ===== Resolve final tx type (conservative; prevents misclassifying receipts as transfers) =====
+let finalTxType = aiTxType;
 
-          let detectedAccountId = "";
-          let detectedFromId = "";
-          let detectedToId = "";
+if (docType === "receipt") {
+  // Receipts are not internal transfers. Default to expense unless model strongly says income.
+  finalTxType = aiTxType === "income" ? "income" : "expense";
+} else if (docType === "transfer_slip" || docType === "bill_payment") {
+  // "transfer" is only for INTERNAL movement between user's accounts.
+  if (matchedFromId && matchedToId && matchedFromId !== matchedToId) {
+    const isCreditPay =
+      (matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) ||
+      looksLikeCreditPaymentText(contextText);
 
-          if (finalTxType === "transfer" || finalTxType === "credit_payment") {
-            detectedFromId = matchedFromId || accounts?.[0]?.id || "";
-            detectedToId = matchedToId || accounts?.[0]?.id || "";
+    finalTxType = isCreditPay ? "credit_payment" : "transfer";
+  } else if (matchedFromId && !matchedToId) {
+    // outgoing payment to external counterparty
+    finalTxType = "expense";
+  } else if (!matchedFromId && matchedToId) {
+    // incoming money into a known account
+    finalTxType = "income";
+  } else {
+    // unknown accounts: slips are more likely to be expenses than internal transfers
+    finalTxType = aiTxType === "income" ? "income" : "expense";
+  }
+} else {
+  // Unknown: keep lightweight heuristics, but never allow transfer if we have line items.
+  let tmp = aiTxType;
 
-            // ถ้าเป็น credit_payment แต่จับ from/to ไม่ครบ ให้ fallback ให้ถูกชนิด
-            if (finalTxType === "credit_payment") {
-              const fromAcc = accounts.find((a) => a.id === detectedFromId) || null;
-              const toAcc = accounts.find((a) => a.id === detectedToId) || null;
-              const fallbackFrom = nonCreditAccounts?.[0]?.id || accounts?.[0]?.id || "";
-              const fallbackTo = creditAccounts?.[0]?.id || detectedToId || "";
+  if (
+    looksLikeCreditPaymentText(contextText) &&
+    matchedToAcc &&
+    isCreditAccount(matchedToAcc) &&
+    matchedFromAcc &&
+    !isCreditAccount(matchedFromAcc)
+  ) {
+    tmp = "credit_payment";
+  } else if (aiTxType !== "income" && hasTwoSides && looksLikeTransferText(contextText)) {
+    tmp = "transfer";
+  }
 
-              if (!fromAcc || isCreditAccount(fromAcc)) detectedFromId = fallbackFrom;
-              if (!toAcc || !isCreditAccount(toAcc)) detectedToId = fallbackTo;
-            }
-          } else {
-            detectedAccountId =
-              bestMatchAccountId(accounts, fromDigits) ||
-              bestMatchAccountId(accounts, toDigits) ||
-              accountId ||
-              accounts?.[0]?.id ||
-              "";
-          }
-          const rawDocType = String(result?.doc_type ?? result?.docType ?? "").toLowerCase().trim();
-          const inferredDocType = (() => {
-            if (rawDocType) return rawDocType;
-            if (finalTxType === "transfer" || finalTxType === "credit_payment") return "transfer_slip";
-            const hasItems = Array.isArray(result?.items) && result.items.length > 0;
-            return hasItems ? "receipt" : "unknown";
-          })();
+  finalTxType = enhanceScannedTxType({
+    currentType: tmp,
+    aiTxType,
+    matchedFromId,
+    matchedToId,
+    matchedFromAcc,
+    matchedToAcc,
+    contextText,
+  });
 
-          // Hybrid guardrail:
-          // - transfer slips / bill payments must NOT produce line-item breakdown
-          // - receipts MAY produce line-item breakdown (items may still be empty)
-          const docType = inferredDocType;
+  if (hasLineItems && (finalTxType === "transfer" || finalTxType === "credit_payment")) {
+    finalTxType = "expense";
+  }
+}
 
-          let scannedItems = Array.isArray(result?.items) ? result.items : [];
-          if (docType === "transfer_slip" || docType === "bill_payment" || finalTxType === "transfer" || finalTxType === "credit_payment") {
-            scannedItems = [];
-          }
+// ===== Decide which account fields to populate =====
+let detectedAccountId = "";
+let detectedFromId = "";
+let detectedToId = "";
+
+if (finalTxType === "transfer" || finalTxType === "credit_payment") {
+  detectedFromId = matchedFromId || nonCreditAccounts?.[0]?.id || accounts?.[0]?.id || "";
+  detectedToId = matchedToId || creditAccounts?.[0]?.id || accounts?.[0]?.id || "";
+
+  // If credit_payment but we couldn't match from/to properly, fallback to "best" kinds
+  if (finalTxType === "credit_payment") {
+    const fromAcc = accounts.find((a) => a.id === detectedFromId) || null;
+    const toAcc = accounts.find((a) => a.id === detectedToId) || null;
+    const fallbackFrom = nonCreditAccounts?.[0]?.id || accounts?.[0]?.id || "";
+    const fallbackTo = creditAccounts?.[0]?.id || detectedToId || "";
+
+    if (!fromAcc || isCreditAccount(fromAcc)) detectedFromId = fallbackFrom;
+    if (!toAcc || !isCreditAccount(toAcc)) detectedToId = fallbackTo;
+  }
+} else {
+  detectedAccountId = matchedFromId || matchedToId || accountId || accounts?.[0]?.id || "";
+}
+
+// Hybrid guardrail:
+// - transfer slips / bill payments must NOT produce line-item breakdown
+// - receipts MAY produce line-item breakdown (items may still be empty)
+let scannedItems = Array.isArray(result?.items) ? result.items : [];
+if (
+  docType === "transfer_slip" ||
+  docType === "bill_payment" ||
+  finalTxType === "transfer" ||
+  finalTxType === "credit_payment"
+) {
+  scannedItems = [];
+}
+
 
           const fallbackKey =
             sanitizeCategoryKey(result?.category) || sanitizeCategoryKey(result?.category_key) || "other";

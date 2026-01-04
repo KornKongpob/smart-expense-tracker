@@ -272,7 +272,12 @@ export function groupReceiptItemsToCategory(type, items = [], fallbackText = "",
   for (const it of safeItems) {
     const name = String(it?.name || it?.title || it?.desc || "").trim();
     const text = norm(name);
-    const rawKey = sanitizeCategoryKey(it?.category) || sanitizeCategoryKey(fallbackCategory);
+    const rawKey =
+      sanitizeCategoryKey(it?.category_key) ||
+      sanitizeCategoryKey(it?.categoryKey) ||
+      sanitizeCategoryKey(it?.category) ||
+      sanitizeCategoryKey(it?.cat) ||
+      sanitizeCategoryKey(fallbackCategory);
     const key = rawKey || inferCategoryKeyFromText(type, text) || "other";
 
     // amount priority: total > amount > price*qty
@@ -327,7 +332,12 @@ export function splitReceiptItemsToLines(type, items = [], fallbackText = "", fa
     const name = String(it?.name || it?.title || it?.desc || "").trim();
     const text = norm(name);
 
-    const rawKey = sanitizeCategoryKey(it?.category) || sanitizeCategoryKey(fallbackCategory);
+    const rawKey =
+      sanitizeCategoryKey(it?.category_key) ||
+      sanitizeCategoryKey(it?.categoryKey) ||
+      sanitizeCategoryKey(it?.category) ||
+      sanitizeCategoryKey(it?.cat) ||
+      sanitizeCategoryKey(fallbackCategory);
     const key = rawKey || inferCategoryKeyFromText(type, text) || "other";
 
     // amount priority: total > amount > lineTotal > price*qty

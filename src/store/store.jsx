@@ -98,17 +98,46 @@ const safeNum = (v, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+
+const coerceSatang = (v, fallback = 0) => {
+  // We store money in **satang** (integer).
+  // However, older versions (or some edit flows) may have persisted "baht" strings like "125.25".
+  // Heuristic:
+  // - integer-like strings/numbers => satang
+  // - decimals / currency-formatted strings => treat as baht and convert
+  if (v == null || v === "") return fallback;
+
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return fallback;
+    if (!Number.isInteger(v)) return parseMoneyToSatang(v); // baht number => satang
+    return Math.round(v);
+  }
+
+  const s = String(v).trim();
+  if (!s) return fallback;
+
+  // Pure integer string => satang
+  if (/^-?\d+$/.test(s)) {
+    const n = Number(s);
+    return Number.isFinite(n) ? Math.round(n) : fallback;
+  }
+
+  // Otherwise treat as THB major units (baht) string and convert
+  return parseMoneyToSatang(s);
+};
+
 const safeSatang = (v, fallback = 0) => {
-  const n = safeNum(v, NaN);
-  return Number.isFinite(n) ? Math.round(n) : fallback;
+  const n = coerceSatang(v, NaN);
+  return Number.isFinite(n) ? ensureSatangInt(n, fallback) : fallback;
 };
 
 const normalizeMoneyFromUnit = (v, unit) => {
-  const u = String(unit || '').toLowerCase();
-  if (u === 'satang') return safeSatang(v, 0);
+  const u = String(unit || "").toLowerCase();
+  if (u === "satang") return safeSatang(v, 0);
   // legacy: treat as THB major units
   return parseMoneyToSatang(v);
 };
+
 
 const clampInt = (v, min, max, fallback) => {
   const n = Math.trunc(safeNum(v, fallback));
