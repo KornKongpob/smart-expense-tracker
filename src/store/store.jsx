@@ -98,7 +98,6 @@ const safeNum = (v, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-
 const coerceSatang = (v, fallback = 0) => {
   // We store money in **satang** (integer).
   // However, older versions (or some edit flows) may have persisted "baht" strings like "125.25".
