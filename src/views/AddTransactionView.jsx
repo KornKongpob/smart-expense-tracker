@@ -575,10 +575,21 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialType]);
 
+  // NOTE: canonical storage is satang (integer). AmountField expects a THB-major string (e.g., "125.25").
+  // So when pre-filling edit forms, convert satang -> THB string.
   const [amountDigits, setAmountDigits] = useState(() => {
     const n = transferPair?.outTx?.amount ?? initialData?.amount ?? 0;
-    return n ? String(Math.round(Math.abs(n))) : "";
+    return n ? formatMoneyInputFromSatang(Math.abs(Number(n))) : "";
   });
+
+  // Keep amount field synced when the edited record changes.
+  useEffect(() => {
+    if (!isEditMode) return;
+    if (isSplitMode) return; // split uses splitTotalDigits instead
+    const n = transferPair?.outTx?.amount ?? initialData?.amount ?? 0;
+    setAmountDigits(n ? formatMoneyInputFromSatang(Math.abs(Number(n))) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditMode, initialData?.id]);
 
   const [categoryId, setCategoryId] = useState(() => {
     if (initialData?.isTransfer) return "transfer";
