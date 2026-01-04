@@ -30,6 +30,10 @@ const EXPENSE_KW = {
     "mcdonald",
     "7-eleven",
     "seven",
+    // common brand keywords
+    "starbucks",
+    "สตาร์บัค",
+    "สตาร์บัคส์",
   ],
   transport: [
     "น้ำมัน",
@@ -96,7 +100,24 @@ const EXPENSE_KW = {
     "makro",
     "tops",
   ],
-  health: ["โรงพยาบาล", "คลินิก", "clinic", "hospital", "ยา", "pharmacy", "watsons", "boots", "ตรวจ", "หมอ"],
+  health: [
+    "โรงพยาบาล",
+    "คลินิก",
+    "clinic",
+    "hospital",
+    "ยา",
+    "pharmacy",
+    "watsons",
+    "boots",
+    "ตรวจ",
+    "หมอ",
+    // receipt item keywords (e.g., plasters, cold gel packs)
+    "พลาสเตอร์",
+    "พาสเตอร์",
+    "แผ่นเจล",
+    "ประคบ",
+    "เจลประคบ",
+  ],
   entertainment: ["netflix", "spotify", "cinema", "movie", "concert", "เกม", "game", "steam", "disney", "prime video"],
 };
 
@@ -224,4 +245,53 @@ export function groupReceiptItemsToCategory(type, items = [], fallbackText = "",
   const primaryKey = arr[0]?.key || "other";
 
   return { groups: arr, primaryKey };
+}
+
+/**
+ * ✅ Split receipt items into per-line entries (no grouping)
+ * - Filters out zero/invalid amounts (amt <= 0)
+ * - Infers category key from item text (fallback to receipt category/text)
+ *
+ * returns lines: [{ key, name, amount, qty?, price? }]
+ * amount is THB (major units, number)
+ */
+export function splitReceiptItemsToLines(type, items = [], fallbackText = "", fallbackCategory = "") {
+  const safeItems = Array.isArray(items) ? items : [];
+  const out = [];
+
+  for (const it of safeItems) {
+    const name = String(it?.name || it?.title || it?.desc || "").trim();
+    const text = norm(name);
+
+    const rawKey = sanitizeCategoryKey(it?.category) || sanitizeCategoryKey(fallbackCategory);
+    const key = rawKey || inferCategoryKeyFromText(type, text) || "other";
+
+    // amount priority: total > amount > lineTotal > price*qty
+    const qty = Number(it?.qty || it?.quantity || 0) || 0;
+    const price = Number(it?.price || 0) || 0;
+    const computed = qty > 0 && price > 0 ? qty * price : 0;
+
+    const amt =
+      Number(it?.total) ||
+      Number(it?.amount) ||
+      Number(it?.lineTotal) ||
+      (computed > 0 ? computed : 0);
+
+    // ✅ Skip zero lines (e.g., promotions/points)
+    if (!Number.isFinite(amt) || amt <= 0) continue;
+
+    out.push({
+      key,
+      name,
+      amount: amt,
+      qty: qty || undefined,
+      price: price || undefined,
+    });
+  }
+
+  // If no usable items, return empty
+  if (!out.length) return [];
+
+  // Keep OCR order (as pushed)
+  return out;
 }
