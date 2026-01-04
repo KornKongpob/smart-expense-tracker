@@ -86,14 +86,48 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
   canvas.height = h;
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) return original;
+  // Improve OCR readability on downscaled images
+  try {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+  } catch {
+    // ignore
+  }
   ctx.drawImage(img, 0, 0, w, h);
 
   // Prefer JPEG for much smaller payloads.
   let q = qualityStart;
   let out = canvas.toDataURL("image/jpeg", q);
 
-  while (approxDataUrlBytes(out) > maxBytes && q > qualityMin) {
-    q = Math.max(qualityMin, q - qualityStep);
+  // If too large, gradually reduce JPEG quality, then (if needed) reduce dimensions
+  // This tends to preserve text edges better than forcing very low JPEG quality.
+  let curW = w;
+  let curH = h;
+  while (approxDataUrlBytes(out) > maxBytes) {
+    if (q > qualityMin) {
+      q = Math.max(qualityMin, q - qualityStep);
+      out = canvas.toDataURL("image/jpeg", q);
+      continue;
+    }
+
+    // Quality already at minimum: reduce resolution a bit and retry.
+    // Stop once the image becomes too small for OCR.
+    if (curW <= 1600 || curH <= 1600) break;
+
+    curW = Math.max(1, Math.round(curW * 0.9));
+    curH = Math.max(1, Math.round(curH * 0.9));
+    canvas.width = curW;
+    canvas.height = curH;
+    try {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+    } catch {
+      // ignore
+    }
+    ctx.drawImage(img, 0, 0, curW, curH);
+
+    // reset to starting quality after resizing
+    q = qualityStart;
     out = canvas.toDataURL("image/jpeg", q);
   }
 

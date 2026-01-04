@@ -1769,7 +1769,7 @@ if (
       const { previewUrl, previewUrlSource, batchId, status, error, ...rest } = q || {};
       const type = rest?.type || rest?.txType || "expense";
       const referenceId = rest?.referenceId || rest?.ref || "";
-      return {
+      const next = {
         ...rest,
         id: rest?.id || generateId(),
         createdAt,
@@ -1777,6 +1777,52 @@ if (
         type,
         referenceId,
       };
+
+      // ✅ Default Split-by-items for receipts with multiple purchased lines
+      // - Receipt with >=2 positive line items => set splitByCategory=true
+      // - Build groups from items (each item keeps its own name + category)
+      // - Skip 0-price lines (promotions/points)
+      try {
+        const docType = String(next?.docType || next?.doc_type || "").toLowerCase().trim();
+        const txType = String(next?.txType || next?.type || type || "expense").toLowerCase().trim();
+        const items = Array.isArray(next?.items) ? next.items : [];
+
+        if (docType === "receipt" && txType === "expense" && items.length) {
+          const lines = splitReceiptItemsToLines(
+            "expense",
+            items,
+            `${String(next?.merchant || "").trim()} ${String(next?.note || "").trim()}`.trim(),
+            String(next?.categoryId || next?.category_key || next?.category || "").trim() || "other"
+          );
+
+          const groups = (lines || [])
+            .filter((ln) => (Number(ln?.amount) || 0) > 0)
+            .map((ln, idx) => {
+              const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+              const categoryId = ensureCategory("expense", key);
+              return {
+                key,
+                categoryId,
+                amount: parseMoneyToSatang(ln?.amount),
+                note: String(ln?.name || "").trim(),
+                splitIndex: idx + 1,
+                splitCount: (lines || []).length,
+              };
+            });
+
+          if (groups.length >= 2) {
+            next.splitByCategory = true;
+            next.groups = groups;
+            next.splitGroupId = String(next?.splitGroupId || "").trim() || generateSplitGroupId();
+            next.splitLabel =
+              String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+          }
+        }
+      } catch {
+        // ignore - keep inbox item as-is
+      }
+
+      return next;
     });
 
     addScanInboxItems(serializable);
@@ -1800,7 +1846,7 @@ if (
       const { previewUrl, previewUrlSource, batchId, status, error, ...rest } = q || {};
       const type = rest?.type || rest?.txType || "expense";
       const referenceId = rest?.referenceId || rest?.ref || "";
-      return {
+      const next = {
         ...rest,
         id: rest?.id || generateId(),
         createdAt,
@@ -1808,6 +1854,49 @@ if (
         type,
         referenceId,
       };
+
+      // ✅ Keep the same default Split behavior for duplicate receipts too
+      try {
+        const docType = String(next?.docType || next?.doc_type || "").toLowerCase().trim();
+        const txType = String(next?.txType || next?.type || type || "expense").toLowerCase().trim();
+        const items = Array.isArray(next?.items) ? next.items : [];
+
+        if (docType === "receipt" && txType === "expense" && items.length) {
+          const lines = splitReceiptItemsToLines(
+            "expense",
+            items,
+            `${String(next?.merchant || "").trim()} ${String(next?.note || "").trim()}`.trim(),
+            String(next?.categoryId || next?.category_key || next?.category || "").trim() || "other"
+          );
+
+          const groups = (lines || [])
+            .filter((ln) => (Number(ln?.amount) || 0) > 0)
+            .map((ln, idx) => {
+              const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+              const categoryId = ensureCategory("expense", key);
+              return {
+                key,
+                categoryId,
+                amount: parseMoneyToSatang(ln?.amount),
+                note: String(ln?.name || "").trim(),
+                splitIndex: idx + 1,
+                splitCount: (lines || []).length,
+              };
+            });
+
+          if (groups.length >= 2) {
+            next.splitByCategory = true;
+            next.groups = groups;
+            next.splitGroupId = String(next?.splitGroupId || "").trim() || generateSplitGroupId();
+            next.splitLabel =
+              String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      return next;
     });
 
     addScanInboxItems(serializable);

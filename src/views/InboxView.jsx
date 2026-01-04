@@ -22,6 +22,7 @@ import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
+import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
 
 function appendEvidenceToNote(note, evidence) {
   if (!evidence) return note || "";
@@ -336,12 +337,69 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
 
   const attachmentUrl = useBlobUrl(draft?.attachmentId);
 
+  // ✅ Keep category keys safe (fallback to "other" if unknown)
+  const ensureExpenseCategoryId = (key) => {
+    const k = String(key || "").trim();
+    const exp = categories?.expense || [];
+    if (k && exp.some((c) => String(c?.id || "") === k)) return k;
+    if (exp.some((c) => String(c?.id || "") === "other")) return "other";
+    return String(exp?.[0]?.id || "");
+  };
+
+  const deriveReceiptGroups = (it) => {
+    try {
+      const docType = String(it?.docType || it?.doc_type || "").toLowerCase().trim();
+      const txType = normalizeTxType(it?.type || it?.txType);
+      if (docType !== "receipt") return [];
+      if (txType !== "expense") return []; // receipts => expense only
+
+      const items = Array.isArray(it?.items) ? it.items : [];
+      if (!items.length) return [];
+
+      const fallbackKey = String(it?.categoryId || it?.category_key || it?.category || "").trim() || "other";
+      const hint = `${String(it?.merchant || "").trim()} ${String(it?.note || "").trim()}`.trim();
+
+      const lines = splitReceiptItemsToLines("expense", items, hint, fallbackKey);
+      const groups = (lines || [])
+        .filter((ln) => (Number(ln?.amount) || 0) > 0)
+        .map((ln, idx) => {
+          const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+          return {
+            key,
+            categoryId: ensureExpenseCategoryId(key),
+            amount: parseMoneyToSatang(ln?.amount),
+            note: String(ln?.name || "").trim(),
+            splitIndex: idx + 1,
+            splitCount: (lines || []).length,
+          };
+        });
+
+      // Need at least 2 positive lines to behave as Split
+      if (groups.length < 2) return [];
+      return groups;
+    } catch {
+      return [];
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     if (!item) return;
 
     const txType = normalizeTxType(item?.type || item?.txType);
-    const isSplit = !!item?.splitByCategory && Array.isArray(item?.groups) && item.groups.length >= 2;
+    // ✅ Auto-enable Split for multi-item receipts (even if splitByCategory/groups missing)
+    // This prevents the "Edit -> Split review not working" case.
+    const derived = deriveReceiptGroups(item);
+    const rawGroups = Array.isArray(item?.groups) ? item.groups : [];
+    const shouldSplit = (
+      (!!item?.splitByCategory && rawGroups.length >= 2) ||
+      (derived.length >= 2)
+    );
+    const effectiveGroups = shouldSplit
+      ? (rawGroups.length >= 2 ? rawGroups : derived)
+      : [];
+
+    const isSplit = shouldSplit && Array.isArray(effectiveGroups) && effectiveGroups.length >= 2;
     setDraft({
       ...item,
       type: txType,
@@ -360,7 +418,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       splitGroupId: String(item?.splitGroupId || ""),
       splitLabel: String(item?.splitLabel || ""),
       groups: isSplit
-        ? (item.groups || []).filter((g) => asSatang(g?.amount) > 0).map((g) => ({
+        ? (effectiveGroups || []).filter((g) => asSatang(g?.amount) > 0).map((g) => ({
             key: g?.key || "",
             categoryId: String(g?.categoryId || ""),
             amount: g?.amount != null ? formatMoneyInputFromSatang(asSatang(g.amount)) : "",
@@ -368,7 +426,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
           }))
         : [],
     });
-  }, [open, item]);
+  }, [open, item, categories]);
 
   if (!open || !draft) return null;
 
@@ -401,17 +459,26 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
 
       const nextOn = !d.splitByCategory;
       if (nextOn) {
-        const seeded = Array.isArray(d.groups) && d.groups.length
-          ? d.groups
-          : [
-              {
-                key: "",
-                categoryId: String(d.categoryId || ""),
-                amount: String(d.amount ?? ""),
-                note: "",
-              },
-              { key: "", categoryId: "", amount: "", note: "" },
-            ];
+        // ✅ If this is a receipt with multiple items, seed split lines from OCR/LLM items
+        const derived = deriveReceiptGroups(d);
+        const seeded = derived.length >= 2
+          ? derived.map((g) => ({
+              key: g.key || "",
+              categoryId: String(g.categoryId || ""),
+              amount: formatMoneyInputFromSatang(asSatang(g.amount)),
+              note: String(g.note || ""),
+            }))
+          : Array.isArray(d.groups) && d.groups.length
+            ? d.groups
+            : [
+                {
+                  key: "",
+                  categoryId: String(d.categoryId || ""),
+                  amount: String(d.amount ?? ""),
+                  note: "",
+                },
+                { key: "", categoryId: "", amount: "", note: "" },
+              ];
 
         return {
           ...d,
