@@ -1,7 +1,7 @@
 // api/scan.js
 // Vercel Serverless Function: POST /api/scan
 // Required env: OPENAI_API_KEY
-// Optional env: OPENAI_MODEL (default: gpt-5)
+// Optional env: OPENAI_MODEL (default: gpt-4o-mini)
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -825,7 +825,7 @@ export default async function handler(req, res) {
     // Normalize to valid model IDs.
     const normalizeOpenAIModel = (raw) => {
       const s = String(raw || "").trim();
-      if (!s) return "gpt-5-chat-latest";
+      if (!s) return "gpt-4o-mini";
 
       const low = s.toLowerCase();
 
@@ -925,12 +925,11 @@ Schema (ALL keys must exist; use null if unknown):
 `;
 
 
-    const response_format = {
+    const text_format = {
       type: "json_schema",
-      json_schema: {
-        name: "scan_result",
-        strict: true,
-        schema: {
+      name: "scan_result",
+      strict: true,
+      schema: {
           type: "object",
           additionalProperties: false,
           required: [
@@ -1006,7 +1005,6 @@ Schema (ALL keys must exist; use null if unknown):
               },
             },
           },
-        },
       },
     };
 
@@ -1019,7 +1017,7 @@ Schema (ALL keys must exist; use null if unknown):
       body: JSON.stringify({
         model,
         temperature: 0,
-        response_format,
+        text: { format: text_format },
         input: [
           {
             role: "user",
@@ -1038,7 +1036,7 @@ Schema (ALL keys must exist; use null if unknown):
       const msg = data?.error?.message || "OpenAI request failed";
       const tip =
         /model/i.test(msg) && /not found|does not exist|unknown/i.test(msg)
-          ? "Check OPENAI_MODEL. Valid examples: gpt-5-chat-latest, gpt-5, gpt-5.1."
+          ? "Check OPENAI_MODEL. Valid examples: gpt-4o-mini, gpt-4o-2024-08-06, gpt-4.1-mini, gpt-5.2."
           : null;
 
       return res.status(r.status).json({

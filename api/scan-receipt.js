@@ -674,7 +674,7 @@ async function callOpenAI({ base64, mimeType }) {
   // Normalize to valid model IDs.
   const normalizeOpenAIModel = (raw) => {
     const s = String(raw || "").trim();
-    if (!s) return "gpt-5-chat-latest";
+    if (!s) return "gpt-4o-mini";
 
     const low = s.toLowerCase();
 
@@ -770,7 +770,7 @@ Schema (ALL keys must exist; use null if unknown):
 }
 `;
 
-  const response_format = {
+  const text_format = {
     type: "json_schema",
     json_schema: {
       name: "scan_result",
@@ -859,7 +859,7 @@ Schema (ALL keys must exist; use null if unknown):
 
     model,
     temperature: 0,
-    response_format,
+    text_format,
     input: [
       {
         role: "user",
@@ -886,7 +886,7 @@ Schema (ALL keys must exist; use null if unknown):
     const msg = json?.error?.message || "OpenAI request failed";
     const tip =
       /model/i.test(msg) && /not found|does not exist|unknown/i.test(msg)
-        ? "Check OPENAI_MODEL. Valid examples: gpt-5-chat-latest, gpt-5, gpt-5.1."
+        ? "Check OPENAI_MODEL. Valid examples: gpt-4o-mini, gpt-4o-2024-08-06, gpt-4.1-mini, gpt-5.2."
         : null;
 
     return {

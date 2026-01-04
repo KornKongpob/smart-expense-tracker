@@ -25,6 +25,79 @@ function fileToDataUrl(file) {
   });
 }
 
+function approxDataUrlBytes(dataUrl) {
+  const str = String(dataUrl || "");
+  const idx = str.indexOf("base64,");
+  if (idx === -1) return str.length;
+  const b64 = str.slice(idx + "base64,".length);
+  // base64 length -> bytes (rough)
+  return Math.floor((b64.length * 3) / 4);
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    try {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("image_decode_failed"));
+      img.src = dataUrl;
+    } catch (err) {
+      const e = new Error("image_decode_failed");
+      e.cause = err;
+      reject(e);
+    }
+  });
+}
+
+// Resize/compress before sending to /api to avoid payload limits & reduce cost.
+// Defaults aim to stay well under common serverless body limits.
+async function fileToOptimizedDataUrl(file, opts = {}) {
+  const {
+    maxDim = 1600,
+    maxBytes = 1_800_000, // ~1.8MB binary (base64 will be larger)
+    qualityStart = 0.86,
+    qualityMin = 0.62,
+    qualityStep = 0.06,
+  } = opts;
+
+  const original = await fileToDataUrl(file);
+  if (!original.startsWith("data:image/")) return original;
+
+  if (typeof document === "undefined" || typeof Image === "undefined") return original;
+
+  // If already small enough, keep as-is.
+  if (approxDataUrlBytes(original) <= maxBytes) return original;
+
+  const img = await loadImageFromDataUrl(original);
+
+  // Scale down.
+  const w0 = img.naturalWidth || img.width;
+  const h0 = img.naturalHeight || img.height;
+  if (!w0 || !h0) return original;
+
+  const scale = Math.min(1, maxDim / Math.max(w0, h0));
+  const w = Math.max(1, Math.round(w0 * scale));
+  const h = Math.max(1, Math.round(h0 * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) return original;
+  ctx.drawImage(img, 0, 0, w, h);
+
+  // Prefer JPEG for much smaller payloads.
+  let q = qualityStart;
+  let out = canvas.toDataURL("image/jpeg", q);
+
+  while (approxDataUrlBytes(out) > maxBytes && q > qualityMin) {
+    q = Math.max(qualityMin, q - qualityStep);
+    out = canvas.toDataURL("image/jpeg", q);
+  }
+
+  return out;
+}
+
 function dataUrlToBase64(dataUrl) {
   const s = String(dataUrl || "");
   const m = s.match(/^data:([^;]+);base64,(.*)$/i);
