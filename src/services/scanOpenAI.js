@@ -35,10 +35,22 @@ function dataUrlToBase64(dataUrl) {
 function safeParseAmount(v) {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (v == null) return null;
-  const s = String(v).trim();
-  if (!s) return null;
-  const cleaned = s.replace(/[, ]+/g, "");
-  const num = Number(cleaned);
+  const s0 = String(v).trim();
+  if (!s0) return null;
+
+  // remove common noise (currency symbols, spaces, commas, trailing letters like "N")
+  let s = s0.replace(/[฿\s,]/g, "");
+  // keep digits, '.', and '-' only
+  s = s.replace(/[^0-9.\-]/g, "");
+  // if multiple dots, keep the first
+  const parts = s.split(".");
+  if (parts.length > 2) s = parts[0] + "." + parts.slice(1).join("");
+  // if multiple dashes, keep only a leading dash
+  const neg = s.startsWith("-");
+  s = s.replace(/\-/g, "");
+  if (neg) s = "-" + s;
+
+  const num = Number(s);
   return Number.isFinite(num) ? num : null;
 }
 
@@ -61,12 +73,28 @@ function normalizeItems(items) {
     .map((it) => {
       if (!it || typeof it !== "object") return null;
       const name = it.name != null ? String(it.name).trim() : "";
-      const price = safeParseAmount(it.price);
       if (!name) return null;
-      return { name, price: Number.isFinite(price) ? price : null };
+
+      const qty = safeParseAmount(it.qty);
+      const unitPrice = safeParseAmount(it.unit_price ?? it.unitPrice ?? it.price);
+      const lineTotal = safeParseAmount(it.line_total ?? it.lineTotal ?? it.total ?? it.amount ?? it.price);
+
+      const category_key = (it.category_key ?? it.category ?? null) != null ? String(it.category_key ?? it.category).trim() : null;
+
+      return {
+        name,
+        qty: Number.isFinite(qty) ? qty : null,
+        unit_price: Number.isFinite(unitPrice) ? unitPrice : null,
+        total: Number.isFinite(lineTotal) ? lineTotal : null,
+        // Back-compat fields expected by older helpers
+        price: Number.isFinite(unitPrice) ? unitPrice : (Number.isFinite(lineTotal) ? lineTotal : null),
+        lineTotal: Number.isFinite(lineTotal) ? lineTotal : null,
+        category_key,
+        category: category_key,
+      };
     })
     .filter(Boolean)
-    .slice(0, 15);
+    .slice(0, 30);
 }
 
 function normalizeKeywords(kws) {
@@ -87,6 +115,8 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
   const d = data && typeof data === "object" ? data : null;
 
   const normalized = {
+    doc_type: d?.doc_type ?? d?.docType ?? null,
+    currency: d?.currency ?? null,
     tx_type: normalizeTxType(d?.tx_type),
     amount: safeParseAmount(d?.amount),
     date: safeISODate(d?.date),
@@ -94,6 +124,7 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     note: d?.note ?? d?.merchant ?? null,
     ref: d?.ref ?? null,
     category: d?.category ?? null,
+    category_key: d?.category_key ?? d?.category ?? null,
     from_account: d?.from_account ?? null,
     to_account: d?.to_account ?? null,
     evidence: d?.evidence ?? rawText ?? "",
@@ -106,6 +137,9 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     from_account_variants: d?.from_account_variants ?? null,
     to_account_variants: d?.to_account_variants ?? null,
     account_candidates: Array.isArray(d?.account_candidates) ? d.account_candidates : null,
+
+    confidence: d?.confidence && typeof d.confidence === 'object' ? d.confidence : null,
+    flags: d?.flags && typeof d.flags === 'object' ? d.flags : null,
 
     _rawText: rawText ?? "",
     _model: model ?? "",

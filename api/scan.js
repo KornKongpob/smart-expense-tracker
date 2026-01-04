@@ -56,6 +56,27 @@ function extractResponsesOutputText(resp) {
   return String(fallback || "").trim();
 }
 
+function findFirstParsedObject(resp) {
+  try {
+    const out = resp?.output;
+    if (Array.isArray(out)) {
+      for (const item of out) {
+        const content = item?.content;
+        if (Array.isArray(content)) {
+          for (const c of content) {
+            if (c && typeof c === "object" && c.parsed && typeof c.parsed === "object") return c.parsed;
+            if (c && typeof c === "object" && c.json && typeof c.json === "object") return c.json;
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+
 function toArabicDigits(s) {
   const th = "๐๑๒๓๔๕๖๗๘๙";
   return String(s || "").replace(/[๐-๙]/g, (ch) => {
@@ -81,6 +102,13 @@ function safeNumber(v) {
   const cleaned = toArabicDigits(s).replace(/[฿$, ]+/g, "").replace(/,/g, "");
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
+}
+
+function clamp01(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
 }
 
 function normalizeCategoryKey(v) {
@@ -615,8 +643,27 @@ function normalizeScanResult(parsed, rawText) {
   const merchant = parsed?.merchant != null ? String(parsed.merchant) : null;
   const note = parsed?.note != null ? String(parsed.note) : merchant != null ? String(merchant) : null;
 
-  const items = normalizeItems(parsed?.items ?? parsed?.line_items ?? parsed?.lines ?? null);
+  // items can be "items" or legacy keys; normalize into {name, qty, unit_price, total, category_key}
+  let items = normalizeItems(parsed?.items ?? parsed?.line_items ?? parsed?.lines ?? null);
 
+  // ---- doc_type normalization ----
+  const dtRaw = safeString(parsed?.doc_type ?? parsed?.docType).toLowerCase();
+  const allowedDt = new Set(["receipt", "transfer_slip", "bill_payment", "unknown"]);
+  let doc_type = allowedDt.has(dtRaw) ? dtRaw : "";
+
+  // If model didn't provide doc_type, infer lightly from refined tx_type and presence of line items
+  if (!doc_type) {
+    if (refined.tx_type === "transfer") doc_type = "transfer_slip";
+    else if (Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) > 0)) doc_type = "receipt";
+    else doc_type = "unknown";
+  }
+
+  // Enforce: transfer slips / bill payments must not contain purchase line items
+  if (doc_type === "transfer_slip" || doc_type === "bill_payment" || refined.tx_type === "transfer") {
+    items = [];
+  }
+
+  // ---- category ----
   let category =
     normalizeCategoryKey(parsed?.category_key) ||
     normalizeCategoryKey(parsed?.category) ||
@@ -628,22 +675,63 @@ function normalizeScanResult(parsed, rawText) {
     if (!category) category = fromItems || fromText || "other";
     if (category === "other") category = fromItems || fromText || "other";
   } else {
-    // ✅ ทั้ง transfer ปกติ และ credit_card_payment ใช้ category = transfer เหมือนเดิม
     category = "transfer";
   }
 
+  // ---- confidence + flags (hybrid guardrails) ----
+  const confIn = parsed?.confidence && typeof parsed.confidence === "object" ? parsed.confidence : {};
+  const confidence = {
+    overall: clamp01(typeof confIn.overall === 'number' ? confIn.overall : (typeof parsed?.confidence_overall === 'number' ? parsed.confidence_overall : null)),
+    amount: clamp01(typeof confIn.amount === 'number' ? confIn.amount : null),
+    date: clamp01(typeof confIn.date === 'number' ? confIn.date : null),
+    merchant: clamp01(typeof confIn.merchant === 'number' ? confIn.merchant : null),
+    items: clamp01(typeof confIn.items === 'number' ? confIn.items : null),
+  };
+
+  const flagsIn = parsed?.flags && typeof parsed.flags === "object" ? parsed.flags : {};
+
+  // Compute simple item flags from normalized items
+  const hasPositiveItems = Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) > 0);
+  const hasZeroItems = Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) === 0);
+  const hasDiscountHint = /ส่วนลด|discount|คูปอง|coupon|แต้ม|points|โปรโมชั่น|promo/i.test(String(rawText || ""));
+
+  // needs_human_review: low confidence OR inconsistent totals (when receipt)
+  let needsReview = false;
+  if (confidence.overall != null && confidence.overall < 0.6) needsReview = true;
+
+  if (doc_type === "receipt" && amount != null && hasPositiveItems) {
+    const sum = items.reduce((s, it) => s + (safeNumber(it?.total) || 0), 0);
+    if (sum > 0) {
+      const diff = Math.abs(sum - amount);
+      if (diff >= 2) needsReview = true; // >= 2 THB mismatch
+    }
+  }
+
+  const flags = {
+    has_line_items: typeof flagsIn.has_line_items === 'boolean' ? flagsIn.has_line_items : !!hasPositiveItems,
+    has_zero_price_lines: typeof flagsIn.has_zero_price_lines === 'boolean' ? flagsIn.has_zero_price_lines : !!hasZeroItems,
+    has_discount_lines: typeof flagsIn.has_discount_lines === 'boolean' ? flagsIn.has_discount_lines : !!hasDiscountHint,
+    needs_human_review: typeof flagsIn.needs_human_review === 'boolean' ? flagsIn.needs_human_review : !!needsReview,
+  };
+
   const normalized = {
+    doc_type,
+
     tx_type: refined.tx_type,
     tx_subtype: refined.tx_subtype,
     is_credit_card_payment: refined.is_credit_card_payment,
 
     amount: Number.isFinite(amount) ? amount : null,
+    currency: parsed?.currency != null && String(parsed.currency).trim() ? String(parsed.currency).trim().toUpperCase() : null,
     date: parsed?.date ? String(parsed.date).slice(0, 10) : null,
     merchant,
     note,
     ref: parsed?.ref != null && String(parsed.ref).trim() ? String(parsed.ref).trim() : null,
 
+    // keep both legacy and new keys for compatibility
     category,
+    category_key: category,
+
     items,
 
     from_account:
@@ -652,11 +740,14 @@ function normalizeScanResult(parsed, rawText) {
         : null,
     to_account:
       parsed?.to_account != null && String(parsed.to_account).trim()
-        ? // ถ้าเป็นบัตรเครดิต ให้เก็บ last4 ได้ (แต่ยังยอมรับ 3-6 ถ้า slip เป็น “เลขบัญชีรับชำระ”)
-          (refined.is_credit_card_payment ? (lastN(parsed.to_account, 4) || clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 })) : clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }))
+        ? (refined.is_credit_card_payment
+            ? (lastN(parsed.to_account, 4) || clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }))
+            : clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }))
         : null,
 
     evidence: evidence0,
+    confidence,
+    flags,
   };
 
   const enhanced = enhanceAccounts({
@@ -768,52 +859,156 @@ export default async function handler(req, res) {
     // - ถ้าเป็นสลิปชำระบัตรเครดิต/โอนเข้าบัตรเครดิต: tx_type="transfer", tx_subtype="credit_card_payment", is_credit_card_payment=true
     // - ถ้าเป็น transfer ปกติ: tx_type="transfer", tx_subtype="transfer", is_credit_card_payment=false
     // - ถ้าเป็นใบเสร็จ: expense/income ตามเดิม
-    const prompt =
-      "You are an OCR+parser for Thai receipts and bank/payment slips used in a personal expense tracker.\n" +
-      "Return STRICT JSON ONLY. No markdown. No extra text.\n" +
-      "Allowed category_key values:\n" +
-      "- expense: food, transport, shopping, bills, health, entertainment, other\n" +
-      "- income: salary, bonus, investment, refund, other\n" +
-      "- transfer: transfer\n" +
-      "\n" +
-      "Schema:\n" +
-      "{\n" +
-      '  "tx_type": "expense"|"income"|"transfer",\n' +
-      '  "tx_subtype": "transfer"|"credit_card_payment"|null,\n' +
-      '  "is_credit_card_payment": boolean|null,\n' +
-      '  "amount": number|null,\n' +
-      '  "date": "YYYY-MM-DD"|null,\n' +
-      '  "merchant": string|null,\n' +
-      '  "note": string|null,\n' +
-      '  "ref": string|null,\n' +
-      '  "category_key": string|null,\n' +
-      '  "items": [\n' +
-      '    { "name": string, "qty": number|null, "unit_price": number|null, "total": number|null, "category_key": string|null }\n' +
-      "  ]|[],\n" +
-      '  "from_account": string|null,\n' +
-      '  "to_account": string|null,\n' +
-      '  "evidence": string|null\n' +
-      "}\n" +
-      "\n" +
-      "Rules:\n" +
-      "- If unsure, use null.\n" +
-      "- amount: grand total paid.\n" +
-      "- evidence: include the key lines you used (<= 220 chars).\n" +
-      "\n" +
-      "Classification:\n" +
-      "- If it is clearly a transfer between accounts: tx_type MUST be 'transfer'.\n" +
-      "- If it is a CREDIT CARD PAYMENT slip (Thai/EN keywords like ชำระบัตร, บัตรเครดิต, CardX, credit card, หมายเลขบัตร, บัญชีรับชำระ, ยอดชำระ, ชำระขั้นต่ำ):\n" +
-      "  * tx_type MUST be 'transfer'\n" +
-      "  * tx_subtype MUST be 'credit_card_payment'\n" +
-      "  * is_credit_card_payment MUST be true\n" +
-      "- Otherwise for normal transfer: tx_type='transfer', tx_subtype='transfer', is_credit_card_payment=false.\n" +
-      "- For receipts (not transfer): tx_type='expense' or 'income'. tx_subtype should be null.\n" +
-      "\n" +
-      "Account digits extraction:\n" +
-      "- from_account / to_account MUST be digits only (Thai digits ok).\n" +
-      "- For bank account: return ONLY last 3-6 digits.\n" +
-      "- For card number: return ONLY last 4 digits.\n" +
-      "- Do NOT use reference/biller/merchant ids as account.\n";
+    const prompt = `
+You are an OCR+parser for Thai receipts and Thai bank/payment transfer slips used in a personal expense tracker.
+Return STRICT JSON ONLY. No markdown. No extra text.
+
+Decide doc_type:
+- receipt: itemized receipt/invoice with purchased line items
+- transfer_slip: bank transfer / payment slip / credit card payment slip
+- bill_payment: utility bill payment slip
+- unknown: otherwise
+
+Rules:
+- If unsure, use null.
+- amount: grand total paid.
+- evidence: include key lines you used (<= 220 chars).
+
+Line items rules:
+- If doc_type is transfer_slip or bill_payment: items MUST be [] (empty). Do NOT invent items.
+- If doc_type is receipt: items MUST include ONLY purchased products/services with line_total > 0.
+  * Skip any lines with 0 price (freebies, stamps, tasks, promotions, coupons, points, exchanged rights, etc.)
+  * Skip summary lines (TOTAL, Subtotal, VAT, service charge, change, discounts)
+
+Classification:
+- If it is clearly a transfer between accounts: tx_type MUST be 'transfer'.
+- If it is a CREDIT CARD PAYMENT slip (Thai/EN keywords like ชำระบัตร, บัตรเครดิต, CardX, credit card, หมายเลขบัตร, บัญชีรับชำระ, ยอดชำระ, ชำระขั้นต่ำ):
+  * tx_type MUST be 'transfer'
+  * tx_subtype MUST be 'credit_card_payment'
+  * is_credit_card_payment MUST be true
+- Otherwise for normal transfer: tx_type='transfer', tx_subtype='transfer', is_credit_card_payment=false.
+- For receipts (not transfer): tx_type='expense' or 'income'. tx_subtype should be null.
+
+Account digits extraction:
+- from_account / to_account MUST be digits only (Thai digits ok).
+- For bank account: return ONLY last 3-6 digits.
+- For card number: return ONLY last 4 digits.
+- Do NOT use reference/biller/merchant ids as account.
+
+Allowed category_key values:
+- expense: food, transport, shopping, bills, health, entertainment, other
+- income: salary, bonus, investment, refund, other
+- transfer: transfer
+
+Schema (ALL keys must exist; use null if unknown):
+{
+  "doc_type": "receipt"|"transfer_slip"|"bill_payment"|"unknown",
+  "tx_type": "expense"|"income"|"transfer",
+  "tx_subtype": "transfer"|"credit_card_payment"|null,
+  "is_credit_card_payment": boolean|null,
+  "amount": number|null,
+  "currency": string|null,
+  "date": "YYYY-MM-DD"|null,
+  "merchant": string|null,
+  "note": string|null,
+  "ref": string|null,
+  "category_key": string|null,
+  "items": [
+    { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null }
+  ],
+  "from_account": string|null,
+  "to_account": string|null,
+  "evidence": string|null,
+  "confidence": { "overall": number|null, "amount": number|null, "date": number|null, "merchant": number|null, "items": number|null },
+  "flags": { "has_line_items": boolean, "has_zero_price_lines": boolean, "has_discount_lines": boolean, "needs_human_review": boolean }
+}
+`;
+
+
+    const response_format = {
+      type: "json_schema",
+      json_schema: {
+        name: "scan_result",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "doc_type",
+            "tx_type",
+            "tx_subtype",
+            "is_credit_card_payment",
+            "amount",
+            "currency",
+            "date",
+            "merchant",
+            "note",
+            "ref",
+            "category_key",
+            "items",
+            "from_account",
+            "to_account",
+            "evidence",
+            "confidence",
+            "flags"
+          ],
+          properties: {
+            doc_type: { type: "string", enum: ["receipt", "transfer_slip", "bill_payment", "unknown"] },
+            tx_type: { type: "string", enum: ["expense", "income", "transfer"] },
+            tx_subtype: { anyOf: [{ type: "string", enum: ["transfer", "credit_card_payment"] }, { type: "null" }] },
+            is_credit_card_payment: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+            amount: { anyOf: [{ type: "number" }, { type: "null" }] },
+            currency: { anyOf: [{ type: "string" }, { type: "null" }] },
+            date: { anyOf: [{ type: "string" }, { type: "null" }] },
+            merchant: { anyOf: [{ type: "string" }, { type: "null" }] },
+            note: { anyOf: [{ type: "string" }, { type: "null" }] },
+            ref: { anyOf: [{ type: "string" }, { type: "null" }] },
+            category_key: { anyOf: [{ type: "string" }, { type: "null" }] },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["name", "qty", "unit_price", "line_total", "category_key"],
+                properties: {
+                  name: { type: "string" },
+                  qty: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  category_key: { anyOf: [{ type: "string" }, { type: "null" }] },
+                },
+              },
+            },
+            from_account: { anyOf: [{ type: "string" }, { type: "null" }] },
+            to_account: { anyOf: [{ type: "string" }, { type: "null" }] },
+            evidence: { anyOf: [{ type: "string" }, { type: "null" }] },
+            confidence: {
+              type: "object",
+              additionalProperties: false,
+              required: ["overall", "amount", "date", "merchant", "items"],
+              properties: {
+                overall: { anyOf: [{ type: "number" }, { type: "null" }] },
+                amount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                date: { anyOf: [{ type: "number" }, { type: "null" }] },
+                merchant: { anyOf: [{ type: "number" }, { type: "null" }] },
+                items: { anyOf: [{ type: "number" }, { type: "null" }] },
+              },
+            },
+            flags: {
+              type: "object",
+              additionalProperties: false,
+              required: ["has_line_items", "has_zero_price_lines", "has_discount_lines", "needs_human_review"],
+              properties: {
+                has_line_items: { type: "boolean" },
+                has_zero_price_lines: { type: "boolean" },
+                has_discount_lines: { type: "boolean" },
+                needs_human_review: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+    };
 
     const r = await fetch(OPENAI_URL, {
       method: "POST",
@@ -824,6 +1019,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model,
         temperature: 0,
+        response_format,
         input: [
           {
             role: "user",
@@ -855,8 +1051,10 @@ export default async function handler(req, res) {
       });
     }
 
+    const parsedObj = findFirstParsedObject(data);
     const text = extractResponsesOutputText(data);
-    const parsed = safeJsonParseMaybe(text);
+
+    const parsed = parsedObj || safeJsonParseMaybe(text);
 
     if (!parsed || typeof parsed !== "object") {
       return res.status(200).json({

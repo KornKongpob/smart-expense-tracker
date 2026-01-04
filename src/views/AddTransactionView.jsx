@@ -39,7 +39,7 @@ import {
   getBudget,
   calcAccountBalance,
 } from "../store/selectors";
-import { groupReceiptItemsToCategory, sanitizeCategoryKey } from "../utils/receiptCategorizer";
+import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
 import { deriveAutomationPatch } from "../utils/rulesEngine";
 import {
   resolveMerchantCanonical,
@@ -580,7 +580,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     if (initialData?.isTransfer) return false;
     const gid = String(initialData?.splitGroupId || "").trim();
     if (!gid) return false;
-    return splitGroupTransactions.length >= 2;
+    const childCount = (splitGroupTransactions || []).filter((t) => !t?.isSplitParent).length;
+    return childCount >= 2;
   }, [isEditMode, initialData?.isTransfer, initialData?.splitGroupId, splitGroupTransactions.length]);
 
   const makeEmptySplitLine = () => ({
@@ -595,7 +596,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   const [splitLines, setSplitLines] = useState(() => {
     if (isEditingSplitGroup && splitGroupTransactions.length) {
-      const sorted = [...splitGroupTransactions].sort((a, b) => {
+      const sorted = [...splitGroupTransactions].filter((t) => !t?.isSplitParent).sort((a, b) => {
         const ai = Number(a?.splitIndex || 0);
         const bi = Number(b?.splitIndex || 0);
         if (ai && bi) return ai - bi;
@@ -628,13 +629,14 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
     if (isEditingSplitGroup) {
       setIsSplitMode(true);
-      const sorted = [...splitGroupTransactions].sort((a, b) => {
+      const sorted = [...splitGroupTransactions].filter((t) => !t?.isSplitParent).sort((a, b) => {
         const ai = Number(a?.splitIndex || 0);
         const bi = Number(b?.splitIndex || 0);
         if (ai && bi) return ai - bi;
         return (b?.amount || 0) - (a?.amount || 0);
       });
-      setSplitLabel(String(sorted?.[0]?.splitLabel || initialData?.splitLabel || ""));
+      const parentInGroup = (splitGroupTransactions || []).find((t) => !!t?.isSplitParent);
+      setSplitLabel(String(parentInGroup?.splitLabel || sorted?.[0]?.splitLabel || initialData?.splitLabel || ""));
       setSplitLines(
         sorted.map((t) => ({
           txId: String(t?.id || ""),
@@ -1365,8 +1367,23 @@ const existingRefSet = useMemo(() => {
               accounts?.[0]?.id ||
               "";
           }
+          const rawDocType = String(result?.doc_type ?? result?.docType ?? "").toLowerCase().trim();
+          const inferredDocType = (() => {
+            if (rawDocType) return rawDocType;
+            if (finalTxType === "transfer" || finalTxType === "credit_payment") return "transfer_slip";
+            const hasItems = Array.isArray(result?.items) && result.items.length > 0;
+            return hasItems ? "receipt" : "unknown";
+          })();
 
-          const scannedItems = Array.isArray(result?.items) ? result.items : [];
+          // Hybrid guardrail:
+          // - transfer slips / bill payments must NOT produce line-item breakdown
+          // - receipts MAY produce line-item breakdown (items may still be empty)
+          const docType = inferredDocType;
+
+          let scannedItems = Array.isArray(result?.items) ? result.items : [];
+          if (docType === "transfer_slip" || docType === "bill_payment" || finalTxType === "transfer" || finalTxType === "credit_payment") {
+            scannedItems = [];
+          }
 
           const fallbackKey =
             sanitizeCategoryKey(result?.category) || sanitizeCategoryKey(result?.category_key) || "other";
@@ -1374,34 +1391,47 @@ const existingRefSet = useMemo(() => {
           let groups = [];
           let primaryKey = fallbackKey;
 
-          // สำหรับ credit_payment/transfer: ไม่ split หมวด
-          if (finalTxType === "expense" || finalTxType === "income") {
-            const grouped = groupReceiptItemsToCategory(finalTxType, scannedItems, contextText, fallbackKey);
-            primaryKey = grouped.primaryKey || fallbackKey;
+          // ✅ Receipt items (expense): create per-item lines (ignore 0฿ promo lines)
+          if (finalTxType === "expense") {
+            const lines = splitReceiptItemsToLines("expense", scannedItems, contextText, fallbackKey);
+            if (lines.length) primaryKey = lines[0]?.key || fallbackKey;
 
-            groups = (grouped.groups || []).map((g) => {
-              const catId = ensureCategory(finalTxType, g.key || "other");
-              return {
-                key: g.key || "other",
-                categoryId: catId,
-                amount: parseMoneyToSatang(g.amount),
-                names: Array.isArray(g.names) ? g.names.slice(0, 6) : [],
-              };
-            }).filter((g) => Number(g?.amount || 0) > 0);
+            groups = (lines || [])
+              .map((ln) => {
+                const catId = ensureCategory("expense", ln.key || "other");
+                return {
+                  key: ln.key || "other",
+                  categoryId: catId,
+                  amount: parseMoneyToSatang(ln.amount),
+                  note: String(ln.name || "").trim(),
+                };
+              })
+              .filter((g) => Number(g?.amount || 0) > 0);
+          }
+
+          // ✅ Income slips normally have no item lines
+          if (finalTxType === "income") {
+            primaryKey = fallbackKey;
+            groups = [];
           }
 
           const groupSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
           const aiTotal = amountSatang != null ? amountSatang : 0;
+          let splitByCategory = finalTxType === "expense" && groups.length >= 2;
 
-          let splitByCategory = false;
-          if (finalTxType === "expense" && groups.length >= 2) {
-            const g0 = groups[0]?.amount || 0;
-            const g1 = groups[1]?.amount || 0;
-            const total = groupSum || aiTotal || 1;
-            const ratio2 = g1 / total;
-            const ratio1 = g0 / total;
-            splitByCategory = ratio2 >= 0.2 && ratio1 <= 0.88;
+          const scanWarnings = [];
+          const scanFlags = result?.flags || null;
+          const scanConfidence = result?.confidence || null;
+
+          if (scanFlags?.needs_human_review) scanWarnings.push("NEEDS_HUMAN_REVIEW");
+          if (scanFlags?.has_zero_price_lines) scanWarnings.push("HAS_ZERO_PRICE_LINES");
+          if (scanFlags?.has_discount_lines) scanWarnings.push("HAS_DISCOUNT_LINES");
+
+          if (finalTxType === "expense" && (docType === "receipt" || docType === "unknown") && amountSatang != null && groupSum > 0) {
+            const diff = Math.abs(groupSum - amountSatang);
+            if (diff >= 200) scanWarnings.push("TOTAL_MISMATCH");
           }
+
 
           let detectedCategoryId = "";
           if (finalTxType === "expense") detectedCategoryId = ensureCategory("expense", primaryKey || "other");
@@ -1469,7 +1499,7 @@ const existingRefSet = useMemo(() => {
             const t = aiTotal && aiTotal > 0 ? aiTotal : null;
 
             if (finalTxType === "transfer" || finalTxType === "credit_payment") return a ?? t ?? g;
-            if (splitByCategory) return g ?? a ?? t;
+            if (splitByCategory) return a ?? g ?? t;
             return a ?? g ?? t;
           })();
 
@@ -1488,6 +1518,15 @@ const existingRefSet = useMemo(() => {
             duplicate: dupByRef,
             includeDuplicate: !dupByRef,
             evidence: evidenceText.slice(0, 240),
+            docType,
+            scanWarnings,
+            scanMeta: {
+              docType,
+              flags: scanFlags || null,
+              confidence: scanConfidence || null,
+              model: result?._model || null,
+              endpointUsed: result?._endpointUsed || null,
+            },
             items: scannedItems,
             groups,
             splitByCategory: finalTxType === "transfer" || finalTxType === "credit_payment" ? false : splitByCategory,
@@ -1867,41 +1906,99 @@ const existingRefSet = useMemo(() => {
       }
 
       if (q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length >= 2) {
-        const groups = q.groups
+        // ✅ Per-item split: create 1 parent transaction (total) + N child transactions (breakdown)
+        // - ignores 0฿ promo lines (already filtered)
+        // - budgets/reports count only children; parent is for UI only
+        const groups = (q.groups || [])
           .map((g) => ({ ...g, amount: Number(g.amount) || 0 }))
           .filter((g) => g.amount > 0);
 
-        groups.sort((a, b) => b.amount - a.amount);
+        // keep original order (OCR order); if splitIndex exists, respect it
+        groups.sort((a, b) => {
+          const ai = Number(a?.splitIndex || 0);
+          const bi = Number(b?.splitIndex || 0);
+          if (ai && bi && ai !== bi) return ai - bi;
+          return 0;
+        });
 
         const splitGroupId = String(q?.splitGroupId || "").trim() || generateSplitGroupId();
         const splitCount = groups.length;
         const groupLabel = String(q?.splitLabel || merchant || baseNoteRaw || "Split").trim().slice(0, 80) || "Split";
 
+        const parentId = generateId();
+
+        const childSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+        let parentAmount = Number(q.amount) || 0;
+        if (!parentAmount || parentAmount <= 0) parentAmount = childSum;
+
+        // Try reconcile tiny rounding differences by adjusting the last line
+        let diff = parentAmount - childSum;
+        if (diff !== 0 && groups.length) {
+          const last = groups[groups.length - 1];
+          const nextAmt = (Number(last.amount) || 0) + diff;
+          if (nextAmt > 0) {
+            last.amount = nextAmt;
+            diff = 0;
+          }
+        }
+        // If still mismatch and we can't adjust safely, prefer childSum for consistent UI total
+        if (diff !== 0) parentAmount = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+
+        const parentCategory = String(groups.find((g) => g?.categoryId)?.categoryId || q.categoryId || "other").trim();
+
+        // Parent (UI only)
+        txs.push({
+          id: parentId,
+          type: "expense",
+          amount: parentAmount,
+          category: parentCategory,
+          accountId: q.accountId,
+          date: d,
+          note: baseNote,
+          isTransfer: false,
+          transferId: null,
+          ref: q.ref || null,
+          source: "scan",
+          attachmentId: q.attachmentId || null,
+
+          splitGroupId,
+          splitCount,
+          splitLabel: groupLabel,
+          isSplit: true,
+          isSplitParent: true,
+
+          merchant: merchant || null,
+          evidence: String(q.evidence || "").slice(0, 240) || null,
+          from_account: String(q.fromDigits || "").trim() || null,
+          to_account: String(q.toDigits || "").trim() || null,
+          counterparty_digits: String(q.toDigits || q.fromDigits || "").trim() || null,
+        });
+
+        // Children (real transactions)
         groups.forEach((g, idx) => {
-          const itemsTxt = Array.isArray(g.names) && g.names.length ? ` • ${g.names.join(", ")}` : "";
-          const groupNoteRaw = `${baseNoteRaw} • ${categoryNameFromKey(g.key)}${itemsTxt}`.slice(0, 180);
-          const groupNote = appendEvidenceToNote(groupNoteRaw, q.evidence, 180);
+          const itemName = String(g?.note || "").trim() || categoryNameFromKey(g.key);
 
           txs.push({
             id: generateId(),
             type: "expense",
-            amount: g.amount,
+            amount: Number(g.amount) || 0,
             category: g.categoryId,
             accountId: q.accountId,
             date: d,
-            note: groupNote,
+            note: itemName,
             isTransfer: false,
             transferId: null,
-            ref: idx === 0 ? (q.ref || null) : null,
+            ref: null,
             source: "scan",
             attachmentId: q.attachmentId || null,
 
-            // ✅ Split grouping fields (for UI)
             splitGroupId,
             splitIndex: idx + 1,
             splitCount,
             splitLabel: groupLabel,
             isSplit: true,
+            isSplitChild: true,
+            splitParentId: parentId,
 
             merchant: merchant || null,
             evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -2023,7 +2120,7 @@ const existingRefSet = useMemo(() => {
       return;
     }
 
-    // ✅ Split transactions (expense/income)
+    // ✅ Split transactions (expense/income) - 1 parent + N children
     if (isSplitMode) {
       if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
 
@@ -2044,17 +2141,38 @@ const existingRefSet = useMemo(() => {
 
       const splitGroupId = String(initialData?.splitGroupId || "").trim() || generateSplitGroupId();
       const splitCount = cleanedLines.length;
-      const groupLabel = String(splitLabel || "").trim().slice(0, 80);
+      const groupLabel = String(splitLabel || "").trim().slice(0, 80) || null;
 
-      const txs = cleanedLines.map((l, idx) => {
-        const finalNote = l.lineNote
-          ? noteText
-            ? noteText === l.lineNote
-              ? noteText
-              : `${noteText} • ${l.lineNote}`
-            : l.lineNote
-          : noteText;
+      // existing group (for edit) may already have a parent
+      const existingParent = (splitGroupTransactions || []).find((t) => !!t?.isSplitParent) || (initialData?.isSplitParent ? initialData : null);
+      const parentId = String(existingParent?.id || "").trim() || (initialData?.isSplitParent ? String(initialData.id) : "") || generateId();
 
+      const childrenTotal = cleanedLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+      const parentCategory = String(existingParent?.category || cleanedLines[0]?.categoryId || "other").trim() || "other";
+
+      const parentTx = {
+        id: parentId,
+        type: type === "income" ? "income" : "expense",
+        amount: childrenTotal,
+        category: parentCategory,
+        accountId,
+        date: d,
+        note: noteText || groupLabel || "Split",
+        isTransfer: false,
+        transferId: null,
+        ref: refText || null,
+        source: "manual",
+        attachmentId: initialAttachmentId || null,
+
+        splitGroupId,
+        splitCount,
+        splitLabel: groupLabel,
+        isSplit: true,
+        isSplitParent: true,
+      };
+
+      const childTxs = cleanedLines.map((l, idx) => {
+        const itemName = l.lineNote || noteText || null;
         return {
           id: l.txId || generateId(),
           type: type === "income" ? "income" : "expense",
@@ -2062,32 +2180,38 @@ const existingRefSet = useMemo(() => {
           category: l.categoryId,
           accountId,
           date: d,
-          note: finalNote,
+          note: itemName,
           isTransfer: false,
           transferId: null,
-          ref: idx === 0 ? (refText || null) : null,
+          ref: null,
           source: "manual",
           attachmentId: initialAttachmentId || null,
 
           splitGroupId,
           splitIndex: idx + 1,
           splitCount,
-          splitLabel: groupLabel || null,
+          splitLabel: groupLabel,
           isSplit: true,
+          isSplitChild: true,
+          splitParentId: parentId,
         };
       });
 
       // delete removed lines (when editing an existing split group)
-      const existingIds = new Set(
-        (splitGroupTransactions || []).map((t) => String(t?.id || "")).filter(Boolean)
+      const existingChildIds = new Set(
+        (splitGroupTransactions || [])
+          .filter((t) => !t?.isSplitParent)
+          .map((t) => String(t?.id || ""))
+          .filter(Boolean)
       );
-      const nextIds = new Set(txs.map((t) => String(t.id)));
-      const removedIds = [...existingIds].filter((id) => !nextIds.has(id));
+      const nextIds = new Set(childTxs.map((t) => String(t.id)));
+      const removedIds = [...existingChildIds].filter((id) => !nextIds.has(id));
 
       if (removedIds.length) {
         deleteManyTransactions(removedIds, { navigateToDashboard: false });
       }
-      bulkUpsertTransactions(txs, { navigateToDashboard: true });
+
+      bulkUpsertTransactions([parentTx, ...childTxs], { navigateToDashboard: true });
       return;
     }
 
@@ -2608,10 +2732,20 @@ const existingRefSet = useMemo(() => {
                                 {/* Split groups editor */}
                                 {q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length >= 2 ? (
                                   <div className="glass-panel border border-emerald-500/15 rounded-2xl p-3">
-                                    <div className="text-xs font-bold text-gray-900/70 mb-2">แยกหมวดจากบรรทัดในบิล</div>
+                                    <div className="text-xs font-bold text-gray-900/70 mb-2">แยกรายการในใบเสร็จ (ไม่รวมราคา 0)</div>
                                     <div className="space-y-2">
                                       {q.groups.map((g, idx) => (
                                         <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
+                                          <div className="mb-2">
+                                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">รายการ</div>
+                                            <input
+                                              type="text"
+                                              value={g.note || ""}
+                                              onChange={(e) => updateQueueGroup(q.id, idx, { note: e.target.value })}
+                                              className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                                              placeholder="ชื่อสินค้า/บริการ"
+                                            />
+                                          </div>
                                           <div className="grid grid-cols-5 gap-2 items-start">
                                             <div className="col-span-3">
                                               <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
@@ -2647,7 +2781,7 @@ const existingRefSet = useMemo(() => {
                                                 className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
                                               />
                                               <div className="text-[10px] text-gray-900/55 mt-1 truncate">
-                                                {Array.isArray(g.names) && g.names.length ? `เช่น: ${g.names.join(", ")}` : "—"}
+                                                {String(g.note || "").trim() ? "" : "—"}
                                               </div>
                                             </div>
                                           </div>

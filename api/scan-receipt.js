@@ -165,6 +165,27 @@ function extractResponsesOutputText(resp) {
   return String(maybe || "").trim();
 }
 
+function findFirstParsedObject(resp) {
+  try {
+    const out = resp?.output;
+    if (Array.isArray(out)) {
+      for (const item of out) {
+        const content = item?.content;
+        if (Array.isArray(content)) {
+          for (const c of content) {
+            if (c && typeof c === 'object' && c.parsed && typeof c.parsed === 'object') return c.parsed;
+            if (c && typeof c === 'object' && c.json && typeof c.json === 'object') return c.json;
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+
 function safeString(v) {
   if (v == null) return "";
   return String(v).trim();
@@ -179,6 +200,14 @@ function safeNumber(v) {
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 }
+
+function clamp01(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
 
 function normalizeCategoryKey(v) {
   const s = safeString(v).toLowerCase();
@@ -676,46 +705,161 @@ async function callOpenAI({ base64, mimeType }) {
   const model = normalizeOpenAIModel(process.env.OPENAI_MODEL);
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
-  const prompt =
-    `You are a receipt/bank-slip parser for a personal expense tracker.\n` +
-    `Return STRICT JSON ONLY (no markdown, no explanation).\n` +
-    `Allowed category_key values:\n` +
-    `- expense: food, transport, shopping, bills, health, entertainment, other\n` +
-    `- income: salary, bonus, investment, refund, other\n` +
-    `- transfer: transfer\n` +
-    `Schema:\n` +
-    `{\n` +
-    `  "tx_type": "expense"|"income"|"transfer",\n` +
-    `  "amount": number|null,\n` +
-    `  "date": "YYYY-MM-DD"|null,\n` +
-    `  "merchant": string|null,\n` +
-    `  "note": string|null,\n` +
-    `  "ref": string|null,\n` +
-    `  "category_key": string|null,\n` +
-    `  "items": [\n` +
-    `    { "name": string, "qty": number|null, "unit_price": number|null, "total": number|null, "category_key": string|null }\n` +
-    `  ]|[],\n` +
-    `  "from_account": string|null,\n` +
-    `  "to_account": string|null,\n` +
-    `  "evidence": string|null\n` +
-    `}\n` +
-    `Rules:\n` +
-    `- amount = grand total paid.\n` +
-    `- If date is Buddhist Era (>=2400), convert to AD.\n` +
-    `- Use tx_type="transfer" only if clearly a transfer between accounts.\n` +
-    `- For credit card payment slips (ชำระบัตร/บัตรเครดิต/CardX/หมายเลขบัตร/บัญชีรับชำระ), still output best guess fields; server will classify.\n` +
-    `- ref: extract transaction reference / TRX / Ref / เลขที่รายการ if present, else null.\n` +
-    `- from_account / to_account:\n` +
-    `  * MUST be ONLY last 3-6 digits of account number (digits only; Thai digits ok).\n` +
-    `  * For card number, return last 4 digits ONLY.\n` +
-    `  * Map direction: "จาก/From/ผู้โอน" => from_account, "ไปยัง/To/ผู้รับ/บัญชีรับชำระ/หมายเลขบัตร" => to_account.\n` +
-    `  * Do NOT use reference/biller/merchant ids as account.\n` +
-    `- evidence: short string (<=220 chars) containing key lines you used.\n` +
-    `Return JSON only.\n`;
+  const prompt = `
+You are an OCR+parser for Thai receipts and Thai bank/payment transfer slips used in a personal expense tracker.
+Return STRICT JSON ONLY. No markdown. No extra text.
+
+Decide doc_type:
+- receipt: itemized receipt/invoice with purchased line items
+- transfer_slip: bank transfer / payment slip / credit card payment slip
+- bill_payment: utility bill payment slip
+- unknown: otherwise
+
+Rules:
+- If unsure, use null.
+- amount: grand total paid.
+- evidence: include key lines you used (<= 220 chars).
+
+Line items rules:
+- If doc_type is transfer_slip or bill_payment: items MUST be [] (empty). Do NOT invent items.
+- If doc_type is receipt: items MUST include ONLY purchased products/services with line_total > 0.
+  * Skip any lines with 0 price (freebies, stamps, tasks, promotions, coupons, points, exchanged rights, etc.)
+  * Skip summary lines (TOTAL, Subtotal, VAT, service charge, change, discounts)
+
+Classification:
+- If it is clearly a transfer between accounts: tx_type MUST be 'transfer'.
+- If it is a CREDIT CARD PAYMENT slip (Thai/EN keywords like ชำระบัตร, บัตรเครดิต, CardX, credit card, หมายเลขบัตร, บัญชีรับชำระ, ยอดชำระ, ชำระขั้นต่ำ):
+  * tx_type MUST be 'transfer'
+  * tx_subtype MUST be 'credit_card_payment'
+  * is_credit_card_payment MUST be true
+- Otherwise for normal transfer: tx_type='transfer', tx_subtype='transfer', is_credit_card_payment=false.
+- For receipts (not transfer): tx_type='expense' or 'income'. tx_subtype should be null.
+
+Account digits extraction:
+- from_account / to_account MUST be digits only (Thai digits ok).
+- For bank account: return ONLY last 3-6 digits.
+- For card number: return ONLY last 4 digits.
+- Do NOT use reference/biller/merchant ids as account.
+
+Allowed category_key values:
+- expense: food, transport, shopping, bills, health, entertainment, other
+- income: salary, bonus, investment, refund, other
+- transfer: transfer
+
+Schema (ALL keys must exist; use null if unknown):
+{
+  "doc_type": "receipt"|"transfer_slip"|"bill_payment"|"unknown",
+  "tx_type": "expense"|"income"|"transfer",
+  "tx_subtype": "transfer"|"credit_card_payment"|null,
+  "is_credit_card_payment": boolean|null,
+  "amount": number|null,
+  "currency": string|null,
+  "date": "YYYY-MM-DD"|null,
+  "merchant": string|null,
+  "note": string|null,
+  "ref": string|null,
+  "category_key": string|null,
+  "items": [
+    { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null }
+  ],
+  "from_account": string|null,
+  "to_account": string|null,
+  "evidence": string|null,
+  "confidence": { "overall": number|null, "amount": number|null, "date": number|null, "merchant": number|null, "items": number|null },
+  "flags": { "has_line_items": boolean, "has_zero_price_lines": boolean, "has_discount_lines": boolean, "needs_human_review": boolean }
+}
+`;
+
+  const response_format = {
+    type: "json_schema",
+    json_schema: {
+      name: "scan_result",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "doc_type",
+          "tx_type",
+          "tx_subtype",
+          "is_credit_card_payment",
+          "amount",
+          "currency",
+          "date",
+          "merchant",
+          "note",
+          "ref",
+          "category_key",
+          "items",
+          "from_account",
+          "to_account",
+          "evidence",
+          "confidence",
+          "flags"
+        ],
+        properties: {
+          doc_type: { type: "string", enum: ["receipt", "transfer_slip", "bill_payment", "unknown"] },
+          tx_type: { type: "string", enum: ["expense", "income", "transfer"] },
+          tx_subtype: { anyOf: [{ type: "string", enum: ["transfer", "credit_card_payment"] }, { type: "null" }] },
+          is_credit_card_payment: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+          amount: { anyOf: [{ type: "number" }, { type: "null" }] },
+          currency: { anyOf: [{ type: "string" }, { type: "null" }] },
+          date: { anyOf: [{ type: "string" }, { type: "null" }] },
+          merchant: { anyOf: [{ type: "string" }, { type: "null" }] },
+          note: { anyOf: [{ type: "string" }, { type: "null" }] },
+          ref: { anyOf: [{ type: "string" }, { type: "null" }] },
+          category_key: { anyOf: [{ type: "string" }, { type: "null" }] },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["name", "qty", "unit_price", "line_total", "category_key"],
+              properties: {
+                name: { type: "string" },
+                qty: { anyOf: [{ type: "number" }, { type: "null" }] },
+                unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
+                line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
+                category_key: { anyOf: [{ type: "string" }, { type: "null" }] }
+              }
+            }
+          },
+          from_account: { anyOf: [{ type: "string" }, { type: "null" }] },
+          to_account: { anyOf: [{ type: "string" }, { type: "null" }] },
+          evidence: { anyOf: [{ type: "string" }, { type: "null" }] },
+          confidence: {
+            type: "object",
+            additionalProperties: false,
+            required: ["overall", "amount", "date", "merchant", "items"],
+            properties: {
+              overall: { anyOf: [{ type: "number" }, { type: "null" }] },
+              amount: { anyOf: [{ type: "number" }, { type: "null" }] },
+              date: { anyOf: [{ type: "number" }, { type: "null" }] },
+              merchant: { anyOf: [{ type: "number" }, { type: "null" }] },
+              items: { anyOf: [{ type: "number" }, { type: "null" }] }
+            }
+          },
+          flags: {
+            type: "object",
+            additionalProperties: false,
+            required: ["has_line_items", "has_zero_price_lines", "has_discount_lines", "needs_human_review"],
+            properties: {
+              has_line_items: { type: "boolean" },
+              has_zero_price_lines: { type: "boolean" },
+              has_discount_lines: { type: "boolean" },
+              needs_human_review: { type: "boolean" }
+            }
+          }
+        }
+      }
+    }
+  };
 
   const payload = {
+
     model,
     temperature: 0,
+    response_format,
     input: [
       {
         role: "user",
@@ -758,8 +902,9 @@ async function callOpenAI({ base64, mimeType }) {
     };
   }
 
+  const parsedObj = findFirstParsedObject(json);
   const outputText = extractResponsesOutputText(json);
-  const parsed = safeJsonParseMaybe(outputText);
+  const parsed = parsedObj || safeJsonParseMaybe(outputText);
 
   if (!parsed) {
     return {
@@ -796,10 +941,7 @@ async function callOpenAI({ base64, mimeType }) {
     normalizeCategoryKey(parsed?.category) ||
     (refined.tx_type === "transfer" ? "transfer" : null);
 
-  // if credit card payment => bills (unless already set)
-  if (refined.is_credit_card_payment) {
-    if (!category || category === "transfer") category = "bills";
-  } else if (refined.tx_type !== "transfer") {
+  if (refined.tx_type !== "transfer") {
     const fromItems = pickDominantCategoryFromItems(items);
     const fromText = inferCategoryFromText(`${merchant || ""} ${note || ""} ${outputText || ""}`);
     if (!category) category = fromItems || fromText || "other";
@@ -808,23 +950,78 @@ async function callOpenAI({ base64, mimeType }) {
     category = "transfer";
   }
 
+  // ---- doc_type normalization ----
+  const dtRaw = safeString(parsed?.doc_type ?? parsed?.docType).toLowerCase();
+  const allowedDt = new Set(["receipt", "transfer_slip", "bill_payment", "unknown"]);
+  let doc_type = allowedDt.has(dtRaw) ? dtRaw : "";
+
+  // If model didn't provide doc_type, infer lightly from refined tx_type and presence of line items
+  if (!doc_type) {
+    if (refined.tx_type === "transfer") doc_type = "transfer_slip";
+    else if (Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) > 0)) doc_type = "receipt";
+    else doc_type = "unknown";
+  }
+
+  // Enforce: transfer slips / bill payments must not contain purchase line items
+  let finalItems = items;
+  if (doc_type === "transfer_slip" || doc_type === "bill_payment" || refined.tx_type === "transfer") {
+    finalItems = [];
+  }
+
+  // ---- confidence + flags (hybrid guardrails) ----
+  const confIn = parsed?.confidence && typeof parsed.confidence === "object" ? parsed.confidence : {};
+  const confidence = {
+    overall: clamp01(typeof confIn.overall === "number" ? confIn.overall : null),
+    amount: clamp01(typeof confIn.amount === "number" ? confIn.amount : null),
+    date: clamp01(typeof confIn.date === "number" ? confIn.date : null),
+    merchant: clamp01(typeof confIn.merchant === "number" ? confIn.merchant : null),
+    items: clamp01(typeof confIn.items === "number" ? confIn.items : null),
+  };
+
+  const flagsIn = parsed?.flags && typeof parsed.flags === "object" ? parsed.flags : {};
+  const hasPositiveItems = Array.isArray(finalItems) && finalItems.some((it) => (safeNumber(it?.total) || 0) > 0);
+  const hasZeroItems = Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) == 0);
+  const hasDiscountHint = /ส่วนลด|discount|คูปอง|coupon|แต้ม|points|โปรโมชั่น|promo/i.test(String(outputText || ""));
+
+  let needsReview = false;
+  if (confidence.overall != null && confidence.overall < 0.6) needsReview = true;
+  if (doc_type === "receipt" && amount != null && hasPositiveItems) {
+    const sum = finalItems.reduce((s, it) => s + (safeNumber(it?.total) || 0), 0);
+    const diff = sum > 0 ? Math.abs(sum - amount) : 0;
+    if (diff >= 2) needsReview = true;
+  }
+
+  const flags = {
+    has_line_items: typeof flagsIn.has_line_items === "boolean" ? flagsIn.has_line_items : !!hasPositiveItems,
+    has_zero_price_lines: typeof flagsIn.has_zero_price_lines === "boolean" ? flagsIn.has_zero_price_lines : !!hasZeroItems,
+    has_discount_lines: typeof flagsIn.has_discount_lines === "boolean" ? flagsIn.has_discount_lines : !!hasDiscountHint,
+    needs_human_review: typeof flagsIn.needs_human_review === "boolean" ? flagsIn.needs_human_review : !!needsReview,
+  };
+
   const normalized = {
+    doc_type,
+
     tx_type: refined.tx_type,
     tx_subtype: refined.tx_subtype,
     is_credit_card_payment: refined.is_credit_card_payment,
 
     amount: Number.isFinite(amount) ? amount : null,
+    currency: parsed?.currency != null && String(parsed.currency).trim() ? String(parsed.currency).trim().toUpperCase() : null,
     date: parsed.date ? String(parsed.date).slice(0, 10) : null,
     merchant,
     note,
     ref: parsed.ref ? String(parsed.ref).trim() : null,
 
     category,
-    items,
+    category_key: category,
+
+    items: finalItems,
 
     from_account: parsed.from_account ? clampDigits(parsed.from_account, { maxLen: 6, minLen: 3 }) : null,
     to_account: parsed.to_account ? clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }) : null,
     evidence: evidence0,
+    confidence,
+    flags,
   };
 
   // ✅ Enhancement: robust account mapping (prefer card last4 when credit card payment)
