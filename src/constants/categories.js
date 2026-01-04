@@ -14,6 +14,8 @@ export const DEFAULT_CATEGORIES = {
   expense: [
     // Essentials
     { id: "food", name: "อาหาร", icon: "🍜", color: "#FF6B6B" },
+    // ✅ New: explicit drinks category (for receipts like "น้ำดื่ม", "เครื่องดื่ม")
+    { id: "drinks", name: "เครื่องดื่ม", icon: "🥤", color: "#34D399" },
     { id: "groceries", name: "ของกิน/ของใช้", icon: "🛒", color: "#FF9F43" },
     { id: "transport", name: "เดินทาง", icon: "🚗", color: "#4ECDC4" },
     { id: "fuel", name: "น้ำมัน/ชาร์จรถ", icon: "⛽", color: "#48BFE3" },
@@ -51,6 +53,8 @@ export const DEFAULT_CATEGORIES = {
     { id: "gift", name: "ของขวัญ", icon: "🎁", color: "#E879F9" },
 
     // Misc
+    // ✅ New: a neutral category for "one receipt, many categories" parent transaction (UI-only)
+    { id: "mixed", name: "หลายหมวด", icon: "🧩", color: "#A3A3A3" },
     { id: "other", name: "อื่นๆ", icon: "📦", color: "#C8D6E5" },
   ],
 

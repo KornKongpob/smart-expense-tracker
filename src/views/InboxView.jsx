@@ -62,20 +62,21 @@ function buildTransactionsFromInboxItem(item) {
   const note = appendEvidenceToNote(item?.note || "", item?.evidence);
   const ref = item?.referenceId || item?.ref || "";
 
-  // Split by category (legacy scan payload support)
-  if (item?.splitByCategory && Array.isArray(item?.groups) && item.groups.length) {
+  // Split (receipt items): create 1 parent transaction + N child transactions
+  // ✅ Ignore zero/invalid lines (amount <= 0)
+  if (txType === "expense" && item?.splitByCategory && Array.isArray(item?.groups) && item.groups.length) {
     const accountId = item?.accountId || "";
     if (!accountId) throw new Error("ยังไม่ได้เลือก Account สำหรับรายการแบบ Split");
 
     const splitGroupId = String(item?.splitGroupId || "").trim() || generateSplitGroupId();
     const splitLabel = String(item?.splitLabel || merchant || item?.note || "Split").trim().slice(0, 80) || "Split";
 
-    // ✅ Ignore zero/invalid lines: only create split transactions for amount > 0
+    // ✅ only keep lines with amount > 0
     const usableGroups = (item.groups || [])
       .map((g) => ({ ...g, amount: asSatang(g?.amount) }))
       .filter((g) => isPositiveNumber(g.amount));
 
-    // If only 1 usable line remains, fallback to a single transaction instead of a split group
+    // If only 1 usable line remains, fallback to single tx (no split breakdown)
     if (usableGroups.length === 1) {
       const g0 = usableGroups[0];
       const categoryId = g0?.categoryId || item?.categoryId || "";
@@ -88,7 +89,7 @@ function buildTransactionsFromInboxItem(item) {
           amount: g0.amount,
           date,
           merchant,
-          note: g0?.note ? `${note ? note + "\n\n" : ""}${g0.note}` : note,
+          note: String(g0?.note || "").trim() || note,
           ref: ref || "",
           category: categoryId,
           accountId,
@@ -106,12 +107,67 @@ function buildTransactionsFromInboxItem(item) {
 
     const splitCount = usableGroups.length;
 
+    const parentId = generateId();
+    const childSum = usableGroups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+
+    // Parent amount: prefer item.amount if provided, else sum of children
+    let parentAmount = asSatang(item?.amount);
+    if (!isPositiveNumber(parentAmount)) parentAmount = childSum;
+
+    // Try reconcile tiny differences by adjusting the last line
+    let diff = parentAmount - childSum;
+    if (diff !== 0 && usableGroups.length) {
+      const last = usableGroups[usableGroups.length - 1];
+      const nextAmt = (Number(last.amount) || 0) + diff;
+      if (nextAmt > 0) {
+        last.amount = nextAmt;
+        diff = 0;
+      }
+    }
+    // If mismatch remains and we can't adjust safely, prefer childSum for consistent UI
+    if (diff !== 0) parentAmount = usableGroups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+
+    // ✅ Parent category for split groups:
+    // - Multiple child categories → parent = "mixed" (UI-only)
+    // - Single child category → use that category
+    const uniqueCats = Array.from(new Set(usableGroups.map((g) => String(g?.categoryId || "").trim()).filter(Boolean)));
+    const parentCategory = String(
+      (uniqueCats.length > 1 ? "mixed" : uniqueCats[0]) || item?.categoryId || "mixed"
+    ).trim();
+
     const txs = [];
+
+    // Parent (UI-only)
+    txs.push({
+      id: parentId,
+      type: txType,
+      amount: parentAmount,
+      date,
+      merchant,
+      note,
+      ref: ref || "",
+      category: parentCategory,
+      accountId,
+      isTransfer: false,
+      transferId: null,
+      attachmentId: item?.attachmentId || null,
+      source: "inbox",
+
+      splitGroupId,
+      splitCount,
+      splitLabel,
+      isSplit: true,
+      isSplitParent: true,
+    });
+
+    // Children (real transactions)
     for (let i = 0; i < usableGroups.length; i++) {
       const g = usableGroups[i];
-      const amount = g.amount;
+      const amount = Number(g.amount) || 0;
       const categoryId = g?.categoryId || item?.categoryId || "";
       if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับกลุ่ม Split");
+
+      const itemName = String(g?.note || "").trim() || "(item)";
 
       txs.push({
         id: generateId(),
@@ -119,8 +175,9 @@ function buildTransactionsFromInboxItem(item) {
         amount,
         date,
         merchant,
-        note: g?.note ? `${note ? note + "\n\n" : ""}${g.note}` : note,
-        ref: i === 0 ? ref : "",
+        itemName,
+        note: itemName,
+        ref: "",
         category: categoryId,
         accountId,
         isTransfer: false,
@@ -128,14 +185,16 @@ function buildTransactionsFromInboxItem(item) {
         attachmentId: item?.attachmentId || null,
         source: "inbox",
 
-        // ✅ Split grouping fields (for UI)
         splitGroupId,
         splitIndex: i + 1,
         splitCount,
         splitLabel,
         isSplit: true,
+        isSplitChild: true,
+        splitParentId: parentId,
       });
     }
+
     return txs;
   }
 

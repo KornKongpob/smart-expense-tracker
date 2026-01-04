@@ -115,34 +115,84 @@ function normalizeCategoryKey(v) {
   const s = safeString(v).toLowerCase();
   if (!s) return null;
 
+  // Keep this list aligned with DEFAULT_CATEGORIES (src/constants/categories.js)
+  // plus special/system keys.
   const allowed = new Set([
+    // expense
     "food",
+    "drinks",
+    "groceries",
     "transport",
-    "shopping",
+    "fuel",
     "bills",
-    "health",
+    "rent",
+    "shopping",
+    "coffee",
+    "dining",
     "entertainment",
+    "travel",
+    "health",
+    "fitness",
+    "beauty",
+    "pets",
+    "kids",
+    "home",
+    "education",
+    "work",
+    "phone_internet",
+    "subscriptions",
+    "fees",
+    "adjust_balance",
+    "insurance",
+    "donation",
+    "gift",
+    "mixed",
+    "other",
+    // income
     "salary",
     "bonus",
+    "freelance",
+    "business",
     "investment",
+    "interest",
+    "dividend",
     "refund",
-    "other",
+    "gift_income",
+    "other_income",
+    // system
     "transfer",
   ]);
   if (allowed.has(s)) return s;
 
   const alias = {
+    // utilities
     utilities: "bills",
+    utility: "bills",
     bill: "bills",
-    gas: "transport",
-    fuel: "transport",
-    petrol: "transport",
-    diesel: "transport",
+    // transport
+    gas: "fuel",
+    fuel: "fuel",
+    petrol: "fuel",
+    diesel: "fuel",
     commute: "transport",
-    groceries: "shopping",
-    supermarket: "shopping",
+    // groceries/shopping
+    supermarket: "groceries",
+    groceries: "groceries",
+    market: "groceries",
+    convenience: "groceries",
+    // food/drinks
+    beverage: "drinks",
+    drinks: "drinks",
+    drink: "drinks",
+    cafe: "coffee",
+    coffee: "coffee",
+    tea: "coffee",
+    restaurant: "dining",
+    dining: "dining",
+    // health
     medicine: "health",
     pharmacy: "health",
+    // entertainment
     movie: "entertainment",
     cinema: "entertainment",
   };
@@ -191,12 +241,56 @@ function inferCategoryFromText(text) {
   )
     return "transport";
 
+  // Coffee/Tea
   if (
     has([
-      "restaurant",
       "cafe",
       "coffee",
+      "espresso",
+      "latte",
+      "mocha",
+      "cappuccino",
+      "americano",
       "tea",
+      "milk tea",
+      "starbucks",
+      "กาแฟ",
+      "ชา",
+      "ชานม",
+      "สตาร์บัค",
+      "สตาร์บัคส์",
+    ])
+  )
+    return "coffee";
+
+  // Drinks (water/soft drinks)
+  if (
+    has([
+      "beverage",
+      "drink",
+      "drinks",
+      "water",
+      "mineral",
+      "sparkling",
+      "soda",
+      "juice",
+      "cola",
+      "coke",
+      "pepsi",
+      "sprite",
+      "fanta",
+      "เครื่องดื่ม",
+      "น้ำดื่ม",
+      "น้ำเปล่า",
+    ])
+  )
+    return "drinks";
+
+  // Dining vs Food (merchant-level words → dining; item-level words → food)
+  if (has(["restaurant", "ร้านอาหาร", "lineman", "line man", "grabfood"])) return "dining";
+
+  if (
+    has([
       "food",
       "noodle",
       "noodles",
@@ -207,22 +301,16 @@ function inferCategoryFromText(text) {
       "bakery",
       "kfc",
       "mcdonald",
-      "starbucks",
-      "grabfood",
-      "line man",
-      "lineman",
       "อาหาร",
       "ก๋วยเตี๋ยว",
       "ข้าว",
-      "กาแฟ",
-      "ชา",
       "ไก่",
       "หมู",
       "ปลา",
       "ส้มตำ",
       "บะหมี่",
-      "ร้านอาหาร",
       "ของกิน",
+      "ขนม",
     ])
   )
     return "food";
@@ -291,14 +379,9 @@ function inferCategoryFromText(text) {
   )
     return "entertainment";
 
+  // Groceries / convenience stores (prefer groceries)
   if (
     has([
-      "shopping",
-      "store",
-      "mall",
-      "lazada",
-      "shopee",
-      "amazon",
       "7-eleven",
       "7 eleven",
       "seven eleven",
@@ -308,9 +391,10 @@ function inferCategoryFromText(text) {
       "makro",
       "supermarket",
       "market",
-      "shop",
+      "tops",
+      "grocery",
+      "groceries",
       "ซื้อของ",
-      "ช้อป",
       "ร้านค้า",
       "ตลาด",
       "เซเว่น",
@@ -319,7 +403,9 @@ function inferCategoryFromText(text) {
       "แม็คโคร",
     ])
   )
-    return "shopping";
+    return "groceries";
+
+  if (has(["shopping", "store", "mall", "lazada", "shopee", "amazon", "shop", "ช้อป"])) return "shopping";
 
   if (has(["salary", "payroll", "เงินเดือน"])) return "salary";
   if (has(["bonus", "โบนัส"])) return "bonus";
@@ -678,6 +764,19 @@ function normalizeScanResult(parsed, rawText) {
     category = "transfer";
   }
 
+  // ✅ Parent category strategy for receipt splits:
+  // If receipt has items across multiple categories, set the main category to "mixed"
+  // (the app should use child items for budgets/stats; parent is UI-only).
+  if (doc_type === "receipt" && Array.isArray(items) && items.length) {
+    const distinct = new Set(
+      items
+        .map((it) => normalizeCategoryKey(it?.category_key))
+        .filter((k) => !!k && k !== "other")
+    );
+    if (distinct.size >= 2) category = "mixed";
+    else if (distinct.size === 1 && (!category || category === "other")) category = Array.from(distinct)[0];
+  }
+
   // ---- confidence + flags (hybrid guardrails) ----
   const confIn = parsed?.confidence && typeof parsed.confidence === "object" ? parsed.confidence : {};
   const confidence = {
@@ -853,7 +952,10 @@ export default async function handler(req, res) {
       return s;
     };
 
-    const model = normalizeOpenAIModel(process.env.OPENAI_MODEL);
+    const primaryModel = normalizeOpenAIModel(process.env.OPENAI_MODEL);
+    // ✅ Optional fallback for higher accuracy OCR (especially small Thai fonts)
+    // If OPENAI_MODEL_FALLBACK is not set, we default to gpt-4o (only used when needed).
+    const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_MODEL_FALLBACK || "gpt-4o");
 
     // ✅ ปรับ prompt ให้ AI “ส่งสัญญาณ” ชำระบัตรเครดิตมาเลย
     // - ถ้าเป็นสลิปชำระบัตรเครดิต/โอนเข้าบัตรเครดิต: tx_type="transfer", tx_subtype="credit_card_payment", is_credit_card_payment=true
@@ -895,10 +997,15 @@ Account digits extraction:
 - For card number: return ONLY last 4 digits.
 - Do NOT use reference/biller/merchant ids as account.
 
-Allowed category_key values:
-- expense: food, transport, shopping, bills, health, entertainment, other
-- income: salary, bonus, investment, refund, other
+Allowed category_key values (prefer these exact ids; if unsure use 'other'):
+- expense: food, drinks, coffee, dining, groceries, transport, fuel, bills, rent, shopping, entertainment, travel, health, other, mixed
+- income: salary, bonus, freelance, business, investment, interest, dividend, refund, other_income
 - transfer: transfer
+
+For receipts (doc_type=receipt):
+- category_key = best single category for the whole receipt if it is clearly one category.
+- If the receipt contains multiple categories (e.g., food + drinks + health), set category_key="mixed".
+- Each item in items[] should have its own category_key.
 
 Schema (ALL keys must exist; use null if unknown):
 {
@@ -1008,29 +1115,35 @@ Schema (ALL keys must exist; use null if unknown):
       },
     };
 
-    const r = await fetch(OPENAI_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        text: { format: text_format },
-        input: [
-          {
-            role: "user",
-            content: [
-              { type: "input_text", text: prompt },
-              { type: "input_image", image_url: finalImage },
-            ],
-          },
-        ],
-      }),
-    });
+    const callOpenAI = async (modelToUse, promptText) => {
+      const r = await fetch(OPENAI_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelToUse,
+          temperature: 0,
+          text: { format: text_format },
+          input: [
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: promptText },
+                { type: "input_image", image_url: finalImage },
+              ],
+            },
+          ],
+        }),
+      });
 
-    const data = await r.json().catch(() => null);
+      const data = await r.json().catch(() => null);
+      return { r, data, modelUsed: modelToUse };
+    };
+
+    // 1) Primary pass (cheap)
+    let { r, data, modelUsed } = await callOpenAI(primaryModel, prompt);
 
     if (!r.ok) {
       const msg = data?.error?.message || "OpenAI request failed";
@@ -1043,14 +1156,62 @@ Schema (ALL keys must exist; use null if unknown):
         ok: false,
         code: "openai_error",
         message: msg,
-        model,
+        model: modelUsed,
         tip,
         raw: data || null,
       });
     }
 
-    const parsedObj = findFirstParsedObject(data);
-    const text = extractResponsesOutputText(data);
+    let parsedObj = findFirstParsedObject(data);
+    let text = extractResponsesOutputText(data);
+
+    // 2) Fallback pass (higher accuracy) – only when signals suggest OCR is weak
+    try {
+      const parsedForDecision = parsedObj || safeJsonParseMaybe(text);
+
+      const docType = safeString(parsedForDecision?.doc_type);
+      const isReceipt = docType === "receipt";
+      const items = Array.isArray(parsedForDecision?.items) ? parsedForDecision.items : [];
+      const itemsCount = items
+        .map((it) => safeNumber(it?.line_total ?? it?.total ?? it?.amount))
+        .filter((n) => typeof n === "number" && Number.isFinite(n) && n > 0).length;
+
+      const needsReview = !!parsedForDecision?.flags?.needs_human_review;
+      const itemsConf = safeNumber(parsedForDecision?.confidence?.items);
+      const overallConf = safeNumber(parsedForDecision?.confidence?.overall);
+
+      const amount = safeNumber(parsedForDecision?.amount);
+      const sumItems = items.reduce((s, it) => s + (safeNumber(it?.line_total ?? it?.total ?? it?.amount) || 0), 0);
+      const diff = amount != null && sumItems > 0 ? Math.abs(amount - sumItems) : 0;
+      const mismatch = amount != null && sumItems > 0 ? diff > Math.max(10, amount * 0.15) : false;
+
+      const shouldFallback =
+        fallbackModel &&
+        fallbackModel !== primaryModel &&
+        isReceipt &&
+        (
+          needsReview ||
+          itemsCount === 0 ||
+          (typeof itemsConf === "number" && itemsConf < 0.55) ||
+          (typeof overallConf === "number" && overallConf < 0.55) ||
+          mismatch
+        );
+
+      if (shouldFallback) {
+        const secondPassHint = `\n\nSecond pass instructions:\n- Focus on reading small Thai fonts accurately.\n- Ensure items[] includes ONLY purchased lines with line_total > 0 (skip any 0-price lines/promotions).\n- Prefer clean item names (no totals/VAT lines).\n- If multiple item categories exist, set category_key=\"mixed\" and set each item.category_key.`;
+
+        const second = await callOpenAI(fallbackModel, prompt + secondPassHint);
+        if (second?.r?.ok) {
+          r = second.r;
+          data = second.data;
+          modelUsed = second.modelUsed;
+          parsedObj = findFirstParsedObject(data);
+          text = extractResponsesOutputText(data);
+        }
+      }
+    } catch {
+      // ignore fallback decision errors; keep primary output
+    }
 
     const parsed = parsedObj || safeJsonParseMaybe(text);
 
@@ -1060,7 +1221,7 @@ Schema (ALL keys must exist; use null if unknown):
         code: "parse_failed",
         message: "Model output is not valid JSON",
         rawText: text,
-        model,
+        model: modelUsed,
       });
     }
 
@@ -1070,7 +1231,7 @@ Schema (ALL keys must exist; use null if unknown):
       ok: true,
       data: normalized,
       rawText: text,
-      model,
+      model: modelUsed,
     });
   } catch (err) {
     return res.status(500).json({

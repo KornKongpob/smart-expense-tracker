@@ -53,11 +53,13 @@ function loadImageFromDataUrl(dataUrl) {
 // Defaults aim to stay well under common serverless body limits.
 async function fileToOptimizedDataUrl(file, opts = {}) {
   const {
-    maxDim = 1600,
-    maxBytes = 1_800_000, // ~1.8MB binary (base64 will be larger)
-    qualityStart = 0.86,
-    qualityMin = 0.62,
-    qualityStep = 0.06,
+    // ✅ More conservative (higher quality) defaults for better OCR accuracy.
+    // If the image is still too large, we gradually reduce quality to stay under maxBytes.
+    maxDim = 2400,
+    maxBytes = 3_500_000, // ~3.5MB binary
+    qualityStart = 0.92,
+    qualityMin = 0.72,
+    qualityStep = 0.05,
   } = opts;
 
   const original = await fileToDataUrl(file);
@@ -96,6 +98,15 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
   }
 
   return out;
+}
+
+async function fileToBestDataUrl(file) {
+  // Keep original if already small; otherwise optimize with high-quality settings.
+  // This reduces request failures (payload too large) while preserving OCR readability.
+  const original = await fileToDataUrl(file);
+  if (!original || !original.startsWith("data:image/")) return original;
+  if (approxDataUrlBytes(original) <= 3_500_000) return original;
+  return fileToOptimizedDataUrl(file, { maxDim: 2400, maxBytes: 3_500_000, qualityStart: 0.92, qualityMin: 0.72, qualityStep: 0.05 });
 }
 
 function dataUrlToBase64(dataUrl) {
@@ -273,7 +284,9 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
   }
 
   onStatus?.("encoding_image");
-  const imageDataUrl = await fileToDataUrl(file);
+  // ✅ Keep quality high for OCR, but still prevent oversized payloads.
+  // If image is already small enough, it will be kept as-is.
+  const imageDataUrl = await fileToOptimizedDataUrl(file);
 
   // ---- 1) Try primary endpoint (/api/scan by default) ----
   onStatus?.("calling_api");

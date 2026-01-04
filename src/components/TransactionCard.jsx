@@ -38,17 +38,26 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
   }, [categoriesObj]);
 
   const isTransfer = !!tx?.isTransfer;
-  const isSplitGroup = !!tx?.isSplitGroup || (String(tx?.splitGroupId || "").trim() && Array.isArray(tx?.splitLines));
+  const gidForSplit = String(tx?.splitGroupId || "").trim();
+  const isSplitGroup = !!tx?.isSplitGroup || !!tx?.isSplitParent || (gidForSplit && Array.isArray(tx?.splitLines));
 
   const splitLines = useMemo(() => {
     if (!isSplitGroup) return null;
     let lines = Array.isArray(tx?.splitLines) ? tx.splitLines : null;
     if (!lines || !lines.length) {
-      const gid = String(tx?.splitGroupId || "").trim();
-      lines = (allTx || []).filter((t) => String(t?.splitGroupId || "").trim() === gid && !t?.isTransfer);
+      const gid = gidForSplit;
+      if (tx?.isSplitParent) {
+        lines = (allTx || []).filter((t) =>
+          !t?.isTransfer &&
+          (String(t?.splitParentId || "").trim() === String(tx?.id || "").trim() ||
+            (t?.isSplitChild && String(t?.splitGroupId || "").trim() === gid))
+        );
+      } else {
+        lines = (allTx || []).filter((t) => String(t?.splitGroupId || "").trim() === gid && !t?.isTransfer);
+      }
     }
 
-    const ordered = [...(lines || [])].sort((a, b) => {
+    const ordered = [...(lines || [])].filter((x) => !x?.isSplitParent).sort((a, b) => {
       const ai = Number(a?.splitIndex || 0);
       const bi = Number(b?.splitIndex || 0);
       if (ai && bi && ai !== bi) return ai - bi;
@@ -226,28 +235,28 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           {/* ✅ Split breakdown (show all + scroll inside card) */}
           {!isTransfer && isSplitGroup && Array.isArray(splitLines) && splitLines.length ? (
             <div
-              className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-28 overflow-y-auto no-scrollbar"
+              className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-56 overflow-y-auto overflow-x-hidden no-scrollbar"
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             >
               <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
                 Breakdown ({splitLines.length})
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 pr-1">
                 {splitLines.map((l) => {
                   const cat = categoriesById.get(String(l?.category || "")) || null;
                   const isIncomeLine = String(l?.type || "").toLowerCase() === "income";
                   const prefix = isIncomeLine ? "+" : "-";
                   const amt = formatCurrency(Number(l?.amount) || 0);
-                  const lineNote = String(l?.note || "").trim();
+                  const lineNote = String(l?.itemName || l?.note || "").trim();
                   return (
                     <div key={String(l?.id || `${l?.splitIndex || ""}-${l?.category || ""}-${l?.amount || ""}`)} className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">
-                          {cat?.name || "—"}
+                          {lineNote || cat?.name || "—"}
                         </div>
                         {lineNote ? (
-                          <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{lineNote}</div>
+                          <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{cat?.name || "—"}</div>
                         ) : null}
                       </div>
                       <div className={`shrink-0 text-xs font-black ${isIncomeLine ? "text-emerald-700" : "text-red-700"}`}>

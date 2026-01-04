@@ -314,16 +314,28 @@ function categoryNameFromKey(key) {
   const k = sanitizeCategoryKey(key);
   const map = {
     food: "อาหาร",
+    drinks: "เครื่องดื่ม",
+    coffee: "กาแฟ/ชา",
+    dining: "กินนอกบ้าน",
+    groceries: "ของกิน/ของใช้",
     transport: "เดินทาง",
+    fuel: "น้ำมันรถ",
     shopping: "ช้อปปิ้ง",
     bills: "บิล/น้ำไฟ",
+    phone_internet: "มือถือ/อินเทอร์เน็ต",
+    subscriptions: "สมาชิก/Subscription",
     health: "สุขภาพ",
+    fitness: "ออกกำลังกาย",
+    beauty: "ความงาม",
+    home: "บ้าน",
+    education: "การเรียน",
     entertainment: "บันเทิง",
     salary: "เงินเดือน",
     bonus: "โบนัส",
     investment: "ลงทุน",
     refund: "เงินคืน",
     other: "อื่นๆ",
+    mixed: "หลายหมวด",
     transfer: "Transfer",
   };
   return map[k] || String(key || "").trim() || "อื่นๆ";
@@ -335,11 +347,23 @@ function mapKnownCategoryId(type, key) {
 
   const expenseMap = {
     food: "food",
+    drinks: "drinks",
+    coffee: "coffee",
+    dining: "dining",
+    groceries: "groceries",
     transport: "transport",
+    fuel: "fuel",
     shopping: "shopping",
     bills: "bills",
+    phone_internet: "phone_internet",
+    subscriptions: "subscriptions",
     health: "health",
+    fitness: "fitness",
+    beauty: "beauty",
+    home: "home",
+    education: "education",
     entertainment: "entertainment",
+    mixed: "mixed",
     other: "other",
     transfer: "transfer",
   };
@@ -1944,7 +1968,14 @@ const existingRefSet = useMemo(() => {
         // If still mismatch and we can't adjust safely, prefer childSum for consistent UI total
         if (diff !== 0) parentAmount = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
 
-        const parentCategory = String(groups.find((g) => g?.categoryId)?.categoryId || q.categoryId || "other").trim();
+        // ✅ Parent category for split receipts:
+        // - If children have multiple categories → parent = "mixed" (UI-only parent)
+        // - If children all same category → use that category
+        const uniqueCats = Array.from(
+          new Set(groups.map((g) => String(g?.categoryId || "").trim()).filter(Boolean))
+        );
+        const parentCategory = (uniqueCats.length > 1 ? ensureCategory("expense", "mixed") : uniqueCats[0]) ||
+          String(q.categoryId || ensureCategory("expense", "mixed")).trim();
 
         // Parent (UI only)
         txs.push({
@@ -1985,6 +2016,8 @@ const existingRefSet = useMemo(() => {
             category: g.categoryId,
             accountId: q.accountId,
             date: d,
+            // ✅ Explicit item name for child line (also mirrored into note for compatibility)
+            itemName,
             note: itemName,
             isTransfer: false,
             transferId: null,
@@ -2148,7 +2181,13 @@ const existingRefSet = useMemo(() => {
       const parentId = String(existingParent?.id || "").trim() || (initialData?.isSplitParent ? String(initialData.id) : "") || generateId();
 
       const childrenTotal = cleanedLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-      const parentCategory = String(existingParent?.category || cleanedLines[0]?.categoryId || "other").trim() || "other";
+      // ✅ For split groups, parent category is mixed if children span multiple categories
+      const uniqueCats = Array.from(new Set(cleanedLines.map((l) => String(l?.categoryId || "").trim()).filter(Boolean)));
+      const parentCategory = String(
+        existingParent?.category ||
+        (uniqueCats.length > 1 ? ensureCategory("expense", "mixed") : uniqueCats[0]) ||
+        ensureCategory("expense", "mixed")
+      ).trim() || "mixed";
 
       const parentTx = {
         id: parentId,
@@ -2180,6 +2219,7 @@ const existingRefSet = useMemo(() => {
           category: l.categoryId,
           accountId,
           date: d,
+          itemName: itemName || null,
           note: itemName,
           isTransfer: false,
           transferId: null,
