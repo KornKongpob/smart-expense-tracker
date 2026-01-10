@@ -1,7 +1,7 @@
 // api/scan.js
 // Vercel Serverless Function: POST /api/scan
 // Required env: OPENAI_API_KEY
-// Optional env: OPENAI_MODEL (default: gpt-4o-mini)
+// Optional env: OPENAI_MODEL (default: gpt-5.1)
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -25,6 +25,27 @@ function safeJsonParseMaybe(text) {
     }
     return null;
   }
+}
+
+function normalizeItemName(raw) {
+  let s = safeString(raw);
+  if (!s) return "";
+
+  // collapse whitespace
+  s = s.replace(/\s+/g, " ").trim();
+
+  // strip trailing prices that sometimes get glued into the name
+  // e.g. "น้ำดื่ม 15.00" -> "น้ำดื่ม"
+  s = s.replace(/\s+\d{1,3}(?:,\d{3})*(?:\.\d{2})\s*$/u, "").trim();
+
+  // strip leading qty column if it sneaks in
+  // e.g. "1 แผ่นเจลประคบเย็น" -> "แผ่นเจลประคบเย็น"
+  s = s.replace(/^\s*\d+\s+/u, "").trim();
+
+  // common OCR noise on Thai receipts
+  s = s.replace(/[|]+/g, " ").replace(/\s+/g, " ").trim();
+
+  return s;
 }
 
 function extractResponsesOutputText(resp) {
@@ -428,7 +449,8 @@ function normalizeItems(items) {
   for (const it of items) {
     if (!it || typeof it !== "object") continue;
 
-    const name = safeString(it.name ?? it.title ?? it.desc ?? it.description ?? it.item ?? it.product);
+    const nameRaw = safeString(it.name ?? it.title ?? it.desc ?? it.description ?? it.item ?? it.product);
+    const name = normalizeItemName(nameRaw);
     const qty = safeNumber(it.qty ?? it.quantity);
     const unit_price = safeNumber(it.unit_price ?? it.unitPrice ?? it.price);
     const total = safeNumber(it.total ?? it.amount ?? it.line_total ?? it.lineTotal);
@@ -445,6 +467,16 @@ function normalizeItems(items) {
     if (finalTotal == null && qty != null && unit_price != null) finalTotal = qty * unit_price;
 
     if (!name && finalTotal == null) continue;
+
+    // guard against summary lines accidentally being classified as items
+    const lower = name.toLowerCase();
+    const banned = ["total", "grand", "vat", "tax", "change", "ยอด", "รวม", "สุทธิ", "ส่วนลด", "เงินทอน"];
+    if (banned.some((k) => lower.includes(k))) {
+      // keep only if it's clearly a real line item (has qty/unit_price or looks like a product)
+      const hasPrice = finalTotal != null && finalTotal > 0;
+      const hasUnit = (qty != null && qty > 0) || (unit_price != null && unit_price > 0);
+      if (!hasPrice || !hasUnit) continue;
+    }
 
     out.push({
       name: name || "",
@@ -946,11 +978,11 @@ export default async function handler(req, res) {
     // Normalize to valid model IDs.
     const normalizeOpenAIModel = (raw) => {
       const s = String(raw || "").trim();
-      if (!s) return "gpt-4o-mini";
+      if (!s) return "gpt-5.1";
 
       const low = s.toLowerCase();
 
-      // Common informal variants → ChatGPT snapshot model id
+      // Common informal variants → stable model ids
       if (
         low === "5" ||
         low === "5.0" ||
@@ -967,6 +999,11 @@ export default async function handler(req, res) {
         return "gpt-5-chat-latest";
       }
 
+      // ✅ Prefer explicit 5.1 when requested
+      if (low === "5.1" || low === "gpt5.1" || low === "gpt-5.1" || low === "chatgpt 5.1" || low === "chatgpt-5.1") {
+        return "gpt-5.1";
+      }
+
       // Normalize dotted version to the stable id
       if (low === "gpt-5.0") return "gpt-5";
 
@@ -975,16 +1012,16 @@ export default async function handler(req, res) {
     };
 
     // ✅ Default model choice
-    // We bias toward accuracy for OCR-heavy receipts (Thai small fonts) by defaulting to gpt-4o.
+    // We bias toward OCR accuracy for Thai small fonts by defaulting to gpt-5.1.
     // You can override with OPENAI_MODEL.
-    const primaryModel = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-4o");
+    const primaryModel = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-5.1");
 
     // ✅ Optional fallback for higher accuracy OCR (especially small Thai fonts)
-    // If OPENAI_MODEL_FALLBACK is not set, we default to gpt-4o (only used when needed).
-    const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_MODEL_FALLBACK || "gpt-4o");
+    // If OPENAI_MODEL_FALLBACK is not set, we default to gpt-5.1 (only used when needed).
+    const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_MODEL_FALLBACK || "gpt-5.1");
 
     // ✅ Items-only extraction model (focused on reading receipt line items)
-    // You can override with OPENAI_ITEMS_MODEL (recommended: gpt-4o).
+    // You can override with OPENAI_ITEMS_MODEL.
     const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || fallbackModel || primaryModel);
 
     // ✅ ปรับ prompt ให้ AI “ส่งสัญญาณ” ชำระบัตรเครดิตมาเลย
@@ -1219,7 +1256,7 @@ Schema (ALL keys must exist; use null if unknown):
             },
           ],
           temperature: 0,
-          max_output_tokens: 1100,
+          max_output_tokens: 1600,
           text: { format: items_only_format },
         }),
       });
@@ -1235,7 +1272,7 @@ Schema (ALL keys must exist; use null if unknown):
       const msg = data?.error?.message || "OpenAI request failed";
       const tip =
         /model/i.test(msg) && /not found|does not exist|unknown/i.test(msg)
-          ? "Check OPENAI_MODEL. Valid examples: gpt-4o-mini, gpt-4o-2024-08-06, gpt-4.1-mini, gpt-5.2."
+          ? "Check OPENAI_MODEL. Valid examples: gpt-5.1, gpt-5-chat-latest, gpt-4.1-mini, gpt-4o."
           : null;
 
       return res.status(r.status).json({
@@ -1327,23 +1364,34 @@ Schema (ALL keys must exist; use null if unknown):
           .filter((n) => typeof n === "number" && Number.isFinite(n) && n > 0);
         const itemsCount0 = pos0.length;
 
+        const itemsConf0 = safeNumber(
+          parsedForNormalize?.confidence?.items ?? parsedForNormalize?.confidence?.items_extraction
+        );
+        const needsReview0 = !!parsedForNormalize?.needs_review;
+
         const amt0 = safeNumber(parsedForNormalize?.amount);
         const sum0 = items0.reduce((s, it) => s + (safeNumber(it?.line_total ?? it?.total ?? it?.amount) || 0), 0);
         const mismatch0 = amt0 != null && sum0 > 0 ? Math.abs(sum0 - amt0) > Math.max(10, amt0 * 0.15) : false;
 
-        // Trigger when items are missing/too few OR totals look inconsistent.
-        if (itemsCount0 < 2 || mismatch0) {
+        // Trigger when items are missing/too few, extraction confidence is low,
+        // the model asks for review, OR totals look inconsistent.
+        if (itemsCount0 < 2 || mismatch0 || needsReview0 || (itemsConf0 != null && itemsConf0 < 0.7)) {
           const itemsPrompt = `
-You are an OCR+receipt line-item extractor for Thai receipts.
+You are an OCR + receipt line-item extractor for Thai receipts (e.g., 7-Eleven / Lotus / BigC).
 Return STRICT JSON ONLY. No markdown. No extra text.
 
-Task:
-- Extract ONLY purchased products/services (line items) from the image.
-- Include ONLY items with line_total > 0.
-- EXCLUDE any 0.00 lines (freebies, stamps, tasks, promotions), and EXCLUDE summary lines (TOTAL, VAT, discount, change).
-- Preserve item names as shown (Thai/English). Do not replace with generic labels.
+Rules (VERY IMPORTANT):
+1) Extract ONLY purchased products/services under the receipt's item list section (often titled "รายการสินค้า").
+2) Include ONLY items with line_total > 0.
+3) EXCLUDE any 0.00 / 0.00N lines (freebies, stamps, missions, promotions, points, coupons).
+4) EXCLUDE summary lines (ยอดสุทธิ, รวม, TOTAL, VAT, discount, change, TID, R#, store code, phone numbers).
+5) Preserve item names AS SHOWN (Thai/English). Do NOT replace with generic labels like "อาหาร" or "เครื่องดื่ม".
+6) If the receipt shows a quantity column (often a leading "1"), set qty accordingly.
+7) If unit price is not shown, set unit_price=null.
+8) Numbers: use decimal with dot, no currency symbol.
 
-Output JSON schema: { "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null } ] }
+Output JSON schema:
+{ "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null } ] }
 `;
 
           const itemsPass = await callOpenAIItemsOnly(itemsModel, itemsPrompt);
@@ -1352,7 +1400,7 @@ Output JSON schema: { "items": [ { "name": string, "qty": number|null, "unit_pri
             const extracted = Array.isArray(itemsObj?.items) ? itemsObj.items : [];
             const cleaned = extracted
               .map((it) => ({
-                name: safeString(it?.name ?? it?.title ?? it?.item),
+                name: normalizeItemName(it?.name ?? it?.title ?? it?.item),
                 qty: safeNumber(it?.qty ?? it?.quantity),
                 unit_price: safeNumber(it?.unit_price ?? it?.unitPrice ?? it?.price),
                 line_total: safeNumber(it?.line_total ?? it?.lineTotal ?? it?.total ?? it?.amount),

@@ -61,6 +61,18 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
     qualityStart = 0.96,
     qualityMin = 0.78,
     qualityStep = 0.05,
+
+    // ✅ OCR enhancement (helps Thai small fonts on receipts)
+    // - grayscale + contrast makes text edges clearer
+    // - optional mild sharpen (best-effort; skips on slow devices)
+    ocrEnhance = true,
+    sharpen = true,
+    contrast = 1.35,
+    brightness = 1.06,
+
+    // ✅ Even if the original image is already under maxBytes, we may still want
+    // to re-render it with OCR-friendly filters.
+    forceProcess = false,
   } = opts;
 
   const original = await fileToDataUrl(file);
@@ -68,8 +80,8 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
 
   if (typeof document === "undefined" || typeof Image === "undefined") return original;
 
-  // If already small enough, keep as-is.
-  if (approxDataUrlBytes(original) <= maxBytes) return original;
+  // If already small enough, keep as-is (unless caller forces OCR re-render).
+  if (!forceProcess && approxDataUrlBytes(original) <= maxBytes) return original;
 
   const img = await loadImageFromDataUrl(original);
 
@@ -94,7 +106,77 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
   } catch {
     // ignore
   }
+
+  // ---- draw + OCR enhancements (best effort) ----
+  try {
+    if (ocrEnhance && "filter" in ctx) {
+      // Make text edges clearer (receipt-style black on white)
+      ctx.filter = `grayscale(1) contrast(${contrast}) brightness(${brightness})`;
+    }
+  } catch {
+    // ignore
+  }
+
   ctx.drawImage(img, 0, 0, w, h);
+
+  // Reset filter so subsequent draws are normal
+  try {
+    if ("filter" in ctx) ctx.filter = "none";
+  } catch {
+    // ignore
+  }
+
+  // Optional mild sharpening convolution (skip on very large images)
+  const trySharpen = () => {
+    if (!sharpen) return;
+    const px = w * h;
+    // keep this cheap on mobile
+    if (px > 4_000_000) return;
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+    const out = new Uint8ClampedArray(data.length);
+
+    // 3x3 sharpen kernel: [0 -1 0; -1 5 -1; 0 -1 0]
+    const idx = (x, y) => (y * w + x) * 4;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = idx(x, y);
+        for (let c = 0; c < 3; c++) {
+          const v =
+            -data[idx(x, y - 1) + c] +
+            -data[idx(x - 1, y) + c] +
+            5 * data[i + c] +
+            -data[idx(x + 1, y) + c] +
+            -data[idx(x, y + 1) + c];
+          out[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+        }
+        out[i + 3] = data[i + 3];
+      }
+    }
+
+    // Copy borders unchanged
+    for (let x = 0; x < w; x++) {
+      const t = idx(x, 0);
+      const b = idx(x, h - 1);
+      out[t] = data[t]; out[t + 1] = data[t + 1]; out[t + 2] = data[t + 2]; out[t + 3] = data[t + 3];
+      out[b] = data[b]; out[b + 1] = data[b + 1]; out[b + 2] = data[b + 2]; out[b + 3] = data[b + 3];
+    }
+    for (let y = 0; y < h; y++) {
+      const l = idx(0, y);
+      const r = idx(w - 1, y);
+      out[l] = data[l]; out[l + 1] = data[l + 1]; out[l + 2] = data[l + 2]; out[l + 3] = data[l + 3];
+      out[r] = data[r]; out[r + 1] = data[r + 1]; out[r + 2] = data[r + 2]; out[r + 3] = data[r + 3];
+    }
+
+    imgData.data.set(out);
+    ctx.putImageData(imgData, 0, 0);
+  };
+
+  try {
+    trySharpen();
+  } catch {
+    // ignore
+  }
 
   // Prefer JPEG for much smaller payloads.
   let q = qualityStart;
@@ -136,12 +218,23 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
 }
 
 async function fileToBestDataUrl(file) {
-  // Keep original if already small; otherwise optimize with high-quality settings.
-  // This reduces request failures (payload too large) while preserving OCR readability.
+  // ✅ Always apply a best-effort OCR-friendly re-render.
+  // Even if the image is already under the body-size limit, the grayscale/contrast
+  // pass significantly improves small Thai fonts on receipts.
   const original = await fileToDataUrl(file);
   if (!original || !original.startsWith("data:image/")) return original;
-  if (approxDataUrlBytes(original) <= 3_500_000) return original;
-  return fileToOptimizedDataUrl(file, { maxDim: 2400, maxBytes: 3_500_000, qualityStart: 0.92, qualityMin: 0.72, qualityStep: 0.05 });
+
+  return fileToOptimizedDataUrl(file, {
+    // Keep more pixels for OCR while staying under common serverless limits.
+    maxDim: 2800,
+    maxBytes: 3_500_000,
+    qualityStart: 0.94,
+    qualityMin: 0.74,
+    qualityStep: 0.05,
+    ocrEnhance: true,
+    sharpen: true,
+    forceProcess: true,
+  });
 }
 
 function dataUrlToBase64(dataUrl) {
