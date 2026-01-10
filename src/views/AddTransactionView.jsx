@@ -1778,6 +1778,15 @@ if (
         referenceId,
       };
 
+      // ✅ If groups already exist (from scan), ensure Split is enabled
+      if (Array.isArray(next?.groups) && next.groups.length >= 2 && !next.splitByCategory) {
+        next.splitByCategory = true;
+        next.splitGroupId = String(next?.splitGroupId || '').trim() || generateSplitGroupId();
+        next.splitLabel =
+          String(next?.splitLabel || next?.merchant || next?.note || 'Receipt').trim().slice(0, 80) || 'Receipt';
+      }
+
+
       // ✅ Default Split-by-items for receipts with multiple purchased lines
       // - Receipt with >=2 positive line items => set splitByCategory=true
       // - Build groups from items (each item keeps its own name + category)
@@ -1787,7 +1796,7 @@ if (
         const txType = String(next?.txType || next?.type || type || "expense").toLowerCase().trim();
         const items = Array.isArray(next?.items) ? next.items : [];
 
-        if (docType === "receipt" && txType === "expense" && items.length) {
+        if (txType === "expense" && items.length && docType !== "transfer_slip" && docType !== "bill_payment") {
           const lines = splitReceiptItemsToLines(
             "expense",
             items,
@@ -1855,13 +1864,22 @@ if (
         referenceId,
       };
 
+      // ✅ If groups already exist (from scan), ensure Split is enabled
+      if (Array.isArray(next?.groups) && next.groups.length >= 2 && !next.splitByCategory) {
+        next.splitByCategory = true;
+        next.splitGroupId = String(next?.splitGroupId || '').trim() || generateSplitGroupId();
+        next.splitLabel =
+          String(next?.splitLabel || next?.merchant || next?.note || 'Receipt').trim().slice(0, 80) || 'Receipt';
+      }
+
+
       // ✅ Keep the same default Split behavior for duplicate receipts too
       try {
         const docType = String(next?.docType || next?.doc_type || "").toLowerCase().trim();
         const txType = String(next?.txType || next?.type || type || "expense").toLowerCase().trim();
         const items = Array.isArray(next?.items) ? next.items : [];
 
-        if (docType === "receipt" && txType === "expense" && items.length) {
+        if (txType === "expense" && items.length && docType !== "transfer_slip" && docType !== "bill_payment") {
           const lines = splitReceiptItemsToLines(
             "expense",
             items,

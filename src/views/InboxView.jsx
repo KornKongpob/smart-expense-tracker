@@ -65,7 +65,8 @@ function buildTransactionsFromInboxItem(item) {
 
   // Split (receipt items): create 1 parent transaction + N child transactions
   // ✅ Ignore zero/invalid lines (amount <= 0)
-  if (txType === "expense" && item?.splitByCategory && Array.isArray(item?.groups) && item.groups.length) {
+  const hasSplitGroups = Array.isArray(item?.groups) && item.groups.length >= 2;
+  if (txType === "expense" && (item?.splitByCategory || hasSplitGroups) && hasSplitGroups) {
     const accountId = item?.accountId || "";
     if (!accountId) throw new Error("ยังไม่ได้เลือก Account สำหรับรายการแบบ Split");
 
@@ -345,16 +346,34 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     if (exp.some((c) => String(c?.id || "") === "other")) return "other";
     return String(exp?.[0]?.id || "");
   };
-
   const deriveReceiptGroups = (it) => {
     try {
       const docType = String(it?.docType || it?.doc_type || "").toLowerCase().trim();
       const txType = normalizeTxType(it?.type || it?.txType);
-      if (docType !== "receipt") return [];
       if (txType !== "expense") return []; // receipts => expense only
 
       const items = Array.isArray(it?.items) ? it.items : [];
-      if (!items.length) return [];
+      if (items.length < 2) return [];
+
+      // Treat as a receipt if:
+      // - model says receipt, OR
+      // - we have >=2 priced line items (name + amount > 0)
+      const pricedCount = items.reduce((n, it0) => {
+        const name = String(it0?.name || it0?.title || it0?.desc || "").trim();
+        const amt =
+          Number(it0?.line_total) ||
+          Number(it0?.total) ||
+          Number(it0?.amount) ||
+          Number(it0?.lineTotal) ||
+          0;
+        return name && Number.isFinite(amt) && amt > 0 ? n + 1 : n;
+      }, 0);
+
+      const looksLikeReceipt = docType === "receipt" || pricedCount >= 2;
+      if (!looksLikeReceipt) return [];
+
+      // Avoid deriving split for obvious non-receipt docs
+      if (docType === "transfer_slip" || docType === "bill_payment") return [];
 
       const fallbackKey = String(it?.categoryId || it?.category_key || it?.category || "").trim() || "other";
       const hint = `${String(it?.merchant || "").trim()} ${String(it?.note || "").trim()}`.trim();
@@ -391,10 +410,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     // This prevents the "Edit -> Split review not working" case.
     const derived = deriveReceiptGroups(item);
     const rawGroups = Array.isArray(item?.groups) ? item.groups : [];
-    const shouldSplit = (
-      (!!item?.splitByCategory && rawGroups.length >= 2) ||
-      (derived.length >= 2)
-    );
+    const shouldSplit = (rawGroups.length >= 2) || (derived.length >= 2);
     const effectiveGroups = shouldSplit
       ? (rawGroups.length >= 2 ? rawGroups : derived)
       : [];
@@ -415,8 +431,8 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
 
       // ✅ Split-by-category preview/edit in Inbox
       splitByCategory: isSplit,
-      splitGroupId: String(item?.splitGroupId || ""),
-      splitLabel: String(item?.splitLabel || ""),
+      splitGroupId: isSplit ? (String(item?.splitGroupId || "").trim() || generateSplitGroupId()) : "",
+      splitLabel: isSplit ? (String(item?.splitLabel || item?.merchant || item?.note || "Receipt").trim().slice(0, 80) || "Receipt") : "",
       groups: isSplit
         ? (effectiveGroups || []).filter((g) => asSatang(g?.amount) > 0).map((g) => ({
             key: g?.key || "",
