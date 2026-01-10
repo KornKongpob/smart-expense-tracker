@@ -16,7 +16,7 @@ function fileToDataUrl(file) {
         reject(e);
       };
       reader.readAsDataURL(file);
-    } catch (err) {A
+    } catch (err) {
       const e = new Error("file_read_failed");
       e.code = "file_read_failed";
       e.cause = err;

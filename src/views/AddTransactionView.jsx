@@ -40,6 +40,7 @@ import {
   calcAccountBalance,
 } from "../store/selectors";
 import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
+import { reconcileReceiptGroups, signedReceiptGroupSatang, isAdjustmentLike } from "../utils/receiptAdjustments";
 import { deriveAutomationPatch } from "../utils/rulesEngine";
 import {
   resolveMerchantCanonical,
@@ -1493,13 +1494,17 @@ if (
             if (lines.length) primaryKey = lines[0]?.key || fallbackKey;
 
             groups = (lines || [])
-              .map((ln) => {
-                const catId = ensureCategory("expense", ln.key || "other");
+              .map((ln, idx) => {
+                const key = sanitizeCategoryKey(ln.key || "other") || "other";
+                const catId = ensureCategory("expense", key);
                 return {
-                  key: ln.key || "other",
+                  key,
                   categoryId: catId,
                   amount: parseMoneyToSatang(ln.amount),
                   note: String(ln.name || "").trim(),
+                  splitIndex: idx + 1,
+                  receiptLineType: "item",
+                  adjustmentEffect: "add",
                 };
               })
               .filter((g) => Number(g?.amount || 0) > 0);
@@ -1511,8 +1516,14 @@ if (
             groups = [];
           }
 
-          const groupSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+          // ✅ Reconcile receipt total with an explicit adjustment line (e.g. discount)
           const aiTotal = amountSatang != null ? amountSatang : 0;
+          const reconciled = reconcileReceiptGroups(groups, aiTotal, {
+            ensureCategoryId: (k) => ensureCategory("expense", k),
+            baseLineCountMin: 2,
+          });
+          groups = reconciled.groups;
+          const groupSum = groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
           // ✅ Default to split for receipts with multiple purchased items
           // (convenience-store receipts are the #1 pain point)
           const positiveScannedItemCount = Array.isArray(scannedItems)
@@ -1604,6 +1615,22 @@ if (
             return a ?? g ?? t;
           })();
 
+          const itemsSubtotalSatang = (groups || [])
+            .filter((g) => !isAdjustmentLike(g))
+            .reduce((s, g) => s + (Number(g?.amount) || 0), 0);
+          const reconcileMeta = {
+            ...(reconciled?.meta || {}),
+            itemsSubtotalSatang,
+            discountSatang:
+              String(reconciled?.meta?.adjustmentEffect || "").toLowerCase().trim() === "subtract"
+                ? Number(reconciled?.meta?.adjustmentSatang || 0)
+                : 0,
+            surchargeSatang:
+              String(reconciled?.meta?.adjustmentEffect || "").toLowerCase().trim() === "add"
+                ? Number(reconciled?.meta?.adjustmentSatang || 0)
+                : 0,
+          };
+
           let patch = {
             status: "ready",
             txType: finalTxType,
@@ -1628,6 +1655,7 @@ if (
               confidence: scanConfidence || null,
               model: result?._model || null,
               endpointUsed: result?._endpointUsed || null,
+              reconcile: reconcileMeta,
             },
             items: scannedItems,
             groups,
@@ -2035,8 +2063,10 @@ if (
             .map((g) => ({ ...g, amount: Number(g.amount) || 0 }))
             .filter((g) => g.amount > 0);
 
-          if (positives.length < 2) {
-            return showAlert?.("Split จะสร้างเฉพาะบรรทัดที่ยอดมากกว่า 0 และต้องเหลืออย่างน้อย 2 บรรทัด");
+          const nonAdjPositives = positives.filter((g) => !isAdjustmentLike(g));
+
+          if (nonAdjPositives.length < 2) {
+            return showAlert?.("Split ต้องมีอย่างน้อย 2 รายการสินค้า (ไม่รวมส่วนลด/ค่าธรรมเนียม)");
           }
 
           for (const g of positives) {
@@ -2118,8 +2148,27 @@ if (
         // ✅ Per-item split: create 1 parent transaction (total) + N child transactions (breakdown)
         // - ignores 0฿ promo lines (already filtered)
         // - budgets/reports count only children; parent is for UI only
-        const groups = (q.groups || [])
-          .map((g) => ({ ...g, amount: Number(g.amount) || 0 }))
+        let groups = (q.groups || [])
+          .map((g) => {
+            const note = String(g?.note || "").trim();
+            const catId = String(g?.categoryId || "").trim();
+            const looksLikeDiscount = catId === "discount" || note.includes("ส่วนลด");
+            const isAdj = isAdjustmentLike(g) || looksLikeDiscount;
+            const adjEffectRaw = String(g?.adjustmentEffect || "").toLowerCase().trim();
+            const adjustmentEffect = adjEffectRaw || (isAdj ? (looksLikeDiscount ? "subtract" : "add") : "add");
+            const receiptLineType = isAdj ? "adjustment" : "item";
+            const adjustmentType = isAdj ? (looksLikeDiscount ? "discount" : String(g?.adjustmentType || "fee")) : null;
+
+            return {
+              ...g,
+              amount: Number(g.amount) || 0,
+              note,
+              categoryId: catId,
+              receiptLineType,
+              adjustmentType,
+              adjustmentEffect,
+            };
+          })
           .filter((g) => g.amount > 0);
 
         // keep original order (OCR order); if splitIndex exists, respect it
@@ -2131,33 +2180,47 @@ if (
         });
 
         const splitGroupId = String(q?.splitGroupId || "").trim() || generateSplitGroupId();
-        const splitCount = groups.length;
         const groupLabel = String(q?.splitLabel || merchant || baseNoteRaw || "Split").trim().slice(0, 80) || "Split";
 
         const parentId = generateId();
 
-        const childSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+        // ✅ Parent total is the paid total. We reconcile children by adding an explicit adjustment line.
         let parentAmount = Number(q.amount) || 0;
-        if (!parentAmount || parentAmount <= 0) parentAmount = childSum;
-
-        // Try reconcile tiny rounding differences by adjusting the last line
-        let diff = parentAmount - childSum;
-        if (diff !== 0 && groups.length) {
-          const last = groups[groups.length - 1];
-          const nextAmt = (Number(last.amount) || 0) + diff;
-          if (nextAmt > 0) {
-            last.amount = nextAmt;
-            diff = 0;
-          }
+        if (!parentAmount || parentAmount <= 0) {
+          // fallback: best-effort paid total from current groups (no adjustment)
+          parentAmount = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
         }
-        // If still mismatch and we can't adjust safely, prefer childSum for consistent UI total
-        if (diff !== 0) parentAmount = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+
+        const rec = reconcileReceiptGroups(groups, parentAmount, {
+          ensureCategoryId: (k) => ensureCategory("expense", k),
+          baseLineCountMin: 2,
+        });
+        groups = rec.groups;
+        const splitCount = groups.length;
+
+        const paidTotalSatang = groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+        if (paidTotalSatang > 0) parentAmount = paidTotalSatang;
+
+        const itemsSubtotalSatang = groups
+          .filter((g) => !isAdjustmentLike(g))
+          .reduce((s, g) => s + (Number(g.amount) || 0), 0);
+        const discountSatang = groups
+          .filter((g) => isAdjustmentLike(g) && String(g.adjustmentEffect || "").toLowerCase().trim() === "subtract")
+          .reduce((s, g) => s + (Number(g.amount) || 0), 0);
+        const surchargeSatang = groups
+          .filter((g) => isAdjustmentLike(g) && String(g.adjustmentEffect || "").toLowerCase().trim() === "add")
+          .reduce((s, g) => s + (Number(g.amount) || 0), 0);
 
         // ✅ Parent category for split receipts:
         // - If children have multiple categories → parent = "mixed" (UI-only parent)
         // - If children all same category → use that category
         const uniqueCats = Array.from(
-          new Set(groups.map((g) => String(g?.categoryId || "").trim()).filter(Boolean))
+          new Set(
+            groups
+              .filter((g) => !isAdjustmentLike(g))
+              .map((g) => String(g?.categoryId || "").trim())
+              .filter(Boolean)
+          )
         );
         const parentCategory = (uniqueCats.length > 1 ? ensureCategory("expense", "mixed") : uniqueCats[0]) ||
           String(q.categoryId || ensureCategory("expense", "mixed")).trim();
@@ -2176,6 +2239,13 @@ if (
           ref: q.ref || null,
           source: "scan",
           attachmentId: q.attachmentId || null,
+
+          paymentMethod: q.paymentMethod || "cash",
+
+          receiptPaidTotalSatang: parentAmount,
+          receiptItemsSubtotalSatang: itemsSubtotalSatang,
+          receiptDiscountSatang: discountSatang,
+          receiptSurchargeSatang: surchargeSatang,
 
           splitGroupId,
           splitCount,
@@ -2210,8 +2280,13 @@ if (
             source: "scan",
             attachmentId: q.attachmentId || null,
 
+            paymentMethod: q.paymentMethod || "cash",
+            receiptLineType: g.receiptLineType || "item",
+            adjustmentType: g.adjustmentType || null,
+            adjustmentEffect: g.adjustmentEffect || "add",
+
             splitGroupId,
-            splitIndex: idx + 1,
+            splitIndex: Number(g?.splitIndex || 0) || idx + 1,
             splitCount,
             splitLabel: groupLabel,
             isSplit: true,
@@ -2242,6 +2317,8 @@ if (
         ref: q.ref || null,
         source: "scan",
         attachmentId: q.attachmentId || null,
+
+        paymentMethod: q.paymentMethod || "cash",
 
         merchant: merchant || null,
         evidence: String(q.evidence || "").slice(0, 240) || null,

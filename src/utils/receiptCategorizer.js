@@ -147,6 +147,9 @@ const EXPENSE_KW = {
     "เจลประคบ",
   ],
   entertainment: ["netflix", "spotify", "cinema", "movie", "concert", "เกม", "game", "steam", "disney", "prime video"],
+
+  // ✅ Receipt adjustments
+  discount: ["ส่วนลด", "discount", "coupon", "promo", "promotion", "voucher"],
 };
 
 const INCOME_KW = {
@@ -175,6 +178,8 @@ const ALIAS = {
   "ชา": "coffee",
   "เครื่องดื่ม": "drinks",
   "น้ำดื่ม": "drinks",
+  "ส่วนลด": "discount",
+  "discount": "discount",
   "อื่นๆ": "other",
   "เงินเดือน": "salary",
   "โบนัส": "bonus",
@@ -213,6 +218,7 @@ export function sanitizeCategoryKey(raw) {
     "phone_internet",
     "subscriptions",
     "fees",
+    "discount",
     "adjust_balance",
     "insurance",
     "donation",

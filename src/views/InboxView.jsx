@@ -23,7 +23,7 @@ import {
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
 import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
-import { reconcileReceiptGroups, signedReceiptGroupSatang, isAdjustmentLike } from "../utils/receiptAdjustments.js";
+import { reconcileReceiptGroups, signedReceiptGroupSatang, isAdjustmentLike } from "../utils/receiptAdjustments";
 
 function appendEvidenceToNote(note, evidence) {
   if (!evidence) return note || "";

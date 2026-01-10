@@ -86,6 +86,9 @@ export default function DashboardView() {
 
     if (filterAccount) base = base.filter((t) => t.accountId === filterAccount);
 
+    // ✅ hide split child transactions from the main list (children show inside parent breakdown)
+    base = base.filter((t) => !t?.isSplitChild);
+
     base = base.filter(matchQuery);
 
     // keep ordering (latest date first; same date: latest added first)
@@ -181,36 +184,58 @@ export default function DashboardView() {
 
         out.push({ tx: displayTx, category: cat, accountName: accountLabel });
       } else if (!isTransferLike(t) && gid) {
-        // ✅ Split group: แสดง 1 การ์ด (ยอดรวม) แล้ว list breakdown ในการ์ด
+        // ✅ Split group: show a single card. If we have a split-parent tx, use it as the representative.
+        // Children are the "real" categorized transactions (used for budgets/reports).
         if (seenSplitGroupIds.has(gid)) continue;
         seenSplitGroupIds.add(gid);
 
         const group = bySplitGroupId.get(gid) || [t];
-        const groupSorted = [...group].sort((a, b) => {
+
+        const parent = group.find((x) => !!x?.isSplitParent) || null;
+        const rawLines = parent
+          ? group.filter(
+              (x) =>
+                !!x?.isSplitChild || String(x?.splitParentId || "").trim() === String(parent?.id || "").trim()
+            )
+          : group.filter((x) => !x?.isSplitParent);
+
+        const linesBase = rawLines && rawLines.length ? rawLines : group.filter((x) => !x?.isSplitParent);
+
+        const groupSorted = [...linesBase].sort((a, b) => {
           const ia = Number(a?.splitIndex || 0) || 0;
           const ib = Number(b?.splitIndex || 0) || 0;
           if (ia && ib && ia !== ib) return ia - ib;
           return Math.abs(Number(b?.amount || 0)) - Math.abs(Number(a?.amount || 0));
         });
 
-        let rep = t;
-        if (filterAccount) rep = groupSorted.find((x) => x.accountId === filterAccount) || groupSorted[0] || t;
-        else rep = groupSorted[0] || t;
+        // representative for edit context
+        let rep = parent || t;
+        if (!parent) {
+          if (filterAccount) rep = groupSorted.find((x) => x.accountId === filterAccount) || groupSorted[0] || t;
+          else rep = groupSorted[0] || t;
+        }
 
-        const total = groupSorted.reduce((s, x) => s + (Number(x?.amount) || 0), 0);
-        const label = String(rep?.splitLabel || groupSorted.find((x) => x?.splitLabel)?.splitLabel || "").trim();
-        const baseNote = String(rep?.note || "").trim();
+        const total = parent ? Number(parent?.amount || 0) || 0 : groupSorted.reduce((s, x) => s + (Number(x?.amount) || 0), 0);
+        const label = String(
+          (parent?.splitLabel || rep?.splitLabel || groupSorted.find((x) => x?.splitLabel)?.splitLabel || "")
+        ).trim();
+
+        const baseNote = String((parent?.note || rep?.note || "").trim());
         const displayNote = label || baseNote || `Split (${groupSorted.length})`;
 
+        const createdAtCandidates = []
+          .concat(parent ? [getTxCreatedAt(parent)] : [])
+          .concat(groupSorted.map((x) => getTxCreatedAt(x)));
+
         const displayTx = {
-          ...rep,
-          id: rep?.id || t.id,
+          ...(parent || rep),
+          id: (parent || rep)?.id || t.id,
           amount: total,
           note: displayNote,
           isSplitGroup: true,
           splitGroupId: gid,
           splitLines: groupSorted,
-          createdAt: Math.max(...groupSorted.map((x) => getTxCreatedAt(x))),
+          createdAt: Math.max(...createdAtCandidates),
         };
 
         const accName = accountsById.get(displayTx.accountId)?.name || "—";
