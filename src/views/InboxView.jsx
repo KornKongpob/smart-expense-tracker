@@ -23,6 +23,7 @@ import {
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
 import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
+import { reconcileReceiptGroups, signedReceiptGroupSatang, isAdjustmentLike } from "../utils/receiptAdjustments";
 
 function appendEvidenceToNote(note, evidence) {
   if (!evidence) return note || "";
@@ -72,30 +73,67 @@ function buildTransactionsFromInboxItem(item) {
 
     const splitGroupId = String(item?.splitGroupId || "").trim() || generateSplitGroupId();
     const splitLabel = String(item?.splitLabel || merchant || item?.note || "Split").trim().slice(0, 80) || "Split";
+    const paymentMethod = String(item?.paymentMethod || item?.payment_method || "cash");
 
-    // ✅ only keep lines with amount > 0
-    const usableGroups = (item.groups || [])
-      .map((g) => ({ ...g, amount: asSatang(g?.amount) }))
+    let usableGroups = (item.groups || [])
+      .map((g, idx) => {
+        const gg = g && typeof g === "object" ? g : {};
+        const amount = asSatang(gg?.amount);
+        const categoryId = String(gg?.categoryId || gg?.category || "").trim();
+        const note0 = String(gg?.note || gg?.name || gg?.title || "").trim();
+        const receiptLineType = String(gg?.receiptLineType || "").toLowerCase().trim()
+          || (isAdjustmentLike(gg) || categoryId === "discount" ? "adjustment" : "item");
+        let adjustmentEffect = String(gg?.adjustmentEffect || "").toLowerCase().trim();
+        if (receiptLineType === "adjustment") {
+          if (adjustmentEffect !== "subtract" && adjustmentEffect !== "add") {
+            adjustmentEffect = categoryId === "discount" ? "subtract" : "add";
+          }
+        } else {
+          adjustmentEffect = "add";
+        }
+        const adjustmentType = String(gg?.adjustmentType || "").trim() || (categoryId === "discount" ? "discount" : "");
+        const splitIndex = Number(gg?.splitIndex || 0) || idx + 1;
+        return {
+          key: String(gg?.key || ""),
+          categoryId,
+          amount,
+          note: note0,
+          receiptLineType,
+          adjustmentType,
+          adjustmentEffect,
+          splitIndex,
+        };
+      })
       .filter((g) => isPositiveNumber(g.amount));
 
-    // If only 1 usable line remains, fallback to single tx (no split breakdown)
-    if (usableGroups.length === 1) {
-      const g0 = usableGroups[0];
-      const categoryId = g0?.categoryId || item?.categoryId || "";
+    const nonAdjCount = usableGroups.filter((g) => String(g?.receiptLineType || "").toLowerCase().trim() !== "adjustment").length;
+
+    // If we don't have enough purchased lines, gracefully fall back to a single transaction
+    // (prevents approval from failing on edge cases like 1 item + 1 discount line).
+    if (usableGroups.length < 2 || nonAdjCount < 2) {
+      const g0 = usableGroups.find((x) => String(x?.receiptLineType || "").toLowerCase().trim() !== "adjustment") || usableGroups[0];
+      const categoryId = String(g0?.categoryId || item?.categoryId || "").trim();
       if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับรายการนี้");
+
+      let amount = asSatang(item?.amount);
+      if (!isPositiveNumber(amount)) {
+        const signed = usableGroups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+        amount = Math.abs(signed);
+      }
+      if (!isPositiveNumber(amount)) throw new Error("กรุณากรอกยอดเงินให้มากกว่า 0");
 
       return [
         {
           id: generateId(),
           type: txType,
-          amount: g0.amount,
+          amount,
           date,
           merchant,
           note: String(g0?.note || "").trim() || note,
           ref: ref || "",
           category: categoryId,
           accountId,
-          paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
+          paymentMethod,
           isTransfer: false,
           transferId: null,
           attachmentId: item?.attachmentId || null,
@@ -104,39 +142,39 @@ function buildTransactionsFromInboxItem(item) {
       ];
     }
 
-    if (usableGroups.length < 2) {
-      throw new Error("Split จะสร้างเฉพาะบรรทัดที่ยอดมากกว่า 0 และต้องเหลืออย่างน้อย 2 บรรทัด");
+    // Parent amount: prefer item.amount if provided, else signed sum
+    let parentAmount = asSatang(item?.amount);
+    if (!isPositiveNumber(parentAmount)) {
+      const signed = usableGroups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+      parentAmount = Math.abs(signed);
     }
 
-    const splitCount = usableGroups.length;
+    // ✅ Robust reconcile: when receipt total != sum(items), add an adjustment line (e.g. ส่วนลด)
+    const rec = reconcileReceiptGroups(usableGroups, parentAmount, {
+      ensureCategoryId: (k) => k,
+      baseLineCountMin: 2,
+    });
+    usableGroups = (rec.groups || []).filter((g) => isPositiveNumber(g.amount));
 
     const parentId = generateId();
-    const childSum = usableGroups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+    const splitCount = usableGroups.length;
 
-    // Parent amount: prefer item.amount if provided, else sum of children
-    let parentAmount = asSatang(item?.amount);
-    if (!isPositiveNumber(parentAmount)) parentAmount = childSum;
-
-    // Try reconcile tiny differences by adjusting the last line
-    let diff = parentAmount - childSum;
-    if (diff !== 0 && usableGroups.length) {
-      const last = usableGroups[usableGroups.length - 1];
-      const nextAmt = (Number(last.amount) || 0) + diff;
-      if (nextAmt > 0) {
-        last.amount = nextAmt;
-        diff = 0;
-      }
-    }
-    // If mismatch remains and we can't adjust safely, prefer childSum for consistent UI
-    if (diff !== 0) parentAmount = usableGroups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+    // Recompute with signed sum after reconcile
+    const signedAfter = usableGroups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+    parentAmount = Math.abs(signedAfter) || parentAmount;
 
     // ✅ Parent category for split groups:
-    // - Multiple child categories → parent = "mixed" (UI-only)
-    // - Single child category → use that category
-    const uniqueCats = Array.from(new Set(usableGroups.map((g) => String(g?.categoryId || "").trim()).filter(Boolean)));
-    const parentCategory = String(
-      (uniqueCats.length > 1 ? "mixed" : uniqueCats[0]) || item?.categoryId || "mixed"
-    ).trim();
+    // - Multiple non-adjustment categories → parent = "mixed" (UI-only)
+    // - Single non-adjustment category → use that category
+    const nonAdjCats = Array.from(
+      new Set(
+        usableGroups
+          .filter((g) => String(g?.receiptLineType || "").toLowerCase().trim() !== "adjustment")
+          .map((g) => String(g?.categoryId || "").trim())
+          .filter(Boolean)
+      )
+    );
+    const parentCategory = String((nonAdjCats.length > 1 ? "mixed" : nonAdjCats[0]) || item?.categoryId || "mixed").trim();
 
     const txs = [];
 
@@ -151,7 +189,7 @@ function buildTransactionsFromInboxItem(item) {
       ref: ref || "",
       category: parentCategory,
       accountId,
-      paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
+      paymentMethod,
       isTransfer: false,
       transferId: null,
       attachmentId: item?.attachmentId || null,
@@ -165,13 +203,16 @@ function buildTransactionsFromInboxItem(item) {
     });
 
     // Children (real transactions)
+    // NOTE: adjustment lines are saved as "expense" but their net effect is controlled by adjustmentEffect.
     for (let i = 0; i < usableGroups.length; i++) {
       const g = usableGroups[i];
       const amount = Number(g.amount) || 0;
-      const categoryId = g?.categoryId || item?.categoryId || "";
+      const categoryId = String(g?.categoryId || item?.categoryId || "").trim();
       if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับกลุ่ม Split");
 
-      const itemName = String(g?.note || "").trim() || "(item)";
+      const isAdj = String(g?.receiptLineType || "").toLowerCase().trim() === "adjustment";
+      const fallbackName = categoryId === "discount" ? "ส่วนลด" : (isAdj ? "ปรับยอด" : "(item)");
+      const itemName = String(g?.note || "").trim() || fallbackName;
 
       txs.push({
         id: generateId(),
@@ -184,19 +225,23 @@ function buildTransactionsFromInboxItem(item) {
         ref: "",
         category: categoryId,
         accountId,
-        paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
+        paymentMethod,
         isTransfer: false,
         transferId: null,
         attachmentId: item?.attachmentId || null,
         source: "inbox",
 
         splitGroupId,
-        splitIndex: i + 1,
+        splitIndex: Number(g?.splitIndex || 0) || i + 1,
         splitCount,
         splitLabel,
         isSplit: true,
         isSplitChild: true,
         splitParentId: parentId,
+
+        receiptLineType: String(g?.receiptLineType || "item"),
+        adjustmentType: String(g?.adjustmentType || ""),
+        adjustmentEffect: String(g?.adjustmentEffect || "add"),
       });
     }
 
@@ -342,6 +387,14 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
 
   const attachmentUrl = useBlobUrl(draft?.attachmentId);
 
+  const defaultCashAccountId = useMemo(() => {
+    const arr = Array.isArray(accounts) ? accounts : [];
+    const hit = arr.find((a) => String(a?.type || "").toLowerCase().trim() === "cash")
+      || arr.find((a) => String(a?.name || "").includes("เงินสด"))
+      || arr.find((a) => String(a?.id || "").toLowerCase().includes("cash"));
+    return String(hit?.id || "");
+  }, [accounts]);
+
   // ✅ Keep category keys safe (fallback to "other" if unknown)
   const ensureExpenseCategoryId = (key) => {
     const k = String(key || "").trim();
@@ -383,7 +436,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       const hint = `${String(it?.merchant || "").trim()} ${String(it?.note || "").trim()}`.trim();
 
       const lines = splitReceiptItemsToLines("expense", items, hint, fallbackKey);
-      const groups = (lines || [])
+      let groups = (lines || [])
         .filter((ln) => (Number(ln?.amount) || 0) > 0)
         .map((ln, idx) => {
           const key = sanitizeCategoryKey(ln?.key || "other") || "other";
@@ -394,11 +447,21 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             note: String(ln?.name || "").trim(),
             splitIndex: idx + 1,
             splitCount: (lines || []).length,
+            receiptLineType: "item",
+            adjustmentEffect: "add",
           };
         });
 
-      // Need at least 2 positive lines to behave as Split
+      // Need at least 2 purchased lines to behave as Split
       if (groups.length < 2) return [];
+
+      // ✅ Reconcile to paid total (adds "ส่วนลด" line when needed)
+      const paidTotal = asSatang(it?.amount);
+      const rec = reconcileReceiptGroups(groups, paidTotal, {
+        ensureCategoryId: (k) => ensureExpenseCategoryId(k),
+        baseLineCountMin: 2,
+      });
+      groups = rec.groups;
       return groups;
     } catch {
       return [];
@@ -415,35 +478,96 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     const derived = deriveReceiptGroups(item);
     const rawGroups = Array.isArray(item?.groups) ? item.groups : [];
     const shouldSplit = (rawGroups.length >= 2) || (derived.length >= 2);
-    const effectiveGroups = shouldSplit
-      ? (rawGroups.length >= 2 ? rawGroups : derived)
-      : [];
+    const effectiveGroupsRaw = shouldSplit ? (rawGroups.length >= 2 ? rawGroups : derived) : [];
 
-    const isSplit = shouldSplit && Array.isArray(effectiveGroups) && effectiveGroups.length >= 2;
+    const normalizeGroup = (g, idx) => {
+      const gg = g && typeof g === "object" ? g : {};
+      const amountSatang = asSatang(gg?.amount);
+      const key = sanitizeCategoryKey(gg?.key || gg?.categoryKey || gg?.category_key || "") || "";
+      const cat0 = String(gg?.categoryId || gg?.category || "").trim();
+      const categoryId = cat0 || (key ? ensureExpenseCategoryId(key) : ensureExpenseCategoryId("other"));
+      const note = String(gg?.note || gg?.name || gg?.title || "").trim();
+
+      const adjLike = isAdjustmentLike(gg) || categoryId === "discount";
+      const receiptLineType = adjLike ? "adjustment" : "item";
+      let adjustmentEffect = String(gg?.adjustmentEffect || gg?.effect || "").toLowerCase().trim();
+      if (receiptLineType === "adjustment" && adjustmentEffect !== "subtract" && adjustmentEffect !== "add") {
+        adjustmentEffect = categoryId === "discount" ? "subtract" : "add";
+      }
+      if (receiptLineType === "item") adjustmentEffect = "add";
+
+      const adjustmentType = String(gg?.adjustmentType || "").trim() || (categoryId === "discount" ? "discount" : "");
+      const splitIndex = Number(gg?.splitIndex || 0) || idx + 1;
+      return {
+        key,
+        categoryId,
+        amount: amountSatang,
+        note,
+        splitIndex,
+        receiptLineType,
+        adjustmentType,
+        adjustmentEffect,
+      };
+    };
+
+    let groupsSatang = (effectiveGroupsRaw || [])
+      .map((g, idx) => normalizeGroup(g, idx))
+      .filter((g) => isPositiveNumber(g.amount));
+
+    const nonAdjCount = groupsSatang.filter((g) => !isAdjustmentLike(g)).length;
+    const isSplit = shouldSplit && nonAdjCount >= 2;
+
+    // ✅ Keep a stable paid-total (parent) and reconcile groups to it
+    let paidTotalSatang = asSatang(item?.amount);
+    if (!isPositiveNumber(paidTotalSatang)) {
+      // fallback: compute from signed groups (items + adjustments)
+      const sumSigned = groupsSatang.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+      paidTotalSatang = Math.abs(sumSigned);
+    }
+
+    if (isSplit && isPositiveNumber(paidTotalSatang)) {
+      const rec = reconcileReceiptGroups(groupsSatang, paidTotalSatang, {
+        ensureCategoryId: (k) => ensureExpenseCategoryId(k),
+        baseLineCountMin: 2,
+      });
+      groupsSatang = rec.groups.filter((g) => isPositiveNumber(g.amount));
+    }
+
+    const paymentMethod = String(item?.paymentMethod || item?.payment_method || "cash");
+    const accountIdRaw = String(item?.accountId || "");
+    const autoAccountId = !accountIdRaw && paymentMethod === "cash" ? defaultCashAccountId : accountIdRaw;
+
     setDraft({
       ...item,
       type: txType,
-      amount: item?.amount != null ? formatMoneyInputFromSatang(asSatang(item.amount)) : "",
+      amount: isPositiveNumber(paidTotalSatang) ? formatMoneyInputFromSatang(paidTotalSatang) : "",
       date: item?.date ? String(item.date).slice(0, 10) : toISODate(new Date()),
       merchant: String(item?.merchant || ""),
       categoryId: String(item?.categoryId || item?.category || (txType === "transfer" || txType === "credit_payment" ? "transfer" : "")),
-      accountId: String(item?.accountId || ""),
+      accountId: autoAccountId,
       fromAccountId: String(item?.fromAccountId || ""),
       toAccountId: String(item?.toAccountId || ""),
-      paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
+      paymentMethod,
       note: String(item?.note || ""),
       referenceId: String(item?.referenceId || item?.ref || ""),
+
+      paidTotalSatang: paidTotalSatang,
 
       // ✅ Split-by-category preview/edit in Inbox
       splitByCategory: isSplit,
       splitGroupId: isSplit ? (String(item?.splitGroupId || "").trim() || generateSplitGroupId()) : "",
-      splitLabel: isSplit ? (String(item?.splitLabel || item?.merchant || item?.note || "Receipt").trim().slice(0, 80) || "Receipt") : "",
+      splitLabel: isSplit
+        ? (String(item?.splitLabel || item?.merchant || item?.note || "Receipt").trim().slice(0, 80) || "Receipt")
+        : "",
       groups: isSplit
-        ? (effectiveGroups || []).filter((g) => asSatang(g?.amount) > 0).map((g) => ({
+        ? (groupsSatang || []).map((g) => ({
             key: g?.key || "",
             categoryId: String(g?.categoryId || ""),
-            amount: g?.amount != null ? formatMoneyInputFromSatang(asSatang(g.amount)) : "",
+            amount: formatMoneyInputFromSatang(asSatang(g.amount)),
             note: String(g?.note || ""),
+            receiptLineType: String(g?.receiptLineType || "item"),
+            adjustmentType: String(g?.adjustmentType || ""),
+            adjustmentEffect: String(g?.adjustmentEffect || "add"),
           }))
         : [],
     });
@@ -466,11 +590,89 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
   // before draft is initialized.
   const splitTotal = (() => {
     if (!isSplitMode) return parseMoneyToSatang(draft?.amount);
-    return (draft.groups || []).reduce((s, g) => {
+    const signed = (draft.groups || []).reduce((s, g) => {
       const a = parseMoneyToSatang(g?.amount);
-      return a > 0 ? s + a : s;
+      if (!(a > 0)) return s;
+      const eff = String(g?.adjustmentEffect || "add").toLowerCase().trim();
+      return s + (eff === "subtract" ? -a : a);
     }, 0);
+    return Math.abs(signed);
   })();
+
+  const reconcileDraftGroups = (baseDraft, nextGroupsDraft) => {
+    try {
+      const d0 = baseDraft || {};
+      const raw = Array.isArray(nextGroupsDraft) ? nextGroupsDraft : [];
+
+      let groupsSatang = raw
+        .map((g, idx) => {
+          const gg = g && typeof g === "object" ? g : {};
+          const key = sanitizeCategoryKey(gg?.key || gg?.categoryKey || gg?.category_key || "") || "";
+          const cat0 = String(gg?.categoryId || gg?.category || "").trim();
+          const categoryId = cat0 || (key ? ensureExpenseCategoryId(key) : ensureExpenseCategoryId("other"));
+          const amount = parseMoneyToSatang(gg?.amount);
+          const note = String(gg?.note || "").trim();
+
+          const receiptLineType = String(gg?.receiptLineType || "").toLowerCase().trim() || (categoryId === "discount" ? "adjustment" : "item");
+          let adjustmentEffect = String(gg?.adjustmentEffect || "").toLowerCase().trim();
+          if (receiptLineType === "adjustment") {
+            if (adjustmentEffect !== "subtract" && adjustmentEffect !== "add") {
+              adjustmentEffect = categoryId === "discount" ? "subtract" : "add";
+            }
+          } else {
+            adjustmentEffect = "add";
+          }
+
+          const adjustmentType = String(gg?.adjustmentType || "").trim() || (categoryId === "discount" ? "discount" : "");
+          const splitIndex = Number(gg?.splitIndex || 0) || idx + 1;
+
+          return {
+            key,
+            categoryId,
+            amount,
+            note,
+            splitIndex,
+            receiptLineType: receiptLineType === "adjustment" ? "adjustment" : "item",
+            adjustmentType,
+            adjustmentEffect,
+          };
+        })
+        .filter((g) => isPositiveNumber(g.amount));
+
+      const nonAdjCount = groupsSatang.filter((g) => !isAdjustmentLike(g)).length;
+
+      let target = Number(d0?.paidTotalSatang) || 0;
+      if (!isPositiveNumber(target)) target = parseMoneyToSatang(d0?.amount);
+      if (!isPositiveNumber(target)) {
+        const sumSigned = groupsSatang.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+        target = Math.abs(sumSigned);
+      }
+
+      if (nonAdjCount >= 2 && isPositiveNumber(target)) {
+        const rec = reconcileReceiptGroups(groupsSatang, target, {
+          ensureCategoryId: (k) => ensureExpenseCategoryId(k),
+          baseLineCountMin: 2,
+        });
+        groupsSatang = rec.groups.filter((g) => isPositiveNumber(g.amount));
+      }
+
+      return {
+        paidTotalSatang: isPositiveNumber(target) ? target : 0,
+        groupsDraft: groupsSatang.map((g) => ({
+          key: g?.key || "",
+          categoryId: String(g?.categoryId || "").trim(),
+          amount: formatMoneyInputFromSatang(asSatang(g.amount)),
+          note: String(g?.note || ""),
+          receiptLineType: String(g?.receiptLineType || "item"),
+          adjustmentType: String(g?.adjustmentType || ""),
+          adjustmentEffect: String(g?.adjustmentEffect || "add"),
+          splitIndex: Number(g?.splitIndex || 0) || 0,
+        })),
+      };
+    } catch {
+      return { paidTotalSatang: 0, groupsDraft: Array.isArray(nextGroupsDraft) ? nextGroupsDraft : [] };
+    }
+  };
 
   const toggleSplitMode = () => {
     setDraft((d) => {
@@ -483,11 +685,15 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         // ✅ If this is a receipt with multiple items, seed split lines from OCR/LLM items
         const derived = deriveReceiptGroups(d);
         const seeded = derived.length >= 2
-          ? derived.map((g) => ({
+          ? derived.map((g, idx) => ({
               key: g.key || "",
-              categoryId: String(g.categoryId || ""),
+              categoryId: String(g.categoryId || "").trim(),
               amount: formatMoneyInputFromSatang(asSatang(g.amount)),
               note: String(g.note || ""),
+              receiptLineType: String(g?.receiptLineType || "item"),
+              adjustmentType: String(g?.adjustmentType || ""),
+              adjustmentEffect: String(g?.adjustmentEffect || "add"),
+              splitIndex: Number(g?.splitIndex || 0) || idx + 1,
             }))
           : Array.isArray(d.groups) && d.groups.length
             ? d.groups
@@ -497,23 +703,47 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                   categoryId: String(d.categoryId || ""),
                   amount: String(d.amount ?? ""),
                   note: "",
+                  receiptLineType: "item",
+                  adjustmentType: "",
+                  adjustmentEffect: "add",
+                  splitIndex: 1,
                 },
-                { key: "", categoryId: "", amount: "", note: "" },
+                {
+                  key: "",
+                  categoryId: "",
+                  amount: "",
+                  note: "",
+                  receiptLineType: "item",
+                  adjustmentType: "",
+                  adjustmentEffect: "add",
+                  splitIndex: 2,
+                },
               ];
+
+        const rec = reconcileDraftGroups(d, seeded);
+        const nextPaid = isPositiveNumber(rec?.paidTotalSatang)
+          ? rec.paidTotalSatang
+          : isPositiveNumber(Number(d?.paidTotalSatang))
+            ? Number(d.paidTotalSatang)
+            : parseMoneyToSatang(d?.amount);
 
         return {
           ...d,
           splitByCategory: true,
-          groups: seeded,
+          groups: rec?.groupsDraft || seeded,
           splitGroupId: String(d.splitGroupId || "").trim() || generateSplitGroupId(),
           splitLabel: String(d.splitLabel || d.merchant || d.note || "Split"),
           // split uses per-line categories
           categoryId: "",
+          paidTotalSatang: isPositiveNumber(nextPaid) ? nextPaid : d?.paidTotalSatang,
+          amount: isPositiveNumber(nextPaid) ? formatMoneyInputFromSatang(nextPaid) : d?.amount,
         };
       }
 
       // turn off split → collapse to single (take first line if possible)
-      const g0 = Array.isArray(d.groups) && d.groups.length ? d.groups[0] : null;
+      const g0 = Array.isArray(d.groups) && d.groups.length
+        ? (d.groups.find((x) => String(x?.receiptLineType || "").toLowerCase().trim() !== "adjustment") || d.groups[0])
+        : null;
       return {
         ...d,
         splitByCategory: false,
@@ -531,15 +761,40 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       const groups = Array.isArray(d?.groups) ? [...d.groups] : [];
       if (!groups[idx]) return d;
       groups[idx] = { ...groups[idx], ...patch };
-      return { ...d, groups };
+      if (!d?.splitByCategory) return { ...d, groups };
+      const rec = reconcileDraftGroups(d, groups);
+      const nextPaid = isPositiveNumber(Number(d?.paidTotalSatang)) ? Number(d.paidTotalSatang) : rec?.paidTotalSatang;
+      return {
+        ...d,
+        groups: rec?.groupsDraft || groups,
+        paidTotalSatang: isPositiveNumber(nextPaid) ? nextPaid : d?.paidTotalSatang,
+        amount: isPositiveNumber(nextPaid) ? formatMoneyInputFromSatang(nextPaid) : d?.amount,
+      };
     });
   };
 
   const addGroup = () => {
     setDraft((d) => {
       const groups = Array.isArray(d?.groups) ? [...d.groups] : [];
-      groups.push({ key: "", categoryId: "", amount: "", note: "" });
-      return { ...d, groups };
+      groups.push({
+        key: "",
+        categoryId: "",
+        amount: "",
+        note: "",
+        receiptLineType: "item",
+        adjustmentType: "",
+        adjustmentEffect: "add",
+        splitIndex: groups.length + 1,
+      });
+      if (!d?.splitByCategory) return { ...d, groups };
+      const rec = reconcileDraftGroups(d, groups);
+      const nextPaid = isPositiveNumber(Number(d?.paidTotalSatang)) ? Number(d.paidTotalSatang) : rec?.paidTotalSatang;
+      return {
+        ...d,
+        groups: rec?.groupsDraft || groups,
+        paidTotalSatang: isPositiveNumber(nextPaid) ? nextPaid : d?.paidTotalSatang,
+        amount: isPositiveNumber(nextPaid) ? formatMoneyInputFromSatang(nextPaid) : d?.amount,
+      };
     });
   };
 
@@ -547,7 +802,15 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     setDraft((d) => {
       const groups = Array.isArray(d?.groups) ? [...d.groups] : [];
       groups.splice(idx, 1);
-      return { ...d, groups };
+      if (!d?.splitByCategory) return { ...d, groups };
+      const rec = reconcileDraftGroups(d, groups);
+      const nextPaid = isPositiveNumber(Number(d?.paidTotalSatang)) ? Number(d.paidTotalSatang) : rec?.paidTotalSatang;
+      return {
+        ...d,
+        groups: rec?.groupsDraft || groups,
+        paidTotalSatang: isPositiveNumber(nextPaid) ? nextPaid : d?.paidTotalSatang,
+        amount: isPositiveNumber(nextPaid) ? formatMoneyInputFromSatang(nextPaid) : d?.amount,
+      };
     });
   };
 
@@ -581,11 +844,17 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         const groupsRaw = Array.isArray(draft.groups) ? draft.groups : [];
         // ✅ Ignore zero/invalid lines: only keep groups with amount > 0
         const groups = groupsRaw
-          .map((g) => ({ ...g, amountSatang: parseMoneyToSatang(g?.amount) }))
+          .map((g) => ({
+            ...g,
+            amountSatang: parseMoneyToSatang(g?.amount),
+            receiptLineType: String(g?.receiptLineType || "item"),
+            adjustmentEffect: String(g?.adjustmentEffect || "add"),
+          }))
           .filter((g) => isPositiveNumber(g.amountSatang));
 
-        if (groups.length < 2) {
-          showAlert?.("Split จะสร้างเฉพาะบรรทัดที่ยอดมากกว่า 0 และต้องเหลืออย่างน้อย 2 บรรทัด");
+        const nonAdjCount = groups.filter((g) => String(g?.receiptLineType || "").toLowerCase().trim() !== "adjustment").length;
+        if (nonAdjCount < 2) {
+          showAlert?.("Split ต้องมีรายการสินค้าจริงอย่างน้อย 2 บรรทัด (ไม่รวมส่วนลด/ปรับยอด)");
           return;
         }
 
@@ -626,12 +895,20 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         .trim()
         .slice(0, 80) || "Split";
 
-      const groups = (draft.groups || [])
-        .map((g) => ({
+      // ✅ Make sure we persist the reconciled lines (including discount adjustment)
+      const rec = reconcileDraftGroups(draft, draft.groups || []);
+      const groupsDraft = Array.isArray(rec?.groupsDraft) && rec.groupsDraft.length ? rec.groupsDraft : (draft.groups || []);
+
+      const groups = (groupsDraft || [])
+        .map((g, idx) => ({
           key: g?.key || "",
           categoryId: String(g?.categoryId || "").trim(),
           amount: parseMoneyToSatang(g?.amount),
           note: String(g?.note || ""),
+          receiptLineType: String(g?.receiptLineType || "item"),
+          adjustmentType: String(g?.adjustmentType || ""),
+          adjustmentEffect: String(g?.adjustmentEffect || "add"),
+          splitIndex: Number(g?.splitIndex || 0) || idx + 1,
         }))
         .filter((g) => isPositiveNumber(g.amount));
 
@@ -1030,6 +1307,16 @@ export default function InboxView({ showAlert, showConfirm }) {
     return map;
   }, [state.accounts]);
 
+  const defaultCashAccountId = useMemo(() => {
+    const arr = Array.isArray(state?.accounts) ? state.accounts : [];
+    const hit = arr.find((a) =>
+      String(a?.type || "").toLowerCase() === "cash" ||
+      String(a?.id || "").toLowerCase().includes("cash") ||
+      /เงินสด/i.test(String(a?.name || ""))
+    );
+    return String(hit?.id || "");
+  }, [state.accounts]);
+
   const categoriesById = useMemo(() => {
     const map = new Map();
     const exp = state?.categories?.expense || [];
@@ -1143,7 +1430,13 @@ export default function InboxView({ showAlert, showConfirm }) {
         const normalizedItems = [];
         for (const it of items) {
           const canon = resolveMerchantCanonical(it?.merchant || it?.note, state?.merchants || []);
-          const nextIt = canon ? { ...it, merchant: canon } : it;
+          let nextIt = canon ? { ...it, merchant: canon } : it;
+
+          // ✅ Default payment_method cash → default cash account (prevents approval errors)
+          const pm = String(nextIt?.paymentMethod || nextIt?.payment_method || "cash").toLowerCase().trim() || "cash";
+          if ((!nextIt?.accountId || !String(nextIt.accountId).trim()) && pm === "cash" && defaultCashAccountId) {
+            nextIt = { ...nextIt, accountId: defaultCashAccountId, paymentMethod: pm };
+          }
           normalizedItems.push(nextIt);
           const txs = buildTransactionsFromInboxItem(nextIt);
           allTxs.push(...txs);
@@ -1456,6 +1749,10 @@ export default function InboxView({ showAlert, showConfirm }) {
                             const cat = categoriesById.get(String(g?.categoryId || "")) || null;
                             const amt = formatCurrency(Number(g?.amount) || 0);
                             const lineNote = String(g?.note || "").trim();
+                            const eff = String(g?.adjustmentEffect || "add").toLowerCase().trim();
+                            const isSubtract = txType === "expense" && eff === "subtract";
+                            const sign = txType === "income" ? "+" : (isSubtract ? "+" : "-");
+                            const cls = txType === "income" ? "text-emerald-700" : (isSubtract ? "text-emerald-700" : "text-red-700");
                             return (
                               <div key={`${it.id}-g-${idx}`} className="flex items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
@@ -1468,9 +1765,8 @@ export default function InboxView({ showAlert, showConfirm }) {
                                     </div>
                                   ) : null}
                                 </div>
-                                <div className={`shrink-0 text-xs font-black ${txType === "income" ? "text-emerald-700" : "text-red-700"}`}>
-                                  {txType === "income" ? "+" : "-"}
-                                  {amt}
+                                <div className={`shrink-0 text-xs font-black ${cls}`}>
+                                  {sign}{amt}
                                 </div>
                               </div>
                             );

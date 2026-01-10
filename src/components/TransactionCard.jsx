@@ -4,6 +4,7 @@ import { ArrowRightLeft, ChevronRight, CreditCard, Layers } from "lucide-react";
 import { isCreditAccount } from "../utils/accountMatch";
 import { useAppStore } from "../store/store";
 import { formatCurrency, formatDateShort } from "../utils/format";
+import { signedReceiptTxSatang } from "../utils/receiptAdjustments";
 
 // ---------- small helpers ----------
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
@@ -99,9 +100,21 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
 
   const isIncome = tx?.type === "income";
 
+  const isDiscountAdjustment =
+    !tx?.isTransfer &&
+    !tx?.isSplitParent &&
+    String(tx?.type || "").toLowerCase().trim() === "expense" &&
+    String(tx?.adjustmentEffect || "").toLowerCase().trim() === "subtract";
+
   let amountText = formatCurrency(tx?.amount || 0);
   let amountPrefix = isIncome ? "+" : "-";
   let amountClass = isIncome ? "text-emerald-700" : "text-red-700";
+
+  // ✅ Show discount adjustment as a positive impact (green)
+  if (isDiscountAdjustment) {
+    amountPrefix = "+";
+    amountClass = "text-emerald-700";
+  }
 
   // ชื่อ/ไอคอน/สีแสดงผล
   let title = category?.name || "รายการ";
@@ -111,6 +124,10 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
   let leadingIcon = category?.icon || "🧾";
   let leadingBg = category?.color ? `${category.color}20` : "rgba(255,255,255,0.25)";
   let badgeText = "";
+
+  if (isDiscountAdjustment) {
+    badgeText = "DISCOUNT";
+  }
 
   // -------- Transfer / Credit Card Payment (special rendering) --------
   if (isTransfer) {
@@ -162,8 +179,10 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
 
   // -------- Split Group (special rendering) --------
   if (!isTransfer && isSplitGroup) {
-    const total = (splitLines || []).reduce((s, t) => s + (Number(t?.amount) || 0), 0) || (Number(tx?.amount) || 0);
-    amountText = formatCurrency(total);
+    // ✅ Split group paid-total must reconcile item lines + adjustments (e.g. discount)
+    const sumSigned = (splitLines || []).reduce((s, t) => s + signedReceiptTxSatang(t), 0);
+    const total = sumSigned || (Number(tx?.amount) || 0);
+    amountText = formatCurrency(Math.abs(total));
 
     const label = String(tx?.splitLabel || "").trim();
     title = label || `Split (${(splitLines || []).length})`;
