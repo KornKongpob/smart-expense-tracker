@@ -47,6 +47,8 @@ export const DEFAULT_CATEGORIES = {
 
     // Finance
     { id: "fees", name: "ค่าธรรมเนียม/ดอกเบี้ย", icon: "🏦", color: "#EF4444" },
+    // ✅ Receipt adjustment: discount (stored as expense line with adjustmentEffect="subtract")
+    { id: "discount", name: "ส่วนลด", icon: "🏷️", color: "#10B981" },
     { id: "adjust_balance", name: "ปรับยอดบัญชี", icon: "🧮", color: "#6B7280" },
     { id: "insurance", name: "ประกัน", icon: "🛡️", color: "#0EA5E9" },
     { id: "donation", name: "บริจาค", icon: "❤️", color: "#F43F5E" },

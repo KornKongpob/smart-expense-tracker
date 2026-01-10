@@ -371,10 +371,17 @@ export function calcTotals(transactions) {
   for (const t of transactions || []) {
     if (!t) continue;
     if (t.isTransfer) continue; // transfers should not affect "income/expense totals"
+    if (t.isSplitParent) continue; // split parent is UI-only (avoid double count)
 
     const amt = Number(t.amount) || 0;
-    if (t.type === "income") income += amt;
-    else if (t.type === "expense") expense += amt;
+    if (t.type === "income") {
+      income += amt;
+    } else if (t.type === "expense") {
+      // ✅ Receipt adjustment: discount is stored as expense with adjustmentEffect="subtract"
+      // so it reduces total expense instead of increasing it.
+      const ae = String(t.adjustmentEffect || "").toLowerCase().trim();
+      expense += ae === "subtract" ? -amt : amt;
+    }
   }
 
   return {
@@ -398,9 +405,13 @@ export function calcAccountTxNet(transactions, accountId) {
   return (transactions || [])
     .filter((t) => t?.accountId === accId)
     .reduce((sum, t) => {
+      if (t?.isSplitParent) return sum; // UI-only
       const amt = Number(t?.amount) || 0;
       if (t?.type === "income") return sum + amt;
-      if (t?.type === "expense") return sum - amt;
+      if (t?.type === "expense") {
+        const ae = String(t?.adjustmentEffect || "").toLowerCase().trim();
+        return ae === "subtract" ? sum + amt : sum - amt;
+      }
       return sum;
     }, 0);
 }
@@ -432,6 +443,7 @@ export function calcSpentByCategoryInMonth(transactions, monthKey) {
   for (const t of transactions || []) {
     if (!t) continue;
     if (t.isTransfer) continue; // ✅ transfers should not count as spending
+    if (t.isSplitParent) continue; // split parent is UI-only
     if (t.type !== "expense") continue;
 
     const iso = toISODateSafe(t.date);
@@ -441,7 +453,9 @@ export function calcSpentByCategoryInMonth(transactions, monthKey) {
     if (!cat) continue;
 
     const amt = Number(t.amount) || 0;
-    map.set(cat, (map.get(cat) || 0) + amt);
+    const ae = String(t.adjustmentEffect || "").toLowerCase().trim();
+    const signed = ae === "subtract" ? -amt : amt;
+    map.set(cat, (map.get(cat) || 0) + signed);
   }
 
   return map;
