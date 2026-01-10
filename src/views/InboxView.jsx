@@ -95,6 +95,7 @@ function buildTransactionsFromInboxItem(item) {
           ref: ref || "",
           category: categoryId,
           accountId,
+          paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
           isTransfer: false,
           transferId: null,
           attachmentId: item?.attachmentId || null,
@@ -150,6 +151,7 @@ function buildTransactionsFromInboxItem(item) {
       ref: ref || "",
       category: parentCategory,
       accountId,
+      paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
       isTransfer: false,
       transferId: null,
       attachmentId: item?.attachmentId || null,
@@ -182,6 +184,7 @@ function buildTransactionsFromInboxItem(item) {
         ref: "",
         category: categoryId,
         accountId,
+        paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
         isTransfer: false,
         transferId: null,
         attachmentId: item?.attachmentId || null,
@@ -269,6 +272,7 @@ function buildTransactionsFromInboxItem(item) {
       ref,
       category: categoryId,
       accountId,
+      paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
       isTransfer: false,
       transferId: null,
       attachmentId: item?.attachmentId || null,
@@ -426,6 +430,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       accountId: String(item?.accountId || ""),
       fromAccountId: String(item?.fromAccountId || ""),
       toAccountId: String(item?.toAccountId || ""),
+      paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
       note: String(item?.note || ""),
       referenceId: String(item?.referenceId || item?.ref || ""),
 
@@ -607,6 +612,10 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             ? ""
             : String(draft.categoryId || ""),
       accountId: txType === "transfer" || txType === "credit_payment" ? "" : String(draft.accountId || ""),
+      paymentMethod:
+        txType === "transfer" || txType === "credit_payment"
+          ? ""
+          : String(draft.paymentMethod || "cash"),
       fromAccountId: txType === "transfer" || txType === "credit_payment" ? String(draft.fromAccountId || "") : "",
       toAccountId: txType === "transfer" || txType === "credit_payment" ? String(draft.toAccountId || "") : "",
     };
@@ -795,6 +804,33 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                       {a.name}
                     </option>
                   ))}
+                </select>
+              </label>
+
+              <label className="text-xs font-bold text-gray-900/60 min-w-0 mt-3 block">
+                Payment method
+                <select
+                  value={String(draft.paymentMethod || "cash")}
+                  onChange={(e) => {
+                    const pm = e.target.value;
+                    setDraft((d) => {
+                      if (!d) return d;
+                      const next = { ...d, paymentMethod: pm };
+                      if (pm === "cash") {
+                        const cashAcc = accounts.find(
+                          (a) => String(a?.type || "").toLowerCase() === "cash" || String(a?.id || "").toLowerCase().includes("cash") || /เงินสด/i.test(String(a?.name || ""))
+                        );
+                        if (cashAcc?.id) next.accountId = cashAcc.id;
+                      }
+                      return next;
+                    });
+                  }}
+                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                >
+                  <option value="unknown">unknown</option>
+                  <option value="cash">cash</option>
+                  <option value="card">card</option>
+                  <option value="promptpay">promptpay</option>
                 </select>
               </label>
 

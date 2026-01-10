@@ -16,7 +16,7 @@ function fileToDataUrl(file) {
         reject(e);
       };
       reader.readAsDataURL(file);
-    } catch (err) {
+    } catch (err) {A
       const e = new Error("file_read_failed");
       e.code = "file_read_failed";
       e.cause = err;
@@ -337,6 +337,8 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     ref: d?.ref ?? null,
     category: d?.category ?? null,
     category_key: d?.category_key ?? d?.category ?? null,
+    payment_method: d?.payment_method ?? d?.paymentMethod ?? null,
+    account_id: d?.account_id ?? d?.accountId ?? null,
     from_account: d?.from_account ?? null,
     to_account: d?.to_account ?? null,
     evidence: d?.evidence ?? rawText ?? "",
@@ -400,8 +402,10 @@ function isExplicitEndpointProvided(endpoint) {
  * - "calling_api_fallback"
  * - "done"
  */
-export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
-  const defaultUrl = import.meta.env.VITE_SCAN_API_URL || "/api/scan";
+export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [] } = {}) {
+  // ✅ Prefer the receipt-optimized endpoint by default.
+  // (We still keep /api/scan working as an alias on the backend.)
+  const defaultUrl = import.meta.env.VITE_SCAN_API_URL || "/api/scan-receipt";
   const url = (endpoint || defaultUrl || "/api/scan").trim();
   const explicitEndpoint = isExplicitEndpointProvided(endpoint);
 
@@ -414,13 +418,17 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
   onStatus?.("encoding_image");
   // ✅ Keep quality high for OCR, but still prevent oversized payloads.
   // If image is already small enough, it will be kept as-is.
-  const imageDataUrl = await fileToOptimizedDataUrl(file);
+  const imageDataUrl = await fileToOptimizedDataUrl(file, {
+    // receipts are high-value OCR targets; always run the enhancement pass
+    forceProcess: true,
+    maxDim: 2800,
+  });
 
   // ---- 1) Try primary endpoint (/api/scan by default) ----
   onStatus?.("calling_api");
   let primary;
   try {
-    primary = await postJson(url, { imageDataUrl });
+    primary = await postJson(url, { imageDataUrl, accounts });
   } catch (err) {
     const e = new Error("scan_network_error");
     e.code = "scan_network_error";
@@ -443,7 +451,7 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus } = {}) {
 
     let fb;
     try {
-      fb = await postJson(fallbackUrl, { base64, mimeType });
+      fb = await postJson(fallbackUrl, { base64, mimeType, accounts });
     } catch (err) {
       const e = new Error("scan_network_error");
       e.code = "scan_network_error";

@@ -1304,6 +1304,7 @@ const existingRefSet = useMemo(() => {
           setScanStatus(`กำลังอ่าน: ${file.name}`);
           const result = await scanReceiptOpenAI(file, {
             onStatus: (s) => setScanStatus(s || `กำลังอ่าน: ${file.name}`),
+            accounts,
           });
 
           const aiTxType =
@@ -1414,6 +1415,14 @@ if (docType === "receipt") {
   }
 }
 
+// ---- NEW: payment method + account_id returned from OpenAI ----
+const aiPaymentMethodRaw = String(result?.payment_method || result?.paymentMethod || "")
+  .trim()
+  .toLowerCase();
+const aiPaymentMethod = ["cash", "card", "promptpay"].includes(aiPaymentMethodRaw) ? aiPaymentMethodRaw : "cash";
+const aiAccountIdRaw = String(result?.account_id || result?.accountId || "").trim();
+const aiAccountId = aiAccountIdRaw && accounts.some((a) => String(a?.id || "") === aiAccountIdRaw) ? aiAccountIdRaw : "";
+
 // ===== Decide which account fields to populate =====
 let detectedAccountId = "";
 let detectedFromId = "";
@@ -1434,7 +1443,28 @@ if (finalTxType === "transfer" || finalTxType === "credit_payment") {
     if (!toAcc || !isCreditAccount(toAcc)) detectedToId = fallbackTo;
   }
 } else {
-  detectedAccountId = matchedFromId || matchedToId || accountId || accounts?.[0]?.id || "";
+  // Prefer account_id chosen by OpenAI (it has access to the user's account metadata).
+  detectedAccountId = aiAccountId || matchedFromId || matchedToId || accountId || accounts?.[0]?.id || "";
+
+  // If payment method is cash and we still don't have a confident match, default to the cash account if it exists.
+  if (!aiAccountId && aiPaymentMethod === "cash") {
+    const cashAcc = (accounts || []).find((a) => {
+      const type = String(a?.type || "").toLowerCase();
+      const id = String(a?.id || "").toLowerCase();
+      const name = String(a?.name || "");
+      const nameLow = name.toLowerCase();
+      const icon = String(a?.icon || a?.emoji || "");
+      return (
+        type === "cash" ||
+        id.includes("cash") ||
+        nameLow.includes("เงินสด") ||
+        nameLow.includes("cash") ||
+        icon.includes("💵") ||
+        icon.includes("💰")
+      );
+    });
+    if (cashAcc?.id) detectedAccountId = cashAcc.id;
+  }
 }
 
 // Hybrid guardrail:
@@ -1483,7 +1513,12 @@ if (
 
           const groupSum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
           const aiTotal = amountSatang != null ? amountSatang : 0;
-          let splitByCategory = finalTxType === "expense" && groups.length >= 2;
+          // ✅ Default to split for receipts with multiple purchased items
+          // (convenience-store receipts are the #1 pain point)
+          const positiveScannedItemCount = Array.isArray(scannedItems)
+            ? scannedItems.filter((it) => Number(it?.line_total ?? it?.total ?? it?.amount ?? 0) > 0).length
+            : 0;
+          let splitByCategory = finalTxType === "expense" && (groups.length >= 2 || positiveScannedItemCount >= 2);
 
           const scanWarnings = [];
           const scanFlags = result?.flags || null;
@@ -1579,6 +1614,7 @@ if (
             ref: rref,
             categoryId: finalTxType === "transfer" || finalTxType === "credit_payment" ? "transfer" : detectedCategoryId,
             accountId: detectedAccountId || (accounts?.[0]?.id || ""),
+            paymentMethod: aiPaymentMethod,
             fromAccountId: detectedFromId || (accounts?.[0]?.id || ""),
             toAccountId: detectedToId || (accounts?.[0]?.id || ""),
             duplicate: dupByRef,

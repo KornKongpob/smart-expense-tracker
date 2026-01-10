@@ -227,34 +227,80 @@ function normalizeCategoryKey(v) {
   if (!s) return null;
 
   const allowed = new Set([
+    // expense
     "food",
+    "drinks",
+    "groceries",
     "transport",
-    "shopping",
+    "fuel",
     "bills",
-    "health",
+    "rent",
+    "shopping",
+    "coffee",
+    "dining",
     "entertainment",
+    "travel",
+    "health",
+    "fitness",
+    "beauty",
+    "pets",
+    "kids",
+    "home",
+    "education",
+    "work",
+    "phone_internet",
+    "subscriptions",
+    "fees",
+    "insurance",
+    "donation",
+    "gift",
+    "other",
+    "mixed",
+
+    // income
     "salary",
     "bonus",
+    "freelance",
+    "business",
     "investment",
+    "interest",
+    "dividend",
     "refund",
-    "other",
+    "gift_income",
+    "other_income",
+
+    // transfer
     "transfer",
   ]);
   if (allowed.has(s)) return s;
 
   const alias = {
     utilities: "bills",
+    utility: "bills",
     bill: "bills",
-    gas: "transport",
-    fuel: "transport",
-    petrol: "transport",
-    diesel: "transport",
-    groceries: "shopping",
-    supermarket: "shopping",
+    bills: "bills",
+
+    gas: "fuel",
+    petrol: "fuel",
+    diesel: "fuel",
+
+    supermarket: "groceries",
+    grocery: "groceries",
+
     pharmacy: "health",
     medicine: "health",
+
     cinema: "entertainment",
     movie: "entertainment",
+
+    internet: "phone_internet",
+    phone: "phone_internet",
+    telecom: "phone_internet",
+
+    diningout: "dining",
+    restaurant: "dining",
+    café: "coffee",
+    cafe: "coffee",
   };
   if (alias[s]) return alias[s];
 
@@ -674,7 +720,7 @@ function refineTxTypeAndSubtype({ parsedTxType, evidence, rawText }) {
   return { tx_type: safeType, tx_subtype: safeType === "transfer" ? "transfer" : null, is_credit_card_payment: false };
 }
 
-async function callOpenAI({ base64, mimeType }) {
+async function callOpenAI({ base64, mimeType, accounts = [] }) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return {
@@ -720,9 +766,95 @@ async function callOpenAI({ base64, mimeType }) {
     return s;
   };
 
+  const normalizePaymentMethod = (raw) => {
+    const s = String(raw || "").trim().toLowerCase();
+    if (!s) return "unknown";
+    if (s === "cash" || s === "เงินสด") return "cash";
+    if (s === "card" || s === "credit" || s === "debit" || s === "บัตร" || s === "บัตรเครดิต" || s === "บัตรเดบิต") return "card";
+    if (s === "promptpay" || s === "qr" || s === "พร้อมเพย์" || s === "พร้อมเพย์/qr" || s === "qr พร้อมเพย์") return "promptpay";
+    if (s.includes("promptpay") || s.includes("พร้อมเพย์")) return "promptpay";
+    if (s.includes("visa") || s.includes("master") || s.includes("amex") || s.includes("card") || s.includes("เครดิต") || s.includes("เดบิต")) return "card";
+    if (s.includes("cash") || s.includes("เงินสด")) return "cash";
+    return "unknown";
+  };
+
+  const digitsOnly = (s) =>
+    String(s || "")
+      .replace(/[๐-๙]/g, (ch) => "๐๑๒๓๔๕๖๗๘๙".indexOf(ch))
+      .replace(/[^\d]/g, "");
+
+  const compactAccountsForModel = (accounts) => {
+    const list = Array.isArray(accounts) ? accounts : [];
+    return list
+      .map((a) => {
+        const id = String(a?.id || "").trim();
+        if (!id) return null;
+        const name = String(a?.name || "").trim();
+        const type = String(a?.type || "").trim().toLowerCase();
+        const cardLast4 = digitsOnly(a?.cardLast4 || a?.digits || "").slice(-4);
+        const accDigits = digitsOnly(a?.accountNumber || a?.account_number || "");
+        const accountLast6 = accDigits ? accDigits.slice(-6) : "";
+        const accountLast4 = accDigits ? accDigits.slice(-4) : "";
+        return {
+          id,
+          name: name || id,
+          type: type || "other",
+          cardLast4: cardLast4 || "",
+          accountLast6: accountLast6 || "",
+          accountLast4: accountLast4 || "",
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 30);
+  };
+
+  const pickAccountIdFallback = ({ accounts, candidates = [] }) => {
+    const list = Array.isArray(accounts) ? accounts : [];
+    if (!list.length) return "";
+
+    const cand = Array.isArray(candidates) ? candidates.map((x) => digitsOnly(x)).filter(Boolean) : [];
+    if (!cand.length) return "";
+
+    // Prefer exact last4 match on cardLast4, else last6/last4 match on account number
+    for (const c of cand) {
+      const last4 = c.slice(-4);
+      if (last4) {
+        const hit = list.find((a) => digitsOnly(a?.cardLast4).slice(-4) === last4);
+        if (hit?.id) return String(hit.id);
+      }
+    }
+
+    for (const c of cand) {
+      const last6 = c.slice(-6);
+      const last4 = c.slice(-4);
+      const hit = list.find((a) => {
+        const acc = digitsOnly(a?.accountNumber);
+        if (!acc) return false;
+        if (last6 && acc.endsWith(last6)) return true;
+        if (last4 && acc.endsWith(last4)) return true;
+        return false;
+      });
+      if (hit?.id) return String(hit.id);
+    }
+
+    return "";
+  };
+
   // ✅ Default to gpt-5.1 for OCR-heavy receipts
   const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-5.1");
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
+
+  const accountsForModel = compactAccountsForModel(accounts);
+  const accountsText = accountsForModel.length
+    ? accountsForModel
+        .map((a) => {
+          const parts = [`id=${a.id}`, `name=${a.name}`, `type=${a.type}`];
+          if (a.cardLast4) parts.push(`cardLast4=${a.cardLast4}`);
+          if (a.accountLast6) parts.push(`accountLast6=${a.accountLast6}`);
+          return `- ${parts.join(" | ")}`;
+        })
+        .join("\n")
+    : "- (no accounts provided)";
 
   const prompt = `
 You are an OCR+parser for Thai receipts and Thai bank/payment transfer slips used in a personal expense tracker.
@@ -744,6 +876,7 @@ Line items rules:
 - If doc_type is receipt: items MUST include ONLY purchased products/services with line_total > 0.
   * Skip any lines with 0 price (freebies, stamps, tasks, promotions, coupons, points, exchanged rights, etc.)
   * Skip summary lines (TOTAL, Subtotal, VAT, service charge, change, discounts)
+  * Convenience-store receipts (e.g. 7-Eleven) often show a qty column at the start ("1") and also show promo lines like "0.00N" — treat those as NOT purchased items.
 
 Classification:
 - If it is clearly a transfer between accounts: tx_type MUST be 'transfer'.
@@ -760,10 +893,22 @@ Account digits extraction:
 - For card number: return ONLY last 4 digits.
 - Do NOT use reference/biller/merchant ids as account.
 
+Payment method + account selection:
+- payment_method MUST be one of: cash, card, promptpay, unknown.
+- account_id MUST be one of the ids from the Accounts list below, or null if you cannot determine it.
+- If payment_method is cash and you see an account named "เงินสด" or type=cash, prefer that.
+
+Accounts list (user's accounts; choose a matching id when possible):
+${accountsText}
+
 Allowed category_key values:
-- expense: food, transport, shopping, bills, health, entertainment, other
-- income: salary, bonus, investment, refund, other
+- expense: food, drinks, groceries, transport, fuel, bills, rent, shopping, coffee, dining, entertainment, travel, health, fitness, beauty, pets, kids, home, education, work, phone_internet, subscriptions, fees, insurance, donation, gift, other, mixed
+- income: salary, bonus, freelance, business, investment, interest, dividend, refund, gift_income, other_income
 - transfer: transfer
+
+Notes:
+- If a receipt contains multiple different categories, set the top-level category_key to "mixed".
+- Each item in items[] MUST have its own category_key (use "other" if uncertain).
 
 Schema (ALL keys must exist; use null if unknown):
 {
@@ -771,6 +916,8 @@ Schema (ALL keys must exist; use null if unknown):
   "tx_type": "expense"|"income"|"transfer",
   "tx_subtype": "transfer"|"credit_card_payment"|null,
   "is_credit_card_payment": boolean|null,
+  "payment_method": "cash"|"card"|"promptpay"|"unknown",
+  "account_id": string|null,
   "amount": number|null,
   "currency": string|null,
   "date": "YYYY-MM-DD"|null,
@@ -778,6 +925,8 @@ Schema (ALL keys must exist; use null if unknown):
   "note": string|null,
   "ref": string|null,
   "category_key": string|null,
+  "payment_method": "cash"|"card"|"promptpay"|"unknown",
+  "account_id": string|null,
   "items": [
     { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null }
   ],
@@ -787,11 +936,22 @@ Schema (ALL keys must exist; use null if unknown):
   "confidence": { "overall": number|null, "amount": number|null, "date": number|null, "merchant": number|null, "items": number|null },
   "flags": { "has_line_items": boolean, "has_zero_price_lines": boolean, "has_discount_lines": boolean, "needs_human_review": boolean }
 }
+
+Account selection rules:
+- Use the accounts list below to choose account_id when possible.
+- Match by digits shown on the slip/receipt:
+  * Card number: match by last 4 digits (cardLast4)
+  * Bank account number: match by last 4-6 digits (accountLast6)
+- If payment_method is cash and you cannot find digits, prefer the cash account if it exists.
+- If you cannot determine, return account_id = null.
+
+Accounts available:
+${accountsText}
 `;
 
-  const text_format = {
-    type: "json_schema",
-    json_schema: {
+  const text = {
+    format: {
+      type: "json_schema",
       name: "scan_result",
       strict: true,
       schema: {
@@ -802,6 +962,8 @@ Schema (ALL keys must exist; use null if unknown):
           "tx_type",
           "tx_subtype",
           "is_credit_card_payment",
+          "payment_method",
+          "account_id",
           "amount",
           "currency",
           "date",
@@ -821,6 +983,8 @@ Schema (ALL keys must exist; use null if unknown):
           tx_type: { type: "string", enum: ["expense", "income", "transfer"] },
           tx_subtype: { anyOf: [{ type: "string", enum: ["transfer", "credit_card_payment"] }, { type: "null" }] },
           is_credit_card_payment: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+          payment_method: { type: "string", enum: ["cash", "card", "promptpay", "unknown"] },
+          account_id: { anyOf: [{ type: "string" }, { type: "null" }] },
           amount: { anyOf: [{ type: "number" }, { type: "null" }] },
           currency: { anyOf: [{ type: "string" }, { type: "null" }] },
           date: { anyOf: [{ type: "string" }, { type: "null" }] },
@@ -878,7 +1042,7 @@ Schema (ALL keys must exist; use null if unknown):
 
     model,
     temperature: 0,
-    text_format,
+    text,
     input: [
       {
         role: "user",
@@ -976,32 +1140,49 @@ Schema (ALL keys must exist; use null if unknown):
   // This endpoint focuses on receipts; a targeted line-item pass is noticeably more reliable
   // for 7-Eleven style layouts (qty column + price on the right), especially on mobile screenshots.
   const positiveItemCount = items.filter((it) => (safeNumber(it?.total) || 0) > 0).length;
+  const combinedTextForHeuristics = `${String(evidence0 || "")}\n${String(outputText || "")}`;
+  const looksLikeReceipt = /รายการสินค้า|ยอดสุทธิ|รวม\s*สุทธิ|สาขา|7\s*-?\s*eleven|all\s*member/i.test(combinedTextForHeuristics);
+  const strongTransferSlip =
+    (doc_type === "transfer_slip" || doc_type === "bill_payment") &&
+    refined.tx_type === "transfer" &&
+    !!(parsed?.from_account || parsed?.to_account) &&
+    !looksLikeReceipt;
+
   const shouldItemsFallback =
-    doc_type === "receipt" && (positiveItemCount < 2 || needsReviewFlag || (itemsConfFlag != null && itemsConfFlag < 0.7));
+    !strongTransferSlip &&
+    (doc_type === "receipt" || looksLikeReceipt || positiveItemCount < 2) &&
+    (positiveItemCount < 2 || needsReviewFlag || (itemsConfFlag != null && itemsConfFlag < 0.75));
+
+  let itemsOnlyPaymentMethod = "";
+  let itemsOnlyAccountId = "";
 
   if (shouldItemsFallback) {
     const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || model || "gpt-5.1");
 
-    const items_only_format = {
-      type: "json_schema",
-      json_schema: {
+    const itemsText = {
+      format: {
+        type: "json_schema",
         name: "receipt_items_only",
+        strict: true,
         schema: {
           type: "object",
           additionalProperties: false,
-          required: ["items"],
+          required: ["payment_method", "account_id", "items"],
           properties: {
+            payment_method: { type: "string", enum: ["cash", "card", "promptpay", "unknown"] },
+            account_id: { anyOf: [{ type: "string" }, { type: "null" }] },
             items: {
               type: "array",
               items: {
                 type: "object",
                 additionalProperties: false,
-                required: ["name", "qty", "unit_price", "line_total"],
+                required: ["name", "qty", "unit_price", "line_total", "category_key"],
                 properties: {
                   name: { type: "string" },
                   qty: { anyOf: [{ type: "number" }, { type: "null" }] },
                   unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
                   line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  category_key: { anyOf: [{ type: "string" }, { type: "null" }] },
                 },
               },
             },
@@ -1024,8 +1205,19 @@ Rules (VERY IMPORTANT):
 7) If unit price is not shown, set unit_price=null.
 8) Numbers: use decimal with dot, no currency symbol.
 
+Payment method + account selection:
+- payment_method MUST be one of: cash, card, promptpay, unknown.
+- account_id MUST be one of the ids from the Accounts list below, or null if you cannot determine it.
+
+Accounts list:
+${accountsText}
+
+Category:
+- For each item, output category_key from this allowed set:
+  food, drinks, groceries, transport, fuel, bills, rent, shopping, coffee, dining, entertainment, travel, health, fitness, beauty, pets, kids, home, education, work, phone_internet, subscriptions, fees, insurance, donation, gift, other, mixed
+
 Output JSON schema:
-{ "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null } ] }
+{ "payment_method": "cash"|"card"|"promptpay"|"unknown", "account_id": string|null, "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null } ] }
 `;
 
     try {
@@ -1039,7 +1231,7 @@ Output JSON schema:
           model: itemsModel,
           temperature: 0,
           max_output_tokens: 1600,
-          text: { format: items_only_format },
+          text: itemsText,
           input: [
             {
               role: "user",
@@ -1056,19 +1248,35 @@ Output JSON schema:
       if (rr.ok) {
         const itemsObj = findFirstParsedObject(jj) || safeJsonParseMaybe(extractResponsesOutputText(jj));
         const extracted = Array.isArray(itemsObj?.items) ? itemsObj.items : [];
+        const extractedPaymentMethod = normalizePaymentMethod(itemsObj?.payment_method ?? itemsObj?.paymentMethod);
+        const extractedAccountIdRaw = String(itemsObj?.account_id ?? itemsObj?.accountId ?? "").trim();
         const cleaned = extracted
           .map((it) => ({
             name: normalizeItemName(it?.name ?? it?.title ?? it?.item),
             qty: safeNumber(it?.qty ?? it?.quantity),
             unit_price: safeNumber(it?.unit_price ?? it?.unitPrice ?? it?.price),
             total: safeNumber(it?.line_total ?? it?.lineTotal ?? it?.total ?? it?.amount),
-            category_key: null,
+            category_key:
+              normalizeCategoryKey(it?.category_key ?? it?.categoryKey ?? it?.category) ||
+              inferCategoryFromText(it?.name) ||
+              null,
           }))
           .filter((it) => it.name && Number.isFinite(it.total) && it.total > 0)
           .slice(0, 40);
 
         if (cleaned.length >= 2) {
           items = cleaned;
+          // If the first pass couldn't decide doc_type, upgrade to receipt when items clearly exist
+          if (doc_type !== "receipt") doc_type = "receipt";
+
+          // Opportunistic merge back payment method/account choice from items-only pass
+          if (extractedPaymentMethod && extractedPaymentMethod !== "unknown" && String(parsed?.payment_method || "").trim() === "") {
+            parsed.payment_method = extractedPaymentMethod;
+          }
+
+          if (extractedAccountIdRaw) {
+            parsed.account_id = extractedAccountIdRaw;
+          }
         }
       }
     } catch {
@@ -1094,6 +1302,17 @@ Output JSON schema:
   let finalItems = items;
   if (doc_type === "transfer_slip" || doc_type === "bill_payment" || refined.tx_type === "transfer") {
     finalItems = [];
+  }
+
+  // ---- payment method + account id (may be refined again after account candidate extraction) ----
+  const accountsList = Array.isArray(accounts) ? accounts : [];
+  let payment_method = normalizePaymentMethod(parsed?.payment_method ?? parsed?.paymentMethod);
+  let account_id = parsed?.account_id != null || parsed?.accountId != null ? String((parsed?.account_id ?? parsed?.accountId) || "").trim() : "";
+  if (!account_id) account_id = "";
+
+  // Validate account_id against provided accounts
+  if (account_id && accountsList.length && !accountsList.some((a) => String(a?.id || "") === account_id)) {
+    account_id = "";
   }
 
   // ---- confidence + flags (hybrid guardrails) ----
@@ -1132,6 +1351,9 @@ Output JSON schema:
     tx_type: refined.tx_type,
     tx_subtype: refined.tx_subtype,
     is_credit_card_payment: refined.is_credit_card_payment,
+
+    payment_method,
+    account_id: account_id ? account_id : null,
 
     amount: Number.isFinite(amount) ? amount : null,
     currency: parsed?.currency != null && String(parsed.currency).trim() ? String(parsed.currency).trim().toUpperCase() : null,
@@ -1176,6 +1398,48 @@ Output JSON schema:
     isCard: !!c.isCard,
   }));
 
+  // ---- final payment method heuristics ----
+  if (!normalized.payment_method) normalized.payment_method = "unknown";
+  if (normalized.payment_method === "unknown") {
+    const t = String(combinedTextForHeuristics || "").toLowerCase();
+    if (/promptpay|พร้อมเพย์|qr/.test(t)) normalized.payment_method = "promptpay";
+    else if (refined.is_credit_card_payment) normalized.payment_method = "card";
+    else if (/visa|master|amex|card|เครดิต|เดบิต|บัตร/.test(t)) normalized.payment_method = "card";
+    else if (/cash|เงินสด/.test(t)) normalized.payment_method = "cash";
+    else {
+      const hasCardCand = (enhanced.candidates || []).some((c) => c?.isCard);
+      if (hasCardCand) normalized.payment_method = "card";
+    }
+
+    // Default payment method: cash (user preference)
+    if (normalized.payment_method === "unknown") normalized.payment_method = "cash";
+  }
+
+  // ---- final account id selection ----
+  if (!normalized.account_id) {
+    // 1) digits-based match from candidates
+    const candDigits = (enhanced.candidates || [])
+      .map((c) => c?.digits)
+      .filter(Boolean)
+      .concat([normalized.from_account, normalized.to_account].filter(Boolean));
+
+    const fallbackId = pickAccountIdFallback({ accounts: accountsList, candidates: candDigits });
+    if (fallbackId) normalized.account_id = fallbackId;
+  }
+
+  // 2) cash default
+  if (!normalized.account_id && accountsList.length && normalized.payment_method === "cash") {
+    const cashAcc = accountsList.find((a) => {
+      const type = String(a?.type || "").toLowerCase();
+      const name = String(a?.name || "").toLowerCase();
+      const id = String(a?.id || "").toLowerCase();
+      return type === "cash" || id.includes("cash") || name.includes("เงินสด") || name.includes("cash");
+    });
+    if (cashAcc?.id) normalized.account_id = String(cashAcc.id);
+  }
+
+  if (!normalized.account_id) normalized.account_id = null;
+
   return {
     status: 200,
     body: { ok: true, data: normalized, rawText: outputText, model },
@@ -1209,6 +1473,12 @@ export default async function handler(req, res) {
     // 2) JSON: accept { base64, mimeType } OR { imageDataUrl }
     const body = await readJson(req);
 
+    const accounts = Array.isArray(body?.accounts)
+      ? body.accounts
+      : Array.isArray(body?.accountsContext)
+      ? body.accountsContext
+      : [];
+
     // Prefer imageDataUrl if present
     const imageDataUrl = String(body?.imageDataUrl || "").trim();
     const parsedDataUrl = imageDataUrl ? parseDataUrlMaybe(imageDataUrl) : null;
@@ -1225,7 +1495,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    const out = await callOpenAI({ base64, mimeType });
+    const out = await callOpenAI({ base64, mimeType, accounts });
     res.status(out.status).json(out.body);
   } catch (e) {
     const msg = String(e?.message || e);
