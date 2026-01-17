@@ -282,6 +282,16 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
     let fileBuffer = null;
     let mimeType = "";
     let filename = "";
+    const fields = {};
+
+    bb.on("field", (name, val) => {
+      try {
+        if (!name) return;
+        fields[String(name)] = String(val ?? "");
+      } catch {
+        // ignore
+      }
+    });
 
     bb.on("file", (fieldname, file, info) => {
       const chunks = [];
@@ -301,7 +311,7 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
     });
 
     bb.on("error", (e) => finish(e));
-    bb.on("finish", () => finish(null, { fileBuffer, mimeType, filename }));
+    bb.on("finish", () => finish(null, { fileBuffer, mimeType, filename, fields }));
 
     try {
       req.pipe(bb);
@@ -1907,7 +1917,17 @@ export default async function handler(req, res) {
 
     // 1) multipart/form-data
     if (ct.includes("multipart/form-data")) {
-      const { fileBuffer, mimeType } = await parseMultipart(req, { maxBytes: MAX_IMAGE_BYTES });
+      const { fileBuffer, mimeType, fields } = await parseMultipart(req, { maxBytes: MAX_IMAGE_BYTES });
+      const accounts = (() => {
+        try {
+          const f = fields && typeof fields === 'object' ? fields : {};
+          const raw = f.accounts ?? f.accountsContext ?? '';
+          const parsed = safeJsonParseMaybe(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
       if (!fileBuffer || fileBuffer.length === 0) {
         res.status(400).json({ ok: false, code: "missing_file", message: "No file uploaded" });
         return;
@@ -1920,7 +1940,7 @@ export default async function handler(req, res) {
 
 
       const base64 = fileBuffer.toString("base64");
-      const out = await callOpenAI({ base64, mimeType: mt });
+      const out = await callOpenAI({ base64, mimeType: mt, accounts });
       res.status(out.status).json(out.body);
       return;
     }

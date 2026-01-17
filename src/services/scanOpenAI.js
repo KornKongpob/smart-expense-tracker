@@ -439,6 +439,53 @@ async function safeReadJson(res) {
   }
 }
 
+
+async function dataUrlToBlob(dataUrl) {
+  const s = String(dataUrl || "");
+  if (!s.startsWith("data:")) return null;
+  const res = await fetch(s);
+  return await res.blob();
+}
+
+async function postMultipart(url, { imageDataUrl, fileName, accounts }, { timeoutMs = 45000 } = {}) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const blob = await dataUrlToBlob(imageDataUrl);
+    if (!blob) {
+      const e = new Error("missing_image_data");
+      e.code = "missing_image_data";
+      throw e;
+    }
+
+    const form = new FormData();
+    form.append("file", blob, fileName || "receipt.jpg");
+    if (Array.isArray(accounts) && accounts.length) {
+      form.append("accounts", JSON.stringify(accounts));
+    }
+
+    const headers = (() => {
+      const h = {};
+      const token = import.meta.env.VITE_SCAN_API_TOKEN || "";
+      if (token) h.Authorization = `Bearer ${token}`;
+      return h;
+    })();
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: form,
+      signal: controller.signal,
+    });
+
+    const json = await safeReadJson(res);
+    return { res, json };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function postJson(url, body, { timeoutMs = 45000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -478,7 +525,7 @@ function isExplicitEndpointProvided(endpoint) {
 export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [] } = {}) {
   // ✅ Prefer the receipt-optimized endpoint by default.
   // (We still keep /api/scan working as an alias on the backend.)
-  const defaultUrl = import.meta.env.VITE_SCAN_API_URL || "/api/scan-receipt";
+  const defaultUrl = import.meta.env.VITE_SCAN_API_URL || "/api/scan";
   const url = (endpoint || defaultUrl || "/api/scan").trim();
   const explicitEndpoint = isExplicitEndpointProvided(endpoint);
 
@@ -501,7 +548,7 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   onStatus?.("calling_api");
   let primary;
   try {
-    primary = await postJson(url, { imageDataUrl, accounts });
+    primary = await postMultipart(url, { imageDataUrl, fileName: file?.name, accounts });
   } catch (err) {
     const e = new Error("scan_network_error");
     e.code = "scan_network_error";
@@ -511,9 +558,8 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
 
   // If primary endpoint missing and user didn't force endpoint: try fallback /api/scan-receipt
   if (primary?.res?.status === 404 && !explicitEndpoint) {
-    const { base64, mimeType } = dataUrlToBase64(imageDataUrl);
-
-    if (!base64) {
+    // fallback uses multipart too
+    if (!imageDataUrl) {
       const e = new Error("scan_api_not_found");
       e.code = "scan_api_not_found";
       throw e;
@@ -524,7 +570,7 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
 
     let fb;
     try {
-      fb = await postJson(fallbackUrl, { base64, mimeType, accounts });
+      fb = await postMultipart(fallbackUrl, { imageDataUrl, fileName: file?.name, accounts });
     } catch (err) {
       const e = new Error("scan_network_error");
       e.code = "scan_network_error";

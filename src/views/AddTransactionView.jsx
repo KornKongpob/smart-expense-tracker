@@ -2880,7 +2880,7 @@ if (
                           </div>
 
                           <div className="mt-2 text-sm font-extrabold text-gray-900 truncate">
-                            {q.amount ? formatCurrency(q.amount) : q.status === "error" ? "สแกนไม่สำเร็จ" : "กำลังประมวลผล..."}
+                            {q.amount ? formatCurrency(q.amount) : q.status === "error" ? (q.error ? `สแกนไม่สำเร็จ (${q.error})` : "สแกนไม่สำเร็จ") : "กำลังประมวลผล..."}
                           </div>
 
                           <div className="mt-1 text-xs text-gray-800/60 truncate">
