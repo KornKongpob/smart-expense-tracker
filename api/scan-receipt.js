@@ -1043,7 +1043,7 @@ function refineTxTypeAndSubtype({ parsedTxType, evidence, rawText }) {
 }
 
 async function callOpenAI({ base64, mimeType, accounts = [] }) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) {
     return {
       status: 400,
@@ -1055,7 +1055,7 @@ async function callOpenAI({ base64, mimeType, accounts = [] }) {
   // Normalize to valid model IDs.
   const normalizeOpenAIModel = (raw) => {
     const s = String(raw || "").trim();
-    if (!s) return "gpt-5.1";
+    if (!s) return "gpt-4o-mini";
 
     const low = s.toLowerCase();
 
@@ -1171,8 +1171,10 @@ async function callOpenAI({ base64, mimeType, accounts = [] }) {
     return "";
   };
 
-  // ✅ Default to gpt-5.1 for OCR-heavy receipts
-  const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-5.1");
+  // ✅ Default to a widely-available vision + Structured Outputs model.
+  // Override with OPENAI_MODEL. Optionally set OPENAI_FALLBACK_MODEL for retries (model-not-found / access issues).
+  const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-4o-mini");
+  const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini");
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
   const accountsForModel = compactAccountsForModel(accounts);
@@ -1425,11 +1427,10 @@ ${accountsText}
     }
   };
 
-  const payload = {
-
-    model,
+  const buildPayload = ({ m, useSchema }) => ({
+    model: m,
     temperature: 0,
-    text,
+    text: useSchema ? text : { format: { type: "json_object" } },
     input: [
       {
         role: "user",
@@ -1439,25 +1440,102 @@ ${accountsText}
         ],
       },
     ],
-  };
-
-  const r = await fetchWithTimeout(OPENAI_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
   });
 
-  const json = await r.json().catch(() => null);
+  const isModelNotFound = (msg) =>
+    /model/i.test(msg) &&
+    /(not found|does not exist|unknown|you do not have access|access denied|permission)/i.test(msg);
+
+  const isSchemaUnsupported = (msg) =>
+    /(json_schema|response_format|text\.format|structured\s*outputs)/i.test(msg) &&
+    /(not supported|unsupported|invalid|not allowed|unknown|must be one of|only supported)/i.test(msg);
+
+  const parseOpenAIError = (status, jj) => {
+    const e = jj?.error || jj || {};
+    return {
+      status,
+      message: String(e?.message || "OpenAI request failed"),
+      type: e?.type || null,
+      code: e?.code || null,
+      param: e?.param || null,
+    };
+  };
+
+  const doRequest = async ({ m, useSchema }) => {
+    const r = await fetchWithTimeout(OPENAI_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(buildPayload({ m, useSchema })),
+    });
+
+    const jj = await r.json().catch(() => null);
+    const requestId = r.headers?.get ? r.headers.get("x-request-id") : null;
+    return { r, jj, requestId };
+  };
+
+  // Attempt order:
+  // 1) primary model + Structured Outputs (json_schema)
+  // 2) if model is not found / access denied → retry fallback model + json_schema
+  // 3) if json_schema is unsupported → retry JSON mode (json_object)
+  // 4) final attempt: fallback model + json_object
+  let usedModel = model;
+  let usedSchema = true;
+
+  let { r, jj: json, requestId } = await doRequest({ m: model, useSchema: true });
 
   if (!r.ok) {
-    const msg = json?.error?.message || "OpenAI request failed";
-    const tip =
-      /model/i.test(msg) && /not found|does not exist|unknown/i.test(msg)
-        ? "Check OPENAI_MODEL. Valid examples: gpt-5.1, gpt-5-chat-latest, gpt-4.1-mini, gpt-4o."
-        : null;
+    const err1 = parseOpenAIError(r.status, json);
+    if (isModelNotFound(err1.message) && fallbackModel && fallbackModel !== model) {
+      const t2 = await doRequest({ m: fallbackModel, useSchema: true });
+      r = t2.r;
+      json = t2.jj;
+      requestId = t2.requestId;
+      usedModel = fallbackModel;
+      usedSchema = true;
+    }
+  }
+
+  if (!r.ok) {
+    const err2 = parseOpenAIError(r.status, json);
+    if (isSchemaUnsupported(err2.message)) {
+      const t3 = await doRequest({ m: usedModel, useSchema: false });
+      r = t3.r;
+      json = t3.jj;
+      requestId = t3.requestId;
+      usedSchema = false;
+    }
+  }
+
+  if (!r.ok && fallbackModel && fallbackModel !== usedModel) {
+    const err3 = parseOpenAIError(r.status, json);
+    if (isModelNotFound(err3.message) || isSchemaUnsupported(err3.message)) {
+      const t4 = await doRequest({ m: fallbackModel, useSchema: false });
+      r = t4.r;
+      json = t4.jj;
+      requestId = t4.requestId;
+      usedModel = fallbackModel;
+      usedSchema = false;
+    }
+  }
+
+  if (!r.ok) {
+    const err = parseOpenAIError(r.status, json);
+    const msg = err.message || "OpenAI request failed";
+
+    let tip = null;
+    if (isModelNotFound(msg)) {
+      tip = "Set OPENAI_MODEL to a model your key can access (recommended: gpt-4o-mini).";
+    } else if (isSchemaUnsupported(msg)) {
+      tip =
+        "This model may not support Structured Outputs (json_schema). Use a supported model (e.g. gpt-4o-mini) or let the server fall back to JSON mode.";
+    } else if (/api key|incorrect api key|unauthorized/i.test(msg) || r.status === 401) {
+      tip = "Check OPENAI_API_KEY in Vercel Project Settings → Environment Variables (and redeploy).";
+    } else if (/quota|insufficient|billing|payment/i.test(msg) || r.status === 402) {
+      tip = "Your OpenAI project may have insufficient quota/billing. Check usage/billing settings.";
+    }
 
     return {
       status: r.status,
@@ -1465,7 +1543,14 @@ ${accountsText}
         ok: false,
         code: "openai_error",
         message: msg,
-        model,
+        model: usedModel,
+        format: usedSchema ? "json_schema" : "json_object",
+        request_id: requestId || null,
+        openai_error: {
+          type: err.type,
+          code: err.code,
+          param: err.param,
+        },
         tip,
       },
     };
@@ -1483,7 +1568,7 @@ ${accountsText}
         code: "parse_failed",
         message: "Model output is not valid JSON",
         rawText: outputText,
-        model,
+        model: usedModel,
       },
     };
   }
@@ -1545,7 +1630,7 @@ ${accountsText}
   let itemsOnlyAccountId = "";
 
   if (shouldItemsFallback) {
-    const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || model || "gpt-5.1");
+    const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || usedModel || "gpt-4o-mini");
 
     const itemsText = {
       format: {

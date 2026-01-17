@@ -1822,8 +1822,10 @@ if (
 
           updateQueueItem(qid, patch);
         } catch (err) {
-          const msg = String(err?.message || err);
-          updateQueueItem(qid, { status: "error", error: msg || "scan_failed" });
+          const code = err?.code ? String(err.code) : "";
+          const msg = String(err?.message || err || "");
+          const combined = code ? `${code}: ${msg || code}` : msg || "scan_failed";
+          updateQueueItem(qid, { status: "error", error: combined });
         }
       }
     } finally {

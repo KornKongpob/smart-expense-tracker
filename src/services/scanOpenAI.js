@@ -582,8 +582,9 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
     const json = fb.json;
 
     if (!res.ok) {
-      const code = json?.error || "scan_failed";
-      const e = new Error(code);
+      const code = json?.code || json?.error || json?.error?.code || "scan_failed";
+      const msg = json?.message || json?.error?.message || code;
+      const e = new Error(msg);
       e.code = code;
       e.details = { status: res.status, body: json };
       throw e;
@@ -617,16 +618,18 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   }
 
   if (!res.ok) {
-    const code = json?.code || json?.error || "scan_failed";
-    const e = new Error(code);
+    const code = json?.code || json?.error || json?.error?.code || "scan_failed";
+    const msg = json?.message || json?.error?.message || code;
+    const e = new Error(msg);
     e.code = code;
     e.details = { status: res.status, body: json };
     throw e;
   }
 
   if (!json?.ok) {
-    const code = json?.code || json?.error || "scan_failed";
-    const e = new Error(code);
+    const code = json?.code || json?.error || json?.error?.code || "scan_failed";
+    const msg = json?.message || json?.error?.message || code;
+    const e = new Error(msg);
     e.code = code;
     e.details = json;
     throw e;
