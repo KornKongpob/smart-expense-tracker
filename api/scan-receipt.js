@@ -6,16 +6,247 @@ const OPENAI_URL = "https://api.openai.com/v1/responses";
 // NOTE: harmless for Vercel Functions, required for Next API routes
 export const config = { api: { bodyParser: false } };
 
+
+// =========================
+// Security / abuse prevention
+// =========================
+const IS_PROD = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+
+// JSON request bodies can be abused to DoS serverless functions. Keep this tight.
+// NOTE: base64 is bigger than binary; client optimizes images before sending.
+const MAX_JSON_BODY_BYTES = Number(process.env.SCAN_MAX_JSON_BODY_BYTES || 2 * 1024 * 1024); // 2MB
+
+// Max decoded binary image bytes allowed (applies to multipart file size and JSON base64).
+const MAX_IMAGE_BYTES = Number(process.env.SCAN_MAX_IMAGE_BYTES || 8 * 1024 * 1024); // 8MB
+
+// Basic per-IP rate limit (best-effort; serverless instances do not share memory).
+const RATE_LIMIT_PER_MINUTE = Number(process.env.SCAN_RATE_LIMIT_PER_MINUTE || 30);
+const RATE_WINDOW_MS = 60_000;
+
+// OpenAI call timeout (ms)
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 35_000);
+
+const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
+const _rate = new Map(); // key -> { resetAt, count }
+
+function setSecurityHeaders(res) {
+  try {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+    res.setHeader("Referrer-Policy", "no-referrer");
+  } catch {
+    // ignore
+  }
+}
+
+function parseEnvList(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function getClientIp(req) {
+  const xf = String(req.headers?.["x-forwarded-for"] || "").trim();
+  if (xf) return xf.split(",")[0].trim();
+  const xr = String(req.headers?.["x-real-ip"] || "").trim();
+  if (xr) return xr;
+  return String(req.socket?.remoteAddress || "").trim() || "unknown";
+}
+
+function constantTimeEqual(a, b) {
+  const s1 = String(a || "");
+  const s2 = String(b || "");
+  if (s1.length !== s2.length) return false;
+  let out = 0;
+  for (let i = 0; i < s1.length; i++) out |= s1.charCodeAt(i) ^ s2.charCodeAt(i);
+  return out === 0;
+}
+
+function getBearerToken(req) {
+  const auth = String(req.headers?.authorization || "").trim();
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : "";
+}
+
+function hasValidScanToken(req) {
+  const expected = String(process.env.SCAN_API_TOKEN || "").trim();
+  if (!expected) return false;
+
+  const got = getBearerToken(req) || String(req.headers?.["x-scan-token"] || "").trim();
+  if (!got) return false;
+
+  return constantTimeEqual(got, expected);
+}
+
+function isAllowedOrigin(req) {
+  const allowed = parseEnvList(process.env.SCAN_ALLOWED_ORIGINS);
+  if (!allowed.length) return { ok: false, origin: "" };
+
+  const origin = String(req.headers?.origin || "").trim();
+  if (!origin) return { ok: false, origin: "" };
+
+  return { ok: allowed.includes(origin), origin };
+}
+
+function applyCorsIfAllowed(res, originOk, origin) {
+  if (!originOk || !origin) return;
+  try {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Scan-Token");
+  } catch {
+    // ignore
+  }
+}
+
+function enforceAccess(req, res) {
+  const tokenConfigured = String(process.env.SCAN_API_TOKEN || "").trim().length > 0;
+  const { ok: originOk, origin } = isAllowedOrigin(req);
+
+  // If SCAN_ALLOWED_ORIGINS is set, allow those origins (browser) OR a valid token (server-to-server)
+  const originsConfigured = parseEnvList(process.env.SCAN_ALLOWED_ORIGINS).length > 0;
+
+  const tokenOk = hasValidScanToken(req);
+  applyCorsIfAllowed(res, originOk, origin);
+
+  if (req.method === "OPTIONS") {
+    // Preflight support (only for allowed origins)
+    if (originOk) {
+      res.status(204).end();
+      return false;
+    }
+    res.status(403).end();
+    return false;
+  }
+
+  if (originsConfigured) {
+    if (originOk || tokenOk) return true;
+    res.status(403).json({ ok: false, code: "forbidden", message: "Origin not allowed" });
+    return false;
+  }
+
+  if (tokenConfigured) {
+    if (tokenOk) return true;
+    res.status(401).json({ ok: false, code: "unauthorized", message: "Missing/invalid token" });
+    return false;
+  }
+
+  return true; // open by default (no env configured)
+}
+
+function enforceRateLimit(req, res) {
+  const limit = Number.isFinite(RATE_LIMIT_PER_MINUTE) && RATE_LIMIT_PER_MINUTE > 0 ? RATE_LIMIT_PER_MINUTE : 0;
+  if (!limit) return true;
+
+  const ip = getClientIp(req);
+  const key = `scan:${ip}`;
+  const now = Date.now();
+
+  const rec = _rate.get(key);
+  if (!rec || now >= rec.resetAt) {
+    _rate.set(key, { resetAt: now + RATE_WINDOW_MS, count: 1 });
+    return true;
+  }
+
+  rec.count += 1;
+  if (rec.count <= limit) return true;
+
+  const retryAfterSec = Math.max(1, Math.ceil((rec.resetAt - now) / 1000));
+  res.setHeader("Retry-After", String(retryAfterSec));
+  res.status(429).json({ ok: false, code: "rate_limited", message: "Too many requests" });
+  return false;
+}
+
+function normalizeImageMime(mimeType) {
+  const m = String(mimeType || "").trim().toLowerCase();
+  if (!m) return "";
+  // normalize common variants
+  if (m === "image/jpg") return "image/jpeg";
+  return m;
+}
+
+function assertAllowedImageMime(mimeType) {
+  const mt = normalizeImageMime(mimeType);
+  if (!mt || !ALLOWED_IMAGE_MIME.has(mt)) return "";
+  return mt;
+}
+
+function approxBase64Bytes(b64) {
+  const s = String(b64 || "").trim();
+  if (!s) return 0;
+  // base64 length -> bytes (rough; accounts for padding)
+  let len = s.length;
+  if (s.endsWith("==")) len -= 2;
+  else if (s.endsWith("=")) len -= 1;
+  return Math.floor((len * 3) / 4);
+}
+
+function assertBase64UnderLimit(b64, maxBytes) {
+  const bytes = approxBase64Bytes(b64);
+  if (!bytes) return { ok: false, bytes: 0 };
+  if (bytes > maxBytes) return { ok: false, bytes };
+  return { ok: true, bytes };
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = OPENAI_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...(options || {}), signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 function getContentType(req) {
   return String(req.headers?.["content-type"] || "").toLowerCase();
 }
 
-function readRawBody(req) {
+function readRawBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (err, val) => {
+      if (done) return;
+      done = true;
+      if (err) reject(err);
+      else resolve(val);
+    };
+
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    let total = 0;
+
+    req.on("data", (c) => {
+      try {
+        total += c.length;
+        if (maxBytes && total > maxBytes) {
+          const e = new Error("body_too_large");
+          e.code = "body_too_large";
+          try {
+            req.destroy(e);
+          } catch {
+            // ignore
+          }
+          return finish(e);
+        }
+        chunks.push(c);
+      } catch (e) {
+        finish(e);
+      }
+    });
+
+    req.on("end", () => {
+      try {
+        finish(null, Buffer.concat(chunks));
+      } catch (e) {
+        finish(e);
+      }
+    });
+
+    req.on("error", (e) => finish(e));
   });
 }
 
@@ -784,13 +1015,22 @@ async function callOpenAI({ base64, mimeType, accounts = [] }) {
       .replace(/[^\d]/g, "");
 
   const compactAccountsForModel = (accounts) => {
+    const cleanOneLine = (s, maxLen) => {
+      const t = String(s || "")
+        .replace(/[\r\n\t]+/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      if (!maxLen) return t;
+      return t.length > maxLen ? t.slice(0, maxLen) : t;
+    };
+
     const list = Array.isArray(accounts) ? accounts : [];
     return list
       .map((a) => {
-        const id = String(a?.id || "").trim();
+        const id = cleanOneLine(a?.id || "", 60);
         if (!id) return null;
-        const name = String(a?.name || "").trim();
-        const type = String(a?.type || "").trim().toLowerCase();
+        const name = cleanOneLine(a?.name || "", 80);
+        const type = cleanOneLine(a?.type || "", 30).toLowerCase();
         const cardLast4 = digitsOnly(a?.cardLast4 || a?.digits || "").slice(-4);
         const accDigits = digitsOnly(a?.accountNumber || a?.account_number || "");
         const accountLast6 = accDigits ? accDigits.slice(-6) : "";
@@ -1054,7 +1294,7 @@ ${accountsText}
     ],
   };
 
-  const r = await fetch(OPENAI_URL, {
+  const r = await fetchWithTimeout(OPENAI_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -1080,7 +1320,6 @@ ${accountsText}
         message: msg,
         model,
         tip,
-        raw: json || null,
       },
     };
   }
@@ -1221,7 +1460,7 @@ Output JSON schema:
 `;
 
     try {
-      const rr = await fetch(OPENAI_URL, {
+      const rr = await fetchWithTimeout(OPENAI_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -1448,6 +1687,9 @@ Output JSON schema:
 
 export default async function handler(req, res) {
   try {
+    setSecurityHeaders(res);
+    if (!enforceAccess(req, res)) return;
+    if (!enforceRateLimit(req, res)) return;
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
       res.status(405).json({ ok: false, code: "method_not_allowed", message: "Use POST" });
@@ -1458,14 +1700,20 @@ export default async function handler(req, res) {
 
     // 1) multipart/form-data
     if (ct.includes("multipart/form-data")) {
-      const { fileBuffer, mimeType } = await parseMultipart(req);
+      const { fileBuffer, mimeType } = await parseMultipart(req, { maxBytes: MAX_IMAGE_BYTES });
       if (!fileBuffer || fileBuffer.length === 0) {
         res.status(400).json({ ok: false, code: "missing_file", message: "No file uploaded" });
         return;
       }
+      const mt = assertAllowedImageMime(mimeType || "image/jpeg");
+      if (!mt) {
+        res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only jpeg/png/webp are allowed" });
+        return;
+      }
+
 
       const base64 = fileBuffer.toString("base64");
-      const out = await callOpenAI({ base64, mimeType: mimeType || "image/jpeg" });
+      const out = await callOpenAI({ base64, mimeType: mt });
       res.status(out.status).json(out.body);
       return;
     }
@@ -1486,7 +1734,20 @@ export default async function handler(req, res) {
     const base64 = parsedDataUrl?.base64 || body?.base64 || body?.imageBase64 || null;
     const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
 
-    if (!base64) {
+    const mt = assertAllowedImageMime(mimeType || "image/jpeg");
+    if (!mt) {
+      res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only jpeg/png/webp are allowed" });
+      return;
+    }
+
+    const b64 = typeof base64 === "string" ? base64.trim() : "";
+    const sizeCheck = assertBase64UnderLimit(b64, MAX_IMAGE_BYTES);
+    if (!sizeCheck.ok) {
+      res.status(413).json({ ok: false, code: "image_too_large", message: "Image payload too large" });
+      return;
+    }
+
+    if (!b64) {
       res.status(400).json({
         ok: false,
         code: "missing_base64",
@@ -1495,16 +1756,20 @@ export default async function handler(req, res) {
       return;
     }
 
-    const out = await callOpenAI({ base64, mimeType, accounts });
+    const out = await callOpenAI({ base64: b64, mimeType: mt, accounts });
     res.status(out.status).json(out.body);
   } catch (e) {
     const msg = String(e?.message || e);
-
     if (msg === "file_too_large") {
       res.status(413).json({ ok: false, code: "file_too_large", message: "File too large" });
       return;
     }
 
-    res.status(500).json({ ok: false, code: "server_error", message: msg });
+    if (msg === "body_too_large") {
+      res.status(413).json({ ok: false, code: "body_too_large", message: "Request body too large" });
+      return;
+    }
+
+    res.status(500).json({ ok: false, code: "server_error", message: IS_PROD ? "Internal server error" : msg });
   }
 }

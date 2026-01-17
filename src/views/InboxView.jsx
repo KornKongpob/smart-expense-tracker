@@ -370,7 +370,7 @@ function AttachmentThumb({ attachmentId }) {
         <a
           href={url}
           target="_blank"
-          rel="noreferrer"
+          rel="noreferrer noopener"
           className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
         >
           <img src={url} alt="attachment" className="w-full h-28 object-cover" />
@@ -953,7 +953,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
               <a
                 href={attachmentUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noreferrer noopener"
                 className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
               >
                 <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />

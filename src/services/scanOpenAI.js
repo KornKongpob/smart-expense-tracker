@@ -378,7 +378,12 @@ async function postJson(url, body, { timeoutMs = 45000 } = {}) {
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: (() => {
+        const h = { "Content-Type": "application/json" };
+        const token = import.meta.env.VITE_SCAN_API_TOKEN || "";
+        if (token) h.Authorization = `Bearer ${token}`;
+        return h;
+      })(),
       body: JSON.stringify(body || {}),
       signal: controller.signal,
     });

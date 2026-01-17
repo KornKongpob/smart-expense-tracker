@@ -3512,7 +3512,7 @@ if (
                 <a
                   href={attachmentUrl}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noreferrer noopener"
                   className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
                 >
                   <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />

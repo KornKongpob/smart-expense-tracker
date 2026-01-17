@@ -1,7 +1,6 @@
 // src/services/gemini.js
-
-// ✅ ใส่ API Key ของคุณที่นี่ (หรือทำเป็น env ก็ได้)
-const apiKey = ""; // <-- ใส่ key ของคุณ
+// ✅ SAFE: calls a server-side endpoint (/api/gemini-scan) so the API key never ships to the browser.
+// Optional env: VITE_GEMINI_SCAN_API_URL (default: /api/gemini-scan)
 
 export const fileToBase64 = (file) => {
   return new Promise((resolve, reject) => {
@@ -9,11 +8,13 @@ export const fileToBase64 = (file) => {
     reader.readAsDataURL(file);
 
     reader.onload = () => {
-      const base64String = String(reader.result).split(",")[1];
+      const result = String(reader.result || "");
+      const parts = result.split(",");
+      const base64String = parts[1] || "";
       resolve({
         base64: base64String,
-        mimeType: file.type,
-        preview: reader.result,
+        mimeType: file?.type || "image/jpeg",
+        preview: result,
       });
     };
 
@@ -21,46 +22,52 @@ export const fileToBase64 = (file) => {
   });
 };
 
+async function safeReadJson(res) {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * callGeminiScan(base64Data, mimeType)
+ * -> calls /api/gemini-scan and returns parsed JSON
+ */
 export const callGeminiScan = async (base64Data, mimeType) => {
-  if (!apiKey) throw new Error("API Key Missing");
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-  const prompt = `
-Analyze receipt. Return JSON only:
-{"amount": number, "date": "YYYY-MM-DD", "merchant": string, "category": string}.
-Category options: food, transport, shopping, bills, health, entertainment, other.
-If year is BE (e.g. 2567), convert to AD (2024).
-`;
+  const url = (import.meta.env.VITE_GEMINI_SCAN_API_URL || "/api/gemini-scan").trim();
 
   const payload = {
-    contents: [
-      {
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType, data: base64Data } },
-        ],
-      },
-    ],
+    base64: String(base64Data || ""),
+    mimeType: String(mimeType || "image/jpeg"),
   };
 
-  const response = await fetch(url, {
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: (() => {
+      const h = { "Content-Type": "application/json" };
+      const token = import.meta.env.VITE_SCAN_API_TOKEN || "";
+      if (token) h.Authorization = `Bearer ${token}`;
+      return h;
+    })(),
     body: JSON.stringify(payload),
   });
 
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.status}`);
+  const json = await safeReadJson(res);
+  if (!res.ok) {
+    const msg = json?.message || `API Error: ${res.status}`;
+    const e = new Error(msg);
+    e.code = json?.code || "gemini_api_error";
+    throw e;
   }
 
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!json?.ok) {
+    const msg = json?.message || "Gemini scan failed";
+    const e = new Error(msg);
+    e.code = json?.code || "gemini_scan_failed";
+    e.data = json;
+    throw e;
+  }
 
-  if (!text) throw new Error("No text generated");
-
-  // Gemini มักครอบด้วย ```json ... ``` เลย strip ออกก่อน
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-
-  return JSON.parse(cleaned);
+  return json.data;
 };
