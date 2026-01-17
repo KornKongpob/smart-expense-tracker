@@ -66,7 +66,8 @@ function buildTransactionsFromInboxItem(item) {
 
   // Split (receipt items): create 1 parent transaction + N child transactions
   // ✅ Ignore zero/invalid lines (amount <= 0)
-  const hasSplitGroups = Array.isArray(item?.groups) && item.groups.length >= 2;
+  const nonAdjGroupCount = Array.isArray(item?.groups) ? item.groups.filter((g) => !isAdjustmentLike(g)).length : 0;
+  const hasSplitGroups = nonAdjGroupCount >= 2;
   if (txType === "expense" && (item?.splitByCategory || hasSplitGroups) && hasSplitGroups) {
     const accountId = item?.accountId || "";
     if (!accountId) throw new Error("ยังไม่ได้เลือก Account สำหรับรายการแบบ Split");
@@ -93,6 +94,18 @@ function buildTransactionsFromInboxItem(item) {
         }
         const adjustmentType = String(gg?.adjustmentType || "").trim() || (categoryId === "discount" ? "discount" : "");
         const splitIndex = Number(gg?.splitIndex || 0) || idx + 1;
+        const children = Array.isArray(gg?.children)
+          ? gg.children
+              .map((c) => {
+                const cc = c && typeof c === "object" ? c : {};
+                const nm = String(cc?.name || "").trim();
+                const ca = asSatang(cc?.amount);
+                if (!nm && !ca) return null;
+                return { name: nm || "—", amount: Math.abs(ca) };
+              })
+              .filter(Boolean)
+          : null;
+
         return {
           key: String(gg?.key || ""),
           categoryId,
@@ -102,6 +115,8 @@ function buildTransactionsFromInboxItem(item) {
           adjustmentType,
           adjustmentEffect,
           splitIndex,
+          children,
+          childrenIncludedInParent: !!gg?.childrenIncludedInParent,
         };
       })
       .filter((g) => isPositiveNumber(g.amount));
@@ -137,6 +152,13 @@ function buildTransactionsFromInboxItem(item) {
           isTransfer: false,
           transferId: null,
           attachmentId: item?.attachmentId || null,
+
+          receiptLines: usableGroups || null,
+          receiptPaidTotalSatang: amount,
+          receiptItemsSubtotalSatang: usableGroups ? usableGroups.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() !== "adjustment").reduce((s, l) => s + (Number(l?.amount) || 0), 0) : null,
+          receiptDiscountSatang: usableGroups ? usableGroups.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "subtract").reduce((s, l) => s + (Number(l?.amount) || 0), 0) : null,
+          receiptSurchargeSatang: usableGroups ? usableGroups.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "add").reduce((s, l) => s + (Number(l?.amount) || 0), 0) : null,
+
           source: "inbox",
         },
       ];
@@ -302,6 +324,59 @@ function buildTransactionsFromInboxItem(item) {
   const amount = asSatang(item?.amount);
   const categoryId = item?.categoryId || item?.category || "";
 
+  const receiptLines =
+    txType === "expense" && Array.isArray(item?.groups) && item.groups.length
+      ? item.groups
+          .map((g, idx) => {
+            const gg = g && typeof g === "object" ? g : {};
+            const categoryId0 = String(gg?.categoryId || gg?.category || "").trim();
+            const amount0 = asSatang(gg?.amount);
+            const note0 = String(gg?.note || gg?.name || gg?.title || "").trim();
+            const rlt = String(gg?.receiptLineType || "").toLowerCase().trim() || (isAdjustmentLike(gg) || categoryId0 === "discount" ? "adjustment" : "item");
+            let eff = String(gg?.adjustmentEffect || "").toLowerCase().trim();
+            if (rlt === "adjustment") {
+              if (eff !== "subtract" && eff !== "add") eff = categoryId0 === "discount" ? "subtract" : "add";
+            } else {
+              eff = "add";
+            }
+            const children = Array.isArray(gg?.children)
+              ? gg.children
+                  .map((c) => {
+                    const cc = c && typeof c === "object" ? c : {};
+                    const nm = String(cc?.name || "").trim();
+                    const ca = asSatang(cc?.amount);
+                    if (!nm && !ca) return null;
+                    return { name: nm || "—", amount: Math.abs(ca) };
+                  })
+                  .filter(Boolean)
+              : null;
+
+            return {
+              key: String(gg?.key || ""),
+              categoryId: categoryId0,
+              amount: Math.abs(amount0),
+              note: note0,
+              receiptLineType: rlt,
+              adjustmentEffect: eff,
+              adjustmentType: String(gg?.adjustmentType || "").trim(),
+              splitIndex: Number(gg?.splitIndex || 0) || idx + 1,
+              children,
+              childrenIncludedInParent: !!gg?.childrenIncludedInParent,
+            };
+          })
+          .filter((g) => isPositiveNumber(g.amount))
+      : null;
+
+  const receiptItemsSubtotalSatang = receiptLines
+    ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() !== "adjustment").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
+    : null;
+  const receiptDiscountSatang = receiptLines
+    ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "subtract").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
+    : null;
+  const receiptSurchargeSatang = receiptLines
+    ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "add").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
+    : null;
+
   if (!accountId) throw new Error("ยังไม่ได้เลือก Account");
   if (!categoryId) throw new Error("ยังไม่ได้เลือก Category");
   if (!isPositiveNumber(amount)) throw new Error("ยอดเงินต้องมากกว่า 0");
@@ -321,6 +396,13 @@ function buildTransactionsFromInboxItem(item) {
       isTransfer: false,
       transferId: null,
       attachmentId: item?.attachmentId || null,
+
+      receiptLines: receiptLines || null,
+      receiptPaidTotalSatang: receiptLines ? amount : null,
+      receiptItemsSubtotalSatang: receiptItemsSubtotalSatang,
+      receiptDiscountSatang: receiptDiscountSatang,
+      receiptSurchargeSatang: receiptSurchargeSatang,
+
       source: "inbox",
     },
   ];

@@ -293,6 +293,31 @@ function normalizeItems(items) {
 
       const category_key = (it.category_key ?? it.category ?? null) != null ? String(it.category_key ?? it.category).trim() : null;
 
+      // one-level children (for add-ons/modifiers)
+      let children = null;
+      if (Array.isArray(it.children)) {
+        const chOut = it.children
+          .map((ch) => {
+            if (!ch || typeof ch !== "object") return null;
+            const chName = ch.name != null ? String(ch.name).trim() : "";
+            if (!chName) return null;
+            const chQty = safeParseAmount(ch.qty);
+            const chUnitPrice = safeParseAmount(ch.unit_price ?? ch.unitPrice ?? ch.price);
+            const chLineTotal = safeParseAmount(ch.line_total ?? ch.lineTotal ?? ch.total ?? ch.amount ?? ch.price);
+            return {
+              name: chName,
+              qty: Number.isFinite(chQty) ? chQty : null,
+              unit_price: Number.isFinite(chUnitPrice) ? chUnitPrice : null,
+              total: Number.isFinite(chLineTotal) ? chLineTotal : null,
+              price: Number.isFinite(chUnitPrice) ? chUnitPrice : (Number.isFinite(chLineTotal) ? chLineTotal : null),
+              lineTotal: Number.isFinite(chLineTotal) ? chLineTotal : null,
+            };
+          })
+          .filter(Boolean)
+          .slice(0, 12);
+        if (chOut.length) children = chOut;
+      }
+
       return {
         name,
         qty: Number.isFinite(qty) ? qty : null,
@@ -303,12 +328,54 @@ function normalizeItems(items) {
         lineTotal: Number.isFinite(lineTotal) ? lineTotal : null,
         category_key,
         category: category_key,
+        children,
       };
     })
     .filter(Boolean)
     .slice(0, 30);
 }
 
+function normalizeAdjustments(adjustments) {
+  if (!Array.isArray(adjustments)) return [];
+  return adjustments
+    .map((a) => {
+      if (!a || typeof a !== "object") return null;
+      const name = a.name != null ? String(a.name).trim() : a.type != null ? String(a.type).trim() : "";
+      const amountRaw = safeParseAmount(a.amount ?? a.value ?? a.total ?? a.line_total ?? a.lineTotal ?? a.amt);
+
+      let effect = String(a.effect ?? "").toLowerCase().trim();
+      const looksDiscount = /ส่วนลด|discount|coupon|promo|คูปอง|แต้ม|points/i.test(String(name || "").toLowerCase());
+      if (effect !== "subtract" && effect !== "add") {
+        if (looksDiscount) effect = "subtract";
+        else if (Number.isFinite(amountRaw) && amountRaw < 0) effect = "subtract";
+        else effect = "add";
+      }
+
+      let type = String(a.type ?? a.kind ?? "").toLowerCase().trim();
+      const allowed = new Set(["discount", "fee", "tax", "service_charge", "rounding", "other"]);
+      if (!allowed.has(type)) {
+        const low = String(name || "").toLowerCase();
+        if (looksDiscount) type = "discount";
+        else if (/vat|tax|ภาษี/.test(low)) type = "tax";
+        else if (/service|ค่าบริการ/.test(low)) type = "service_charge";
+        else if (/fee|ค่าธรรมเนียม/.test(low)) type = "fee";
+        else if (/round|ปัดเศษ/.test(low)) type = "rounding";
+        else type = "other";
+      }
+
+      const amount = Number.isFinite(amountRaw) ? Math.abs(amountRaw) : null;
+      if (!name && amount == null) return null;
+
+      return {
+        name: name || type,
+        amount,
+        effect,
+        type,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 20);
+}
 function normalizeKeywords(kws) {
   if (!Array.isArray(kws)) return [];
   const out = [];
@@ -343,6 +410,7 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     to_account: d?.to_account ?? null,
     evidence: d?.evidence ?? rawText ?? "",
     items: normalizeItems(d?.items),
+    adjustments: normalizeAdjustments(d?.adjustments ?? d?.adjustment_lines ?? d?.adjustments_lines ?? null),
     keywords: normalizeKeywords(d?.keywords),
 
     // ✅ new fields (safe additions)

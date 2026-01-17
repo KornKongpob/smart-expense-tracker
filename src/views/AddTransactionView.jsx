@@ -1488,23 +1488,48 @@ if (
           let groups = [];
           let primaryKey = fallbackKey;
 
-          // ✅ Receipt items (expense): create per-item lines (ignore 0฿ promo lines)
+          // ✅ Receipt items (expense): create item + adjustment lines (ignore 0฿ promo lines)
           if (finalTxType === "expense") {
-            const lines = splitReceiptItemsToLines("expense", scannedItems, contextText, fallbackKey);
+            const payloadForLines = {
+              items: scannedItems,
+              adjustments: Array.isArray(result?.adjustments) ? result.adjustments : [],
+              targetTotalSatang: amountSatang != null && amountSatang > 0 ? amountSatang : null,
+            };
+
+            const lines = splitReceiptItemsToLines("expense", payloadForLines, contextText, fallbackKey);
             if (lines.length) primaryKey = lines[0]?.key || fallbackKey;
 
             groups = (lines || [])
               .map((ln, idx) => {
-                const key = sanitizeCategoryKey(ln.key || "other") || "other";
+                const isAdj = String(ln?.receiptLineType || "").toLowerCase().trim() === "adjustment";
+                const key =
+                  sanitizeCategoryKey(
+                    ln.key ||
+                      (isAdj
+                        ? String(ln.adjustmentEffect || "").toLowerCase().trim() === "subtract"
+                          ? "discount"
+                          : "fees"
+                        : "other")
+                  ) || "other";
                 const catId = ensureCategory("expense", key);
+
+                const effect = String(ln?.adjustmentEffect || "").toLowerCase().trim();
+                const adjustmentEffect = isAdj ? (effect === "subtract" ? "subtract" : "add") : "add";
+                const adjustmentType = isAdj
+                  ? String(ln?.adjustmentType || (adjustmentEffect === "subtract" ? "discount" : "fee"))
+                  : null;
+
                 return {
                   key,
                   categoryId: catId,
                   amount: parseMoneyToSatang(ln.amount),
                   note: String(ln.name || "").trim(),
                   splitIndex: idx + 1,
-                  receiptLineType: "item",
-                  adjustmentEffect: "add",
+                  receiptLineType: isAdj ? "adjustment" : "item",
+                  adjustmentEffect,
+                  adjustmentType,
+                  children: Array.isArray(ln?.children) ? ln.children.map((c) => ({ name: String(c?.name || '').trim(), amount: parseMoneyToSatang(c?.amount) })) : null,
+                  childrenIncludedInParent: !!ln?.childrenIncludedInParent,
                 };
               })
               .filter((g) => Number(g?.amount || 0) > 0);
@@ -1520,7 +1545,7 @@ if (
           const aiTotal = amountSatang != null ? amountSatang : 0;
           const reconciled = reconcileReceiptGroups(groups, aiTotal, {
             ensureCategoryId: (k) => ensureCategory("expense", k),
-            baseLineCountMin: 2,
+            baseLineCountMin: 1,
           });
           groups = reconciled.groups;
           const groupSum = groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
@@ -1529,7 +1554,8 @@ if (
           const positiveScannedItemCount = Array.isArray(scannedItems)
             ? scannedItems.filter((it) => Number(it?.line_total ?? it?.total ?? it?.amount ?? 0) > 0).length
             : 0;
-          let splitByCategory = finalTxType === "expense" && (groups.length >= 2 || positiveScannedItemCount >= 2);
+          const nonAdjGroupCount = (groups || []).filter((g) => !isAdjustmentLike(g)).length;
+          let splitByCategory = finalTxType === "expense" && (nonAdjGroupCount >= 2 || positiveScannedItemCount >= 2);
 
           const scanWarnings = [];
           const scanFlags = result?.flags || null;
@@ -2304,6 +2330,57 @@ if (
         continue;
       }
 
+
+
+      // ✅ Preserve receipt breakdown (items + discounts/fees + children) even when saving as a single transaction
+      const receiptLines =
+        txType === "expense" && Array.isArray(q.groups) && q.groups.length
+          ? (q.groups || [])
+              .map((g, idx) => {
+                const gg = g && typeof g === "object" ? g : {};
+                const isAdj = isAdjustmentLike(gg) || String(gg.receiptLineType || "").toLowerCase().trim() === "adjustment";
+                const rawAmt = typeof gg.amount === "number" ? gg.amount : Number(gg.amount);
+                const amt = Number.isFinite(rawAmt) ? Math.round(rawAmt) : 0;
+                const effect = String(gg.adjustmentEffect || gg.effect || "").toLowerCase().trim();
+                const adjEffect = isAdj ? (effect === "subtract" ? "subtract" : "add") : "add";
+
+                return {
+                  key: String(gg.key || "").trim() || null,
+                  categoryId: String(gg.categoryId || gg.category || "").trim() || null,
+                  amount: Math.abs(amt),
+                  note: String(gg.note || gg.name || "").trim() || null,
+                  splitIndex: Number(gg.splitIndex || 0) || idx + 1,
+                  receiptLineType: isAdj ? "adjustment" : "item",
+                  adjustmentEffect: adjEffect,
+                  adjustmentType: isAdj ? String(gg.adjustmentType || "").trim() || null : null,
+                  children: Array.isArray(gg.children)
+                    ? gg.children
+                        .map((c) => {
+                          const cc = c && typeof c === "object" ? c : {};
+                          const ca = typeof cc.amount === "number" ? cc.amount : Number(cc.amount);
+                          const camt = Number.isFinite(ca) ? Math.round(ca) : 0;
+                          const nm = String(cc.name || "").trim();
+                          if (!nm && !camt) return null;
+                          return { name: nm || "—", amount: Math.abs(camt) };
+                        })
+                        .filter(Boolean)
+                    : null,
+                  childrenIncludedInParent: !!gg.childrenIncludedInParent,
+                };
+              })
+              .filter((l) => Number(l?.amount || 0) > 0)
+          : null;
+
+      const receiptItemsSubtotalSatang = receiptLines
+        ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() !== "adjustment").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
+        : null;
+      const receiptDiscountSatang = receiptLines
+        ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "subtract").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
+        : null;
+      const receiptSurchargeSatang = receiptLines
+        ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "add").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
+        : null;
+
       txs.push({
         id: generateId(),
         type: q.txType === "income" ? "income" : "expense",
@@ -2319,6 +2396,12 @@ if (
         attachmentId: q.attachmentId || null,
 
         paymentMethod: q.paymentMethod || "cash",
+
+        receiptLines: receiptLines || null,
+        receiptPaidTotalSatang: receiptLines ? Number(q.amount) : null,
+        receiptItemsSubtotalSatang: receiptItemsSubtotalSatang,
+        receiptDiscountSatang: receiptDiscountSatang,
+        receiptSurchargeSatang: receiptSurchargeSatang,
 
         merchant: merchant || null,
         evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -2747,7 +2830,10 @@ if (
                       : q.txType === "income"
                       ? "Income"
                       : "Expense";
-                  const hasGroups = Array.isArray(q.groups) && q.groups.length >= 2;
+
+                  const nonAdjGroupCount = Array.isArray(q.groups) ? q.groups.filter((g) => !isAdjustmentLike(g)).length : 0;
+                  const hasGroups = q.txType === "expense" && nonAdjGroupCount >= 2;
+                  const hasReceiptLines = q.txType === "expense" && Array.isArray(q.groups) && q.groups.length > 0;
 
                   return (
                     <div key={q.id} className="glass-card rounded-3xl overflow-hidden">
@@ -2891,7 +2977,7 @@ if (
                           ) : null}
 
                           {/* Split toggle (expense only, when groups exist) */}
-                          {q.txType === "expense" && Array.isArray(q.groups) && q.groups.length >= 2 ? (
+                          {q.txType === "expense" && hasGroups ? (
                             <div className="glass-panel border border-emerald-500/20 rounded-2xl p-3 mb-3 flex items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-sm font-extrabold text-emerald-800">แยกเป็นหลายหมวด</div>
@@ -3032,7 +3118,7 @@ if (
                                 </div>
 
                                 {/* Split groups editor */}
-                                {q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length >= 2 ? (
+                                {q.txType === "expense" && q.splitByCategory && hasGroups ? (
                                   <div className="glass-panel border border-emerald-500/15 rounded-2xl p-3">
                                     <div className="text-xs font-bold text-gray-900/70 mb-2">แยกรายการในใบเสร็จ (ไม่รวมราคา 0)</div>
                                     <div className="space-y-2">
@@ -3117,6 +3203,52 @@ if (
                               </div>
                             )}
                           </div>
+
+                          {/* Receipt breakdown (save 1 line, show discount/children as receipt) */}
+                          {q.txType === "expense" && !q.splitByCategory && hasReceiptLines ? (
+                            <div className="mt-3 glass-panel border border-white/20 rounded-2xl p-3">
+                              <div className="text-xs font-bold text-gray-900/70 mb-2">ใบเสร็จ (รายละเอียด)</div>
+                              <div className="space-y-2">
+                                {(q.groups || []).filter((g) => Number(g?.amount || 0) > 0).map((g, idx) => {
+                                  const isAdj = isAdjustmentLike(g);
+                                  const effect = String(g?.adjustmentEffect || "").toLowerCase().trim();
+                                  const sign = isAdj ? (effect === "subtract" ? "-" : "+") : "";
+                                  const cat = expenseCats.find((c) => String(c.id) === String(g?.categoryId)) || null;
+                                  const title = String(g?.note || "").trim() || cat?.name || "—";
+                                  const subtitle = cat && title !== cat.name ? cat.name : isAdj ? (effect === "subtract" ? "ส่วนลด" : "ค่าธรรมเนียม") : "";
+                                  return (
+                                    <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">{title}</div>
+                                          {subtitle ? (
+                                            <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{subtitle}</div>
+                                          ) : null}
+
+                                          {Array.isArray(g?.children) && g.children.length ? (
+                                            <div className="mt-2 space-y-1 pl-3 border-l border-white/15">
+                                              {g.children.map((c, cidx) => (
+                                                <div key={cidx} className="text-[11px] text-gray-900/70 break-words whitespace-normal">
+                                                  • {String(c?.name || "").trim() || "—"}{" "}
+                                                  {Number(c?.amount || 0) > 0 ? (
+                                                    <span className="text-gray-900/55">({formatCurrency(c.amount)})</span>
+                                                  ) : null}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </div>
+
+                                        <div className={`shrink-0 text-xs font-black ${isAdj ? "text-gray-900/70" : "text-gray-900"}`}>
+                                          {sign}{formatCurrency(Number(g?.amount) || 0)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
 
                           {q.evidence ? (
                             <div className="mt-3 text-[11px] text-gray-900/60">

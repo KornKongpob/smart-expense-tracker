@@ -705,6 +705,33 @@ function normalizeItems(items) {
 
     const cat = normalizeCategoryKey(it.category_key ?? it.category) || inferCategoryFromText(name) || null;
 
+    // --- children (1-level) ---
+    let children = null;
+    if (Array.isArray(it.children)) {
+      const chOut = [];
+      for (const ch of it.children) {
+        if (!ch || typeof ch !== "object") continue;
+        const chName = normalizeItemName(ch.name ?? ch.title ?? ch.desc ?? ch.description ?? ch.item ?? ch.product);
+        const chQty = safeNumber(ch.qty ?? ch.quantity);
+        const chUnit = safeNumber(ch.unit_price ?? ch.unitPrice ?? ch.price);
+        const chTotal = safeNumber(ch.total ?? ch.amount ?? ch.line_total ?? ch.lineTotal);
+
+        let chFinal = chTotal;
+        if (chFinal == null && chQty != null && chUnit != null) chFinal = chQty * chUnit;
+        if (!chName && chFinal == null) continue;
+
+        chOut.push({
+          name: chName || "",
+          qty: chQty != null ? chQty : null,
+          unit_price: chUnit != null ? chUnit : null,
+          total: chFinal != null ? chFinal : null,
+        });
+
+        if (chOut.length >= 12) break;
+      }
+      if (chOut.length) children = chOut;
+    }
+
     let finalTotal = total;
     if (finalTotal == null && qty != null && unit_price != null) finalTotal = qty * unit_price;
 
@@ -716,9 +743,63 @@ function normalizeItems(items) {
       unit_price: unit_price != null ? unit_price : null,
       total: finalTotal != null ? finalTotal : null,
       category_key: cat,
+      children,
     });
 
     if (out.length >= 40) break;
+  }
+
+  return out;
+}
+
+function normalizeAdjustments(adjustments) {
+  if (!Array.isArray(adjustments)) return [];
+  const out = [];
+
+  for (const a of adjustments) {
+    if (!a || typeof a !== "object") continue;
+
+    const rawName = a.name ?? a.title ?? a.label ?? a.desc ?? a.description ?? a.kind ?? a.type;
+    const name = normalizeItemName(rawName);
+
+    const amtRaw = safeNumber(a.amount ?? a.value ?? a.total ?? a.line_total ?? a.lineTotal ?? a.amt);
+
+    let effectRaw = safeString(a.effect ?? a.sign ?? a.direction).toLowerCase().trim();
+
+    // If missing effect, infer from common discount keywords or negative amount
+    const nameLow = String(name || rawName || "").toLowerCase();
+    const looksDiscount = /ส่วนลด|discount|coupon|promo|คูปอง|แต้ม|points/i.test(nameLow);
+    if (!effectRaw) {
+      if (looksDiscount) effectRaw = "subtract";
+      else if (amtRaw != null && amtRaw < 0) effectRaw = "subtract";
+      else effectRaw = "add";
+    }
+    if (effectRaw !== "subtract" && effectRaw !== "add") effectRaw = looksDiscount ? "subtract" : "add";
+
+    const amount = amtRaw != null ? Math.abs(amtRaw) : null;
+
+    let typeRaw = safeString(a.type ?? a.adjustment_type ?? a.adjustmentType ?? a.kind).toLowerCase().trim();
+    if (!typeRaw) {
+      if (looksDiscount) typeRaw = "discount";
+      else if (/vat|ภาษี|tax/.test(nameLow)) typeRaw = "tax";
+      else if (/service|ค่าบริการ/.test(nameLow)) typeRaw = "service_charge";
+      else if (/fee|ค่าธรรมเนียม/.test(nameLow)) typeRaw = "fee";
+      else if (/round|ปัดเศษ/.test(nameLow)) typeRaw = "rounding";
+      else typeRaw = "other";
+    }
+    const allowed = new Set(["discount", "fee", "tax", "service_charge", "rounding", "other"]);
+    if (!allowed.has(typeRaw)) typeRaw = "other";
+
+    if (!name && amount == null) continue;
+
+    out.push({
+      name: name || typeRaw,
+      amount: amount != null ? amount : null,
+      effect: effectRaw,
+      type: typeRaw,
+    });
+
+    if (out.length >= 20) break;
   }
 
   return out;
@@ -1165,10 +1246,20 @@ Schema (ALL keys must exist; use null if unknown):
   "note": string|null,
   "ref": string|null,
   "category_key": string|null,
-  "payment_method": "cash"|"card"|"promptpay"|"unknown",
-  "account_id": string|null,
   "items": [
-    { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null }
+    {
+      "name": string,
+      "qty": number|null,
+      "unit_price": number|null,
+      "line_total": number|null,
+      "category_key": string|null,
+      "children": [
+        { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null }
+      ]|null
+    }
+  ],
+  "adjustments": [
+    { "name": string, "amount": number|null, "effect": "subtract"|"add", "type": "discount"|"fee"|"tax"|"service_charge"|"rounding"|"other"|null }
   ],
   "from_account": string|null,
   "to_account": string|null,
@@ -1178,6 +1269,18 @@ Schema (ALL keys must exist; use null if unknown):
 }
 
 Account selection rules:
+
+Line-item/adjustment rules (VERY IMPORTANT):
+- For receipts, use "items" ONLY for purchased goods/services with non-negative line_total.
+- Put discounts/coupons/promotions/points/rounding/taxes/service charges into "adjustments" (NOT as negative items).
+  * Use a POSITIVE amount in adjustments, and set effect:
+    - "subtract" for discounts/coupons/promotions (e.g. ส่วนลด -20 -> {amount: 20, effect: "subtract", type: "discount"})
+    - "add" for fees/tax/service charge/rounding up (type: "fee"/"tax"/"service_charge"/"rounding"/"other")
+- If the receipt shows a discount line like "ส่วนลด -฿20", represent it as an adjustment with effect="subtract".
+- "children" is for add-ons/modifiers/options under a parent item (e.g. กาแฟ + shot + syrup).
+  * Prefer setting the parent "line_total" to the FINAL total for that item INCLUDING children.
+  * Still include children with their own line_total for detail (they are considered included in the parent total).
+
 - Use the accounts list below to choose account_id when possible.
 - Match by digits shown on the slip/receipt:
   * Card number: match by last 4 digits (cardLast4)
@@ -1212,6 +1315,7 @@ ${accountsText}
           "ref",
           "category_key",
           "items",
+          "adjustments",
           "from_account",
           "to_account",
           "evidence",
@@ -1243,7 +1347,40 @@ ${accountsText}
                 qty: { anyOf: [{ type: "number" }, { type: "null" }] },
                 unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
                 line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
-                category_key: { anyOf: [{ type: "string" }, { type: "null" }] }
+                category_key: { anyOf: [{ type: "string" }, { type: "null" }] },
+                children: {
+                  anyOf: [
+                    {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        additionalProperties: false,
+                        required: ["name", "qty", "unit_price", "line_total"],
+                        properties: {
+                          name: { type: "string" },
+                          qty: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          line_total: { anyOf: [{ type: "number" }, { type: "null" }] }
+                        }
+                      }
+                    },
+                    { type: "null" }
+                  ]
+                }
+              }
+            }
+          },
+          adjustments: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["name", "amount", "effect", "type"],
+              properties: {
+                name: { type: "string" },
+                amount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                effect: { type: "string", enum: ["subtract", "add"] },
+                type: { anyOf: [{ type: "string", enum: ["discount", "fee", "tax", "service_charge", "rounding", "other"] }, { type: "null" }] }
               }
             }
           },
@@ -1363,6 +1500,8 @@ ${accountsText}
 
   let items = normalizeItems(parsed?.items ?? parsed?.line_items ?? parsed?.lines ?? null);
 
+  let adjustments = normalizeAdjustments(parsed?.adjustments ?? parsed?.adjustment_lines ?? parsed?.adjustments_lines ?? parsed?.discounts ?? null);
+
   // ---- doc_type normalization (early) ----
   const dtRaw = safeString(parsed?.doc_type ?? parsed?.docType).toLowerCase();
   const allowedDt = new Set(["receipt", "transfer_slip", "bill_payment", "unknown"]);
@@ -1406,7 +1545,7 @@ ${accountsText}
         schema: {
           type: "object",
           additionalProperties: false,
-          required: ["payment_method", "account_id", "items"],
+          required: ["payment_method", "account_id", "items", "adjustments"],
           properties: {
             payment_method: { type: "string", enum: ["cash", "card", "promptpay", "unknown"] },
             account_id: { anyOf: [{ type: "string" }, { type: "null" }] },
@@ -1422,8 +1561,46 @@ ${accountsText}
                   unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
                   line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
                   category_key: { anyOf: [{ type: "string" }, { type: "null" }] },
+                  children: {
+                    anyOf: [
+                      {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          additionalProperties: false,
+                          required: ["name", "qty", "unit_price", "line_total"],
+                          properties: {
+                            name: { type: "string" },
+                            qty: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            line_total: { anyOf: [{ type: "number" }, { type: "null" }] }
+                          }
+                        }
+                      },
+                      { type: "null" }
+                    ]
+                  }
                 },
               },
+            },
+            adjustments: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["name", "amount", "effect", "type"],
+                properties: {
+                  name: { type: "string" },
+                  amount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  effect: { type: "string", enum: ["subtract", "add"] },
+                  type: {
+                    anyOf: [
+                      { type: "string", enum: ["discount", "fee", "tax", "service_charge", "rounding", "other"] },
+                      { type: "null" }
+                    ]
+                  }
+                }
+              }
             },
           },
         },
@@ -1438,7 +1615,9 @@ Rules (VERY IMPORTANT):
 1) Extract ONLY purchased products/services under the receipt's item list section (often titled "รายการสินค้า").
 2) Include ONLY items with line_total > 0.
 3) EXCLUDE any 0.00 / 0.00N lines (freebies, stamps, missions, promotions, points, coupons).
-4) EXCLUDE summary lines (ยอดสุทธิ, รวม, TOTAL, VAT, discount, change, TID, R#, store code, phone numbers).
+4) EXCLUDE summary lines (ยอดสุทธิ, รวม, TOTAL, VAT, change, TID, R#, store code, phone numbers).
+4.1) BUT: extract discount/fee/tax/service charge/rounding lines into "adjustments" (NOT as negative items).
+     - Use POSITIVE amount, and set effect="subtract" for discounts (เช่น ส่วนลด -20) or effect="add" for fees/tax.
 5) Preserve item names AS SHOWN (Thai/English). Do NOT replace with generic labels.
 6) If the receipt shows a quantity column (often a leading "1"), set qty accordingly.
 7) If unit price is not shown, set unit_price=null.
@@ -1456,7 +1635,7 @@ Category:
   food, drinks, groceries, transport, fuel, bills, rent, shopping, coffee, dining, entertainment, travel, health, fitness, beauty, pets, kids, home, education, work, phone_internet, subscriptions, fees, insurance, donation, gift, other, mixed
 
 Output JSON schema:
-{ "payment_method": "cash"|"card"|"promptpay"|"unknown", "account_id": string|null, "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null } ] }
+{ "payment_method": "cash"|"card"|"promptpay"|"unknown", "account_id": string|null, "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null, "children": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null } ]|null } ], "adjustments": [ { "name": string, "amount": number|null, "effect": "subtract"|"add", "type": "discount"|"fee"|"tax"|"service_charge"|"rounding"|"other"|null } ] }
 `;
 
     try {
@@ -1487,6 +1666,7 @@ Output JSON schema:
       if (rr.ok) {
         const itemsObj = findFirstParsedObject(jj) || safeJsonParseMaybe(extractResponsesOutputText(jj));
         const extracted = Array.isArray(itemsObj?.items) ? itemsObj.items : [];
+        const extractedAdjustments = Array.isArray(itemsObj?.adjustments) ? itemsObj.adjustments : [];
         const extractedPaymentMethod = normalizePaymentMethod(itemsObj?.payment_method ?? itemsObj?.paymentMethod);
         const extractedAccountIdRaw = String(itemsObj?.account_id ?? itemsObj?.accountId ?? "").trim();
         const cleaned = extracted
@@ -1495,6 +1675,17 @@ Output JSON schema:
             qty: safeNumber(it?.qty ?? it?.quantity),
             unit_price: safeNumber(it?.unit_price ?? it?.unitPrice ?? it?.price),
             total: safeNumber(it?.line_total ?? it?.lineTotal ?? it?.total ?? it?.amount),
+            children: Array.isArray(it?.children)
+              ? it.children
+                  .map((ch) => ({
+                    name: normalizeItemName(ch?.name ?? ch?.title ?? ch?.item),
+                    qty: safeNumber(ch?.qty ?? ch?.quantity),
+                    unit_price: safeNumber(ch?.unit_price ?? ch?.unitPrice ?? ch?.price),
+                    total: safeNumber(ch?.line_total ?? ch?.lineTotal ?? ch?.total ?? ch?.amount),
+                  }))
+                  .filter((ch) => (ch?.name || "") && Number.isFinite(ch?.total || 0) && (ch?.total || 0) > 0)
+                  .slice(0, 10)
+              : null,
             category_key:
               normalizeCategoryKey(it?.category_key ?? it?.categoryKey ?? it?.category) ||
               inferCategoryFromText(it?.name) ||
@@ -1505,6 +1696,11 @@ Output JSON schema:
 
         if (cleaned.length >= 2) {
           items = cleaned;
+
+          const cleanedAdj = normalizeAdjustments(extractedAdjustments);
+          if (cleanedAdj.length && (!Array.isArray(adjustments) || !adjustments.length)) {
+            adjustments = cleanedAdj;
+          }
           // If the first pass couldn't decide doc_type, upgrade to receipt when items clearly exist
           if (doc_type !== "receipt") doc_type = "receipt";
 
@@ -1539,8 +1735,10 @@ Output JSON schema:
 
   // Enforce: transfer slips / bill payments must not contain purchase line items
   let finalItems = items;
+  let finalAdjustments = adjustments;
   if (doc_type === "transfer_slip" || doc_type === "bill_payment" || refined.tx_type === "transfer") {
     finalItems = [];
+    finalAdjustments = [];
   }
 
   // ---- payment method + account id (may be refined again after account candidate extraction) ----
@@ -1568,19 +1766,26 @@ Output JSON schema:
   const hasPositiveItems = Array.isArray(finalItems) && finalItems.some((it) => (safeNumber(it?.total) || 0) > 0);
   const hasZeroItems = Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) == 0);
   const hasDiscountHint = /ส่วนลด|discount|คูปอง|coupon|แต้ม|points|โปรโมชั่น|promo/i.test(String(outputText || ""));
+  const hasDiscountAdj = Array.isArray(finalAdjustments) && finalAdjustments.some((a) => String(a?.effect || "").toLowerCase().trim() === "subtract");
 
   let needsReview = false;
   if (confidence.overall != null && confidence.overall < 0.6) needsReview = true;
   if (doc_type === "receipt" && amount != null && hasPositiveItems) {
-    const sum = finalItems.reduce((s, it) => s + (safeNumber(it?.total) || 0), 0);
-    const diff = sum > 0 ? Math.abs(sum - amount) : 0;
+    const itemsSum = finalItems.reduce((s, it) => s + (safeNumber(it?.total) || 0), 0);
+    const adjSigned = (finalAdjustments || []).reduce((s, a) => {
+      const amt = safeNumber(a?.amount) || 0;
+      const eff = String(a?.effect || "").toLowerCase().trim();
+      return s + (eff === "subtract" ? -amt : amt);
+    }, 0);
+    const signedSum = itemsSum + adjSigned;
+    const diff = signedSum > 0 ? Math.abs(signedSum - amount) : 0;
     if (diff >= 2) needsReview = true;
   }
 
   const flags = {
     has_line_items: typeof flagsIn.has_line_items === "boolean" ? flagsIn.has_line_items : !!hasPositiveItems,
     has_zero_price_lines: typeof flagsIn.has_zero_price_lines === "boolean" ? flagsIn.has_zero_price_lines : !!hasZeroItems,
-    has_discount_lines: typeof flagsIn.has_discount_lines === "boolean" ? flagsIn.has_discount_lines : !!hasDiscountHint,
+    has_discount_lines: typeof flagsIn.has_discount_lines === "boolean" ? flagsIn.has_discount_lines : (!!hasDiscountAdj || !!hasDiscountHint),
     needs_human_review: typeof flagsIn.needs_human_review === "boolean" ? flagsIn.needs_human_review : !!needsReview,
   };
 
@@ -1605,6 +1810,8 @@ Output JSON schema:
     category_key: category,
 
     items: finalItems,
+
+    adjustments: finalAdjustments,
 
     from_account: parsed.from_account ? clampDigits(parsed.from_account, { maxLen: 6, minLen: 3 }) : null,
     to_account: parsed.to_account ? clampDigits(parsed.to_account, { maxLen: 6, minLen: 3 }) : null,

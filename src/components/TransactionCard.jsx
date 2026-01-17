@@ -67,6 +67,54 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     return ordered;
   }, [isSplitGroup, tx?.splitGroupId, tx?.splitLines, allTx]);
 
+  const receiptLines = useMemo(() => {
+    if (isTransfer || isSplitGroup) return null;
+    const lines = Array.isArray(tx?.receiptLines) ? tx.receiptLines : null;
+    if (!lines || !lines.length) return null;
+
+    const norm = (lines || [])
+      .map((l, idx) => {
+        const ll = l && typeof l === 'object' ? l : {};
+        const rawAmt = typeof ll.amount === 'number' ? ll.amount : Number(ll.amount);
+        const amt = Number.isFinite(rawAmt) ? Math.round(rawAmt) : 0;
+
+        const rlt = String(ll.receiptLineType || '').toLowerCase().trim();
+        const eff0 = String(ll.adjustmentEffect || '').toLowerCase().trim();
+        const isAdj = rlt === 'adjustment' || eff0 === 'subtract' || eff0 === 'add';
+        const receiptLineType = isAdj ? 'adjustment' : 'item';
+        const adjustmentEffect = isAdj ? (eff0 === 'subtract' ? 'subtract' : 'add') : 'add';
+
+        const children = Array.isArray(ll.children)
+          ? ll.children
+              .map((c) => {
+                const cc = c && typeof c === 'object' ? c : {};
+                const nm = String(cc.name || '').trim();
+                const ca = typeof cc.amount === 'number' ? cc.amount : Number(cc.amount);
+                const camt = Number.isFinite(ca) ? Math.round(ca) : 0;
+                if (!nm && !camt) return null;
+                return { name: nm || '—', amount: Math.abs(camt) };
+              })
+              .filter(Boolean)
+          : null;
+
+        return {
+          categoryId: String(ll.categoryId || ll.category || '').trim() || '',
+          note: String(ll.note || ll.name || ll.itemName || '').trim(),
+          amount: Math.abs(amt),
+          receiptLineType,
+          adjustmentEffect,
+          adjustmentType: String(ll.adjustmentType || '').trim(),
+          splitIndex: Number(ll.splitIndex || 0) || idx + 1,
+          children,
+          childrenIncludedInParent: !!ll.childrenIncludedInParent,
+        };
+      })
+      .filter((x) => Number(x?.amount || 0) > 0)
+      .sort((a, b) => (Number(a?.splitIndex || 0) || 0) - (Number(b?.splitIndex || 0) || 0));
+
+    return norm.length ? norm : null;
+  }, [tx?.receiptLines, isTransfer, isSplitGroup]);
+
   const groupNote = String(tx?.note || "").trim();
   const groupLabel = String(tx?.splitLabel || "").trim();
   const showGroupNote = isSplitGroup && groupNote && groupLabel && groupNote !== groupLabel;
@@ -250,7 +298,6 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           {tx?.note ? (
             <div className="mt-1 text-xs text-gray-800/70 whitespace-normal break-words">{String(tx.note)}</div>
           ) : null}
-
           {/* ✅ Split breakdown (show all + scroll inside card) */}
           {!isTransfer && isSplitGroup && Array.isArray(splitLines) && splitLines.length ? (
             <div
@@ -269,7 +316,10 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                   const amt = formatCurrency(Number(l?.amount) || 0);
                   const lineNote = String(l?.itemName || l?.note || "").trim();
                   return (
-                    <div key={String(l?.id || `${l?.splitIndex || ""}-${l?.category || ""}-${l?.amount || ""}`)} className="flex items-start justify-between gap-3">
+                    <div
+                      key={String(l?.id || `${l?.splitIndex || ""}-${l?.category || ""}-${l?.amount || ""}`)}
+                      className="flex items-start justify-between gap-3"
+                    >
                       <div className="min-w-0">
                         <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">
                           {lineNote || cat?.name || "—"}
@@ -281,6 +331,61 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                       <div className={`shrink-0 text-xs font-black ${isIncomeLine ? "text-emerald-700" : "text-red-700"}`}>
                         {prefix}
                         {amt}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ✅ Receipt breakdown (single transaction; receipt-style) */}
+          {!isTransfer && !isSplitGroup && Array.isArray(receiptLines) && receiptLines.length ? (
+            <div
+              className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-56 overflow-y-auto overflow-x-hidden no-scrollbar"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
+                Receipt ({receiptLines.length})
+              </div>
+              <div className="space-y-2 pr-1">
+                {receiptLines.map((l, idx) => {
+                  const cat = categoriesById.get(String(l?.categoryId || "")) || null;
+                  const isAdj = String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment";
+                  const eff = String(l?.adjustmentEffect || "").toLowerCase().trim();
+                  const sign = isAdj ? (eff === "subtract" ? "-" : "+") : "";
+                  const amt = formatCurrency(Number(l?.amount) || 0);
+                  const lineTitle = String(l?.note || "").trim() || cat?.name || "—";
+                  const subtitle = isAdj ? (eff === "subtract" ? "ส่วนลด" : "ค่าธรรมเนียม") : String(cat?.name || "").trim();
+                  return (
+                    <div
+                      key={`${String(l?.splitIndex || idx)}-${String(l?.categoryId || "")}-${String(l?.note || "")}`}
+                      className="rounded-2xl bg-white/10 border border-white/15 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">{lineTitle}</div>
+                          {subtitle && lineTitle !== subtitle ? (
+                            <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{subtitle}</div>
+                          ) : null}
+                          {Array.isArray(l?.children) && l.children.length ? (
+                            <div className="mt-2 space-y-1 pl-3 border-l border-white/15">
+                              {l.children.map((c, cidx) => (
+                                <div key={cidx} className="text-[11px] text-gray-900/70 break-words whitespace-normal">
+                                  • {String(c?.name || "").trim() || "—"}{" "}
+                                  {Number(c?.amount || 0) > 0 ? (
+                                    <span className="text-gray-900/55">({formatCurrency(Number(c.amount) || 0)})</span>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 text-xs font-black text-gray-900">
+                          {sign}
+                          {amt}
+                        </div>
                       </div>
                     </div>
                   );
