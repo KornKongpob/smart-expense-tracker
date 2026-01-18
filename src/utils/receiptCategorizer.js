@@ -9,13 +9,32 @@ const norm = (s) =>
 const containsAny = (text, kws) => kws.some((k) => text.includes(k));
 
 const EXPENSE_KW = {
+  // ✅ Snacks (separate from general food)
+  snacks: [
+    "ขนม",
+    "ทอดกรอบ",
+    "กรอบ",
+    "บิสกิต",
+    "คุกกี้",
+    "เวเฟอร์",
+    "มันฝรั่ง",
+    "ข้าวโพด",
+    "ถั่ว",
+    "snack",
+    "chips",
+    "chip",
+    "cookie",
+    "biscuit",
+    "cracker",
+    "popcorn",
+    "candy",
+  ],
   food: [
     "ก๋วยเตี๋ยว",
     "ข้าว",
     "อาหาร",
     "ของกิน",
     "ร้าน",
-    "ขนม",
     "restaurant",
     "noodle",
     "bbq",
@@ -148,6 +167,29 @@ const EXPENSE_KW = {
   ],
   entertainment: ["netflix", "spotify", "cinema", "movie", "concert", "เกม", "game", "steam", "disney", "prime video"],
 
+  // ✅ Snacks
+  snacks: [
+    "ขนม",
+    "ขนมปัง",
+    "บิสกิต",
+    "คุกกี้",
+    "เวเฟอร์",
+    "มันฝรั่ง",
+    "ทอดกรอบ",
+    "ข้าวเกรียบ",
+    "ข้าวโพดคั่ว",
+    "ลูกอม",
+    "ช็อกโกแลต",
+    "snack",
+    "chips",
+    "cookie",
+    "biscuit",
+    "cracker",
+    "popcorn",
+    "candy",
+    "chocolate",
+  ],
+
   // ✅ Receipt adjustments
   discount: ["ส่วนลด", "discount", "coupon", "promo", "promotion", "voucher"],
 };
@@ -178,6 +220,7 @@ const ALIAS = {
   "ชา": "coffee",
   "เครื่องดื่ม": "drinks",
   "น้ำดื่ม": "drinks",
+  "ขนม": "snacks",
   "ส่วนลด": "discount",
   "discount": "discount",
   "อื่นๆ": "other",
@@ -197,6 +240,7 @@ export function sanitizeCategoryKey(raw) {
     // expense
     "food",
     "drinks",
+    "snacks",
     "groceries",
     "transport",
     "fuel",
@@ -260,7 +304,36 @@ export function inferCategoryKeyFromText(type, text) {
     return "";
   }
 
+  // ✅ Priority order matters.
+  // We want:
+  // - discount lines => discount
+  // - snacks => snacks
+  // - beverages (including coffee/tea) => drinks (user preference)
+  // - then everything else.
+  if (containsAny(t, EXPENSE_KW.discount.map(norm))) return "discount";
+  if (containsAny(t, EXPENSE_KW.snacks.map(norm))) return "snacks";
+
+  // Treat coffee/tea as drinks for receipt splitting.
+  const bev = [...EXPENSE_KW.drinks, ...EXPENSE_KW.coffee].map(norm);
+  if (containsAny(t, bev)) return "drinks";
+
+  // Fall back to remaining categories (excluding coffee/snacks/discount already handled)
+  const fallbackOrder = [
+    "food",
+    "transport",
+    "bills",
+    "shopping",
+    "health",
+    "entertainment",
+  ];
+  for (const k of fallbackOrder) {
+    const arr = EXPENSE_KW[k];
+    if (Array.isArray(arr) && containsAny(t, arr.map(norm))) return k;
+  }
+
+  // Last resort: try any remaining keyword buckets
   for (const [k, arr] of Object.entries(EXPENSE_KW)) {
+    if (k === "discount" || k === "snacks" || k === "coffee" || k === "drinks") continue;
     if (containsAny(t, arr.map(norm))) return k;
   }
   return "";
@@ -460,86 +533,42 @@ export function splitReceiptItemsToLines(type, itemsOrPayload, fallbackText = ""
     }
   }
 
-  // --- Group item lines by category_key (items) ---
-  const grouped = new Map();
+  // ✅ Output as per-line entries (NO grouping by category).
+  // Users want to see each purchased item line separately even if it shares the same category.
+  // Keep the original order: items first, then adjustments.
+  const out = [];
 
   for (const it of itemLines) {
     const amtSat = Number.isFinite(it.baseTotalSatang) ? it.baseTotalSatang : 0;
     if (amtSat <= 0) continue;
-
-    const key = it.category_key || fallbackCategory || "other";
-    const prev = grouped.get(key) || {
-      key,
+    out.push({
+      key: it.category_key || sanitizeCategoryKey(fallbackCategory) || "other",
+      name: it.name,
+      amount: fromSatang(amtSat),
       receiptLineType: "item",
-      amountSatang: 0,
-      names: [],
+      adjustmentEffect: "add",
+      adjustmentType: null,
+      children: it.children ? it.children.map((c) => ({ name: c.name, amount: fromSatang(c.amountSatang) })) : null,
+      childrenIncludedInParent: !!it.childrenIncludedInParent,
+    });
+  }
+
+  for (const a of adjustmentLines) {
+    out.push({
+      key: a.category_key || (a.adjustmentEffect === "subtract" ? "discount" : "fees"),
+      name: a.name,
+      amount: fromSatang(a.amountSatang),
+      receiptLineType: "adjustment",
+      adjustmentEffect: a.adjustmentEffect,
+      adjustmentType: a.adjustmentType,
       children: null,
       childrenIncludedInParent: false,
-    };
-
-    prev.amountSatang += amtSat;
-    prev.names.push(it.name);
-
-    // Keep children only when a bucket contains a single item (otherwise it's ambiguous)
-    if (prev.names.length === 1) {
-      prev.children = it.children;
-      prev.childrenIncludedInParent = it.childrenIncludedInParent;
-    } else {
-      prev.children = null;
-      prev.childrenIncludedInParent = false;
-    }
-
-    grouped.set(key, prev);
+    });
   }
 
-  // --- Keep adjustments as individual lines (so user can see each discount/fee) ---
-  let adjIdx = 0;
-  for (const a of adjustmentLines) {
-    const key = a.category_key || (a.adjustmentEffect === "subtract" ? "discount" : "fees");
-    grouped.set(`__adj_${adjIdx++}_${key}`,
-      {
-        key,
-        receiptLineType: "adjustment",
-        name: a.name,
-        amountSatang: a.amountSatang,
-        adjustmentEffect: a.adjustmentEffect,
-        adjustmentType: a.adjustmentType,
-      }
-    );
-  }
-
-  // Convert to expected output format (amount in major units)
-  const lines = Array.from(grouped.values())
-    .map((g) => {
-      const displayName =
-        g.receiptLineType === "item"
-          ? (Array.isArray(g.names) ? g.names.filter(Boolean).join(" + ") : String(g.name || ""))
-          : String(g.name || "");
-
-      return {
-        key: g.key,
-        name: displayName,
-        amount: fromSatang(g.amountSatang),
-        receiptLineType: g.receiptLineType,
-        adjustmentEffect: g.adjustmentEffect,
-        adjustmentType: g.adjustmentType,
-        children: g.children ? g.children.map((c) => ({ name: c.name, amount: fromSatang(c.amountSatang) })) : null,
-        childrenIncludedInParent: g.childrenIncludedInParent,
-      };
-    })
+  return out
     .filter((ln) => Number.isFinite(ln.amount) && ln.amount > 0)
-    .slice(0, 20);
-
-
-  // Sort: items first, then adjustments; larger amounts first within type
-  lines.sort((a, b) => {
-    const ta = a.receiptLineType === "adjustment" ? 1 : 0;
-    const tb = b.receiptLineType === "adjustment" ? 1 : 0;
-    if (ta !== tb) return ta - tb;
-    return (b.amount || 0) - (a.amount || 0);
-  });
-
-  return lines;
+    .slice(0, 40);
 }
 
 function pickSubsetClosest(candidates, target) {

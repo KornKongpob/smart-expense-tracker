@@ -14,6 +14,8 @@ export const DEFAULT_CATEGORIES = {
   expense: [
     // Essentials
     { id: "food", name: "อาหาร", icon: "🍜", color: "#FF6B6B" },
+    // ✅ New: explicit snacks category (for receipts like "ขนม", "ทอดกรอบ", "บิสกิต")
+    { id: "snacks", name: "ขนม", icon: "🍪", color: "#F59E0B" },
     // ✅ New: explicit drinks category (for receipts like "น้ำดื่ม", "เครื่องดื่ม")
     { id: "drinks", name: "เครื่องดื่ม", icon: "🥤", color: "#34D399" },
     { id: "groceries", name: "ของกิน/ของใช้", icon: "🛒", color: "#FF9F43" },

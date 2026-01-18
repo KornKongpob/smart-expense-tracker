@@ -1010,8 +1010,9 @@ const existingRefSet = useMemo(() => {
         const groups = Array.isArray(x.groups) ? x.groups.slice() : [];
         if (!groups[gidx]) return x;
         groups[gidx] = { ...groups[gidx], ...patch };
-        const sum = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
-        return { ...x, groups, amount: x.splitByCategory ? sum : x.amount };
+        // ✅ Use signed sum so discount lines (adjustmentEffect='subtract') reduce the net total.
+        const signedSum = groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+        return { ...x, groups, amount: x.splitByCategory ? signedSum : x.amount };
       })
     );
   };
