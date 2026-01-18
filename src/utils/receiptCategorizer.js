@@ -350,7 +350,10 @@ export function splitReceiptItemsToLines(type, itemsOrPayload, fallbackText = ""
 
   // Normalize raw items into internal lines (satang)
   const itemLines = [];
-  const inferredFromText = inferCategoryFromText(fallbackText || "") || null;
+  // Infer a best-guess category from the overall receipt text (merchant + note, etc.)
+  // NOTE: We intentionally reuse inferCategoryKeyFromText here to avoid relying on a
+  // separate helper that may not exist in the browser bundle.
+  const inferredFromText = inferCategoryKeyFromText(type, fallbackText || "") || null;
 
   for (const it of items) {
     if (!it || typeof it !== "object") continue;

@@ -1055,7 +1055,8 @@ async function callOpenAI({ base64, mimeType, accounts = [] }) {
   // Normalize to valid model IDs.
   const normalizeOpenAIModel = (raw) => {
     const s = String(raw || "").trim();
-    if (!s) return "gpt-4o-mini";
+    // Default to GPT-5.1 (vision-capable) if caller provides an empty value.
+    if (!s) return "gpt-5.1";
 
     const low = s.toLowerCase();
 
@@ -1171,10 +1172,10 @@ async function callOpenAI({ base64, mimeType, accounts = [] }) {
     return "";
   };
 
-  // ✅ Default to a widely-available vision + Structured Outputs model.
+  // ✅ Default to GPT-5.1 (vision input) and Structured Outputs-capable models.
   // Override with OPENAI_MODEL. Optionally set OPENAI_FALLBACK_MODEL for retries (model-not-found / access issues).
-  const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-4o-mini");
-  const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini");
+  const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-5.1");
+  const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_FALLBACK_MODEL || "gpt-5.1");
   const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
 
   const accountsForModel = compactAccountsForModel(accounts);
@@ -1527,10 +1528,10 @@ ${accountsText}
 
     let tip = null;
     if (isModelNotFound(msg)) {
-      tip = "Set OPENAI_MODEL to a model your key can access (recommended: gpt-4o-mini).";
+      tip = "Set OPENAI_MODEL to a model your key can access (recommended: gpt-5.1).";
     } else if (isSchemaUnsupported(msg)) {
       tip =
-        "This model may not support Structured Outputs (json_schema). Use a supported model (e.g. gpt-4o-mini) or let the server fall back to JSON mode.";
+        "This model may not support Structured Outputs (json_schema). Use a supported model (e.g. gpt-5.1 or gpt-4o-mini) or let the server fall back to JSON mode.";
     } else if (/api key|incorrect api key|unauthorized/i.test(msg) || r.status === 401) {
       tip = "Check OPENAI_API_KEY in Vercel Project Settings → Environment Variables (and redeploy).";
     } else if (/quota|insufficient|billing|payment/i.test(msg) || r.status === 402) {
@@ -1630,7 +1631,7 @@ ${accountsText}
   let itemsOnlyAccountId = "";
 
   if (shouldItemsFallback) {
-    const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || usedModel || "gpt-4o-mini");
+    const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || usedModel || "gpt-5.1");
 
     const itemsText = {
       format: {
