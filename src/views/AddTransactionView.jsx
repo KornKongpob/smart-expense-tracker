@@ -1880,44 +1880,58 @@ if (
       }
 
 
-      // ✅ Default Split-by-items for receipts with multiple purchased lines
-      // - Receipt with >=2 positive line items => set splitByCategory=true
-      // - Build groups from items (each item keeps its own name + category)
-      // - Skip 0-price lines (promotions/points)
+      // ✅ Build receipt breakdown (items + adjustments) and auto-enable Split when purchased lines >= 2
       try {
         const docType = String(next?.docType || next?.doc_type || "").toLowerCase().trim();
         const txType = String(next?.txType || next?.type || type || "expense").toLowerCase().trim();
         const items = Array.isArray(next?.items) ? next.items : [];
+        const adjustments = Array.isArray(next?.adjustments) ? next.adjustments : [];
 
         if (txType === "expense" && items.length && docType !== "transfer_slip" && docType !== "bill_payment") {
-          const lines = splitReceiptItemsToLines(
-            "expense",
-            items,
-            `${String(next?.merchant || "").trim()} ${String(next?.note || "").trim()}`.trim(),
-            String(next?.categoryId || next?.category_key || next?.category || "").trim() || "other"
-          );
+          // If scan already produced groups, keep them. Otherwise, derive from items+adjustments.
+          let groups = Array.isArray(next?.groups) ? next.groups : [];
+          if (!groups.length) {
+            const hint = `${String(next?.merchant || "").trim()} ${String(next?.note || "").trim()}`.trim();
+            const fallbackKey = String(next?.categoryId || next?.category_key || next?.category || "").trim() || "other";
+            const targetTotalSatang = parseMoneyToSatang(next?.amount);
+            const lines = splitReceiptItemsToLines("expense", { items, adjustments, targetTotalSatang }, hint, fallbackKey);
 
-          const groups = (lines || [])
-            .filter((ln) => (Number(ln?.amount) || 0) > 0)
-            .map((ln, idx) => {
-              const key = sanitizeCategoryKey(ln?.key || "other") || "other";
-              const categoryId = ensureCategory("expense", key);
-              return {
-                key,
-                categoryId,
-                amount: parseMoneyToSatang(ln?.amount),
-                note: String(ln?.name || "").trim(),
-                splitIndex: idx + 1,
-                splitCount: (lines || []).length,
-              };
-            });
+            groups = (lines || [])
+              .filter((ln) => (Number(ln?.amount) || 0) > 0)
+              .map((ln, idx) => {
+                const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+                const categoryId = ensureCategory("expense", key);
+                return {
+                  key,
+                  categoryId,
+                  amount: parseMoneyToSatang(ln?.amount),
+                  note: String(ln?.name || "").trim(),
+                  receiptLineType: String(ln?.receiptLineType || "item"),
+                  adjustmentType: String(ln?.adjustmentType || ""),
+                  adjustmentEffect: String(ln?.adjustmentEffect || "add"),
+                  children: Array.isArray(ln?.children) ? ln.children : null,
+                  childrenIncludedInParent: !!ln?.childrenIncludedInParent,
+                  splitIndex: idx + 1,
+                  splitCount: (lines || []).length,
+                };
+              })
+              .filter((g) => isPositiveNumber(g.amount));
+          }
 
-          if (groups.length >= 2) {
-            next.splitByCategory = true;
+          // Persist groups for breakdown even when not splitting
+          if (groups.length) {
             next.groups = groups;
+          }
+
+          const purchasedCount = (groups || []).filter((g) => String(g?.receiptLineType || "item").toLowerCase().trim() !== "adjustment").length;
+          if (purchasedCount >= 2) {
+            next.splitByCategory = true;
             next.splitGroupId = String(next?.splitGroupId || "").trim() || generateSplitGroupId();
-            next.splitLabel =
-              String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+            next.splitLabel = String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+          } else {
+            next.splitByCategory = false;
+            next.splitGroupId = "";
+            next.splitLabel = "";
           }
         }
       } catch {
@@ -1966,41 +1980,58 @@ if (
       }
 
 
-      // ✅ Keep the same default Split behavior for duplicate receipts too
+      // ✅ Build receipt breakdown (items + adjustments) and auto-enable Split when purchased lines >= 2 (duplicate flow)
       try {
         const docType = String(next?.docType || next?.doc_type || "").toLowerCase().trim();
         const txType = String(next?.txType || next?.type || type || "expense").toLowerCase().trim();
         const items = Array.isArray(next?.items) ? next.items : [];
+        const adjustments = Array.isArray(next?.adjustments) ? next.adjustments : [];
 
         if (txType === "expense" && items.length && docType !== "transfer_slip" && docType !== "bill_payment") {
-          const lines = splitReceiptItemsToLines(
-            "expense",
-            items,
-            `${String(next?.merchant || "").trim()} ${String(next?.note || "").trim()}`.trim(),
-            String(next?.categoryId || next?.category_key || next?.category || "").trim() || "other"
-          );
+          // If scan already produced groups, keep them. Otherwise, derive from items+adjustments.
+          let groups = Array.isArray(next?.groups) ? next.groups : [];
+          if (!groups.length) {
+            const hint = `${String(next?.merchant || "").trim()} ${String(next?.note || "").trim()}`.trim();
+            const fallbackKey = String(next?.categoryId || next?.category_key || next?.category || "").trim() || "other";
+            const targetTotalSatang = parseMoneyToSatang(next?.amount);
+            const lines = splitReceiptItemsToLines("expense", { items, adjustments, targetTotalSatang }, hint, fallbackKey);
 
-          const groups = (lines || [])
-            .filter((ln) => (Number(ln?.amount) || 0) > 0)
-            .map((ln, idx) => {
-              const key = sanitizeCategoryKey(ln?.key || "other") || "other";
-              const categoryId = ensureCategory("expense", key);
-              return {
-                key,
-                categoryId,
-                amount: parseMoneyToSatang(ln?.amount),
-                note: String(ln?.name || "").trim(),
-                splitIndex: idx + 1,
-                splitCount: (lines || []).length,
-              };
-            });
+            groups = (lines || [])
+              .filter((ln) => (Number(ln?.amount) || 0) > 0)
+              .map((ln, idx) => {
+                const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+                const categoryId = ensureCategory("expense", key);
+                return {
+                  key,
+                  categoryId,
+                  amount: parseMoneyToSatang(ln?.amount),
+                  note: String(ln?.name || "").trim(),
+                  receiptLineType: String(ln?.receiptLineType || "item"),
+                  adjustmentType: String(ln?.adjustmentType || ""),
+                  adjustmentEffect: String(ln?.adjustmentEffect || "add"),
+                  children: Array.isArray(ln?.children) ? ln.children : null,
+                  childrenIncludedInParent: !!ln?.childrenIncludedInParent,
+                  splitIndex: idx + 1,
+                  splitCount: (lines || []).length,
+                };
+              })
+              .filter((g) => isPositiveNumber(g.amount));
+          }
 
-          if (groups.length >= 2) {
-            next.splitByCategory = true;
+          // Persist groups for breakdown even when not splitting
+          if (groups.length) {
             next.groups = groups;
+          }
+
+          const purchasedCount = (groups || []).filter((g) => String(g?.receiptLineType || "item").toLowerCase().trim() !== "adjustment").length;
+          if (purchasedCount >= 2) {
+            next.splitByCategory = true;
             next.splitGroupId = String(next?.splitGroupId || "").trim() || generateSplitGroupId();
-            next.splitLabel =
-              String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+            next.splitLabel = String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+          } else {
+            next.splitByCategory = false;
+            next.splitGroupId = "";
+            next.splitLabel = "";
           }
         }
       } catch {

@@ -504,6 +504,25 @@ export function splitReceiptItemsToLines(type, itemsOrPayload, fallbackText = ""
     }
   }
 
+
+  // Also convert discount-like POSITIVE items into subtract adjustments (some models/OCR emit discounts as + amounts)
+  for (const it of itemLines) {
+    const nm = norm(it?.name || '');
+    if (!nm) continue;
+    const isDisc = containsAny(nm, EXPENSE_KW.discount || []);
+    if (!isDisc) continue;
+    if (Number.isFinite(it.baseTotalSatang) && it.baseTotalSatang > 0) {
+      adjustmentLines.push({
+        receiptLineType: 'adjustment',
+        name: it.name,
+        amountSatang: Math.abs(it.baseTotalSatang),
+        adjustmentEffect: 'subtract',
+        adjustmentType: 'discount',
+        category_key: 'discount',
+      });
+      it.baseTotalSatang = 0;
+    }
+  }
   // --- Child roll-up heuristic ---
   // We want the sum(items) + signedSum(adjustments) to be as close as possible to targetTotalSatang.
   // If some parents exclude children, we can add childSumSatang to those parents.

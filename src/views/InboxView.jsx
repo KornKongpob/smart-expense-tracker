@@ -68,7 +68,7 @@ function buildTransactionsFromInboxItem(item) {
   // ✅ Ignore zero/invalid lines (amount <= 0)
   const nonAdjGroupCount = Array.isArray(item?.groups) ? item.groups.filter((g) => !isAdjustmentLike(g)).length : 0;
   const hasSplitGroups = nonAdjGroupCount >= 2;
-  if (txType === "expense" && (item?.splitByCategory || hasSplitGroups) && hasSplitGroups) {
+  if (txType === "expense" && !!item?.splitByCategory && hasSplitGroups) {
     const accountId = item?.accountId || "";
     if (!accountId) throw new Error("ยังไม่ได้เลือก Account สำหรับรายการแบบ Split");
 
@@ -492,7 +492,8 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       if (txType !== "expense") return []; // receipts => expense only
 
       const items = Array.isArray(it?.items) ? it.items : [];
-      if (items.length < 2) return [];
+      const adjustments = Array.isArray(it?.adjustments) ? it.adjustments : [];
+      if (!items.length && !adjustments.length) return [];
 
       // Treat as a receipt if:
       // - model says receipt, OR
@@ -508,7 +509,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         return name && Number.isFinite(amt) && amt > 0 ? n + 1 : n;
       }, 0);
 
-      const looksLikeReceipt = docType === "receipt" || pricedCount >= 2;
+      const looksLikeReceipt = docType === "receipt" || pricedCount >= 1;
       if (!looksLikeReceipt) return [];
 
       // Avoid deriving split for obvious non-receipt docs
@@ -517,7 +518,8 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       const fallbackKey = String(it?.categoryId || it?.category_key || it?.category || "").trim() || "other";
       const hint = `${String(it?.merchant || "").trim()} ${String(it?.note || "").trim()}`.trim();
 
-      const lines = splitReceiptItemsToLines("expense", items, hint, fallbackKey);
+      const targetTotalSatang = asSatang(it?.amount);
+      const lines = splitReceiptItemsToLines("expense", { items, adjustments, targetTotalSatang }, hint, fallbackKey);
       let groups = (lines || [])
         .filter((ln) => (Number(ln?.amount) || 0) > 0)
         .map((ln, idx) => {
@@ -529,19 +531,19 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             note: String(ln?.name || "").trim(),
             splitIndex: idx + 1,
             splitCount: (lines || []).length,
-            receiptLineType: "item",
-            adjustmentEffect: "add",
+            receiptLineType: String(ln?.receiptLineType || "item"),
+            adjustmentEffect: String(ln?.adjustmentEffect || "add"),
+            adjustmentType: String(ln?.adjustmentType || ""),
+            children: Array.isArray(ln?.children) ? ln.children : null,
+            childrenIncludedInParent: !!ln?.childrenIncludedInParent,
           };
         });
-
-      // Need at least 2 purchased lines to behave as Split
-      if (groups.length < 2) return [];
 
       // ✅ Reconcile to paid total (adds "ส่วนลด" line when needed)
       const paidTotal = asSatang(it?.amount);
       const rec = reconcileReceiptGroups(groups, paidTotal, {
         ensureCategoryId: (k) => ensureExpenseCategoryId(k),
-        baseLineCountMin: 2,
+        baseLineCountMin: 1,
       });
       groups = rec.groups;
       return groups;
@@ -559,8 +561,10 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     // This prevents the "Edit -> Split review not working" case.
     const derived = deriveReceiptGroups(item);
     const rawGroups = Array.isArray(item?.groups) ? item.groups : [];
-    const shouldSplit = (rawGroups.length >= 2) || (derived.length >= 2);
-    const effectiveGroupsRaw = shouldSplit ? (rawGroups.length >= 2 ? rawGroups : derived) : [];
+    // ✅ Always keep receipt breakdown (groups) if we have it, even when not splitting
+    const effectiveGroupsRaw = rawGroups.length ? rawGroups : derived;
+    // Split is only enabled when the receipt has >=2 purchased (non-adjustment) lines
+    const shouldSplit = (rawGroups.length >= 2) || (derived.length >= 2) || !!item?.splitByCategory;
 
     const normalizeGroup = (g, idx) => {
       const gg = g && typeof g === "object" ? g : {};
@@ -597,7 +601,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       .filter((g) => isPositiveNumber(g.amount));
 
     const nonAdjCount = groupsSatang.filter((g) => !isAdjustmentLike(g)).length;
-    const isSplit = shouldSplit && nonAdjCount >= 2;
+    const isSplit = !!shouldSplit && nonAdjCount >= 2;
 
     // ✅ Keep a stable paid-total (parent) and reconcile groups to it
     let paidTotalSatang = asSatang(item?.amount);
@@ -607,10 +611,10 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       paidTotalSatang = Math.abs(sumSigned);
     }
 
-    if (isSplit && isPositiveNumber(paidTotalSatang)) {
+    if (nonAdjCount >= 1 && isPositiveNumber(paidTotalSatang)) {
       const rec = reconcileReceiptGroups(groupsSatang, paidTotalSatang, {
         ensureCategoryId: (k) => ensureExpenseCategoryId(k),
-        baseLineCountMin: 2,
+        baseLineCountMin: 1,
       });
       groupsSatang = rec.groups.filter((g) => isPositiveNumber(g.amount));
     }
@@ -635,14 +639,13 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
 
       paidTotalSatang: paidTotalSatang,
 
-      // ✅ Split-by-category preview/edit in Inbox
+      // ✅ Receipt breakdown always available (editable), even when not split
       splitByCategory: isSplit,
       splitGroupId: isSplit ? (String(item?.splitGroupId || "").trim() || generateSplitGroupId()) : "",
       splitLabel: isSplit
         ? (String(item?.splitLabel || item?.merchant || item?.note || "Receipt").trim().slice(0, 80) || "Receipt")
         : "",
-      groups: isSplit
-        ? (groupsSatang || []).map((g) => ({
+      groups: (groupsSatang || []).map((g) => ({
             key: g?.key || "",
             categoryId: String(g?.categoryId || ""),
             amount: formatMoneyInputFromSatang(asSatang(g.amount)),
@@ -650,8 +653,9 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
             receiptLineType: String(g?.receiptLineType || "item"),
             adjustmentType: String(g?.adjustmentType || ""),
             adjustmentEffect: String(g?.adjustmentEffect || "add"),
-          }))
-        : [],
+            children: Array.isArray(g?.children) ? g.children : null,
+            childrenIncludedInParent: !!g?.childrenIncludedInParent,
+          })),
     });
   }, [open, item, categories]);
 
@@ -666,6 +670,22 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     (txType === "expense" || txType === "income") &&
     !!draft?.splitByCategory &&
     Array.isArray(draft?.groups);
+
+  const hasBreakdown = (txType === "expense" || txType === "income") && Array.isArray(draft?.groups) && draft.groups.length > 0;
+
+  const breakdownNet = (() => {
+    if (!hasBreakdown) return 0;
+    const signed = (draft.groups || []).reduce((s, g) => {
+      const a = parseMoneyToSatang(g?.amount);
+      if (!(a > 0)) return s;
+      const rlt = String(g?.receiptLineType || "item").toLowerCase().trim();
+      const eff = String(g?.adjustmentEffect || "add").toLowerCase().trim();
+      const isAdj = rlt === "adjustment";
+      if (isAdj) return s + (eff === "subtract" ? -a : a);
+      return s + a;
+    }, 0);
+    return Math.abs(signed);
+  })();
 
   // IMPORTANT: Avoid conditional hooks inside this modal.
   // Using useMemo here would break the Rules of Hooks because the modal returns early
@@ -730,10 +750,10 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         target = Math.abs(sumSigned);
       }
 
-      if (nonAdjCount >= 2 && isPositiveNumber(target)) {
+      if (nonAdjCount >= 1 && isPositiveNumber(target)) {
         const rec = reconcileReceiptGroups(groupsSatang, target, {
           ensureCategoryId: (k) => ensureExpenseCategoryId(k),
-          baseLineCountMin: 2,
+          baseLineCountMin: 1,
         });
         groupsSatang = rec.groups.filter((g) => isPositiveNumber(g.amount));
       }
@@ -822,16 +842,17 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         };
       }
 
-      // turn off split → collapse to single (take first line if possible)
-      const g0 = Array.isArray(d.groups) && d.groups.length
+      // turn off split → keep breakdown for receiptLines editing (do NOT clear groups)
+      const firstItem = Array.isArray(d.groups) && d.groups.length
         ? (d.groups.find((x) => String(x?.receiptLineType || "").toLowerCase().trim() !== "adjustment") || d.groups[0])
         : null;
+      const keepCategory = String(d.categoryId || firstItem?.categoryId || "");
       return {
         ...d,
         splitByCategory: false,
-        groups: [],
-        amount: String(g0?.amount ?? d.amount ?? ""),
-        categoryId: String(g0?.categoryId || d.categoryId || ""),
+        // keep groups so user can still view/edit breakdown even when not splitting
+        groups: Array.isArray(d.groups) ? d.groups : [],
+        categoryId: keepCategory,
         splitLabel: "",
         splitGroupId: "",
       };
@@ -999,11 +1020,39 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       patch.splitLabel = label;
       patch.groups = groups;
     } else {
-      // If user switched from split to single, clear split fields
+      // ✅ Not split, but still persist breakdown lines as receiptLines (editable even when not split)
       patch.splitByCategory = false;
       patch.splitGroupId = "";
       patch.splitLabel = "";
-      patch.groups = [];
+
+      const raw = Array.isArray(draft?.groups) ? draft.groups : [];
+      if (raw.length) {
+        const rec = reconcileDraftGroups(draft, raw);
+        const groupsDraft = Array.isArray(rec?.groupsDraft) && rec.groupsDraft.length ? rec.groupsDraft : raw;
+        const groups = (groupsDraft || [])
+          .map((g, idx) => ({
+            key: g?.key || "",
+            categoryId: String(g?.categoryId || "").trim(),
+            amount: parseMoneyToSatang(g?.amount),
+            note: String(g?.note || ""),
+            receiptLineType: String(g?.receiptLineType || "item"),
+            adjustmentType: String(g?.adjustmentType || ""),
+            adjustmentEffect: String(g?.adjustmentEffect || "add"),
+            splitIndex: Number(g?.splitIndex || 0) || idx + 1,
+          }))
+          .filter((g) => isPositiveNumber(g.amount));
+
+        // Ensure all lines have categoryId
+        for (const g of groups) {
+          if (!String(g?.categoryId || "").trim()) {
+            showAlert?.("กรุณาเลือก Category ให้ครบทุกบรรทัดของ Breakdown");
+            return;
+          }
+        }
+        patch.groups = groups;
+      } else {
+        patch.groups = [];
+      }
     }
 
     onSave?.(draft.id, patch);
@@ -1301,6 +1350,7 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                   </div>
                 </>
               ) : (
+                <>
                 <label className="text-xs font-bold text-gray-900/60 min-w-0">
                   Category
                   <select
@@ -1316,6 +1366,81 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                     ))}
                   </select>
                 </label>
+
+                {!isSplitMode && hasBreakdown ? (
+                  <div className="glass-panel border border-white/20 rounded-2xl p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-extrabold text-gray-900/60 uppercase tracking-wide">
+                        Breakdown ({Array.isArray(draft.groups) ? draft.groups.length : 0})
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addGroup}
+                        className="px-3 py-1.5 rounded-xl bg-white/30 border border-white/20 text-gray-900/80 text-xs font-extrabold active:scale-95"
+                      >
+                        + Add line
+                      </button>
+                    </div>
+
+                    <div className="mt-2 space-y-2 max-h-64 overflow-y-auto overflow-x-hidden no-scrollbar pr-1">
+                      {(draft.groups || []).map((g, idx) => (
+                        <div key={`g-ro-${idx}`} className="rounded-2xl bg-white/20 border border-white/15 p-3">
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
+                              <select
+                                value={g.categoryId || ""}
+                                onChange={(e) => updateGroup(idx, { categoryId: e.target.value })}
+                                className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                              >
+                                <option value="">เลือกหมวดหมู่</option>
+                                {catList.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={g.amount ?? ""}
+                                onChange={(e) => updateGroup(idx, { amount: sanitizeMoneyInput(e.target.value) })}
+                                placeholder="0.00"
+                                className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                              />
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeGroup(idx)}
+                              className={`p-2 rounded-xl border border-white/20 bg-white/20 text-gray-900/70 active:scale-95 ${
+                                (draft.groups || []).length <= 1 ? "opacity-40 pointer-events-none" : ""
+                              }`}
+                              title="Remove line"
+                              aria-label="remove"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+
+                          <input
+                            type="text"
+                            value={g.note || ""}
+                            onChange={(e) => updateGroup(idx, { note: e.target.value })}
+                            className="mt-2 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                            placeholder="note (optional)"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-between text-xs">
+                      <div className="text-gray-900/60 font-extrabold">Net</div>
+                      <div className="text-gray-900 font-black">{formatCurrency(breakdownNet)}</div>
+                    </div>
+                  </div>
+                ) : null}
+                </>
               )}
             </>
           )}
@@ -1744,6 +1869,8 @@ export default function InboxView({ showAlert, showConfirm }) {
               Array.isArray(it?.groups) &&
               it.groups.length >= 2;
 
+            const hasBreakdown = (txType === "expense" || txType === "income") && Array.isArray(it?.groups) && it.groups.length > 0;
+
             const accountLabel = it?.accountId ? accountsById.get(it.accountId)?.name : "";
             const fromLabel = it?.fromAccountId ? accountsById.get(it.fromAccountId)?.name : "";
             const toLabel = it?.toAccountId ? accountsById.get(it.toAccountId)?.name : "";
@@ -1809,7 +1936,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                         <div className="whitespace-normal break-words wrap-anywhere">
                           {accountLabel || "(account?)"}
                           {!isSplitItem && catLabel ? ` • ${catLabel}` : ""}
-                          {isSplitItem ? ` • Split (${it.groups.length})` : ""}
+                          {isSplitItem ? ` • Split (${it.groups.length})` : (hasBreakdown ? ` • Receipt (${it.groups.length})` : "")}
                         </div>
                       )}
                       {ref ? <div className="break-all">ref: {ref}</div> : null}
@@ -1819,7 +1946,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                     </div>
 
                     {/* ✅ Full breakdown list (scroll inside card) */}
-                    {isSplitItem ? (
+                    {hasBreakdown ? (
                       <div
                         className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-28 overflow-y-auto overflow-x-hidden no-scrollbar"
                       >
@@ -1831,10 +1958,13 @@ export default function InboxView({ showAlert, showConfirm }) {
                             const cat = categoriesById.get(String(g?.categoryId || "")) || null;
                             const amt = formatCurrency(Number(g?.amount) || 0);
                             const lineNote = String(g?.note || "").trim();
+                            const rlt = String(g?.receiptLineType || "item").toLowerCase().trim();
                             const eff = String(g?.adjustmentEffect || "add").toLowerCase().trim();
-                            const isSubtract = txType === "expense" && eff === "subtract";
-                            const sign = txType === "income" ? "+" : (isSubtract ? "+" : "-");
-                            const cls = txType === "income" ? "text-emerald-700" : (isSubtract ? "text-emerald-700" : "text-red-700");
+                            const isAdj = rlt === "adjustment";
+                            const isSubtract = isAdj && eff === "subtract";
+                            const isAddAdj = isAdj && eff === "add";
+                            const sign = isSubtract ? "-" : (isAddAdj ? "+" : "");
+                            const cls = isSubtract ? "text-red-700" : (isAddAdj ? "text-emerald-700" : "text-gray-900/85");
                             return (
                               <div key={`${it.id}-g-${idx}`} className="flex items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
