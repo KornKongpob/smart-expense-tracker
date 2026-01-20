@@ -3,8 +3,16 @@ import { useMemo, useState } from "react";
 import { ChevronRight, Bell, Trash2, Check, X, ChevronLeft, Sparkles } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors";
-import { formatCurrency } from "../utils/format";
+import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
+
+const BUDGET_TOTAL_ID = "__TOTAL__"; // overall monthly budget
+const BUDGET_DAILY_ID = "__DAILY__"; // daily budget (for Dashboard)
+
+const PSEUDO_BUDGET_CATS = {
+  [BUDGET_TOTAL_ID]: { id: BUDGET_TOTAL_ID, name: "งบรวมรายเดือน", icon: "🧮", color: "#111827" },
+  [BUDGET_DAILY_ID]: { id: BUDGET_DAILY_ID, name: "งบต่อวัน", icon: "📅", color: "#111827" },
+};
 
 function monthKeyToDate(monthKey) {
   const s = String(monthKey || "").trim(); // "YYYY-MM"
@@ -13,6 +21,42 @@ function monthKeyToDate(monthKey) {
   const y = Number(m[1]);
   const mo = Number(m[2]);
   return new Date(y, Math.max(0, (mo || 1) - 1), 1);
+}
+
+function daysInMonthKey(monthKey) {
+  const d = monthKeyToDate(monthKey);
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+}
+
+function isTransferLike(t) {
+  if (!t) return false;
+  if (t.isTransfer) return true;
+  const c = String(t.category || "").toLowerCase().trim();
+  if (c === "transfer") return true;
+  if (String(t.transferId || "").trim()) return true;
+  return false;
+}
+
+function signedExpenseSatang(t) {
+  const amt = Number(t?.amount || 0) || 0;
+  if (!(amt > 0)) return 0;
+  const eff = String(t?.adjustmentEffect || "").toLowerCase().trim();
+  return eff === "subtract" ? -Math.abs(amt) : Math.abs(amt);
+}
+
+function sumExpenseForDate(transactions, dateISO) {
+  const d = String(dateISO || "").slice(0, 10);
+  let sum = 0;
+  for (const t of transactions || []) {
+    if (!t) continue;
+    if (isTransferLike(t)) continue;
+    if (t?.isSplitParent) continue;
+    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
+    const td = String(t?.date || "").slice(0, 10);
+    if (td !== d) continue;
+    sum += signedExpenseSatang(t);
+  }
+  return Math.max(0, Math.round(sum));
 }
 
 function dateToMonthKey(d) {
@@ -71,6 +115,19 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
   const cats = state.categories?.expense || [];
   const budgets = state.budgets || [];
+
+  // ✅ Used for "Daily budget" preview (only meaningful for current month)
+  const todayISO = toISODate(new Date());
+  const currentMonth = toMonthKey(todayISO);
+  const isCurrentMonth = month === currentMonth;
+  const todaySpentAll = useMemo(
+    () => (isCurrentMonth ? sumExpenseForDate(state.transactions || [], todayISO) : 0),
+    [state.transactions, todayISO, isCurrentMonth]
+  );
+
+  // ✅ Overall budgets for Dashboard
+  const overallMonthlyBudget = useMemo(() => getBudget(budgets, month, BUDGET_TOTAL_ID), [budgets, month]);
+  const overallDailyBudget = useMemo(() => getBudget(budgets, month, BUDGET_DAILY_ID), [budgets, month]);
 
   const [open, setOpen] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState("");
@@ -148,14 +205,16 @@ export default function BudgetsView({ showAlert, showConfirm }) {
   };
 
   const editingCat = useMemo(
-    () => cats.find((c) => c.id === editingCategoryId) || null,
+    () => cats.find((c) => c.id === editingCategoryId) || PSEUDO_BUDGET_CATS[editingCategoryId] || null,
     [cats, editingCategoryId]
   );
 
   const editingSpent = useMemo(() => {
     if (!editingCategoryId) return 0;
+    if (editingCategoryId === BUDGET_TOTAL_ID) return Number(summary.totalSpent || 0) || 0;
+    if (editingCategoryId === BUDGET_DAILY_ID) return Number(todaySpentAll || 0) || 0;
     return spentMap.get(editingCategoryId) || 0;
-  }, [spentMap, editingCategoryId]);
+  }, [spentMap, editingCategoryId, summary.totalSpent, todaySpentAll]);
 
   const preview = useMemo(() => {
     const lim = parseMoneyToSatang(limit);
@@ -252,6 +311,142 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             />
           </div>
         ) : null}
+      </div>
+
+      {/* ✅ Dashboard budgets (Daily / Monthly) */}
+      <div className="glass-card rounded-3xl p-5 mb-5">
+        <div className="text-xs font-bold text-gray-900/60 uppercase">งบสำหรับ Dashboard</div>
+
+        {(() => {
+          const monthlyLimit =
+            Number(overallMonthlyBudget?.limit || 0) > 0 ? Number(overallMonthlyBudget.limit) : Number(summary.totalLimit || 0) || 0;
+          const derivedDaily = monthlyLimit > 0 ? Math.round(monthlyLimit / daysInMonthKey(month)) : 0;
+          const dailyLimit =
+            Number(overallDailyBudget?.limit || 0) > 0 ? Number(overallDailyBudget.limit) : derivedDaily;
+
+          const monthSpent = Number(summary.totalSpent || 0) || 0;
+          const monthPct = monthlyLimit ? Math.round((monthSpent / monthlyLimit) * 100) : 0;
+          const monthOver = monthlyLimit ? Math.max(0, monthSpent - monthlyLimit) : 0;
+
+          const daySpent = isCurrentMonth ? Number(todaySpentAll || 0) || 0 : 0;
+          const dayPct = dailyLimit ? Math.round((daySpent / dailyLimit) * 100) : 0;
+          const dayOver = dailyLimit ? Math.max(0, daySpent - dailyLimit) : 0;
+
+          return (
+            <>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                {/* Daily */}
+                <button
+                  type="button"
+                  onClick={() => openEdit(BUDGET_DAILY_ID)}
+                  className="glass-panel border border-white/20 rounded-2xl p-4 text-left active:scale-[0.99]"
+                  title="แตะเพื่อตั้ง/แก้ไข Daily budget"
+                >
+                  <div className="text-xs font-extrabold text-gray-900/70 flex items-center gap-2">
+                    <span className="text-lg">{PSEUDO_BUDGET_CATS[BUDGET_DAILY_ID].icon}</span> Daily budget
+                  </div>
+
+                  <div className="mt-1 text-sm font-extrabold text-gray-900">
+                    {dailyLimit ? formatCurrency(dailyLimit) : <span className="text-gray-500">ยังไม่ตั้ง</span>}
+                  </div>
+
+                  <div className="mt-1 text-[11px] text-gray-800/60">
+                    {isCurrentMonth ? (
+                      dailyLimit ? (
+                        <>
+                          วันนี้ใช้ไป <span className="font-extrabold">{formatCurrency(daySpent)}</span> ({dayPct}%)
+                        </>
+                      ) : (
+                        <>
+                          วันนี้ใช้ไป <span className="font-extrabold">{formatCurrency(daySpent)}</span>
+                        </>
+                      )
+                    ) : (
+                      <span className="text-gray-500">ดูสถานะได้บน Dashboard (เฉพาะเดือนปัจจุบัน)</span>
+                    )}
+                  </div>
+
+                  {dailyLimit && isCurrentMonth ? (
+                    <div className="mt-3">
+                      <div className="h-2 rounded-full bg-white/30 overflow-hidden">
+                        <div
+                          className={`h-full ${dayOver > 0 ? "bg-red-600/80" : "bg-gray-900/50"}`}
+                          style={{ width: `${Math.min(100, Math.max(0, dayPct))}%` }}
+                        />
+                      </div>
+                      <div
+                        className={`mt-2 text-[11px] font-extrabold ${dayOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
+                      >
+                        {dayOver > 0
+                          ? `เกินงบ ${formatCurrency(dayOver)}`
+                          : `เหลือ ${formatCurrency(Math.max(0, dailyLimit - daySpent))}`}
+                      </div>
+                      {!(Number(overallDailyBudget?.limit || 0) > 0) && derivedDaily > 0 ? (
+                        <div className="mt-0.5 text-[10px] text-gray-900/45">* คำนวณจากงบรายเดือน / จำนวนวัน</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </button>
+
+                {/* Monthly */}
+                <button
+                  type="button"
+                  onClick={() => openEdit(BUDGET_TOTAL_ID)}
+                  className="glass-panel border border-white/20 rounded-2xl p-4 text-left active:scale-[0.99]"
+                  title="แตะเพื่อตั้ง/แก้ไข Monthly budget"
+                >
+                  <div className="text-xs font-extrabold text-gray-900/70 flex items-center gap-2">
+                    <span className="text-lg">{PSEUDO_BUDGET_CATS[BUDGET_TOTAL_ID].icon}</span> Monthly budget
+                  </div>
+
+                  <div className="mt-1 text-sm font-extrabold text-gray-900">
+                    {monthlyLimit ? formatCurrency(monthlyLimit) : <span className="text-gray-500">ยังไม่ตั้ง</span>}
+                  </div>
+
+                  <div className="mt-1 text-[11px] text-gray-800/60">
+                    {monthlyLimit ? (
+                      Number(overallMonthlyBudget?.limit || 0) > 0 ? (
+                        <>
+                          ใช้ไป <span className="font-extrabold">{formatCurrency(monthSpent)}</span> ({monthPct}%)
+                        </>
+                      ) : (
+                        <>
+                          ใช้ไป <span className="font-extrabold">{formatCurrency(monthSpent)}</span> ({monthPct}%) • รวมจากหมวด
+                        </>
+                      )
+                    ) : (
+                      <>
+                        ใช้ไป <span className="font-extrabold">{formatCurrency(monthSpent)}</span>
+                      </>
+                    )}
+                  </div>
+
+                  {monthlyLimit ? (
+                    <div className="mt-3">
+                      <div className="h-2 rounded-full bg-white/30 overflow-hidden">
+                        <div
+                          className={`h-full ${monthOver > 0 ? "bg-red-600/80" : "bg-gray-900/50"}`}
+                          style={{ width: `${Math.min(100, Math.max(0, monthPct))}%` }}
+                        />
+                      </div>
+                      <div
+                        className={`mt-2 text-[11px] font-extrabold ${monthOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
+                      >
+                        {monthOver > 0
+                          ? `เกินงบ ${formatCurrency(monthOver)}`
+                          : `เหลือ ${formatCurrency(Math.max(0, monthlyLimit - monthSpent))}`}
+                      </div>
+                    </div>
+                  ) : null}
+                </button>
+              </div>
+
+              <div className="mt-3 text-[11px] text-gray-800/55">
+                * ถ้าไม่ได้ตั้ง Monthly budget ระบบจะใช้ “งบรวมจากหมวด” (งบประมาณต่อหมวด) แทน • Daily budget ถ้าไม่ได้ตั้งจะคำนวณจาก Monthly / จำนวนวัน
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       <div className="space-y-3">

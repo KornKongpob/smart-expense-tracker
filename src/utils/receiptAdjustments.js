@@ -22,10 +22,21 @@ export function isAdjustmentLike(obj) {
   const t = obj && typeof obj === "object" ? obj : {};
   const lt = String(t.receiptLineType || t.lineType || t.kind || "").toLowerCase().trim();
   if (lt === "adjustment") return true;
+
+  // ✅ Discount category should behave as an adjustment even if other flags are missing
+  const cat = String(t.categoryId || t.category || "").toLowerCase().trim();
+  if (cat === "discount") return true;
+
+  // ✅ Explicit adjustment type (fee/discount/etc.)
   const at = String(t.adjustmentType || "").toLowerCase().trim();
   if (at) return true;
+
+  // ✅ IMPORTANT BUGFIX
+  // Many flows set adjustmentEffect="add" for normal receipt items.
+  // We must NOT treat "add" as an adjustment by itself, otherwise *all* receipt lines
+  // look like fees/adjustments and Split mode never detects real items.
   const ae = String(t.adjustmentEffect || t.effect || "").toLowerCase().trim();
-  return ae === "subtract" || ae === "add";
+  return ae === "subtract";
 }
 
 export function effectFactor(effect) {

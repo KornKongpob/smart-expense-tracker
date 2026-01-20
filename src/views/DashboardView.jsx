@@ -1,10 +1,84 @@
 // src/views/DashboardView.jsx
 import { useMemo, useState } from "react";
-import { Filter, TrendingDown, TrendingUp, FileText, Search, AlertTriangle } from "lucide-react";
+import { Filter, CalendarDays, Calendar, Search, AlertTriangle, FileText } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import { useAppStore } from "../store/store";
-import { calcTotals } from "../store/selectors";
-import { formatCurrency } from "../utils/format";
+import { getBudget, toMonthKey } from "../store/selectors";
+import { formatCurrency, toISODate } from "../utils/format";
+
+const BUDGET_TOTAL_ID = "__TOTAL__";
+const BUDGET_DAILY_ID = "__DAILY__";
+
+function daysInMonthKey(monthKey) {
+  const s = String(monthKey || "").trim();
+  const m = s.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return 30;
+  const y = Number(m[1]);
+  const mo = Math.max(1, Math.min(12, Number(m[2]) || 1));
+  return new Date(y, mo, 0).getDate(); // mo is 1-based, day 0 => last day prev month
+}
+
+function isTransferLike(t) {
+  if (!t) return false;
+  if (t.isTransfer) return true;
+  const c = String(t.category || "").toLowerCase().trim();
+  if (c === "transfer") return true;
+  if (String(t.transferId || "").trim()) return true;
+  return false;
+}
+
+function signedExpenseSatang(t) {
+  const amt = Number(t?.amount || 0) || 0;
+  if (!(amt > 0)) return 0;
+  const eff = String(t?.adjustmentEffect || "").toLowerCase().trim();
+  // discount adjustment reduces expense
+  return eff === "subtract" ? -Math.abs(amt) : Math.abs(amt);
+}
+
+function sumExpenseForDate(transactions, dateISO) {
+  const d = String(dateISO || "").slice(0, 10);
+  let sum = 0;
+  for (const t of transactions || []) {
+    if (!t) continue;
+    if (isTransferLike(t)) continue;
+    if (t?.isSplitParent) continue; // prevent double counting
+    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
+    const td = String(t?.date || "").slice(0, 10);
+    if (td !== d) continue;
+    sum += signedExpenseSatang(t);
+  }
+  return Math.max(0, Math.round(sum));
+}
+
+function sumExpenseForMonth(transactions, monthKey) {
+  const mk = String(monthKey || "").slice(0, 7);
+  let sum = 0;
+  for (const t of transactions || []) {
+    if (!t) continue;
+    if (isTransferLike(t)) continue;
+    if (t?.isSplitParent) continue;
+    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
+    const td = String(t?.date || "").slice(0, 7);
+    if (td !== mk) continue;
+    sum += signedExpenseSatang(t);
+  }
+  return Math.max(0, Math.round(sum));
+}
+
+function sumCategoryBudgetsForMonth(budgets, monthKey) {
+  const mk = String(monthKey || "").trim();
+  let sum = 0;
+  for (const b of budgets || []) {
+    if (!b) continue;
+    if (String(b?.month || "").trim() !== mk) continue;
+    const cid = String(b?.categoryId || "").trim();
+    // exclude global budgets
+    if (cid === BUDGET_TOTAL_ID || cid === BUDGET_DAILY_ID) continue;
+    const lim = Number(b?.limit || 0) || 0;
+    if (lim > 0) sum += lim;
+  }
+  return Math.max(0, Math.round(sum));
+}
 
 function getTxDateMs(t) {
   return t?.date ? new Date(String(t.date).slice(0, 10)).getTime() : 0;
@@ -37,7 +111,44 @@ export default function DashboardView() {
   const [filterAccount, setFilterAccount] = useState("");
   const [q, setQ] = useState("");
 
-  const totals = useMemo(() => calcTotals(state.transactions || []), [state.transactions]);
+  // ===== Budget tracking (Daily / Monthly) =====
+  const todayISO = toISODate(new Date());
+  const currentMonth = toMonthKey(todayISO);
+
+  const todaySpent = useMemo(
+    () => sumExpenseForDate(state.transactions || [], todayISO),
+    [state.transactions, todayISO]
+  );
+
+  const monthSpent = useMemo(
+    () => sumExpenseForMonth(state.transactions || [], currentMonth),
+    [state.transactions, currentMonth]
+  );
+
+  const monthlyBudgetCustom = useMemo(
+    () => getBudget(state.budgets || [], currentMonth, BUDGET_TOTAL_ID),
+    [state.budgets, currentMonth]
+  );
+
+  const dailyBudgetCustom = useMemo(
+    () => getBudget(state.budgets || [], currentMonth, BUDGET_DAILY_ID),
+    [state.budgets, currentMonth]
+  );
+
+  const perCatMonthlyLimit = useMemo(
+    () => sumCategoryBudgetsForMonth(state.budgets || [], currentMonth),
+    [state.budgets, currentMonth]
+  );
+
+  const monthlyLimit = (Number(monthlyBudgetCustom?.limit || 0) > 0 ? Number(monthlyBudgetCustom.limit) : perCatMonthlyLimit) || 0;
+  const derivedDailyLimit = monthlyLimit > 0 ? Math.round(monthlyLimit / daysInMonthKey(currentMonth)) : 0;
+  const dailyLimit = (Number(dailyBudgetCustom?.limit || 0) > 0 ? Number(dailyBudgetCustom.limit) : derivedDailyLimit) || 0;
+
+  const dailyPct = dailyLimit > 0 ? Math.round((todaySpent / dailyLimit) * 100) : 0;
+  const monthlyPct = monthlyLimit > 0 ? Math.round((monthSpent / monthlyLimit) * 100) : 0;
+
+  const dailyOver = dailyLimit > 0 ? Math.max(0, todaySpent - dailyLimit) : 0;
+  const monthlyOver = monthlyLimit > 0 ? Math.max(0, monthSpent - monthlyLimit) : 0;
 
   const allCats = useMemo(() => {
     const exp = state.categories?.expense || [];
@@ -281,20 +392,86 @@ export default function DashboardView() {
         </button>
       </div>
 
-      {/* Summary cards */}
+      {/* Budget status (tap to edit in Budget page) */}
       <div className="grid grid-cols-2 gap-3 mb-5">
-        <div className="glass-card rounded-3xl p-4">
+        <button
+          type="button"
+          onClick={() => navigate("budgets")}
+          className="glass-card rounded-3xl p-4 text-left hover:scale-[1.01] active:scale-[0.99] transition-transform"
+        >
           <div className="text-xs font-bold text-gray-900/60 mb-2 flex items-center gap-2">
-            <TrendingUp size={14} /> รายรับ
+            <CalendarDays size={14} /> วันนี้
           </div>
-          <div className="text-lg font-extrabold text-emerald-700">{formatCurrency(totals.income)}</div>
-        </div>
-        <div className="glass-card rounded-3xl p-4">
+
+          <div className="text-lg font-extrabold text-gray-900">{formatCurrency(todaySpent)}</div>
+
+          <div className="mt-1 text-[11px] text-gray-900/60">
+            {dailyLimit > 0
+              ? `งบ ${formatCurrency(dailyLimit)} • ${dailyPct}%`
+              : "ยังไม่ตั้ง Daily budget (แตะเพื่อตั้ง)"}
+          </div>
+
+          {dailyLimit > 0 ? (
+            <div className="mt-3">
+              <div className="h-2 rounded-full bg-white/25 overflow-hidden">
+                <div
+                  className={`h-full ${dailyOver > 0 ? "bg-red-600/80" : "bg-gray-900/50"}`}
+                  style={{ width: `${Math.min(100, Math.max(0, dailyPct))}%` }}
+                />
+              </div>
+              <div
+                className={`mt-2 text-[11px] font-extrabold ${dailyOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
+              >
+                {dailyOver > 0
+                  ? `เกินงบ ${formatCurrency(dailyOver)}`
+                  : `เหลือ ${formatCurrency(Math.max(0, dailyLimit - todaySpent))}`}
+              </div>
+              {!(Number(dailyBudgetCustom?.limit || 0) > 0) && dailyLimit > 0 && monthlyLimit > 0 ? (
+                <div className="mt-0.5 text-[10px] text-gray-900/45">* คำนวณจากงบรายเดือน / จำนวนวัน</div>
+              ) : null}
+            </div>
+          ) : null}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate("budgets")}
+          className="glass-card rounded-3xl p-4 text-left hover:scale-[1.01] active:scale-[0.99] transition-transform"
+        >
           <div className="text-xs font-bold text-gray-900/60 mb-2 flex items-center gap-2">
-            <TrendingDown size={14} /> รายจ่าย
+            <Calendar size={14} /> เดือนนี้
           </div>
-          <div className="text-lg font-extrabold text-red-700">{formatCurrency(totals.expense)}</div>
-        </div>
+
+          <div className="text-lg font-extrabold text-gray-900">{formatCurrency(monthSpent)}</div>
+
+          <div className="mt-1 text-[11px] text-gray-900/60">
+            {monthlyLimit > 0 ? (
+              Number(monthlyBudgetCustom?.limit || 0) > 0
+                ? `งบ ${formatCurrency(monthlyLimit)} • ${monthlyPct}%`
+                : `งบ ${formatCurrency(monthlyLimit)} (รวมจากหมวด) • ${monthlyPct}%`
+            ) : (
+              "ยังไม่ตั้ง Monthly budget (แตะเพื่อตั้ง)"
+            )}
+          </div>
+
+          {monthlyLimit > 0 ? (
+            <div className="mt-3">
+              <div className="h-2 rounded-full bg-white/25 overflow-hidden">
+                <div
+                  className={`h-full ${monthlyOver > 0 ? "bg-red-600/80" : "bg-gray-900/50"}`}
+                  style={{ width: `${Math.min(100, Math.max(0, monthlyPct))}%` }}
+                />
+              </div>
+              <div
+                className={`mt-2 text-[11px] font-extrabold ${monthlyOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
+              >
+                {monthlyOver > 0
+                  ? `เกินงบ ${formatCurrency(monthlyOver)}`
+                  : `เหลือ ${formatCurrency(Math.max(0, monthlyLimit - monthSpent))}`}
+              </div>
+            </div>
+          ) : null}
+        </button>
       </div>
 
       {/* Filters */}

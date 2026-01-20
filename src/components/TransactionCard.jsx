@@ -80,7 +80,13 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
 
         const rlt = String(ll.receiptLineType || '').toLowerCase().trim();
         const eff0 = String(ll.adjustmentEffect || '').toLowerCase().trim();
-        const isAdj = rlt === 'adjustment' || eff0 === 'subtract' || eff0 === 'add';
+        const at0 = String(ll.adjustmentType || '').toLowerCase().trim();
+        const cat0 = String(ll.categoryId || ll.category || '').toLowerCase().trim();
+
+        // ✅ IMPORTANT: don't treat adjustmentEffect="add" as an adjustment by itself.
+        // Normal receipt items commonly carry "add" (meaning they add to the paid total).
+        // Adjustment lines are identified by receiptLineType/adjustmentType (or subtract effect).
+        const isAdj = rlt === 'adjustment' || !!at0 || cat0 === 'discount' || eff0 === 'subtract';
         const receiptLineType = isAdj ? 'adjustment' : 'item';
         const adjustmentEffect = isAdj ? (eff0 === 'subtract' ? 'subtract' : 'add') : 'add';
 
