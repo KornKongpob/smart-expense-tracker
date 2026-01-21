@@ -311,7 +311,9 @@ const create = () => {
 
   const del = (id) => {
     if (!id) return;
-    const ok = window.confirm("ลบบัญชีนี้? (รายการธุรกรรมจะยังอยู่)");
+    const ok = window.confirm(
+      "ลบบัญชีนี้?\n\nระบบจะลบรายการธุรกรรมทั้งหมดของบัญชีนี้ด้วย (รวมถึงรายการโอนที่เกี่ยวข้อง)"
+    );
     if (!ok) return;
     deleteAccount(id);
     showAlert("ลบแล้ว", "warn");
@@ -1191,7 +1193,9 @@ const create = () => {
               <button
                 onClick={() => {
                   if (!eEditing) return;
-                  const ok = window.confirm("ลบบัญชีนี้? (รายการธุรกรรมจะยังอยู่)");
+                  const ok = window.confirm(
+                    "ลบบัญชีนี้?\n\nระบบจะลบรายการธุรกรรมทั้งหมดของบัญชีนี้ด้วย (รวมถึงรายการโอนที่เกี่ยวข้อง)"
+                  );
                   if (!ok) return;
                   deleteAccount(eEditing);
                   closeEditModal();

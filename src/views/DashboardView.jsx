@@ -1,5 +1,5 @@
 // src/views/DashboardView.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Filter, CalendarDays, Calendar, Search, AlertTriangle, FileText } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import { useAppStore } from "../store/store";
@@ -110,6 +110,14 @@ export default function DashboardView() {
 
   const [filterAccount, setFilterAccount] = useState("");
   const [q, setQ] = useState("");
+const PAGE_SIZE = 40;
+const [limit, setLimit] = useState(PAGE_SIZE);
+
+// Reset paging when filters change
+useEffect(() => {
+  setLimit(PAGE_SIZE);
+}, [filterAccount, q]);
+
 
   // ===== Budget tracking (Daily / Monthly) =====
   const todayISO = toISODate(new Date());
@@ -158,7 +166,7 @@ export default function DashboardView() {
 
   const accountName = (id) => state.accounts?.find((a) => a.id === id)?.name || "—";
 
-  const filtered = useMemo(() => {
+  const { items: filtered, hasMore } = useMemo(() => {
     const txsAll = state.transactions || [];
     const accountsArr = state.accounts || [];
     const expenseCats = state.categories?.expense || [];
@@ -197,9 +205,11 @@ export default function DashboardView() {
 
     if (filterAccount) base = base.filter((t) => t.accountId === filterAccount);
 
-    // ✅ hide split child transactions from the main list (children show inside parent breakdown)
-    base = base.filter((t) => !t?.isSplitChild);
-
+    // ✅ Search should include split-children so keywords inside child lines can be found.
+    // Without a query, keep the list clean by hiding children (they show inside parent breakdown).
+    if (!qn) {
+      base = base.filter((t) => !t?.isSplitChild);
+    }
     base = base.filter(matchQuery);
 
     // keep ordering (latest date first; same date: latest added first)
@@ -229,6 +239,7 @@ export default function DashboardView() {
     const seenTransferIds = new Set();
     const seenSplitGroupIds = new Set();
     const out = [];
+    let hasMore = false;
 
     for (const t of base) {
       const tid = String(t.transferId || "").trim();
@@ -361,11 +372,14 @@ export default function DashboardView() {
         out.push({ tx: t, category: cat, accountName: accName });
       }
 
-      if (out.length >= 40) break;
+      if (out.length >= limit) {
+        hasMore = true;
+        break;
+      }
     }
 
-    return out;
-  }, [state.transactions, state.accounts, state.categories, filterAccount, q, allCats]);
+    return { items: out, hasMore };
+  }, [state.transactions, state.accounts, state.categories, filterAccount, q, allCats, limit]);
 
   const startNewTransaction = () => {
     store.startNewTransaction();
@@ -521,7 +535,7 @@ export default function DashboardView() {
         <h2 className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
           <FileText size={16} /> รายการล่าสุด
         </h2>
-        <div className="text-xs text-gray-900/55 font-extrabold">{filtered.length ? `${filtered.length} รายการ` : ""}</div>
+        <div className="text-xs text-gray-900/55 font-extrabold">{filtered.length ? `${filtered.length}${hasMore ? "+" : ""} รายการ` : ""}</div>
       </div>
 
       {filtered.length ? (
@@ -547,6 +561,16 @@ export default function DashboardView() {
               />
             );
           })}
+{hasMore ? (
+  <button
+    type="button"
+    onClick={() => setLimit((n) => n + PAGE_SIZE)}
+    className="w-full glass-btn py-3 rounded-2xl font-extrabold text-gray-900 active:scale-[0.99]"
+  >
+    โหลดเพิ่ม
+  </button>
+) : null}
+
         </div>
       ) : (
         <div className="glass-card rounded-3xl p-8 text-center">

@@ -1,7 +1,9 @@
 // src/app/App.jsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useAppStore } from "../store/store";
+
+import { STORAGE_SAVE_ERROR_EVENT } from "../services/storage";
 
 // ✅ Use single navbar source
 import Navbar from "../components/Navbar.jsx";
@@ -173,6 +175,38 @@ export default function App() {
   };
 
   const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
+
+  // ✅ Warn user when LocalStorage saving fails (usually quota exceeded)
+  const storageErrorShownAtRef = useRef(0);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onStorageSaveError = (ev) => {
+      const now = Date.now();
+      if (now - storageErrorShownAtRef.current < 30000) return; // throttle
+      storageErrorShownAtRef.current = now;
+
+      const bytes = Number(ev?.detail?.approxBytes || 0) || 0;
+      const mb = bytes ? (bytes / 1024 / 1024).toFixed(2) : "";
+      const sizeHint = mb ? `\n\nขนาด payload ล่าสุด ~${mb}MB` : "";
+
+      showConfirm(
+        "พื้นที่จัดเก็บเต็ม: บันทึกข้อมูลไม่สำเร็จ",
+        `ระบบไม่สามารถบันทึกข้อมูลลงเครื่องได้ (LocalStorage อาจเกินโควต้า ~5MB)${sizeHint}\n\nแนะนำ:\n1) ไปที่ More → Export Backup ทันที\n2) ลบรายการ/รูปที่ไม่จำเป็น (รูปภาพกินพื้นที่มาก)\n3) หากยังไม่หาย ลองเปิดด้วย Browser อื่น หรือเคลียร์พื้นที่เก็บข้อมูล`,
+        () => {
+          try {
+            store.navigate?.("more");
+          } catch {
+            // ignore
+          }
+        },
+        true
+      );
+    };
+
+    window.addEventListener(STORAGE_SAVE_ERROR_EVENT, onStorageSaveError);
+    return () => window.removeEventListener(STORAGE_SAVE_ERROR_EVENT, onStorageSaveError);
+  }, [store, showConfirm]);
 
   const view = state?.ui?.view || "dashboard";
 

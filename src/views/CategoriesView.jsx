@@ -60,7 +60,10 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   const [editingId, setEditingId] = useState(""); // "" = create new
   const [q, setQ] = useState("");
 
-  const cats = useMemo(() => state.categories?.[tab] ?? [], [state.categories, tab]);
+  // ✅ Tombstone strategy: deleteCategory will "hide" a category (mark deletedAt)
+  // so historical reports can still resolve the old name/icon.
+  const catsAll = useMemo(() => state.categories?.[tab] ?? [], [state.categories, tab]);
+  const cats = useMemo(() => (catsAll || []).filter((c) => !c?.deletedAt && !c?.isDeleted), [catsAll]);
 
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("🏷️");
@@ -94,23 +97,21 @@ export default function CategoriesView({ showAlert, showConfirm }) {
     setOpen(true);
   };
 
-  // ---- IMPORTANT ----
-  // We implement "update category" without needing new store action:
-  // deleteCategory + addCategory with same id (replacement).
-  // This keeps current architecture compatible.
   const upsertLocalCategory = ({ id, name, icon, color, keywords }) => {
-    const list = state.categories?.[tab] ?? [];
-    const existing = list.find((c) => c.id === id);
+    const listAll = state.categories?.[tab] ?? [];
+    const existing = listAll.find((c) => c.id === id);
 
-    const payload = { id, name: String(name || "").trim(), icon, color, keywords: uniqKeywords(keywords) };
+    const payload = {
+      ...(existing || {}),
+      id,
+      name: String(name || "").trim(),
+      icon,
+      color,
+      keywords: uniqKeywords(keywords),
+    };
 
-    if (existing) {
-      // delete then add to simulate update
-      deleteCategory({ id, type: tab });
-      addCategory({ type: tab, category: payload });
-    } else {
-      addCategory({ type: tab, category: payload });
-    }
+    // store.addCategory is an UPSERT now
+    addCategory({ type: tab, category: payload });
   };
 
   const addOrSave = () => {
@@ -123,7 +124,8 @@ export default function CategoriesView({ showAlert, showConfirm }) {
       if (!base) base = `cat_${Date.now()}`;
       let id = base;
       let i = 2;
-      while (cats.some((c) => c.id === id)) id = `${base}_${i++}`;
+      // Ensure unique across ALL categories (including deleted/tombstoned)
+      while (catsAll.some((c) => c.id === id)) id = `${base}_${i++}`;
 
       upsertLocalCategory({ id, name: name.trim(), icon, color, keywords: kw });
     } else {
@@ -136,8 +138,13 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   };
 
   const del = (id) => {
-    if ((state.categories?.[tab] ?? []).length <= 1) return showAlert?.("ต้องมีอย่างน้อย 1 หมวดหมู่");
-    showConfirm?.("ลบหมวดหมู่", "ยืนยันลบหมวดหมู่นี้?", () => deleteCategory({ id, type: tab }), true);
+    if ((cats || []).length <= 1) return showAlert?.("ต้องมีอย่างน้อย 1 หมวดหมู่");
+    showConfirm?.(
+      "ลบหมวดหมู่",
+      "ยืนยันลบหมวดหมู่นี้?\n\nหมายเหตุ: หมวดจะถูกซ่อนจากการเลือกใหม่ แต่รายงานย้อนหลัง/งบประมาณยังแสดงชื่อเดิมได้ (ไม่ทำให้ข้อมูลเก่าขึ้น \"—\")",
+      () => deleteCategory({ id, type: tab }),
+      true
+    );
   };
 
   const addKeyword = () => {

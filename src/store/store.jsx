@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useMemo, useReducer } from
 import { ACTIONS } from "./actions";
 
 import { loadAll, saveAll, clearAll } from "../services/storage";
-import { clearAllBlobs } from "../services/blobStore";
+import { clearAllBlobs, deleteBlob } from "../services/blobStore";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
 import { ACCOUNT_ICONS } from "../constants/presets.jsx"; // ✅ for iconId validation + future UI usage
 import { generateId } from "../utils/id";
@@ -232,16 +232,18 @@ function normalizeAccount(a) {
 }
 
 function normalizeBoot(boot) {
-  const fromUnit = String(boot?.moneyUnit || '').toLowerCase() === 'satang' ? 'satang' : 'baht';
+  const root = boot && typeof boot === 'object' && boot.data && typeof boot.data === 'object' ? boot.data : boot;
+
+  const fromUnit = String(root?.moneyUnit || root?.amountUnit || '').toLowerCase() === 'satang' ? 'satang' : 'baht';
 
   const convertAmount = (v) => normalizeMoneyFromUnit(v, fromUnit);
 
-  const transactions = toArray(boot?.transactions).map((t) => ({
+  const transactions = toArray(root?.transactions).map((t) => ({
     ...(t && typeof t === 'object' ? t : {}),
     amount: convertAmount(t?.amount),
   }));
 
-  const accountsRaw = toArray(boot?.accounts);
+  const accountsRaw = toArray(root?.accounts);
   const accountsSeed = accountsRaw.length ? accountsRaw : DEFAULT_ACCOUNTS;
   const accounts = accountsSeed.map((a) =>
     normalizeAccount({
@@ -251,15 +253,15 @@ function normalizeBoot(boot) {
     })
   );
 
-  const cats = boot?.categories && typeof boot.categories === "object" ? boot.categories : DEFAULT_CATEGORIES;
+  const cats = root?.categories && typeof root.categories === "object" ? root.categories : DEFAULT_CATEGORIES;
   const categories = ensureCategories(cats);
 
-  const budgets = toArray(boot?.budgets).map((b) => ({
+  const budgets = toArray(root?.budgets).map((b) => ({
     ...(b && typeof b === 'object' ? b : {}),
     limit: convertAmount(b?.limit),
   }));
 
-  const recurring = toArray(boot?.recurring).map((r) => ({
+  const recurring = toArray(root?.recurring).map((r) => ({
     ...(r && typeof r === 'object' ? r : {}),
     amount: convertAmount(r?.amount),
   }));
@@ -277,10 +279,10 @@ function normalizeBoot(boot) {
     return o;
   };
 
-  const scanInbox = toArray(boot?.scanInbox).map(convertInboxItem);
-  const inbox = toArray(boot?.inbox).map(convertInboxItem);
+  const scanInbox = toArray(root?.scanInbox).map(convertInboxItem);
+  const inbox = toArray(root?.inbox).map(convertInboxItem);
 
-  const rules = toArray(boot?.rules).map((r) => {
+  const rules = toArray(root?.rules).map((r) => {
     const rr = r && typeof r === 'object' ? { ...r } : {};
     const c = rr.conditions && typeof rr.conditions === 'object' ? { ...rr.conditions } : {};
     // amountMin/Max are stored as SATANG after migration
@@ -292,7 +294,7 @@ function normalizeBoot(boot) {
     return rr;
   });
 
-  const ui = boot?.ui && typeof boot.ui === "object" ? boot.ui : undefined;
+  const ui = root?.ui && typeof root.ui === "object" ? root.ui : undefined;
 
   return {
     transactions,
@@ -357,6 +359,21 @@ function normalizeRules(list) {
   return withP.map((r, idx) => ({ ...r, priority: idx + 1 }));
 }
 
+// ---------- geolocation normalization ----------
+function normalizeLocation(raw) {
+  const loc = raw && typeof raw === "object" ? raw : null;
+  if (!loc) return null;
+
+  const lat = Number(loc.lat ?? loc.latitude);
+  const lng = Number(loc.lng ?? loc.lon ?? loc.longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+
+  const round6 = (n) => Math.round(n * 1e6) / 1e6;
+  return { lat: round6(lat), lng: round6(lng) };
+}
+
 // ---------- transaction normalization ----------
 function normalizeTransaction(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
@@ -367,6 +384,7 @@ function normalizeTransaction(raw) {
   const dateMs = date ? new Date(date).getTime() : 0;
   const createdAt = Number(t.createdAt || t.addedAt || t.updatedAt || dateMs || Date.now());
   const updatedAt = Number(t.updatedAt || createdAt);
+  const location = normalizeLocation(t.location);
 
   return {
     ...t,
@@ -377,6 +395,8 @@ function normalizeTransaction(raw) {
     createdAt,
     updatedAt,
     isTransfer: !!t.isTransfer,
+    // optional GPS capture
+    location: location || null,
   };
 }
 
@@ -502,6 +522,10 @@ function migrateScanInboxToInbox(scanInbox) {
 }
 
 // ---------- recurring generation ----------
+// ✅ Safety cap per run (prevents accidental backfill flood)
+// NOTE: we still allow users to run multiple times; UI will warn when truncated.
+const MAX_RECURRING_CREATE_PER_RUN = 200;
+
 function addDaysLocal(dateObj, n) {
   const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
   d.setDate(d.getDate() + n);
@@ -533,15 +557,23 @@ function generateDueTransactionsForRecurring(r, todayISO) {
   const txs = [];
   let lastGenDate = r.lastGenerated ? parseDateSafe(r.lastGenerated) : null;
 
+  let truncated = false;
+  let nextDueISO = null;
+
   let safety = 0;
   while (nextDue.getTime() <= today.getTime()) {
     safety += 1;
-    if (safety > 500) break;
+    // Safety cap: prevent huge accidental backfills from flooding the UI
+    if (safety > MAX_RECURRING_CREATE_PER_RUN) {
+      truncated = true;
+      nextDueISO = toISODate(nextDue);
+      break;
+    }
 
     const iso = toISODate(nextDue);
 
     txs.push({
-      id: generateId(),
+      id: `rec_${r.id}_${iso}`,
       type: r.type === "income" ? "income" : "expense",
       amount: safeSatang(r.amount, 0),
       category: r.categoryId,
@@ -552,19 +584,22 @@ function generateDueTransactionsForRecurring(r, todayISO) {
       transferId: null,
       ref: null,
       source: "recurring",
-      meta: { kind: "recurring", recurringId: r.id || null },
+      meta: { kind: "recurring", recurringId: r.id || null, dueDate: iso },
     });
 
     lastGenDate = nextDue;
     nextDue = advanceRecurringDate(nextDue, r.frequency, r.interval);
   }
 
+  // If we didn't hit cap but there is still something due (edge-case), keep nextDueISO
+  if (!nextDueISO && nextDue?.getTime?.() <= today.getTime()) nextDueISO = toISODate(nextDue);
+
   const nextRecurring = {
     ...r,
     lastGenerated: lastGenDate ? toISODate(lastGenDate) : r.lastGenerated || null,
   };
 
-  return { txs, nextRecurring };
+  return { txs, nextRecurring, truncated, nextDueISO, cap: MAX_RECURRING_CREATE_PER_RUN };
 }
 
 // ---------- reducer ----------
@@ -619,6 +654,22 @@ export function reducer(state, action) {
       };
     }
 
+    case ACTIONS.DELETE_MANY_TRANSACTIONS: {
+      const ids = Array.isArray(action.payload) ? action.payload : [];
+      const delSet = new Set(ids.map((x) => String(x || "")).filter(Boolean));
+      if (!delSet.size) return state;
+
+      const transactions = (state.transactions || []).filter((t) => !delSet.has(String(t?.id || "")));
+      const editingId = delSet.has(String(state.ui.editingId || "")) ? null : state.ui.editingId;
+
+      const navigateToDashboard = action?.meta?.navigateToDashboard !== false;
+      return {
+        ...state,
+        transactions,
+        ui: navigateToDashboard ? { ...state.ui, editingId, view: "dashboard" } : { ...state.ui, editingId },
+      };
+    }
+
     case ACTIONS.ADD_ACCOUNT: {
       return { ...state, accounts: [...state.accounts, normalizeAccount(action.payload)] };
     }
@@ -633,21 +684,110 @@ export function reducer(state, action) {
     }
 
     case ACTIONS.DELETE_ACCOUNT: {
-      const id = action.payload;
-      const accounts = state.accounts.filter((a) => a.id !== id);
-      // ✅ keep historical transactions (UI expects transactions to remain)
-      // They will display with accountName = "—" if the account is deleted.
-      return { ...state, accounts };
+      const payload = action.payload;
+      const id = typeof payload === "string" ? payload : payload?.id;
+      if (!id) return state;
+
+      const accounts = (state.accounts || []).filter((a) => a.id !== id);
+
+      // ✅ Cascade delete transactions belonging to this account
+      let cascadeTxIds = Array.isArray(payload?.cascadeTxIds) ? payload.cascadeTxIds : null;
+      if (!cascadeTxIds) {
+        const txs = Array.isArray(state.transactions) ? state.transactions : [];
+        const idsToDelete = new Set();
+        const transferIdsToDelete = new Set();
+
+        const isTransferLikeTx = (t) => {
+          if (!t) return false;
+          if (t.isTransfer) return true;
+          const tid = String(t.transferId || "").trim();
+          if (tid) return true;
+          const c = String(t.category || "").toLowerCase().trim();
+          return c === "transfer";
+        };
+
+        for (const t of txs) {
+          if (String(t?.accountId || "").trim() !== String(id)) continue;
+          const tid = String(t?.id || "").trim();
+          if (tid) idsToDelete.add(tid);
+          if (isTransferLikeTx(t)) {
+            const trId = String(t?.transferId || "").trim();
+            if (trId) transferIdsToDelete.add(trId);
+          }
+        }
+
+        if (transferIdsToDelete.size) {
+          for (const t of txs) {
+            if (!isTransferLikeTx(t)) continue;
+            const trId = String(t?.transferId || "").trim();
+            if (!trId || !transferIdsToDelete.has(trId)) continue;
+            const tid = String(t?.id || "").trim();
+            if (tid) idsToDelete.add(tid);
+          }
+        }
+
+        cascadeTxIds = Array.from(idsToDelete);
+      }
+
+      const delSet = new Set((cascadeTxIds || []).map((x) => String(x || "")).filter(Boolean));
+      const transactions = delSet.size ? (state.transactions || []).filter((t) => !delSet.has(String(t?.id || ""))) : state.transactions;
+
+      // ✅ Prevent orphan references in other data sources (fallback to first remaining account)
+      const fallbackAccountId = String(accounts?.[0]?.id || "");
+
+      const recurring = (state.recurring || []).map((r) =>
+        String(r?.accountId || "") === String(id) ? { ...r, accountId: fallbackAccountId } : r
+      );
+
+      const patchInboxAccount = (it) => {
+        if (!it) return it;
+        const next = { ...it };
+        if (String(next.accountId || "") === String(id)) next.accountId = fallbackAccountId;
+        if (String(next.fromAccountId || "") === String(id)) next.fromAccountId = fallbackAccountId;
+        if (String(next.toAccountId || "") === String(id)) next.toAccountId = fallbackAccountId;
+        return next;
+      };
+      const inbox = (state.inbox || []).map(patchInboxAccount);
+
+      const editingId = delSet.has(String(state.ui.editingId || "")) ? null : state.ui.editingId;
+      const view = delSet.has(String(state.ui.editingId || "")) ? "dashboard" : state.ui.view;
+
+      return {
+        ...state,
+        accounts,
+        transactions,
+        recurring,
+        inbox,
+        scanInbox: inbox,
+        ui: { ...state.ui, editingId, view },
+      };
     }
 
     case ACTIONS.ADD_CATEGORY: {
       const { type, category } = action.payload || {};
       if (!type || !category) return state;
+      const now = Date.now();
+      const list = state.categories[type] || [];
+      const id = String(category?.id || "").trim();
+      if (!id) return state;
+
+      // ✅ Upsert by id, and ensure the category becomes active (not tombstoned)
+      const cleaned = {
+        ...category,
+        id,
+        deletedAt: null,
+        isDeleted: false,
+        updatedAt: now,
+      };
+
+      const exists = list.some((c) => String(c?.id || "") === id);
+      const nextList = exists ? list.map((c) => (String(c?.id || "") === id ? { ...c, ...cleaned } : c)) : [...list, cleaned];
+
       return {
         ...state,
         categories: {
           ...state.categories,
-          [type]: [...(state.categories[type] || []), category],
+          [type]: nextList,
         },
       };
     }
@@ -655,11 +795,27 @@ export function reducer(state, action) {
     case ACTIONS.DELETE_CATEGORY: {
       const { type, id } = action.payload || {};
       if (!type || !id) return state;
+      const now = Date.now();
+      const list = state.categories[type] || [];
+      let changed = false;
+      const nextList = list.map((c) => {
+        if (String(c?.id || "") !== String(id)) return c;
+        changed = true;
+        return {
+          ...c,
+          isDeleted: true,
+          deletedAt: c?.deletedAt || now,
+          updatedAt: now,
+        };
+      });
+
+      if (!changed) return state;
+
       return {
         ...state,
         categories: {
           ...state.categories,
-          [type]: (state.categories[type] || []).filter((c) => c.id !== id),
+          [type]: nextList,
         },
       };
     }
@@ -1015,12 +1171,48 @@ export function AppStoreProvider({ children }) {
       });
     };
 
-    const deleteTransaction = (id) => dispatch({ type: ACTIONS.DELETE_TRANSACTION, payload: id });
+    // ✅ Attachment cleanup (IndexedDB blobs)
+    // When deleting transactions, also delete orphaned blobs to prevent storage leaks.
+    const cleanupBlobsForTxIds = (ids) => {
+      const txs = Array.isArray(state.transactions) ? state.transactions : [];
+      const delSet = new Set((Array.isArray(ids) ? ids : []).map((x) => String(x || "")).filter(Boolean));
+      if (!delSet.size) return;
+
+      const attachmentIds = new Set();
+      for (const t of txs) {
+        const tid = String(t?.id || "");
+        if (!tid || !delSet.has(tid)) continue;
+        const aid = String(t?.attachmentId || "").trim();
+        if (aid) attachmentIds.add(aid);
+      }
+
+      for (const aid of attachmentIds) {
+        // Only delete if nothing else (outside of delSet) still references this blob.
+        const stillUsed = txs.some(
+          (t) => !delSet.has(String(t?.id || "")) && String(t?.attachmentId || "").trim() === aid
+        );
+        if (stillUsed) continue;
+        try {
+          void deleteBlob(aid);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const deleteTransaction = (id) => {
+      const tid = String(id || "").trim();
+      if (!tid) return;
+      cleanupBlobsForTxIds([tid]);
+      dispatch({ type: ACTIONS.DELETE_TRANSACTION, payload: tid });
+    };
 
     const deleteManyTransactions = (ids, { navigateToDashboard = true } = {}) => {
-      const list = Array.isArray(ids) ? ids.filter(Boolean).map(String) : [];
+      const list = Array.isArray(ids) ? ids.filter(Boolean).map((x) => String(x).trim()).filter(Boolean) : [];
       if (!list.length) return;
-      dispatch({ type: ACTIONS.DELETE_MANY_TRANSACTIONS, payload: list, meta: { navigateToDashboard } });
+      const uniq = Array.from(new Set(list));
+      cleanupBlobsForTxIds(uniq);
+      dispatch({ type: ACTIONS.DELETE_MANY_TRANSACTIONS, payload: uniq, meta: { navigateToDashboard } });
     };
 
     const addAccount = (account) => {
@@ -1036,7 +1228,50 @@ export function AppStoreProvider({ children }) {
       dispatch({ type: ACTIONS.UPDATE_ACCOUNT, payload: partial });
     };
 
-    const deleteAccount = (id) => dispatch({ type: ACTIONS.DELETE_ACCOUNT, payload: id });
+    // ✅ Cascade delete (Option B): delete the account AND all transactions belonging to it.
+    // Also delete the counterpart legs for transfers, to avoid leaving a one-sided transfer.
+    const deleteAccount = (id) => {
+      const accId = String(id || "").trim();
+      if (!accId) return;
+
+      const txs = Array.isArray(state.transactions) ? state.transactions : [];
+      const idsToDelete = new Set();
+      const transferIdsToDelete = new Set();
+
+      const isTransferLikeTx = (t) => {
+        if (!t) return false;
+        if (t.isTransfer) return true;
+        const tid = String(t.transferId || "").trim();
+        if (tid) return true;
+        const c = String(t.category || "").toLowerCase().trim();
+        return c === "transfer";
+      };
+
+      for (const t of txs) {
+        if (String(t?.accountId || "").trim() !== accId) continue;
+        const tid = String(t?.id || "").trim();
+        if (tid) idsToDelete.add(tid);
+        if (isTransferLikeTx(t)) {
+          const trId = String(t?.transferId || "").trim();
+          if (trId) transferIdsToDelete.add(trId);
+        }
+      }
+
+      if (transferIdsToDelete.size) {
+        for (const t of txs) {
+          if (!isTransferLikeTx(t)) continue;
+          const trId = String(t?.transferId || "").trim();
+          if (!trId || !transferIdsToDelete.has(trId)) continue;
+          const tid = String(t?.id || "").trim();
+          if (tid) idsToDelete.add(tid);
+        }
+      }
+
+      const cascadeTxIds = Array.from(idsToDelete);
+      if (cascadeTxIds.length) cleanupBlobsForTxIds(cascadeTxIds);
+
+      dispatch({ type: ACTIONS.DELETE_ACCOUNT, payload: { id: accId, cascadeTxIds } });
+    };
 
     /**
      * ✅ Adjust account balance
@@ -1058,8 +1293,11 @@ export function AppStoreProvider({ children }) {
         const isIncome = delta > 0;
         const category = "adjust_balance";
 
+        // ✅ Use a fresh id (avoid undefined variables + prevent accidental overwrite)
+        const id = generateId();
+
         upsertTransaction({
-          id: generateId(),
+          id,
           type: isIncome ? "income" : "expense",
           amount: Math.abs(delta),
           category,
@@ -1106,11 +1344,15 @@ export function AppStoreProvider({ children }) {
 
       const created = [];
       const nextRecurring = [];
+      const truncatedRules = [];
 
       for (const r of state.recurring || []) {
-        const { txs, nextRecurring: nr } = generateDueTransactionsForRecurring(r, todayISO);
+        const { txs, nextRecurring: nr, truncated, nextDueISO, cap } = generateDueTransactionsForRecurring(r, todayISO);
         if (txs.length) created.push(...txs);
         nextRecurring.push(nr);
+        if (truncated) {
+          truncatedRules.push({ id: String(r?.id || ""), nextDueISO: nextDueISO || null, cap: cap || MAX_RECURRING_CREATE_PER_RUN });
+        }
       }
 
       if (created.length) {
@@ -1120,7 +1362,7 @@ export function AppStoreProvider({ children }) {
         });
       }
 
-      return created.length;
+      return { createdCount: created.length, truncatedRules, cap: MAX_RECURRING_CREATE_PER_RUN, todayISO };
     };
 
     const resetAll = () => {
@@ -1148,7 +1390,15 @@ export function AppStoreProvider({ children }) {
       });
     };
 
-    const importBackup = (payload) => dispatch({ type: ACTIONS.IMPORT_BACKUP, payload });
+    const importBackup = (payload) => {
+      // ✅ Backup does not include binary attachments; clear old blobs to avoid orphans.
+      try {
+        void clearAllBlobs();
+      } catch {
+        // ignore
+      }
+      dispatch({ type: ACTIONS.IMPORT_BACKUP, payload });
+    };
     // inbox
     const addInboxItems = (items) => dispatch({ type: ACTIONS.INBOX_UPSERT_MANY, payload: items });
     const updateInboxItem = (id, patch) => dispatch({ type: ACTIONS.INBOX_UPDATE_ONE, payload: { id, patch } });
@@ -1196,18 +1446,24 @@ export function AppStoreProvider({ children }) {
 
 
     const exportBackup = () => ({
-      transactions: state.transactions ?? [],
-      accounts: state.accounts ?? [],
-      categories: state.categories ?? { expense: [], income: [] },
-      budgets: state.budgets ?? [],
-      recurring: state.recurring ?? [],
-      merchants: state.merchants ?? [],
-      rules: state.rules ?? [],
-      inbox: state.inbox ?? [],
-      // backward compatibility
-      scanInbox: state.inbox ?? [],
-      ui: state.ui ?? { view: "dashboard", editingId: null },
-    });
+  v: 1,
+  exportedAt: Date.now(),
+  data: {
+    // ✅ important: tells importer how to interpret all money fields
+    moneyUnit: state.moneyUnit || "satang",
+    transactions: state.transactions ?? [],
+    accounts: state.accounts ?? [],
+    categories: state.categories ?? { expense: [], income: [] },
+    budgets: state.budgets ?? [],
+    recurring: state.recurring ?? [],
+    merchants: state.merchants ?? [],
+    rules: state.rules ?? [],
+    inbox: state.inbox ?? [],
+    // backward compatibility
+    scanInbox: state.inbox ?? [],
+    ui: state.ui ?? { view: "dashboard", editingId: null },
+  },
+});
 
     const actions = {
       navigate,

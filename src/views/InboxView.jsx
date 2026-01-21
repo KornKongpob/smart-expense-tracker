@@ -1664,14 +1664,8 @@ export default function InboxView({ showAlert, showConfirm }) {
           // ignore
         }
 
-        const approvedAt = Date.now();
-        addInboxItems(
-          normalizedItems.map((it) => ({
-            ...it,
-            status: "approved",
-            approvedAt,
-          }))
-        );
+        // ✅ auto-clean: remove approved items from Inbox (main transactions become the source of truth)
+        removeInboxItems(list);
 
         setSelectedIds(new Set());
         showAlert?.(`Approve แล้ว (${items.length} รายการ / สร้าง ${allTxs.length} transactions)`);

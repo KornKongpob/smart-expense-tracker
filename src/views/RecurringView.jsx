@@ -172,7 +172,15 @@ export default function RecurringView({ showAlert, showConfirm }) {
   };
 
   const runNow = () => {
-    const n = runRecurringNow?.() ?? 0;
+    const res = runRecurringNow?.() || { createdCount: 0, truncatedRules: [], cap: 0 };
+    const n = Number(res.createdCount || 0) || 0;
+    const truncated = Array.isArray(res.truncatedRules) ? res.truncatedRules.length : 0;
+    if (truncated) {
+      showAlert?.(
+        `สร้างรายการตาม Recurring เพิ่มแล้ว ${n} รายการ (ถึงวันที่ ${todayISO}) — บางกฎถูกจำกัดต่อครั้ง ${res.cap} รายการ (กด Run อีกครั้งเพื่อสร้างต่อ)`
+      );
+      return;
+    }
     showAlert?.(`สร้างรายการตาม Recurring เพิ่มแล้ว ${n} รายการ (ถึงวันที่ ${todayISO})`);
   };
 

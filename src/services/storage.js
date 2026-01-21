@@ -12,6 +12,33 @@
 const STORAGE_KEY = "smart-expense-tracker_v1";
 const STORAGE_VERSION = 1;
 
+// ✅ Notify UI when persisting fails (e.g., LocalStorage quota exceeded)
+// This prevents the app from silently "not saving" new data.
+export const STORAGE_SAVE_ERROR_EVENT = "app:storage-save-error";
+let lastSaveErrorAt = 0;
+
+function emitStorageSaveError(err, { key = STORAGE_KEY, jsonLength = 0 } = {}) {
+  if (!hasWindow()) return;
+  const now = Date.now();
+  // throttle: avoid spamming the UI when every state change triggers save
+  if (now - lastSaveErrorAt < 15000) return;
+  lastSaveErrorAt = now;
+
+  try {
+    const detail = {
+      key,
+      ts: now,
+      errorName: String(err?.name || ""),
+      message: String(err?.message || err || ""),
+      // approx bytes (LocalStorage quota is typically ~5MB)
+      approxBytes: Math.max(0, Number(jsonLength) || 0),
+    };
+    window.dispatchEvent(new CustomEvent(STORAGE_SAVE_ERROR_EVENT, { detail }));
+  } catch {
+    // ignore
+  }
+}
+
 function hasWindow() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
@@ -174,9 +201,14 @@ export function saveAll(payload) {
 
   try {
     window.localStorage.setItem(STORAGE_KEY, json);
-  } catch {
-    // ignore quota / serialization errors
-    // (ป้องกันแอพ crash เมื่อ storage เต็ม หรือ iOS Safari โยน error)
+  } catch (err) {
+    // ✅ Do not fail silently: notify UI so user can Export/cleanup.
+    try {
+      console.error("[storage] saveAll failed", err);
+    } catch {
+      // ignore
+    }
+    emitStorageSaveError(err, { key: STORAGE_KEY, jsonLength: json.length });
   }
 }
 
@@ -220,8 +252,13 @@ export function saveState(state) {
 
   try {
     window.localStorage.setItem(STORAGE_KEY, json);
-  } catch {
-    // ignore quota / serialization errors
+  } catch (err) {
+    try {
+      console.error("[storage] saveState failed", err);
+    } catch {
+      // ignore
+    }
+    emitStorageSaveError(err, { key: STORAGE_KEY, jsonLength: json.length });
   }
 }
 

@@ -27,10 +27,11 @@ import AmountField from "../components/AmountField";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../services/blobStore";
 import { formatCurrency, toISODate } from "../utils/format";
-import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput } from "../utils/money";
+import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput, normalizeThaiDigits } from "../utils/money";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { useBlobUrl } from "../utils/useBlobUrl";
 import { PRESET_COLORS } from "../constants/presets.jsx";
+import { findNearbyMerchant, normalizeLatLng } from "../utils/location";
 import {
   isDuplicateByRef,
   findFuzzyDuplicate,
@@ -441,6 +442,101 @@ function looksLikeExpenseText(text) {
   );
 }
 
+// ===== Slip Hunter helpers (Thai transfer slips) =====
+const THAI_SLIP_BANK_KEYWORDS = [
+  { id: "kbank", keys: ["kbank", "kasikorn", "kasikornbank", "กสิกร", "กสิกรไทย", "kbiz"] },
+  { id: "scb", keys: ["scb", "siam commercial", "siam commercial bank", "ไทยพาณิช", "ไทยพาณิชย์"] },
+  { id: "ktb", keys: ["ktb", "krungthai", "กรุงไทย"] },
+  { id: "ttb", keys: ["ttb", "ทหารไทย", "ธนชาต", "ทหารไทยธนชาต", "tmb"] },
+  { id: "truemoney", keys: ["truemoney", "true money", "ทรูมันนี่", "ทรู มันนี่", "wallet", "วอลเล็ต"] },
+];
+
+function fixBuddhistYearISO(isoLike) {
+  const raw = String(isoLike || "").trim();
+  if (!raw) return "";
+  const s = normalizeThaiDigits(raw);
+  const m = s.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if (!m) return raw.slice(0, 10);
+  let y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return raw.slice(0, 10);
+  if (y >= 2400) y = y - 543;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${y}-${pad(mo)}-${pad(d)}`;
+}
+
+function parseSlipTimeFromText(text) {
+  const t0 = String(text || "").replace(/\u00A0/g, " ").trim();
+  if (!t0) return "";
+  const t = normalizeThaiDigits(t0);
+  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[\.:](\d{2})(?:[\.:](\d{2}))?/i);
+  if (!m) return "";
+  const hh = String(m[1]).padStart(2, "0");
+  const mm = String(m[2]).padStart(2, "0");
+  const ss = m[3] != null ? String(m[3]).padStart(2, "0") : "";
+  return ss ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
+}
+
+function guessSlipReceiverBankId(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t) return "";
+  for (const b of THAI_SLIP_BANK_KEYWORDS) {
+    if (b.keys.some((k) => t.includes(String(k).toLowerCase()))) return b.id;
+  }
+  return "";
+}
+
+function guessSlipCategoryKey(merchantText) {
+  const m = String(merchantText || "").toLowerCase();
+  if (!m) return "";
+
+  // Utilities / Bills
+  if (
+    m.includes("การไฟฟ้า") ||
+    m.includes("pea") ||
+    m.includes("mea") ||
+    m.includes("egat") ||
+    m.includes("electric") ||
+    m.includes("การประปา") ||
+    m.includes("waterworks") ||
+    m.includes("internet") ||
+    m.includes("เน็ตทรู") ||
+    m.includes("true") ||
+    m.includes("ais") ||
+    m.includes("dtac")
+  ) {
+    return "bills";
+  }
+
+  // Phone package explicitly
+  if (m.includes("แพ็กเกจ") || m.includes("package") || m.includes("mobile") || m.includes("มือถือ")) {
+    return "phone_internet";
+  }
+
+  // Transport / delivery apps
+  if (m.includes("grab") || m.includes("bolt") || m.includes("lineman") || m.includes("line man") || m.includes("shopeefood")) {
+    return "transport";
+  }
+
+  // Coffee
+  if (m.includes("starbucks") || m.includes("cafe") || m.includes("กาแฟ") || m.includes("coffee")) {
+    return "coffee";
+  }
+
+  // Food / dining
+  if (m.includes("restaurant") || m.includes("อาหาร") || m.includes("kfc") || m.includes("mcd") || m.includes("pizza")) {
+    return "dining";
+  }
+
+  // Shopping / groceries hints
+  if (m.includes("7-eleven") || m.includes("7-11") || m.includes("lotus") || m.includes("big c") || m.includes("makro") || m.includes("tops")) {
+    return "groceries";
+  }
+
+  return "";
+}
+
 /**
  * Enhance model-detected tx type using:
  * - Whether from/to accounts are recognized in the user's account list
@@ -509,20 +605,36 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   } = store;
 
   const initialData = store.getEditingTransaction();
-  const isEditMode = !!initialData;
+  const isEditMode = !!initialData?.id;
 
   const accounts = state.accounts || [];
   const categories = state.categories || { expense: [], income: [] };
 
   // ===== transfer edit pair =====
   const transferPair = useMemo(() => {
-    if (!initialData?.isTransfer || !initialData?.transferId) return null;
-    const all = (state.transactions || []).filter((t) => t.transferId === initialData.transferId);
-    const outTx = all.find((t) => t.type === "expense");
-    const inTx = all.find((t) => t.type === "income");
-    if (!outTx || !inTx) return null;
-    return { outTx, inTx };
-  }, [initialData?.isTransfer, initialData?.transferId, state.transactions]);
+  if (!initialData?.isTransfer) return null;
+
+  const tid = String(initialData?.transferId || "").trim();
+  const group = tid
+    ? (state.transactions || []).filter((t) => String(t?.transferId || "").trim() === tid)
+    : [initialData].filter(Boolean);
+
+  // Prefer canonical legs if present; otherwise fall back to the currently edited leg.
+  const outTx =
+    group.find((t) => String(t?.type || "").toLowerCase() === "expense") ||
+    (String(initialData?.type || "").toLowerCase() === "expense" ? initialData : null);
+
+  const inTx =
+    group.find((t) => String(t?.type || "").toLowerCase() === "income") ||
+    (String(initialData?.type || "").toLowerCase() === "income" ? initialData : null);
+
+  // Keep transferId even if one leg is missing (data corruption safe-guard)
+  const transferId = tid || String(outTx?.transferId || inTx?.transferId || "").trim() || null;
+
+  if (!outTx && !inTx) return null;
+  return { outTx, inTx, transferId, group };
+}, [initialData?.id, initialData?.isTransfer, initialData?.transferId, initialData?.type, state.transactions]);
+
 
   const transferKindForEdit = useMemo(() => {
     if (!transferPair) return null;
@@ -569,6 +681,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   const [type, setType] = useState(initialType); // expense | income | transfer | credit_payment
 
+  // ✅ Prevent double-tap duplication on save
+  const [isSaving, setIsSaving] = useState(false);
+  const savingLockRef = useRef(false);
+
   // keep type synced in edit mode if inferred kind changes (e.g., accounts loaded)
   useEffect(() => {
     if (!isEditMode) return;
@@ -603,6 +719,28 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [date, setDate] = useState(initialData?.date ? String(initialData.date).slice(0, 10) : toISODate(new Date()));
   const [note, setNote] = useState(initialData?.note || "");
   const [ref, setRef] = useState(initialData?.ref || "");
+
+  // ===== Slip Hunter meta (optional) =====
+  const [slipMeta, setSlipMeta] = useState(() => {
+    // preserve on edit if present
+    const prev = initialData && typeof initialData === "object" ? initialData : {};
+    const m = prev?.meta && typeof prev.meta === "object" ? prev.meta.slip : null;
+    return m && typeof m === "object" ? m : null;
+  });
+
+  // ===== Smart Geolocation =====
+  const [currentLocation, setCurrentLocation] = useState(() => {
+    const prev = initialData?.location;
+    const norm = normalizeLatLng(prev);
+    return norm ? { ...norm } : null;
+  });
+  const currentLocationRef = useRef(currentLocation);
+  useEffect(() => {
+    currentLocationRef.current = currentLocation;
+  }, [currentLocation]);
+
+  const [nearbySuggestion, setNearbySuggestion] = useState(null);
+  const geoToastShownRef = useRef(false);
 
   // ===== split group (edit / manual) =====
   const splitGroupTransactions = useMemo(() => {
@@ -783,6 +921,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   // ===== scan queue =====
   const fileInputRef = useRef(null);
+  const slipFileInputRef = useRef(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState("");
   const [queue, setQueue] = useState([]); // queue items
@@ -800,8 +939,13 @@ const existingRefSet = useMemo(() => {
     return set;
   }, [state.transactions]);
 
-  const expenseCats = categories.expense || [];
-  const incomeCats = categories.income || [];
+  // ✅ Tombstone strategy: hide deleted categories from pickers/suggestions,
+  // but keep them in state for historical reports.
+  const isDeletedCat = (c) => !!(c?.deletedAt || c?.isDeleted);
+  const expenseCatsAll = categories.expense || [];
+  const incomeCatsAll = categories.income || [];
+  const expenseCats = expenseCatsAll.filter((c) => !isDeletedCat(c));
+  const incomeCats = incomeCatsAll.filter((c) => !isDeletedCat(c));
 
   // ✅ กันการสร้าง category ซ้ำใน "batch scan" เดียวกัน
   const createdCatRef = useRef({ expense: new Map(), income: new Map() });
@@ -889,6 +1033,87 @@ const existingRefSet = useMemo(() => {
     return { suggestCategoryId };
   }, [state.transactions]);
 
+  // ===== Smart Geolocation: build a lightweight merchant-location dataset from history =====
+  const merchantLocationData = useMemo(() => {
+    const out = [];
+    for (const t of state.transactions || []) {
+      if (!t) continue;
+      if (t.isTransfer) continue;
+
+      const loc = normalizeLatLng(t.location);
+      if (!loc) continue;
+
+      const merchantText = String(t.merchant || extractMerchantFromNote(t.note) || "").trim();
+      if (!merchantText) continue;
+
+      out.push({
+        merchant: merchantText,
+        location: loc,
+        categoryId: String(t.category || ""),
+        accountId: String(t.accountId || ""),
+        updatedAt: Number(t.updatedAt || t.createdAt || 0) || 0,
+      });
+    }
+    return out;
+  }, [state.transactions]);
+
+  // ===== Smart Geolocation: silently request GPS once on mount =====
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    const geo = navigator.geolocation;
+    if (!geo || typeof geo.getCurrentPosition !== "function") return;
+
+    geo.getCurrentPosition(
+      (pos) => {
+        const loc = normalizeLatLng({ lat: pos?.coords?.latitude, lng: pos?.coords?.longitude });
+        if (!loc) return;
+        setCurrentLocation(loc);
+      },
+      // Graceful: ignore errors (permission denied / unavailable)
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 7_000 }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ===== Smart Geolocation: find nearby merchant and suggest autofill =====
+  useEffect(() => {
+    const loc = currentLocation;
+    if (!loc) return;
+
+    const found = findNearbyMerchant(loc.lat, loc.lng, merchantLocationData, { maxDistanceM: 90 });
+    setNearbySuggestion(found || null);
+
+    if (!found || !found.merchant) return;
+
+    // Toast only once per mount/session
+    if (!geoToastShownRef.current) {
+      geoToastShownRef.current = true;
+      showAlert?.(`📍 พบสถานที่ใกล้เคียง: ${found.merchant}`);
+    }
+
+    // Auto-fill ONLY when user hasn't typed yet, and only for new entries.
+    if (!isEditMode && entryMode === "manual") {
+      setNote((prev) => {
+        const p = String(prev || "").trim();
+        return p ? prev : found.merchant;
+      });
+
+      // If we can safely infer a category from history, apply when empty.
+      if (!isSplitMode && (type === "expense" || type === "income")) {
+        const allowed = type === "income" ? incomeCats : expenseCats;
+        const canUse = found.categoryId && allowed.some((c) => String(c?.id) === String(found.categoryId));
+        if (canUse) {
+          setCategoryId((prev) => {
+            const p = String(prev || "").trim();
+            if (!p || p === "other" || p === "other_income") return String(found.categoryId);
+            return prev;
+          });
+        }
+      }
+    }
+  }, [currentLocation, merchantLocationData, entryMode, isEditMode, showAlert, type, isSplitMode, expenseCats, incomeCats]);
+
   const cleanupQueuePreviews = () => {
     for (const it of queue) {
       // Only revoke in-memory previews. Persisted (blobStore) URLs must NOT be revoked here,
@@ -913,7 +1138,9 @@ const existingRefSet = useMemo(() => {
   };
 
   const ensureCategory = (typeForCat, scannedCategory) => {
-    const list = categories[typeForCat] || [];
+    const listAll = categories[typeForCat] || [];
+    // Only active categories are eligible for matching/suggestion
+    const list = (listAll || []).filter((c) => !isDeletedCat(c));
     const key = sanitizeCategoryKey(scannedCategory);
 
     const mem = createdCatRef.current?.[typeForCat];
@@ -945,7 +1172,8 @@ const existingRefSet = useMemo(() => {
       ...(createdCatRef.current?.income?.values?.() || []),
     ]);
 
-    while (list.some((c) => c.id === id) || createdIds.has(id)) id = `${slug}_${i++}`;
+    // Ensure uniqueness across ALL categories (including deleted/tombstoned)
+    while (listAll.some((c) => c.id === id) || createdIds.has(id)) id = `${slug}_${i++}`;
 
     const color = PRESET_COLORS[hashString(id) % PRESET_COLORS.length];
     const newCat = { id, name: categoryNameFromKey(scannedCategory), icon: "🏷️", color };
@@ -1221,6 +1449,10 @@ const existingRefSet = useMemo(() => {
     fileInputRef.current?.click();
   };
 
+  const handlePickSlip = () => {
+    slipFileInputRef.current?.click();
+  };
+
   const handleFilesSelected = async (e) => {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
@@ -1317,7 +1549,8 @@ const existingRefSet = useMemo(() => {
 
           const amountSatang = amount != null ? parseMoneyToSatang(amount) : null;
 
-          const d = result?.date ? String(result.date).slice(0, 10) : toISODate(new Date());
+          // NOTE: Thai slips may use Buddhist year (25xx). Normalize to AD (20xx).
+          const d = fixBuddhistYearISO(result?.date || "") || toISODate(new Date());
 
           const merchant = String(result?.merchant || "").trim();
           const noteText = String(result?.note || "").trim();
@@ -1327,6 +1560,10 @@ const existingRefSet = useMemo(() => {
 
           const contextText = `${merchant} ${noteText} ${evidenceText}`.trim();
           const rref = String(result?.ref || "").trim();
+
+          // Slip Hunter: enrich transfer slips with time + receiver bank (best-effort)
+          const slipTime = parseSlipTimeFromText(evidenceText || contextText);
+          const receiverBankId = guessSlipReceiverBankId(contextText || evidenceText);
 
           const fromDigits = digitsOnly(result?.from_account);
           const toDigits = digitsOnly(result?.to_account);
@@ -1483,8 +1720,14 @@ if (
 }
 
 
-          const fallbackKey =
+          let fallbackKey =
             sanitizeCategoryKey(result?.category) || sanitizeCategoryKey(result?.category_key) || "other";
+
+          // Slip Hunter: if this looks like a transfer/bill-payment slip, prefer category from receiver name.
+          if ((docType === "transfer_slip" || docType === "bill_payment") && finalTxType === "expense") {
+            const guessed = guessSlipCategoryKey(merchant || mergedNote);
+            if (guessed) fallbackKey = guessed;
+          }
 
           let groups = [];
           let primaryKey = fallbackKey;
@@ -1682,6 +1925,15 @@ if (
               confidence: scanConfidence || null,
               model: result?._model || null,
               endpointUsed: result?._endpointUsed || null,
+              slip:
+                docType === "transfer_slip" || docType === "bill_payment"
+                  ? {
+                      time: slipTime || "",
+                      receiverBankId: receiverBankId || "",
+                      transactionRef: rref || "",
+                      receiverName: merchant || "",
+                    }
+                  : null,
               reconcile: reconcileMeta,
             },
             items: scannedItems,
@@ -1737,11 +1989,15 @@ if (
             const canon = resolveMerchantCanonical(patch.merchant || merchant || mergedNote, merchants);
             if (canon) patch = { ...patch, merchant: canon };
 
+            // ✅ Prevent "Smart overwrite": if AI already confidently selected an account,
+            // do NOT allow merchant prefs to overwrite it.
+            const fallbackDefaultAccId = accounts?.[0]?.id || "";
             const hadStrongAccountMatch =
+              (!!detectedAccountId && detectedAccountId !== fallbackDefaultAccId) ||
               !!bestMatchAccountId(accounts, fromDigits) ||
               !!bestMatchAccountId(accounts, toDigits) ||
               !!accountId;
-            const accountForAutofill = !hadStrongAccountMatch ? "" : patch.accountId;
+            const accountForAutofill = hadStrongAccountMatch ? patch.accountId : "";
 
             const mdPatch = deriveMerchantAutofillPatch(
               {
@@ -2140,6 +2396,23 @@ if (
       }
     }
 
+    const locationForSave = currentLocationRef.current
+      ? { lat: currentLocationRef.current.lat, lng: currentLocationRef.current.lng }
+      : null;
+
+    const buildScanMetaForTx = (q) => {
+      const base = q && typeof q === "object" ? q : {};
+      const sm = base.scanMeta && typeof base.scanMeta === "object" ? base.scanMeta : null;
+      const reconcile = sm?.reconcile && typeof sm.reconcile === "object" ? sm.reconcile : null;
+      const slip = sm?.slip && typeof sm.slip === "object" ? sm.slip : null;
+      // Keep meta compact and stable
+      return {
+        ...(reconcile || {}),
+        slip: slip || null,
+        docType: String(base.docType || sm?.docType || "").trim() || null,
+      };
+    };
+
     const txs = [];
     for (const q of ready) {
       const d = String(q.date || toISODate(new Date())).slice(0, 10);
@@ -2172,6 +2445,12 @@ if (
           transferKind: kind,
           attachmentId: q.attachmentId || null,
 
+          // Smart Geolocation
+          location: locationForSave,
+
+          // Slip Hunter / Scan meta
+          meta: buildScanMetaForTx(q),
+
           merchant: merchant || null,
           evidence: String(q.evidence || "").slice(0, 240) || null,
           from_account: String(q.fromDigits || "").trim() || null,
@@ -2193,6 +2472,12 @@ if (
           source: "scan",
           transferKind: kind,
           attachmentId: q.attachmentId || null,
+
+          // Smart Geolocation
+          location: locationForSave,
+
+          // Slip Hunter / Scan meta
+          meta: buildScanMetaForTx(q),
 
           merchant: merchant || null,
           evidence: String(q.evidence || "").slice(0, 240) || null,
@@ -2300,6 +2585,12 @@ if (
           source: "scan",
           attachmentId: q.attachmentId || null,
 
+          // Smart Geolocation
+          location: locationForSave,
+
+          // Slip Hunter / Scan meta
+          meta: buildScanMetaForTx(q),
+
           paymentMethod: q.paymentMethod || "cash",
 
           receiptPaidTotalSatang: parentAmount,
@@ -2339,6 +2630,12 @@ if (
             ref: null,
             source: "scan",
             attachmentId: q.attachmentId || null,
+
+            // Smart Geolocation
+            location: locationForSave,
+
+            // Slip Hunter / Scan meta
+            meta: buildScanMetaForTx(q),
 
             paymentMethod: q.paymentMethod || "cash",
             receiptLineType: g.receiptLineType || "item",
@@ -2429,6 +2726,12 @@ if (
         source: "scan",
         attachmentId: q.attachmentId || null,
 
+        // Smart Geolocation
+        location: locationForSave,
+
+        // Slip Hunter / Scan meta
+        meta: buildScanMetaForTx(q),
+
         paymentMethod: q.paymentMethod || "cash",
 
         receiptLines: receiptLines || null,
@@ -2454,7 +2757,13 @@ if (
         if (t !== "expense" && t !== "income") continue;
         const m = String(tx?.merchant || "").trim();
         if (!m) continue;
-        learnMerchant?.({ merchant: m, txType: t, categoryId: String(tx?.category || ""), accountId: String(tx?.accountId || "") });
+        learnMerchant?.({
+          merchant: m,
+          txType: t,
+          categoryId: String(tx?.category || ""),
+          accountId: String(tx?.accountId || ""),
+          location: tx?.location || null,
+        });
       }
     } catch {
       // ignore
@@ -2468,10 +2777,54 @@ if (
   };
 
   // ===== manual save/delete =====
+  const beginSaveLock = () => {
+    if (savingLockRef.current) return false;
+    savingLockRef.current = true;
+    setIsSaving(true);
+    return true;
+  };
+
+  const releaseSaveLock = () => {
+    // small delay: prevents "double tap" firing before navigation/unmount
+    window.setTimeout(() => {
+      savingLockRef.current = false;
+      setIsSaving(false);
+    }, 700);
+  };
+
   const handleSaveManual = () => {
+    if (savingLockRef.current) return;
     const d = String(date || toISODate(new Date())).slice(0, 10);
     const noteText = String(note || "").trim();
     const refText = String(ref || "").trim();
+
+    // Smart Geolocation: store the latest known position (best-effort)
+    const locationForSave = currentLocationRef.current
+      ? { lat: currentLocationRef.current.lat, lng: currentLocationRef.current.lng }
+      : null;
+
+    // Merchant extraction for manual entries (so geo + history can learn)
+    const existingMerchant = String(initialData?.merchant || "").trim();
+    const slipReceiver = String(slipMeta?.receiverName || slipMeta?.receiver_name || "").trim();
+    const merchantFromNote = extractMerchantFromNote(noteText);
+    const merchantForSave = existingMerchant || slipReceiver || merchantFromNote || "";
+
+    const metaForSave = (() => {
+      const prev = initialData?.meta && typeof initialData.meta === "object" ? initialData.meta : {};
+      const out = { ...prev };
+      if (slipMeta && typeof slipMeta === "object") {
+        // keep slip meta in a stable namespace
+        out.slip = {
+          ...slipMeta,
+          receiverName: String(slipMeta?.receiverName || slipMeta?.receiver_name || merchantForSave || "").trim() || null,
+        };
+      }
+      return Object.keys(out).length ? out : null;
+    })();
+
+    const locationPatch = locationForSave ? { location: locationForSave } : {};
+    const metaPatch = metaForSave ? { meta: metaForSave } : {};
+    const merchantPatch = merchantForSave ? { merchant: merchantForSave } : {};
 
     if (type === "transfer" || type === "credit_payment") {
       if (!amountNumber || amountNumber <= 0) return showAlert?.("กรุณาระบุจำนวนเงินให้ถูกต้อง");
@@ -2487,9 +2840,20 @@ if (
         if (fromAcc && isCreditAccount(fromAcc)) return showAlert?.("ชำระบัตร: บัญชีต้นทางควรเป็นบัญชีปกติ (ไม่ใช่บัตร)");
       }
 
-      const transferId = transferPair?.outTx?.transferId || generateTransferId();
-      const outId = transferPair?.outTx?.id || generateId();
-      const inId = transferPair?.inTx?.id || generateId();
+const transferId =
+  transferPair?.transferId ||
+  transferPair?.outTx?.transferId ||
+  transferPair?.inTx?.transferId ||
+  initialData?.transferId ||
+  generateTransferId();
+const outId =
+  transferPair?.outTx?.id ||
+  (initialData?.isTransfer && String(initialData?.type || "").toLowerCase() === "expense" ? initialData.id : null) ||
+  generateId();
+const inId =
+  transferPair?.inTx?.id ||
+  (initialData?.isTransfer && String(initialData?.type || "").toLowerCase() === "income" ? initialData.id : null) ||
+  generateId();
 
       const kind = type === "credit_payment" ? "credit_payment" : "transfer";
       const defaultNote =
@@ -2497,7 +2861,9 @@ if (
           ? `ชำระบัตรเครดิต • ${(toAcc?.name || "Credit Card").trim()}`
           : "Transfer";
 
-      bulkUpsertTransactions([
+      if (!beginSaveLock()) return;
+      try {
+        bulkUpsertTransactions([
         {
           id: outId,
           type: "expense",
@@ -2512,6 +2878,9 @@ if (
           source: kind,
           transferKind: kind,
           attachmentId: initialAttachmentId || null,
+
+          ...locationPatch,
+          ...metaPatch,
         },
         {
           id: inId,
@@ -2527,8 +2896,14 @@ if (
           source: kind,
           transferKind: kind,
           attachmentId: initialAttachmentId || null,
+
+          ...locationPatch,
+          ...metaPatch,
         },
-      ]);
+        ]);
+      } finally {
+        releaseSaveLock();
+      }
       return;
     }
 
@@ -2582,6 +2957,10 @@ if (
         source: "manual",
         attachmentId: initialAttachmentId || null,
 
+        ...merchantPatch,
+        ...locationPatch,
+        ...metaPatch,
+
         splitGroupId,
         splitCount,
         splitLabel: groupLabel,
@@ -2606,6 +2985,10 @@ if (
           source: "manual",
           attachmentId: initialAttachmentId || null,
 
+          ...merchantPatch,
+          ...locationPatch,
+          ...metaPatch,
+
           splitGroupId,
           splitIndex: idx + 1,
           splitCount,
@@ -2626,73 +3009,211 @@ if (
       const nextIds = new Set(childTxs.map((t) => String(t.id)));
       const removedIds = [...existingChildIds].filter((id) => !nextIds.has(id));
 
-      if (removedIds.length) {
-        deleteManyTransactions(removedIds, { navigateToDashboard: false });
-      }
+      if (!beginSaveLock()) return;
+      try {
+        if (removedIds.length) {
+          deleteManyTransactions(removedIds, { navigateToDashboard: false });
+        }
 
-      bulkUpsertTransactions([parentTx, ...childTxs], { navigateToDashboard: true });
+        bulkUpsertTransactions([parentTx, ...childTxs], { navigateToDashboard: true });
+      } finally {
+        releaseSaveLock();
+      }
       return;
     }
 
-    if (!categoryId) return showAlert?.("กรุณาเลือกหมวดหมู่");
     if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
-
     if (!amountNumber || amountNumber <= 0) return showAlert?.("กรุณาระบุจำนวนเงินให้ถูกต้อง");
+
+    // ✅ Validate category/type compatibility (prevents cross-type corruption)
+    const allowedCats = type === "income" ? incomeCats : expenseCats;
+    let categoryForSave = String(categoryId || "").trim();
+    if (!categoryForSave) return showAlert?.("กรุณาเลือกหมวดหมู่");
+    if (!allowedCats.some((c) => String(c?.id || "") === categoryForSave)) {
+      const fallback = String(allowedCats?.[0]?.id || "").trim();
+      if (!fallback) return showAlert?.("ไม่พบหมวดหมู่ที่ใช้งานได้สำหรับประเภทนี้");
+      categoryForSave = fallback;
+      setCategoryId(fallback);
+      showAlert?.("หมวดหมู่เดิมไม่ตรงกับประเภทรายการ → เลือกหมวดเริ่มต้นให้แล้ว");
+    }
+
+    if (!beginSaveLock()) return;
+    try {
+
+    // ✅ If this transaction used to be a transfer but user changed type to expense/income,
+    // delete the counterpart leg(s) to avoid "phantom transfer" leftovers.
+    if (initialData?.isTransfer) {
+      const tidPrev = String(initialData?.transferId || "").trim();
+      if (tidPrev) {
+        const otherIds = (state.transactions || [])
+          .filter(
+            (t) =>
+              !!t?.isTransfer &&
+              String(t?.transferId || "").trim() === tidPrev &&
+              String(t?.id || "") !== String(initialData.id || "")
+          )
+          .map((t) => String(t?.id || ""))
+          .filter(Boolean);
+
+        if (otherIds.length) deleteManyTransactions(otherIds, { navigateToDashboard: false });
+      }
+    }
+
+    // ✅ If this transaction used to be a split group but user disabled split mode,
+    // delete children and clear split flags to prevent "zombie split children".
+    const prevGid = String(initialData?.splitGroupId || "").trim();
+    if (prevGid) {
+      const parentId = String(
+        initialData?.isSplitParent
+          ? initialData.id
+          : (splitGroupTransactions || []).find((t) => !!t?.isSplitParent)?.id || initialData?.splitParentId || ""
+      ).trim();
+
+      const toDelete = new Set();
+      for (const t of state.transactions || []) {
+        if (!t || t.isTransfer) continue;
+
+        const gid = String(t?.splitGroupId || "").trim();
+        const pid = String(t?.splitParentId || "").trim();
+        const id = String(t?.id || "");
+        if (!id) continue;
+        if (id === String(initialData.id || "")) continue;
+
+        if (gid && gid === prevGid) toDelete.add(id);
+        if (parentId && pid && pid === parentId) toDelete.add(id);
+      }
+
+      const deleteIds = Array.from(toDelete);
+      if (deleteIds.length) deleteManyTransactions(deleteIds, { navigateToDashboard: false });
+    }
 
     upsertTransaction({
       id: initialData?.id,
       type: type === "income" ? "income" : "expense",
       amount: amountNumber,
-      category: categoryId,
+      category: categoryForSave,
       accountId,
       date: d,
       note: noteText,
       isTransfer: false,
       transferId: null,
+      transferKind: null,
       ref: refText || null,
       source: "manual",
       attachmentId: initialAttachmentId || null,
+
+      ...merchantPatch,
+      ...locationPatch,
+      ...metaPatch,
+
+      // ✅ clear split fields (important for collapsing split -> single)
+      splitGroupId: null,
+      splitCount: null,
+      splitLabel: null,
+      isSplit: false,
+      isSplitParent: false,
+      isSplitChild: false,
+      splitIndex: null,
+      splitParentId: null,
     });
+
+    // ✅ Learn from edits (so next scan is smarter)
+    try {
+      const m = String(merchantForSave || "").trim();
+      if (m) {
+        learnMerchant?.({
+          merchant: m,
+          txType: type === "income" ? "income" : "expense",
+          categoryId: categoryForSave,
+          accountId: String(accountId || ""),
+          location: locationForSave || null,
+        });
+      }
+    } catch {
+      // ignore
+    }
+    } finally {
+      releaseSaveLock();
+    }
   };
 
-  const handleDelete = () => {
-    if (!initialData?.id) return;
 
-    if (initialData.isTransfer && transferPair) {
+const handleDelete = () => {
+  if (!initialData?.id) {
+    showAlert?.("ไม่พบรายการสำหรับลบ");
+    return;
+  }
+
+  // ✅ Transfer / credit payment: delete all legs that share the same transferId.
+  // This prevents "เหลือขาเดียว" when transferPair can't be found due to data corruption.
+  if (initialData.isTransfer) {
+    const tid = String(initialData.transferId || transferPair?.transferId || "").trim();
+
+    const groupIds = tid
+      ? (state.transactions || [])
+          .filter((t) => !!t?.isTransfer && String(t?.transferId || "").trim() === tid)
+          .map((t) => String(t?.id || ""))
+          .filter(Boolean)
+      : [String(initialData.id)];
+
+    const ids = Array.from(new Set(groupIds));
+
+    if (ids.length >= 2) {
       showConfirm?.(
         isEditingCreditPayment ? "ลบชำระบัตร" : "ลบ Transfer",
-        "ต้องการลบรายการนี้ใช่ไหม? (จะลบทั้งขาออก/ขาเข้า)",
-        () => {
-          deleteTransaction(transferPair.outTx.id);
-          deleteTransaction(transferPair.inTx.id);
-        },
+        `ต้องการลบรายการนี้ใช่ไหม? (จะลบทั้ง ${ids.length} ขา)`,
+        () => deleteManyTransactions(ids, { navigateToDashboard: true }),
+        true
+      );
+    } else {
+      showConfirm?.(
+        isEditingCreditPayment ? "ลบชำระบัตร" : "ลบ Transfer",
+        "พบ Transfer ขาเดียว (ข้อมูลอาจเสียหาย) ต้องการลบเฉพาะรายการนี้ใช่ไหม?",
+        () => deleteTransaction(initialData.id),
+        true
+      );
+    }
+    return;
+  }
+
+  // ✅ Split group: delete the whole group (with a fallback to splitParentId to catch corrupted children)
+  const gid = String(initialData?.splitGroupId || "").trim();
+  if (gid) {
+    const parentId = String(
+      initialData?.isSplitParent
+        ? initialData.id
+        : splitGroupTransactions.find((t) => !!t?.isSplitParent)?.id || initialData?.splitParentId || ""
+    ).trim();
+
+    const idSet = new Set();
+    for (const t of state.transactions || []) {
+      if (!t) continue;
+      if (t.isTransfer) continue;
+
+      const tg = String(t?.splitGroupId || "").trim();
+      const tp = String(t?.splitParentId || "").trim();
+
+      if (tg && tg === gid) idSet.add(String(t?.id || ""));
+      if (parentId && tp && tp === parentId) idSet.add(String(t?.id || ""));
+    }
+
+    const groupIds = Array.from(idSet).filter(Boolean);
+
+    if (groupIds.length >= 2) {
+      showConfirm?.(
+        "ลบ Split Group",
+        `ต้องการลบรายการแบบ Split ทั้งกลุ่มใช่ไหม? (รวม ${groupIds.length} รายการย่อย)`,
+        () => deleteManyTransactions(groupIds, { navigateToDashboard: true }),
         true
       );
       return;
     }
+  }
 
-    const gid = String(initialData?.splitGroupId || "").trim();
-    if (gid) {
-      const groupIds = (state.transactions || [])
-        .filter((t) => String(t?.splitGroupId || "").trim() === gid && !t?.isTransfer)
-        .map((t) => String(t?.id || ""))
-        .filter(Boolean);
+  showConfirm?.("ลบรายการ", "ต้องการลบรายการนี้ใช่ไหม?", () => deleteTransaction(initialData.id), true);
+};
 
-      if (groupIds.length >= 2) {
-        showConfirm?.(
-          "ลบ Split Group",
-          "ต้องการลบรายการแบบ Split ทั้งกลุ่มใช่ไหม?",
-          () => deleteManyTransactions(groupIds, { navigateToDashboard: true }),
-          true
-        );
-        return;
-      }
-    }
-
-    showConfirm?.("ลบรายการ", "ต้องการลบรายการนี้ใช่ไหม?", () => deleteTransaction(initialData.id), true);
-  };
-
-  const handleClose = () => {
+const handleClose = () => {
     if (!isEditMode && queue.length) {
       showConfirm?.(
         "ทิ้งคิวสแกน?",
@@ -2802,23 +3323,46 @@ if (
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handlePickFiles}
-                className="px-4 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold text-sm active:scale-95 disabled:opacity-60"
-                disabled={isScanning}
-              >
-                <span className="inline-flex items-center gap-2">
-                  {isScanning ? <Loader size={18} className="animate-spin" /> : <Camera size={18} />}
-                  เลือกรูป
-                </span>
-              </button>
+              <div className="flex flex-col gap-2 items-stretch">
+                <button
+                  type="button"
+                  onClick={handlePickFiles}
+                  className="px-4 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold text-sm active:scale-95 disabled:opacity-60"
+                  disabled={isScanning}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {isScanning ? <Loader size={18} className="animate-spin" /> : <Camera size={18} />}
+                    เลือกรูป
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePickSlip}
+                  className="px-4 py-3 rounded-2xl bg-white/60 text-gray-900 border border-white/30 font-extrabold text-sm active:scale-95 disabled:opacity-60"
+                  disabled={isScanning}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <ArrowRightLeft size={18} />
+                    อัปโหลดสลิป
+                  </span>
+                </button>
+              </div>
 
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 multiple
+                className="hidden"
+                onChange={handleFilesSelected}
+                disabled={isScanning}
+              />
+
+              <input
+                ref={slipFileInputRef}
+                type="file"
+                accept="image/*"
                 className="hidden"
                 onChange={handleFilesSelected}
                 disabled={isScanning}
@@ -3338,8 +3882,18 @@ if (
                     showAlert?.("ยังไม่มีบัญชีประเภทบัตรเครดิตในระบบ (เพิ่มบัญชีบัตรก่อน)");
                     return;
                   }
+                  if (t.id === type) return;
                   setType(t.id);
-                  if (t.id === "transfer" || t.id === "credit_payment") setCategoryId("transfer");
+                  if (t.id === "transfer" || t.id === "credit_payment") {
+                    setCategoryId("transfer");
+                    setIsSplitMode(false);
+                    return;
+                  }
+
+                  // ✅ Prevent cross-type category corruption: reset to a sane default for the new type
+                  const nextCats = t.id === "income" ? incomeCats : expenseCats;
+                  const fallbackCatId = String(nextCats?.[0]?.id || "").trim();
+                  if (fallbackCatId) setCategoryId(fallbackCatId);
                 }}
                 className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
                   type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
@@ -3725,6 +4279,13 @@ if (
               />
             </div>
 
+            {nearbySuggestion?.merchant && !isEditMode ? (
+              <div className="px-4 pb-3 -mt-2 text-[11px] text-gray-900/70 flex items-center justify-between">
+                <span className="font-extrabold">📍 พบใกล้เคียง: {nearbySuggestion.merchant}</span>
+                <span className="text-gray-900/50">~{Math.round(nearbySuggestion.distanceM)} ม.</span>
+              </div>
+            ) : null}
+
             <div className="flex items-center p-4">
               <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-gray-900/50 mr-3">
                 <Eye size={20} />
@@ -3742,11 +4303,14 @@ if (
           {/* Fixed Save */}
           <button
             onClick={handleSaveManual}
-            className="fixed bottom-6 left-4 right-4 bg-gray-900/90 text-white py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2"
+            disabled={isSaving}
+            className={`fixed bottom-6 left-4 right-4 bg-gray-900/90 text-white py-4 rounded-2xl font-extrabold shadow-xl transition-all flex items-center justify-center gap-2 ${
+              isSaving ? "opacity-60 cursor-not-allowed" : "active:scale-95"
+            }`}
             type="button"
           >
             {isEditMode ? <Edit2 size={18} /> : <Plus size={18} />}
-            {isEditMode ? "บันทึกการแก้ไข" : "บันทึกรายการ"}
+            {isSaving ? "กำลังบันทึก…" : isEditMode ? "บันทึกการแก้ไข" : "บันทึกรายการ"}
           </button>
         </>
       ) : null}

@@ -207,10 +207,64 @@ export function reducer(state, action) {
 
       const accounts = toArray(s.accounts).filter((x) => x?.id !== id);
 
-      // ลบ transactions ที่ผูกกับบัญชีนี้ (ตามที่ store.jsx ทำ)
-      const transactions = toArray(s.transactions).filter((t) => t?.accountId !== id);
+      const txsAll = toArray(s.transactions);
+      const idsToDelete = new Set();
+      const transferIdsToDelete = new Set();
 
-      return { ...s, accounts, transactions };
+      const isTransferLike = (t) => {
+        const trId = String(t?.transferId || "").trim();
+        const cat = String(t?.category || "").trim().toLowerCase();
+        return !!t?.isTransfer || !!trId || cat === "transfer";
+      };
+
+      for (const t of txsAll) {
+        if (String(t?.accountId || "").trim() !== String(id || "").trim()) continue;
+        const tid = String(t?.id || "").trim();
+        if (tid) idsToDelete.add(tid);
+        if (isTransferLike(t)) {
+          const trId = String(t?.transferId || "").trim();
+          if (trId) transferIdsToDelete.add(trId);
+        }
+      }
+
+      if (transferIdsToDelete.size) {
+        for (const t of txsAll) {
+          if (!isTransferLike(t)) continue;
+          const trId = String(t?.transferId || "").trim();
+          if (!trId || !transferIdsToDelete.has(trId)) continue;
+          const tid = String(t?.id || "").trim();
+          if (tid) idsToDelete.add(tid);
+        }
+      }
+
+      const transactions = idsToDelete.size
+        ? txsAll.filter((t) => !idsToDelete.has(String(t?.id || "").trim()))
+        : txsAll;
+
+      // keep recurring/inbox usable by pointing to a fallback account
+      const fallbackAccountId = accounts?.[0]?.id || "";
+      const recurring = toArray(s.recurring).map((r) =>
+        String(r?.accountId || "").trim() === String(id || "").trim() ? { ...r, accountId: fallbackAccountId } : r
+      );
+      const inbox = toArray(s.inbox).map((it) =>
+        String(it?.accountId || "").trim() === String(id || "").trim() ? { ...it, accountId: fallbackAccountId } : it
+      );
+      const scanInbox = toArray(s.scanInbox).map((it) =>
+        String(it?.accountId || "").trim() === String(id || "").trim() ? { ...it, accountId: fallbackAccountId } : it
+      );
+
+      const editingId = String(s?.ui?.editingId || "").trim();
+      const editingDeleted = editingId && idsToDelete.has(editingId);
+
+      return {
+        ...s,
+        accounts,
+        transactions,
+        recurring,
+        inbox,
+        scanInbox,
+        ui: editingDeleted ? { ...s.ui, editingId: null, view: "dashboard" } : s.ui,
+      };
     }
 
     // categories
@@ -220,14 +274,26 @@ export function reducer(state, action) {
 
       if (!type || !category0) return s;
 
-      const category = { ...category0, id: category0?.id || rid("cat") };
+      const category = {
+        ...category0,
+        id: category0?.id || rid("cat"),
+        // ✅ active by default (tombstone uses deletedAt)
+        deletedAt: null,
+        isDeleted: false,
+      };
 
       const nextCats = ensureCategories(s.categories);
+      const list = toArray(nextCats[type]);
+      const exists = list.some((c) => c?.id === category.id);
+      const nextList = exists
+        ? list.map((c) => (c?.id === category.id ? { ...c, ...category } : c))
+        : [...list, category];
+
       return {
         ...s,
         categories: {
           ...nextCats,
-          [type]: [...toArray(nextCats[type]), category],
+          [type]: nextList,
         },
       };
     }
@@ -243,7 +309,16 @@ export function reducer(state, action) {
         ...s,
         categories: {
           ...nextCats,
-          [type]: toArray(nextCats[type]).filter((c) => c?.id !== id),
+          // ✅ tombstone (keep for historical reports)
+          [type]: toArray(nextCats[type]).map((c) =>
+            c?.id === id
+              ? {
+                  ...c,
+                  deletedAt: c?.deletedAt || Date.now(),
+                  isDeleted: true,
+                }
+              : c
+          ),
         },
       };
     }

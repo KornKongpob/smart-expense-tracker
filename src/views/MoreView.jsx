@@ -63,11 +63,34 @@ export default function MoreView({ showAlert, showConfirm }) {
       const text = await file.text();
       const json = JSON.parse(text);
 
+      // ✅ Backward compatible import:
+      // - Accept both raw backups and versioned backups: { v, exportedAt, data: {...} }
+      // - If moneyUnit is missing (old broken exports), assume 'satang' to avoid x100 inflation.
+      const hasMoneyUnit = (o) =>
+        o && typeof o === "object" && (String(o.moneyUnit || o.amountUnit || "").trim().length > 0);
+
+      let payload = json;
+      let assumedSatang = false;
+
+      if (payload && typeof payload === "object" && payload.data && typeof payload.data === "object") {
+        if (!hasMoneyUnit(payload.data)) {
+          payload = { ...payload, data: { ...payload.data, moneyUnit: "satang" } };
+          assumedSatang = true;
+        }
+      } else if (!hasMoneyUnit(payload)) {
+        payload = { ...(payload && typeof payload === "object" ? payload : {}), moneyUnit: "satang" };
+        assumedSatang = true;
+      }
+
+      const warnText = assumedSatang
+        ? "\n\nหมายเหตุ: ไฟล์นี้ไม่มี moneyUnit → ระบบจะตีความเป็น 'satang' เพื่อป้องกันจำนวนเงินเพี้ยน x100"
+        : "";
+
       showConfirm?.(
         "นำเข้าข้อมูล (Import)",
-        "การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?",
+        `การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${warnText}`,
         () => {
-          importBackup(json);
+          importBackup(payload);
           showAlert?.("นำเข้าข้อมูลสำเร็จ");
           navigate("dashboard");
         },
@@ -84,8 +107,16 @@ export default function MoreView({ showAlert, showConfirm }) {
 
   // ✅ Run now with a nice hint about "today"
   const onRunRecurring = () => {
-    const today = toISODate(new Date());
-    const n = runRecurringNow?.() ?? 0;
+    const res = runRecurringNow?.() || { createdCount: 0, truncatedRules: [], cap: 0, todayISO: toISODate(new Date()) };
+    const today = res.todayISO || toISODate(new Date());
+    const n = Number(res.createdCount || 0) || 0;
+    const truncated = Array.isArray(res.truncatedRules) ? res.truncatedRules.length : 0;
+    if (truncated) {
+      showAlert?.(
+        `สร้างรายการ Recurring เพิ่มแล้ว ${n} รายการ (ถึงวันที่ ${today}) — บางกฎถูกจำกัดต่อครั้ง ${res.cap} รายการ (กด Run อีกครั้งเพื่อสร้างต่อ)`
+      );
+      return;
+    }
     showAlert?.(`สร้างรายการ Recurring เพิ่มแล้ว ${n} รายการ (ถึงวันที่ ${today})`);
   };
 
