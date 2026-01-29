@@ -50,6 +50,10 @@ import {
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
+function isPositiveNumber(n) {
+  return typeof n === "number" && Number.isFinite(n) && n > 0;
+}
+
 // ===== image helpers =====
 function isImageSrc(v) {
   const s = String(v || "").trim();
@@ -930,6 +934,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   // scan batch
   const scanBatchIdRef = useRef(0);
   const [dupDecisionOpen, setDupDecisionOpen] = useState(false);
+  const scanAutoSendRef = useRef({ enabled: false, batchId: 0, triggered: false, fileCount: 0 });
 const existingRefSet = useMemo(() => {
     const set = new Set();
     for (const t of state.transactions || []) {
@@ -1468,6 +1473,9 @@ const existingRefSet = useMemo(() => {
 
     const batchId = Date.now();
     scanBatchIdRef.current = batchId;
+
+    // ✅ Scan flow: multi-files auto-send to Inbox after all scans complete; single file stays for review
+    scanAutoSendRef.current = { enabled: files.length > 1, batchId, triggered: false, fileCount: files.length };
 
     const batchRefSet = new Set(existingRefSet);
     // ✅ Keep a light pool of already-scanned (same batch) items for fuzzy duplicate detection
@@ -2094,7 +2102,8 @@ if (
   const canCreateFromQueue = useMemo(() => {
     // ✅ Allow "Save now" as long as there is at least one ready item.
     // Duplicates will be blocked until the user explicitly confirms.
-    return (queue || []).some((q) => q.status === "ready" && q.amount && q.amount > 0);
+    // Allow click even if amount is 0/missing; validation happens on save.
+    return (queue || []).some((q) => q.status === "ready");
   }, [queue]);
 
   const canSendToInbox = useMemo(() => {
@@ -2204,6 +2213,132 @@ if (
     showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
     return true;
   };
+
+  // ✅ Auto-send only the just-scanned batch to Inbox (multi-files flow)
+  const sendBatchToInbox = (batchId) => {
+    const ready = (queue || []).filter((q) => q.status === "ready" && q.batchId === batchId);
+    if (!ready.length) {
+      showAlert?.("ไม่มีรายการที่พร้อมส่งเข้า Inbox");
+      return false;
+    }
+
+    const createdAt = Date.now();
+    const serializable = ready.map((q) => {
+      const { previewUrl, previewUrlSource, batchId: _bid, status, error, ...rest } = q || {};
+      const type = rest?.type || rest?.txType || "expense";
+      const referenceId = rest?.referenceId || rest?.ref || "";
+      const next = {
+        ...rest,
+        id: rest?.id || generateId(),
+        createdAt,
+        status: "pending",
+        type,
+        referenceId,
+      };
+
+      // ✅ If groups already exist (from scan), ensure Split is enabled
+      if (Array.isArray(next?.groups) && next.groups.length >= 2 && !next.splitByCategory) {
+        next.splitByCategory = true;
+        next.splitGroupId = String(next?.splitGroupId || "").trim() || generateSplitGroupId();
+        next.splitLabel =
+          String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+      }
+
+      // ✅ Build receipt breakdown (items + adjustments) and auto-enable Split when purchased lines >= 2
+      try {
+        const docType = String(next?.docType || next?.doc_type || "").toLowerCase().trim();
+        const txType = String(next?.txType || next?.type || type || "expense").toLowerCase().trim();
+        const items = Array.isArray(next?.items) ? next.items : [];
+        const adjustments = Array.isArray(next?.adjustments) ? next.adjustments : [];
+
+        if (txType === "expense" && items.length && docType !== "transfer_slip" && docType !== "bill_payment") {
+          // If scan already produced groups, keep them. Otherwise, derive from items+adjustments.
+          let groups = Array.isArray(next?.groups) ? next.groups : [];
+          if (!groups.length) {
+            const hint = `${String(next?.merchant || "").trim()} ${String(next?.note || "").trim()}`.trim();
+            const fallbackKey = String(next?.categoryId || next?.category_key || next?.category || "").trim() || "other";
+            const targetTotalSatang = parseMoneyToSatang(next?.amount);
+            const lines = splitReceiptItemsToLines("expense", { items, adjustments, targetTotalSatang }, hint, fallbackKey);
+
+            groups = (lines || [])
+              .filter((ln) => (Number(ln?.amount) || 0) > 0)
+              .map((ln, idx) => {
+                const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+                const categoryId = ensureCategory("expense", key);
+                return {
+                  key,
+                  categoryId,
+                  amount: parseMoneyToSatang(ln?.amount),
+                  note: String(ln?.name || "").trim(),
+                  receiptLineType: String(ln?.receiptLineType || "item"),
+                  adjustmentType: String(ln?.adjustmentType || ""),
+                  adjustmentEffect: String(ln?.adjustmentEffect || "add"),
+                  children: Array.isArray(ln?.children) ? ln.children : null,
+                  childrenIncludedInParent: !!ln?.childrenIncludedInParent,
+                  splitIndex: idx + 1,
+                  splitCount: (lines || []).length,
+                };
+              })
+              .filter((g) => isPositiveNumber(g.amount));
+          }
+
+          // Persist groups for breakdown even when not splitting
+          if (groups.length) {
+            next.groups = groups;
+          }
+
+          const purchasedCount = (groups || []).filter((g) => String(g?.receiptLineType || "item").toLowerCase().trim() !== "adjustment").length;
+          if (purchasedCount >= 2) {
+            next.splitByCategory = true;
+            next.splitGroupId = String(next?.splitGroupId || "").trim() || generateSplitGroupId();
+            next.splitLabel = String(next?.splitLabel || next?.merchant || next?.note || "Receipt").trim().slice(0, 80) || "Receipt";
+          } else {
+            next.splitByCategory = false;
+            next.splitGroupId = "";
+            next.splitLabel = "";
+          }
+        }
+      } catch {
+        // ignore - keep inbox item as-is
+      }
+
+      return next;
+    });
+
+    addScanInboxItems(serializable);
+    removeQueueItems(ready.map((q) => q.id));
+    setDupDecisionOpen(false);
+    navigate("inbox");
+    showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
+    return true;
+  };
+
+  // ✅ Multi-files auto send: when scan finishes and all files are ready, auto-send that batch to Inbox
+  useEffect(() => {
+    const cfg = scanAutoSendRef.current;
+    if (!cfg?.enabled || cfg?.triggered) return;
+    if (scanBatchIdRef.current !== cfg.batchId) return;
+    if (isScanning) return;
+
+    const batchItems = (queue || []).filter((q) => q.batchId === cfg.batchId);
+    if (!batchItems.length) return;
+
+    const stillScanning = batchItems.some((q) => q.status === "scanning");
+    if (stillScanning) return;
+
+    const hasError = batchItems.some((q) => q.status === "error");
+    if (hasError) {
+      scanAutoSendRef.current = { ...cfg, triggered: true };
+      showAlert?.("มีไฟล์บางรายการสแกนไม่สำเร็จ กรุณาตรวจสอบก่อนส่งเข้า Inbox");
+      return;
+    }
+
+    const hasReady = batchItems.some((q) => q.status === "ready");
+    if (!hasReady) return;
+
+    scanAutoSendRef.current = { ...cfg, triggered: true };
+    sendBatchToInbox(cfg.batchId);
+  }, [queue, isScanning]);
 
   // Send only duplicate-ready items to Inbox (used when user chose "Save now" but wants to handle duplicates later)
   const sendDuplicateQueueToInbox = () => {
@@ -2342,7 +2477,7 @@ if (
       navigateToDashboard = true,
     } = {}
   ) => {
-    let base = (queue || []).filter((q) => q.status === "ready" && q.amount && q.amount > 0);
+    let base = (queue || []).filter((q) => q.status === "ready");
 
     if (scope === "duplicates") base = base.filter((q) => !!q.duplicate);
     if (scope === "nonDuplicates") base = base.filter((q) => !q.duplicate);
@@ -2356,6 +2491,28 @@ if (
       if (scope === "duplicates") return showAlert?.("ไม่มีรายการซ้ำที่ต้องบันทึก");
       if (scope === "nonDuplicates") return showAlert?.("ไม่มีรายการที่ไม่ซ้ำให้บันทึก");
       return showAlert?.("ไม่มีรายการที่พร้อมสร้าง (หรือถูกติ๊กว่าเป็นรายการซ้ำ)");
+    }
+
+
+    // ✅ Allow clicking "Save now" even if amount is 0/missing, but block saving until amounts are valid.
+    const badAmounts = ready.filter((q) => {
+      // For split receipts, allow saving if the group total is positive even when parent amount is missing.
+      if (
+        q?.txType === "expense" &&
+        q?.splitByCategory &&
+        Array.isArray(q?.groups) &&
+        q.groups.length
+      ) {
+        const groupSum = (q.groups || []).reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+        return !isPositiveNumber(Number(groupSum));
+      }
+      return !isPositiveNumber(Number(q?.amount));
+    });
+
+    if (badAmounts.length) {
+      const label = String(badAmounts[0]?.fileName || "").trim();
+      showAlert?.(`กรุณากรอกยอดเงินให้มากกว่า 0${label ? ` (${label})` : ""}`);
+      return false;
     }
 
     for (const q of ready) {
@@ -3458,7 +3615,7 @@ const handleClose = () => {
                           </div>
 
                           <div className="mt-2 text-sm font-extrabold text-gray-900 truncate">
-                            {q.amount ? formatCurrency(q.amount) : q.status === "error" ? (q.error ? `สแกนไม่สำเร็จ (${q.error})` : "สแกนไม่สำเร็จ") : "กำลังประมวลผล..."}
+                            {q.amount != null ? formatCurrency(q.amount) : q.status === "error" ? (q.error ? `สแกนไม่สำเร็จ (${q.error})` : "สแกนไม่สำเร็จ") : "กำลังประมวลผล..."}
                           </div>
 
                           <div className="mt-1 text-xs text-gray-800/60 truncate">
