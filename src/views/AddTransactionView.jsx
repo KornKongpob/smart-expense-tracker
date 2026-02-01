@@ -2111,8 +2111,10 @@ if (
   }, [queue]);
 
   
+  // Count only duplicates that are still "blocked" (user hasn't allowed saving duplicates yet)
+  // If user toggled includeDuplicate = true, Save now should proceed normally.
   const duplicateReadyCount = useMemo(() => {
-    return (queue || []).filter((q) => q.status === "ready" && q.duplicate).length;
+    return (queue || []).filter((q) => q.status === "ready" && !!q.duplicate && !q.includeDuplicate).length;
   }, [queue]);
 
   const sendQueueToInbox = () => {
@@ -2340,9 +2342,9 @@ if (
     sendBatchToInbox(cfg.batchId);
   }, [queue, isScanning]);
 
-  // Send only duplicate-ready items to Inbox (used when user chose "Save now" but wants to handle duplicates later)
+  // Send only *blocked duplicates* to Inbox (used when user chose "Save now" but wants to handle duplicates later)
   const sendDuplicateQueueToInbox = () => {
-    const dups = (queue || []).filter((q) => q.status === "ready" && !!q.duplicate);
+    const dups = (queue || []).filter((q) => q.status === "ready" && !!q.duplicate && !q.includeDuplicate);
     if (!dups.length) {
       showAlert?.("ไม่มีรายการซ้ำให้ส่งเข้า Inbox");
       return false;
@@ -2442,8 +2444,12 @@ if (
 
   const handlePostScanSaveNow = () => {
     if (duplicateReadyCount > 0) {
-      // ✅ Save non-duplicates immediately, then ask what to do with duplicates.
-      createTransactionsFromQueue({ scope: "nonDuplicates", duplicateMode: "includeAll", navigateToDashboard: false });
+      // ✅ Save everything that is already "allowed" (non-duplicates + duplicates user already allowed),
+      // then ask what to do with the remaining *blocked* duplicates.
+      const savableCount = (queue || []).filter((q) => q.status === "ready" && (!q.duplicate || q.includeDuplicate)).length;
+      if (savableCount > 0) {
+        createTransactionsFromQueue({ scope: "all", duplicateMode: "respect", navigateToDashboard: false });
+      }
       setDupDecisionOpen(true);
       return;
     }
@@ -2457,7 +2463,7 @@ if (
     }
 
     if (action === "skip") {
-      const dupIds = (queue || []).filter((q) => q.status === "ready" && !!q.duplicate).map((q) => q.id);
+      const dupIds = (queue || []).filter((q) => q.status === "ready" && !!q.duplicate && !q.includeDuplicate).map((q) => q.id);
       if (dupIds.length) removeQueueItems(dupIds);
       setDupDecisionOpen(false);
       showAlert?.(`ข้ามรายการซ้ำ ${dupIds.length} รายการแล้ว`);
@@ -2493,9 +2499,69 @@ if (
       return showAlert?.("ไม่มีรายการที่พร้อมสร้าง (หรือถูกติ๊กว่าเป็นรายการซ้ำ)");
     }
 
+    // ✅ Normalize scanned queue items so "Save now" works even when:
+    // - split receipts have missing/invalid per-line categories
+    // - split receipts end up with <2 purchasable lines (auto-fallback to non-split)
+    // - parent amount is missing but line totals exist (use signed sum)
+    const expenseCatIds = new Set((expenseCats || []).map((c) => String(c?.id || "")));
+    const incomeCatIds = new Set((incomeCats || []).map((c) => String(c?.id || "")));
+
+    const normalizeCategoryId = (txType, catId) => {
+      const id = String(catId || "").trim();
+      if (!id || id === "transfer") return ensureCategory(txType, "other");
+      const set = txType === "income" ? incomeCatIds : expenseCatIds;
+      if (set.has(id)) return id;
+      return ensureCategory(txType, "other");
+    };
+
+    const normalizedReady = ready.map((q) => {
+      const next = { ...(q || {}) };
+      const txType = String(next.txType || next.type || "").toLowerCase().trim() || "expense";
+
+      if (txType === "income" || txType === "expense") {
+        next.categoryId = normalizeCategoryId(txType, next.categoryId);
+      }
+
+      // Fix split receipts: ensure each line has a category, and auto-fallback if not a real split.
+      if (txType === "expense" && next.splitByCategory && Array.isArray(next.groups) && next.groups.length) {
+        const fixedGroups = (next.groups || [])
+          .map((g) => {
+            const gg = g && typeof g === "object" ? g : {};
+            const amount = Number(gg.amount) || 0;
+            if (amount <= 0) return null;
+
+            const rawCat = String(gg.categoryId || gg.category || "").trim();
+            const categoryId = rawCat && expenseCatIds.has(rawCat) ? rawCat : next.categoryId;
+
+            return { ...gg, amount, categoryId };
+          })
+          .filter(Boolean);
+
+        const nonAdj = fixedGroups.filter((g) => !isAdjustmentLike(g));
+
+        const signedSum = fixedGroups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+        if (!isPositiveNumber(Number(next.amount))) {
+          next.amount = signedSum;
+        }
+
+        next.groups = fixedGroups;
+
+        if (nonAdj.length < 2) {
+          // Not enough purchasable lines for a true split; save as a normal expense but keep receiptLines meta.
+          next.splitByCategory = false;
+        } else {
+          next.splitByCategory = true;
+          next.splitGroupId = String(next.splitGroupId || "").trim() || generateSplitGroupId();
+          next.splitLabel =
+            String(next.splitLabel || next.merchant || next.note || "Receipt").trim().slice(0, 80) || "Receipt";
+        }
+      }
+
+      return next;
+    });
 
     // ✅ Allow clicking "Save now" even if amount is 0/missing, but block saving until amounts are valid.
-    const badAmounts = ready.filter((q) => {
+    const badAmounts = normalizedReady.filter((q) => {
       // For split receipts, allow saving if the group total is positive even when parent amount is missing.
       if (
         q?.txType === "expense" &&
@@ -2515,7 +2581,7 @@ if (
       return false;
     }
 
-    for (const q of ready) {
+    for (const q of normalizedReady) {
       if (q.txType === "transfer" || q.txType === "credit_payment") {
         if (!q.fromAccountId || !q.toAccountId) return showAlert?.("ต้องเลือกบัญชีต้นทาง/ปลายทางให้ครบ");
         if (q.fromAccountId === q.toAccountId)
@@ -2571,7 +2637,7 @@ if (
     };
 
     const txs = [];
-    for (const q of ready) {
+    for (const q of normalizedReady) {
       const d = String(q.date || toISODate(new Date())).slice(0, 10);
       const noteText = String(q.note || "").trim();
       const merchant = String(q.merchant || "").trim();
@@ -2927,7 +2993,7 @@ if (
     }
 
     // ✅ remove only the queue items we actually saved (so duplicates can remain blocked/pending)
-    removeQueueItems(ready.map((q) => q.id));
+    removeQueueItems(normalizedReady.map((q) => q.id));
 
     showAlert?.(`บันทึก ${txs.length} รายการแล้ว`);
     return true;
