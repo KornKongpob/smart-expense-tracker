@@ -435,10 +435,49 @@ export function calcAccountBalance(accounts, transactions, accountId) {
  * - excludes transfers
  * - counts only expense transactions
  */
-export function calcSpentByCategoryInMonth(transactions, monthKey) {
+export function calcSpentByCategoryInMonth(transactions, monthKey, categoriesForHierarchy = null) {
   const mk = String(monthKey || "").trim(); // "YYYY-MM"
   const map = new Map();
   if (!mk) return map;
+
+  // Optional: aggregate spending into main categories (parent buckets)
+  const parentById = new Map();
+  if (categoriesForHierarchy) {
+    const list = Array.isArray(categoriesForHierarchy)
+      ? categoriesForHierarchy
+      : [
+          ...(Array.isArray(categoriesForHierarchy?.expense) ? categoriesForHierarchy.expense : []),
+          ...(Array.isArray(categoriesForHierarchy?.income) ? categoriesForHierarchy.income : []),
+        ];
+
+    for (const c of list || []) {
+      const id = String(c?.id || "").trim();
+      if (!id) continue;
+      const pid = String(c?.parentId || "").trim();
+      parentById.set(id, pid && pid !== id ? pid : "");
+    }
+  }
+
+  const ancestorMemo = new Map();
+  const getAncestors = (id) => {
+    const key = String(id || "").trim();
+    if (!key) return [];
+    if (ancestorMemo.has(key)) return ancestorMemo.get(key);
+
+    const out = [];
+    const seen = new Set();
+    let cur = key;
+    for (let i = 0; i < 8; i++) {
+      const pid = String(parentById.get(cur) || "").trim();
+      if (!pid) break;
+      if (seen.has(pid)) break;
+      seen.add(pid);
+      out.push(pid);
+      cur = pid;
+    }
+    ancestorMemo.set(key, out);
+    return out;
+  };
 
   for (const t of transactions || []) {
     if (!t) continue;
@@ -455,11 +494,19 @@ export function calcSpentByCategoryInMonth(transactions, monthKey) {
     const amt = Number(t.amount) || 0;
     const ae = String(t.adjustmentEffect || "").toLowerCase().trim();
     const signed = ae === "subtract" ? -amt : amt;
+
     map.set(cat, (map.get(cat) || 0) + signed);
+
+    if (parentById.size) {
+      for (const anc of getAncestors(cat)) {
+        map.set(anc, (map.get(anc) || 0) + signed);
+      }
+    }
   }
 
   return map;
 }
+
 
 export function getBudget(budgets, month, categoryId) {
   const m = String(month || "").trim();

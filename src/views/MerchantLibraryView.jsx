@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import CategorySelect from "../components/CategorySelect";
 import { ArrowLeft, Plus, Search, Trash2, GitMerge, Edit2, Check, X } from "lucide-react";
 
 import { useAppStore } from "../store/store";
@@ -330,18 +331,19 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs font-bold text-gray-900/60">
               Expense category
-              <select
+              <CategorySelect
+                categories={expenseCats}
                 value={editing?.prefs?.expense?.categoryId || ""}
-                onChange={(e) => setEditing((d) => ({ ...d, prefs: { ...d.prefs, expense: { ...d.prefs.expense, categoryId: e.target.value } } }))}
+                onChange={(e) =>
+                  setEditing((d) => ({
+                    ...d,
+                    prefs: { ...d.prefs, expense: { ...d.prefs.expense, categoryId: e.target.value } },
+                  }))
+                }
+                allowEmpty
+                emptyLabel="(not set)"
                 className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-              >
-                <option value="">(not set)</option>
-                {expenseCats.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
 
             <label className="text-xs font-bold text-gray-900/60">
@@ -364,18 +366,19 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs font-bold text-gray-900/60">
               Income category
-              <select
+              <CategorySelect
+                categories={incomeCats}
                 value={editing?.prefs?.income?.categoryId || ""}
-                onChange={(e) => setEditing((d) => ({ ...d, prefs: { ...d.prefs, income: { ...d.prefs.income, categoryId: e.target.value } } }))}
+                onChange={(e) =>
+                  setEditing((d) => ({
+                    ...d,
+                    prefs: { ...d.prefs, income: { ...d.prefs.income, categoryId: e.target.value } },
+                  }))
+                }
+                allowEmpty
+                emptyLabel="(not set)"
                 className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-              >
-                <option value="">(not set)</option>
-                {incomeCats.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
 
             <label className="text-xs font-bold text-gray-900/60">

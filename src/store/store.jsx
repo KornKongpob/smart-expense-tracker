@@ -53,28 +53,105 @@ const toArray = (v) => {
 };
 
 const mergeCategoriesById = (existing, defaults) => {
-  const ex = toArray(existing);
-  const out = [...ex];
-  const ids = new Set(ex.map((c) => String(c?.id || "").trim()).filter(Boolean));
-  for (const d of toArray(defaults)) {
+  const ex = toArray(existing).filter(Boolean);
+  const defs = toArray(defaults).filter(Boolean);
+
+  const defMap = new Map();
+  for (const d of defs) {
     const id = String(d?.id || "").trim();
     if (!id) continue;
-    if (!ids.has(id)) {
-      out.push(d);
-      ids.add(id);
-    }
+    defMap.set(id, { ...d, id });
   }
+
+  const out = [];
+  const seen = new Set();
+
+  for (const c of ex) {
+    const id = String(c?.id || "").trim();
+    if (!id) continue;
+
+    const d = defMap.get(id);
+    const merged = d
+      ? {
+          ...d,
+          ...c, // user's overrides win (name/icon/color/keywords)
+          id,
+          // but keep new hierarchy fields if user doesn't have them
+          parentId: c?.parentId != null ? String(c.parentId || "").trim() : String(d?.parentId || "").trim(),
+        }
+      : {
+          ...c,
+          id,
+          parentId: String(c?.parentId || "").trim(),
+        };
+
+    out.push(merged);
+    seen.add(id);
+  }
+
+  // Add any missing defaults
+  for (const d of defs) {
+    const id = String(d?.id || "").trim();
+    if (!id) continue;
+    if (seen.has(id)) continue;
+    out.push({ ...d, id, parentId: String(d?.parentId || "").trim() });
+    seen.add(id);
+  }
+
   return out;
+};
+
+const sanitizeHierarchyOneLevel = (list) => {
+  const arr = toArray(list).filter(Boolean);
+
+  const byId = new Map();
+  for (const c of arr) {
+    const id = String(c?.id || "").trim();
+    if (!id) continue;
+    byId.set(id, { ...c, id });
+  }
+
+  const isDeleted = (c) => !!(c?.isDeleted || c?.deletedAt);
+
+  const next = [];
+  for (const c of byId.values()) {
+    const id = c.id;
+    let parentId = String(c?.parentId || "").trim();
+
+    if (parentId === id) parentId = "";
+    if (parentId && !byId.has(parentId)) parentId = "";
+    if (parentId && isDeleted(byId.get(parentId))) parentId = "";
+
+    // prevent 3-level: parent itself must be root
+    if (parentId) {
+      const p = byId.get(parentId);
+      const ppid = String(p?.parentId || "").trim();
+      if (ppid) parentId = "";
+    }
+
+    next.push({ ...c, parentId });
+  }
+
+  return next;
 };
 
 const ensureCategories = (cats) => {
   const expenseIn = toArray(cats?.expense);
   const incomeIn = toArray(cats?.income);
 
-  const expense = expenseIn.length ? mergeCategoriesById(expenseIn, DEFAULT_CATEGORIES.expense) : DEFAULT_CATEGORIES.expense;
-  const income = incomeIn.length ? mergeCategoriesById(incomeIn, DEFAULT_CATEGORIES.income) : DEFAULT_CATEGORIES.income;
+  const mergedExpense = expenseIn.length
+    ? mergeCategoriesById(expenseIn, DEFAULT_CATEGORIES.expense)
+    : DEFAULT_CATEGORIES.expense;
 
-  return { expense, income };
+  const mergedIncome = incomeIn.length
+    ? mergeCategoriesById(incomeIn, DEFAULT_CATEGORIES.income)
+    : DEFAULT_CATEGORIES.income;
+
+  // ✅ keep hierarchy valid (no self parent, no missing parent, no parent of parent)
+  return {
+    expense: sanitizeHierarchyOneLevel(mergedExpense),
+    income: sanitizeHierarchyOneLevel(mergedIncome),
+  };
 };
 
 const digitsOnly = (s) => {
@@ -766,28 +843,55 @@ export function reducer(state, action) {
     case ACTIONS.ADD_CATEGORY: {
       const { type, category } = action.payload || {};
       if (!type || !category) return state;
+      if (type !== "expense" && type !== "income") return state;
+
       const now = Date.now();
       const list = state.categories[type] || [];
+
       const id = String(category?.id || "").trim();
       if (!id) return state;
+
+      // --- normalize parentId (1-level) ---
+      const byId = new Map();
+      for (const c of list || []) {
+        const cid = String(c?.id || "").trim();
+        if (cid) byId.set(cid, c);
+      }
+
+      let parentId = String(category?.parentId || "").trim();
+      if (parentId === id) parentId = "";
+      if (parentId && !byId.has(parentId)) parentId = "";
+      if (parentId) {
+        const p = byId.get(parentId);
+        const ppid = String(p?.parentId || "").trim();
+        const pDel = !!(p?.isDeleted || p?.deletedAt);
+        if (ppid || pDel) parentId = ""; // prevent 3-level or deleted parent
+      }
+
+      // If this category is currently a parent of others, it must remain a main category.
+      const hasChildren = (list || []).some((c) => String(c?.parentId || "").trim() === id && !(c?.isDeleted || c?.deletedAt));
+      if (hasChildren) parentId = "";
 
       // ✅ Upsert by id, and ensure the category becomes active (not tombstoned)
       const cleaned = {
         ...category,
         id,
+        parentId,
         deletedAt: null,
         isDeleted: false,
         updatedAt: now,
       };
 
       const exists = list.some((c) => String(c?.id || "") === id);
-      const nextList = exists ? list.map((c) => (String(c?.id || "") === id ? { ...c, ...cleaned } : c)) : [...list, cleaned];
+      const nextList = exists
+        ? list.map((c) => (String(c?.id || "") === id ? { ...c, ...cleaned } : c))
+        : [...list, cleaned];
 
       return {
         ...state,
         categories: {
           ...state.categories,
-          [type]: nextList,
+          [type]: sanitizeHierarchyOneLevel(nextList),
         },
       };
     }
@@ -795,11 +899,44 @@ export function reducer(state, action) {
     case ACTIONS.DELETE_CATEGORY: {
       const { type, id } = action.payload || {};
       if (!type || !id) return state;
+      if (type !== "expense" && type !== "income") return state;
+
       const now = Date.now();
       const list = state.categories[type] || [];
+      const targetId = String(id).trim();
+      if (!targetId) return state;
+
+      // Cascade tombstone: delete category + all descendants
+      const childrenByParent = new Map();
+      for (const c of list || []) {
+        const pid = String(c?.parentId || "").trim();
+        const cid = String(c?.id || "").trim();
+        if (!pid || !cid) continue;
+        const arr = childrenByParent.get(pid) || [];
+        arr.push(cid);
+        childrenByParent.set(pid, arr);
+      }
+
+      const idsToDelete = new Set();
+      const q = [targetId];
+      while (q.length) {
+        const cur = q.shift();
+        if (!cur || idsToDelete.has(cur)) continue;
+        idsToDelete.add(cur);
+        const kids = childrenByParent.get(cur) || [];
+        for (const kid of kids) {
+          if (!idsToDelete.has(kid)) q.push(kid);
+        }
+      }
+
       let changed = false;
       const nextList = list.map((c) => {
-        if (String(c?.id || "") !== String(id)) return c;
+        const cid = String(c?.id || "").trim();
+        if (!idsToDelete.has(cid)) return c;
+        if (c?.isDeleted || c?.deletedAt) {
+          // already tombstoned, but keep updatedAt fresh so UI refreshes
+          return { ...c, updatedAt: now };
+        }
         changed = true;
         return {
           ...c,
@@ -815,10 +952,11 @@ export function reducer(state, action) {
         ...state,
         categories: {
           ...state.categories,
-          [type]: nextList,
+          [type]: sanitizeHierarchyOneLevel(nextList),
         },
       };
     }
+
 
     // ----- budgets -----
     case ACTIONS.UPSERT_BUDGET: {

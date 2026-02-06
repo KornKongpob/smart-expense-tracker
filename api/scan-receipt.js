@@ -13,11 +13,13 @@ export const config = { api: { bodyParser: false } };
 const IS_PROD = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 
 // JSON request bodies can be abused to DoS serverless functions. Keep this tight.
-// NOTE: base64 is bigger than binary; client optimizes images before sending.
-const MAX_JSON_BODY_BYTES = Number(process.env.SCAN_MAX_JSON_BODY_BYTES || 2 * 1024 * 1024); // 2MB
+// NOTE: base64 is bigger than binary; client optimizes images/PDFs before sending.
+// Default: 6MB JSON (base64 payloads); override via SCAN_MAX_JSON_BODY_BYTES.
+const MAX_JSON_BODY_BYTES = Number(process.env.SCAN_MAX_JSON_BODY_BYTES || 6 * 1024 * 1024);
 
-// Max decoded binary image bytes allowed (applies to multipart file size and JSON base64).
-const MAX_IMAGE_BYTES = Number(process.env.SCAN_MAX_IMAGE_BYTES || 8 * 1024 * 1024); // 8MB
+// Max decoded binary upload bytes allowed (applies to multipart file size and JSON base64).
+// Back-compat: SCAN_MAX_IMAGE_BYTES supported.
+const MAX_UPLOAD_BYTES = Number(process.env.SCAN_MAX_UPLOAD_BYTES || process.env.SCAN_MAX_IMAGE_BYTES || 12 * 1024 * 1024);
 
 // Basic per-IP rate limit (best-effort; serverless instances do not share memory).
 const RATE_LIMIT_PER_MINUTE = Number(process.env.SCAN_RATE_LIMIT_PER_MINUTE || 30);
@@ -27,6 +29,7 @@ const RATE_WINDOW_MS = 60_000;
 const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 35_000);
 
 const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ALLOWED_FILE_MIME = new Set(["application/pdf"]);
 const _rate = new Map(); // key -> { resetAt, count }
 
 function setSecurityHeaders(res) {
@@ -161,18 +164,21 @@ function enforceRateLimit(req, res) {
   return false;
 }
 
-function normalizeImageMime(mimeType) {
+function normalizeInputMime(mimeType) {
   const m = String(mimeType || "").trim().toLowerCase();
   if (!m) return "";
   // normalize common variants
   if (m === "image/jpg") return "image/jpeg";
+  if (m === "application/x-pdf") return "application/pdf";
   return m;
 }
 
-function assertAllowedImageMime(mimeType) {
-  const mt = normalizeImageMime(mimeType);
-  if (!mt || !ALLOWED_IMAGE_MIME.has(mt)) return "";
-  return mt;
+function assertAllowedInputMime(mimeType) {
+  const mt = normalizeInputMime(mimeType);
+  if (!mt) return "";
+  if (ALLOWED_IMAGE_MIME.has(mt)) return mt;
+  if (ALLOWED_FILE_MIME.has(mt)) return mt;
+  return "";
 }
 
 function approxBase64Bytes(b64) {
@@ -1042,7 +1048,7 @@ function refineTxTypeAndSubtype({ parsedTxType, evidence, rawText }) {
   return { tx_type: safeType, tx_subtype: safeType === "transfer" ? "transfer" : null, is_credit_card_payment: false };
 }
 
-async function callOpenAI({ base64, mimeType, accounts = [] }) {
+async function callOpenAI({ base64, mimeType, filename, accounts = [] }) {
   const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) {
     return {
@@ -1176,7 +1182,14 @@ async function callOpenAI({ base64, mimeType, accounts = [] }) {
   // Override with OPENAI_MODEL. Optionally set OPENAI_FALLBACK_MODEL for retries (model-not-found / access issues).
   const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-5.1");
   const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_FALLBACK_MODEL || "gpt-5.1");
-  const dataUrl = `data:${mimeType || "image/jpeg"};base64,${base64}`;
+  const mtNorm = normalizeInputMime(mimeType || "image/jpeg");
+  const dataUrl = `data:${mtNorm || "image/jpeg"};base64,${base64}`;
+  const isPdf = mtNorm === "application/pdf";
+  const safeFilename = (() => {
+    const raw = String(filename || "").trim();
+    if (raw) return raw;
+    return isPdf ? "receipt.pdf" : "receipt.jpg";
+  })();
 
   const accountsForModel = compactAccountsForModel(accounts);
   const accountsText = accountsForModel.length
@@ -1437,7 +1450,9 @@ ${accountsText}
         role: "user",
         content: [
           { type: "input_text", text: prompt },
-          { type: "input_image", image_url: dataUrl },
+          isPdf
+            ? { type: "input_file", filename: safeFilename, file_data: dataUrl }
+            : { type: "input_image", image_url: dataUrl },
         ],
       },
     ],
@@ -2003,7 +2018,7 @@ export default async function handler(req, res) {
 
     // 1) multipart/form-data
     if (ct.includes("multipart/form-data")) {
-      const { fileBuffer, mimeType, fields } = await parseMultipart(req, { maxBytes: MAX_IMAGE_BYTES });
+      const { fileBuffer, mimeType, filename, fields } = await parseMultipart(req, { maxBytes: MAX_UPLOAD_BYTES });
       const accounts = (() => {
         try {
           const f = fields && typeof fields === 'object' ? fields : {};
@@ -2018,15 +2033,15 @@ export default async function handler(req, res) {
         res.status(400).json({ ok: false, code: "missing_file", message: "No file uploaded" });
         return;
       }
-      const mt = assertAllowedImageMime(mimeType || "image/jpeg");
+      const mt = assertAllowedInputMime(mimeType || "image/jpeg");
       if (!mt) {
-        res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only jpeg/png/webp are allowed" });
+        res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
         return;
       }
 
 
       const base64 = fileBuffer.toString("base64");
-      const out = await callOpenAI({ base64, mimeType: mt, accounts });
+      const out = await callOpenAI({ base64, mimeType: mt, filename, accounts });
       res.status(out.status).json(out.body);
       return;
     }
@@ -2046,17 +2061,18 @@ export default async function handler(req, res) {
 
     const base64 = parsedDataUrl?.base64 || body?.base64 || body?.imageBase64 || null;
     const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
+    const filename = String(body?.filename || body?.fileName || body?.name || "").trim();
 
-    const mt = assertAllowedImageMime(mimeType || "image/jpeg");
+    const mt = assertAllowedInputMime(mimeType || "image/jpeg");
     if (!mt) {
-      res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only jpeg/png/webp are allowed" });
+      res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
       return;
     }
 
     const b64 = typeof base64 === "string" ? base64.trim() : "";
-    const sizeCheck = assertBase64UnderLimit(b64, MAX_IMAGE_BYTES);
+    const sizeCheck = assertBase64UnderLimit(b64, MAX_UPLOAD_BYTES);
     if (!sizeCheck.ok) {
-      res.status(413).json({ ok: false, code: "image_too_large", message: "Image payload too large" });
+      res.status(413).json({ ok: false, code: "payload_too_large", message: "Upload payload too large" });
       return;
     }
 
@@ -2069,7 +2085,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    const out = await callOpenAI({ base64: b64, mimeType: mt, accounts });
+    const out = await callOpenAI({ base64: b64, mimeType: mt, filename, accounts });
     res.status(out.status).json(out.body);
   } catch (e) {
     const msg = String(e?.message || e);

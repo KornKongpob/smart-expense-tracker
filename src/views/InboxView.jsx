@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import CategorySelect from "../components/CategorySelect";
 import {
   Inbox,
   Search,
@@ -10,6 +11,7 @@ import {
   X,
   Edit2,
   Layers,
+  FileText
 } from "lucide-react";
 
 import { useAppStore } from "../store/store";
@@ -17,7 +19,7 @@ import { findFuzzyDuplicate } from "../store/selectors";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
-import { useBlobUrl } from "../utils/useBlobUrl";
+import { useBlobInfo } from "../utils/useBlobInfo";
 import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
@@ -442,7 +444,7 @@ function PillTab({ active, onClick, label, count }) {
 }
 
 function AttachmentThumb({ attachmentId }) {
-  const url = useBlobUrl(attachmentId);
+  const { url, mimeType } = useBlobInfo(attachmentId);
   const id = String(attachmentId || "").trim();
   if (!id) return null;
 
@@ -455,7 +457,16 @@ function AttachmentThumb({ attachmentId }) {
           rel="noreferrer noopener"
           className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
         >
-          <img src={url} alt="attachment" className="w-full h-28 object-cover" />
+          {String(mimeType || "").toLowerCase() === "application/pdf" ? (
+            <div className="w-full h-28 flex items-center justify-center bg-white/10">
+              <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
+                <FileText size={18} />
+                PDF
+              </div>
+            </div>
+          ) : (
+            <img src={url} alt="attachment" className="w-full h-28 object-cover" />
+          )}
         </a>
       ) : (
         <div className="text-xs text-gray-900/55">Loading attachment…</div>
@@ -467,7 +478,7 @@ function AttachmentThumb({ attachmentId }) {
 function EditorModal({ open, item, accounts, categories, onClose, onSave, showAlert }) {
   const [draft, setDraft] = useState(null);
 
-  const attachmentUrl = useBlobUrl(draft?.attachmentId);
+  const { url: attachmentUrl, mimeType: attachmentMimeType } = useBlobInfo(draft?.attachmentId);
 
   const defaultCashAccountId = useMemo(() => {
     const arr = Array.isArray(accounts) ? accounts : [];
@@ -1087,7 +1098,16 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 rel="noreferrer noopener"
                 className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
               >
-                <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
+                {String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
+                  <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center bg-white/10">
+                    <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
+                      <FileText size={18} />
+                      Open PDF
+                    </div>
+                  </div>
+                ) : (
+                  <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
+                )}
               </a>
             ) : (
               <div className="text-sm text-gray-900/60">Loading image…</div>
@@ -1296,18 +1316,14 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                         <div key={`g-${idx}`} className="rounded-2xl bg-white/20 border border-white/15 p-3">
                           <div className="flex items-start gap-2">
                             <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
-                              <select
+                              <CategorySelect
+                                categories={catList}
                                 value={g.categoryId || ""}
                                 onChange={(e) => updateGroup(idx, { categoryId: e.target.value })}
+                                allowEmpty
+                                emptyLabel="เลือกหมวดหมู่"
                                 className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-                              >
-                                <option value="">เลือกหมวดหมู่</option>
-                                {catList.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.name}
-                                  </option>
-                                ))}
-                              </select>
+                              />
 
                               <input
                                 type="text"
@@ -1353,18 +1369,14 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 <>
                 <label className="text-xs font-bold text-gray-900/60 min-w-0">
                   Category
-                  <select
+                  <CategorySelect
+                    categories={catList}
                     value={draft.categoryId}
                     onChange={(e) => setDraft((d) => ({ ...d, categoryId: e.target.value }))}
-                    className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-                  >
-                    <option value="">เลือกหมวดหมู่</option>
-                    {catList.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    allowEmpty
+                    emptyLabel="เลือกหมวดหมู่"
+                    className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  />
                 </label>
 
                 {!isSplitMode && hasBreakdown ? (
@@ -1387,18 +1399,14 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                         <div key={`g-ro-${idx}`} className="rounded-2xl bg-white/20 border border-white/15 p-3">
                           <div className="flex items-start gap-2">
                             <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
-                              <select
+                              <CategorySelect
+                                categories={catList}
                                 value={g.categoryId || ""}
                                 onChange={(e) => updateGroup(idx, { categoryId: e.target.value })}
+                                allowEmpty
+                                emptyLabel="เลือกหมวดหมู่"
                                 className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-                              >
-                                <option value="">เลือกหมวดหมู่</option>
-                                {catList.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.name}
-                                  </option>
-                                ))}
-                              </select>
+                              />
 
                               <input
                                 type="text"

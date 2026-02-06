@@ -1,5 +1,6 @@
 // src/views/RecurringView.jsx
 import { useMemo, useState } from "react";
+import CategorySelect from "../components/CategorySelect";
 import { ChevronRight, Plus, Trash2, Check, X, Repeat, Pencil, PlayCircle, CalendarClock } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { formatCurrency, toISODate } from "../utils/format";
@@ -405,17 +406,12 @@ export default function RecurringView({ showAlert, showConfirm }) {
           />
 
           <label className="text-xs font-bold text-gray-700 mb-1 block mt-4">หมวดหมู่</label>
-          <select
+          <CategorySelect
+            categories={catsForType || []}
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
             className="w-full glass-input rounded-2xl px-4 py-3 bg-transparent outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
-          >
-            {(catsForType || []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.icon} {c.name}
-              </option>
-            ))}
-          </select>
+          />
 
           <label className="text-xs font-bold text-gray-700 mb-1 block mt-4">บัญชี</label>
           <select

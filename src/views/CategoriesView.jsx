@@ -1,7 +1,7 @@
 // src/views/CategoriesView.jsx
 import { useMemo, useState } from "react";
-import { ChevronRight, Plus, Trash2, Edit2, X, Check, Search } from "lucide-react";
-import { EMOJI_PRESETS, PRESET_COLORS } from "../constants/presets.jsx";
+import { ChevronRight, Plus, Trash2, Edit2, X, Check, Search, CornerDownRight } from "lucide-react";
+import { PRESET_COLORS } from "../constants/presets.jsx";
 import { useAppStore } from "../store/store";
 
 const slugify = (s) =>
@@ -17,7 +17,7 @@ const normKw = (s) =>
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, ""); // keep letters/numbers/space (unicode)
+    .replace(/[^\p{L}\p{N}\s]/gu, "");
 
 function uniqKeywords(list) {
   const out = [];
@@ -42,14 +42,20 @@ function ModalShell({ title, children, onClose }) {
             type="button"
             onClick={onClose}
             className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
+            aria-label="close"
           >
             <X size={18} />
           </button>
         </div>
         {children}
+        <div className="h-3 pb-safe" />
       </div>
     </div>
   );
+}
+
+function isActiveCat(c) {
+  return !!c && !(c?.deletedAt || c?.isDeleted);
 }
 
 export default function CategoriesView({ showAlert, showConfirm }) {
@@ -57,17 +63,40 @@ export default function CategoriesView({ showAlert, showConfirm }) {
 
   const [tab, setTab] = useState("expense");
   const [open, setOpen] = useState(false);
-  const [editingId, setEditingId] = useState(""); // "" = create new
+  const [editingId, setEditingId] = useState("");
   const [q, setQ] = useState("");
 
-  // ✅ Tombstone strategy: deleteCategory will "hide" a category (mark deletedAt)
-  // so historical reports can still resolve the old name/icon.
   const catsAll = useMemo(() => state.categories?.[tab] ?? [], [state.categories, tab]);
-  const cats = useMemo(() => (catsAll || []).filter((c) => !c?.deletedAt && !c?.isDeleted), [catsAll]);
+  const catsActive = useMemo(() => (catsAll || []).filter(isActiveCat), [catsAll]);
 
+  const byIdActive = useMemo(() => {
+    const m = new Map();
+    for (const c of catsActive) m.set(String(c.id), c);
+    return m;
+  }, [catsActive]);
+
+  const activeMain = useMemo(() => catsActive.filter((c) => !String(c?.parentId || "").trim()), [catsActive]);
+  const activeChildrenByParent = useMemo(() => {
+    const mp = new Map();
+    for (const c of catsActive) {
+      const pid = String(c?.parentId || "").trim();
+      if (!pid) continue;
+      const arr = mp.get(pid) || [];
+      arr.push(c);
+      mp.set(pid, arr);
+    }
+    for (const [pid, arr] of mp.entries()) {
+      arr.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "th"));
+      mp.set(pid, arr);
+    }
+    return mp;
+  }, [catsActive]);
+
+  // --- form state ---
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("🏷️");
   const [color, setColor] = useState(PRESET_COLORS[0]);
+  const [parentId, setParentId] = useState(""); // "" = main
   const [kwInput, setKwInput] = useState("");
   const [keywords, setKeywords] = useState([]);
 
@@ -78,87 +107,54 @@ export default function CategoriesView({ showAlert, showConfirm }) {
     setName("");
     setIcon("🏷️");
     setColor(PRESET_COLORS[0]);
+    setParentId("");
     setKwInput("");
     setKeywords([]);
   };
 
-  const openNew = () => {
+  const openNew = (prefillParentId = "") => {
     resetForm();
+    setParentId(String(prefillParentId || "").trim());
     setOpen(true);
   };
 
   const openEdit = (cat) => {
-    setEditingId(cat.id);
-    setName(cat.name || "");
-    setIcon(cat.icon || "🏷️");
-    setColor(cat.color || PRESET_COLORS[0]);
+    setEditingId(String(cat?.id || ""));
+    setName(String(cat?.name || ""));
+    setIcon(String(cat?.icon || "🏷️"));
+    setColor(String(cat?.color || PRESET_COLORS[0]));
+    setParentId(String(cat?.parentId || "").trim());
     setKwInput("");
-    setKeywords(uniqKeywords(cat.keywords || []));
+    setKeywords(uniqKeywords(cat?.keywords || []));
     setOpen(true);
   };
 
-  const upsertLocalCategory = ({ id, name, icon, color, keywords }) => {
-    const listAll = state.categories?.[tab] ?? [];
-    const existing = listAll.find((c) => c.id === id);
+  const parentOptions = useMemo(() => {
+    // Only active MAIN categories can be parent.
+    return (activeMain || [])
+      .filter((c) => {
+        const id = String(c?.id || "").trim();
+        if (!id) return false;
+        if (editingId && id === String(editingId)) return false; // can't parent self
+        return true;
+      })
+      .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "th"));
+  }, [activeMain, editingId]);
 
-    const payload = {
-      ...(existing || {}),
-      id,
-      name: String(name || "").trim(),
-      icon,
-      color,
-      keywords: uniqKeywords(keywords),
-    };
-
-    // store.addCategory is an UPSERT now
-    addCategory({ type: tab, category: payload });
-  };
-
-  const addOrSave = () => {
-    if (!name.trim()) return showAlert?.("กรุณาใส่ชื่อหมวดหมู่");
-
-    const kw = uniqKeywords(keywords);
-
-    if (!editingId) {
-      let base = slugify(name);
-      if (!base) base = `cat_${Date.now()}`;
-      let id = base;
-      let i = 2;
-      // Ensure unique across ALL categories (including deleted/tombstoned)
-      while (catsAll.some((c) => c.id === id)) id = `${base}_${i++}`;
-
-      upsertLocalCategory({ id, name: name.trim(), icon, color, keywords: kw });
-    } else {
-      upsertLocalCategory({ id: editingId, name: name.trim(), icon, color, keywords: kw });
-    }
-
-    setOpen(false);
-    resetForm();
-    showAlert?.(editingId ? "บันทึกหมวดหมู่แล้ว" : "สร้างหมวดหมู่แล้ว");
-  };
-
-  const del = (id) => {
-    if ((cats || []).length <= 1) return showAlert?.("ต้องมีอย่างน้อย 1 หมวดหมู่");
-    showConfirm?.(
-      "ลบหมวดหมู่",
-      "ยืนยันลบหมวดหมู่นี้?\n\nหมายเหตุ: หมวดจะถูกซ่อนจากการเลือกใหม่ แต่รายงานย้อนหลัง/งบประมาณยังแสดงชื่อเดิมได้ (ไม่ทำให้ข้อมูลเก่าขึ้น \"—\")",
-      () => deleteCategory({ id, type: tab }),
-      true
-    );
-  };
+  const editingHasChildren = useMemo(() => {
+    if (!editingId) return false;
+    const kids = activeChildrenByParent.get(String(editingId)) || [];
+    return kids.length > 0;
+  }, [editingId, activeChildrenByParent]);
 
   const addKeyword = () => {
     const raw = String(kwInput || "").trim();
     if (!raw) return;
-
-    // allow multiple keywords separated by comma/newline
     const parts = raw
       .split(/[,|\n]/g)
       .map((x) => x.trim())
       .filter(Boolean);
-
-    const merged = uniqKeywords([...(keywords || []), ...parts]);
-    setKeywords(merged);
+    setKeywords(uniqKeywords([...(keywords || []), ...parts]));
     setKwInput("");
   };
 
@@ -167,15 +163,113 @@ export default function CategoriesView({ showAlert, showConfirm }) {
     setKeywords((prev) => (prev || []).filter((x) => normKw(x) !== nk));
   };
 
-  const filteredCats = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return cats;
+  const upsertLocalCategory = ({ id, name, icon, color, keywords, parentId }) => {
+    const listAll = state.categories?.[tab] ?? [];
+    const existing = listAll.find((c) => String(c?.id) === String(id));
 
-    return cats.filter((c) => {
-      const hay = `${c.name || ""} ${(c.keywords || []).join(" ")}`.toLowerCase();
+    const payload = {
+      ...(existing || {}),
+      id: String(id),
+      name: String(name || "").trim(),
+      icon: String(icon || "🏷️"),
+      color: String(color || PRESET_COLORS[0]),
+      parentId: String(parentId || "").trim(),
+      keywords: uniqKeywords(keywords),
+    };
+
+    addCategory({ type: tab, category: payload }); // store.addCategory = UPSERT + sanitize hierarchy
+  };
+
+  const addOrSave = () => {
+    if (!String(name || "").trim()) return showAlert?.("กรุณาใส่ชื่อหมวดหมู่");
+
+    // prevent picking a deleted/missing parent in UI layer
+    const pid = String(parentId || "").trim();
+    const isPidOk = !pid || byIdActive.has(pid);
+    const finalParentId = isPidOk ? pid : "";
+
+    // if editing a parent-with-children -> force remain main
+    const safeParentId = editingHasChildren ? "" : finalParentId;
+
+    const kw = uniqKeywords(keywords);
+
+    if (!editingId) {
+      let base = slugify(name);
+      if (!base) base = `cat_${Date.now()}`;
+      let id = base;
+      let i = 2;
+      while ((catsAll || []).some((c) => String(c?.id) === String(id))) id = `${base}_${i++}`;
+      upsertLocalCategory({ id, name: name.trim(), icon, color, keywords: kw, parentId: safeParentId });
+      showAlert?.("สร้างหมวดหมู่แล้ว");
+    } else {
+      upsertLocalCategory({ id: editingId, name: name.trim(), icon, color, keywords: kw, parentId: safeParentId });
+      showAlert?.("บันทึกหมวดหมู่แล้ว");
+    }
+
+    setOpen(false);
+    resetForm();
+  };
+
+  const del = (id) => {
+    const targetId = String(id || "").trim();
+    if (!targetId) return;
+
+    // figure out descendants count for message (1-level only, but store also cascades)
+    const kids = activeChildrenByParent.get(targetId) || [];
+
+    const activeCount = (catsActive || []).length;
+    const removeCount = kids.length ? 1 + kids.length : 1;
+    if (activeCount - removeCount < 1) {
+      return showAlert?.("ต้องมีอย่างน้อย 1 หมวดหมู่ (ลบหมวดหลักนี้แล้วหมวดจะหมด)");
+    }
+
+    const msg = kids.length
+      ? `ยืนยันลบหมวดนี้?\n\nระบบจะซ่อน “หมวดหลัก” และ “หมวดย่อย” ทั้งหมด (${kids.length} รายการ) จากการเลือกใหม่\nแต่รายงานย้อนหลัง/งบประมาณยังแสดงชื่อเดิมได้ (ไม่ทำให้ข้อมูลเก่าขึ้น “—”)`
+      : `ยืนยันลบหมวดหมู่นี้?\n\nหมายเหตุ: หมวดจะถูกซ่อนจากการเลือกใหม่ แต่รายงานย้อนหลัง/งบประมาณยังแสดงชื่อเดิมได้ (ไม่ทำให้ข้อมูลเก่าขึ้น “—”)`;
+
+    showConfirm?.("ลบหมวดหมู่", msg, () => deleteCategory({ id: targetId, type: tab }), true);
+  };
+
+  // --- filtered tree ---
+  const renderTree = useMemo(() => {
+    const needle = String(q || "").trim().toLowerCase();
+    const hit = (c) => {
+      if (!needle) return true;
+      const hay = `${c?.name || ""} ${(c?.keywords || []).join(" ")}`.toLowerCase();
       return hay.includes(needle);
+    };
+
+    if (!needle) {
+      return activeMain
+        .slice()
+        .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "th"))
+        .map((p) => ({ parent: p, children: activeChildrenByParent.get(String(p.id)) || [] }));
+    }
+
+    const matchedIds = new Set();
+    for (const c of catsActive) {
+      if (hit(c)) {
+        matchedIds.add(String(c.id));
+        const pid = String(c?.parentId || "").trim();
+        if (pid) matchedIds.add(pid);
+      }
+    }
+
+    const parents = activeMain
+      .filter((p) => {
+        if (matchedIds.has(String(p.id))) return true;
+        const kids = activeChildrenByParent.get(String(p.id)) || [];
+        return kids.some((k) => matchedIds.has(String(k.id)));
+      })
+      .slice()
+      .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "th"));
+
+    return parents.map((p) => {
+      const showAllKids = hit(p) || matchedIds.has(String(p.id));
+      const kids = (activeChildrenByParent.get(String(p.id)) || []).filter((k) => showAllKids || matchedIds.has(String(k.id)));
+      return { parent: p, children: kids };
     });
-  }, [cats, q]);
+  }, [q, catsActive, activeMain, activeChildrenByParent]);
 
   return (
     <div className="pb-28 pt-6 px-4 min-h-dvh">
@@ -187,10 +281,20 @@ export default function CategoriesView({ showAlert, showConfirm }) {
         >
           <ChevronRight className="rotate-180" size={24} />
         </button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-extrabold text-gray-900">จัดการหมวดหมู่</h1>
-          <p className="text-gray-600 text-sm">เพิ่ม/ลบ/แก้ไข + ตั้ง Keywords เพื่อช่วยจัดหมวดจากการสแกน</p>
+          <p className="text-gray-600 text-sm">สร้างหมวดหลัก/หมวดย่อย + ตั้ง Keywords เพื่อช่วยจัดหมวดจากการสแกน</p>
         </div>
+
+        <button
+          type="button"
+          onClick={() => openNew("")}
+          className="shrink-0 w-10 h-10 rounded-full bg-gray-900/90 text-white flex items-center justify-center active:scale-95"
+          aria-label="add category"
+          title="เพิ่มหมวด"
+        >
+          <Plus size={18} />
+        </button>
       </header>
 
       <div className="glass-panel p-1 rounded-xl flex mb-4">
@@ -214,7 +318,6 @@ export default function CategoriesView({ showAlert, showConfirm }) {
         </button>
       </div>
 
-      {/* Search */}
       <div className="mb-4">
         <div className="glass-input rounded-2xl px-3 py-2 flex items-center gap-2">
           <Search size={16} className="text-gray-600" />
@@ -228,187 +331,247 @@ export default function CategoriesView({ showAlert, showConfirm }) {
       </div>
 
       <div className="space-y-3">
-        {filteredCats.map((cat) => (
-          <div key={cat.id} className="glass-card p-4 rounded-2xl flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3 min-w-0">
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0"
-                style={{ backgroundColor: `${cat.color}20` }}
-              >
-                {cat.icon}
-              </div>
+        {renderTree.length ? (
+          renderTree.map(({ parent, children }) => {
+            const kids = children || [];
+            return (
+              <div key={parent.id} className="glass-card rounded-2xl overflow-hidden border border-white/15">
+                <div className="p-4 flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0"
+                      style={{ backgroundColor: `${parent.color}20` }}
+                    >
+                      {parent.icon}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-gray-900 truncate">{parent.name}</div>
+                      <div className="text-[11px] text-gray-700/70 mt-0.5">
+                        {kids.length ? (
+                          <span className="font-bold text-gray-900/70">มีหมวดย่อย {kids.length} รายการ</span>
+                        ) : parent.keywords?.length ? (
+                          <>
+                            Keywords: <span className="font-bold text-gray-900/80">{parent.keywords.slice(0, 6).join(", ")}{parent.keywords.length > 6 ? " …" : ""}</span>
+                          </>
+                        ) : (
+                          <span className="text-gray-500">ยังไม่ได้ตั้ง keyword</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-              <div className="min-w-0">
-                <div className="font-extrabold text-gray-900 truncate">{cat.name}</div>
-                <div className="text-[11px] text-gray-700/70 mt-0.5">
-                  {cat.keywords?.length ? (
-                    <>
-                      Keywords:{" "}
-                      <span className="font-bold text-gray-900/80">
-                        {cat.keywords.slice(0, 6).join(", ")}
-                        {cat.keywords.length > 6 ? " …" : ""}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-gray-500">ยังไม่ได้ตั้ง keyword</span>
-                  )}
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openNew(parent.id)}
+                      className="p-2 rounded-xl bg-white/20 border border-white/20 text-gray-900/80 active:scale-95"
+                      title="เพิ่มหมวดย่อย"
+                      aria-label="add sub category"
+                    >
+                      <Plus size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(parent)}
+                      className="p-2 rounded-xl bg-white/20 border border-white/20 text-gray-900/80 active:scale-95"
+                      title="Edit"
+                      aria-label="edit"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => del(parent.id)}
+                      className="p-2 rounded-xl bg-red-500/10 border border-red-500/15 text-red-700 active:scale-95"
+                      title="Delete"
+                      aria-label="delete"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
+
+                {kids.length ? (
+                  <div className="border-t border-white/15 px-4 py-3 space-y-2 bg-white/5">
+                    {kids.map((c) => (
+                      <div key={c.id} className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <div className="pt-1 text-gray-900/40">
+                            <CornerDownRight size={14} />
+                          </div>
+                          <div className="flex items-start gap-2 min-w-0">
+                            <div
+                              className="w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0"
+                              style={{ backgroundColor: `${c.color}20` }}
+                            >
+                              {c.icon}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-sm font-extrabold text-gray-900 truncate">{c.name}</div>
+                              <div className="text-[11px] text-gray-700/70">
+                                {c.keywords?.length ? (
+                                  <>
+                                    Keywords: <span className="font-bold text-gray-900/80">{c.keywords.slice(0, 5).join(", ")}{c.keywords.length > 5 ? " …" : ""}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-gray-500">ยังไม่ได้ตั้ง keyword</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(c)}
+                            className="p-2 rounded-xl bg-white/20 border border-white/20 text-gray-900/80 active:scale-95"
+                            title="Edit"
+                            aria-label="edit sub"
+                          >
+                            <Edit2 size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => del(c.id)}
+                            className="p-2 rounded-xl bg-red-500/10 border border-red-500/15 text-red-700 active:scale-95"
+                            title="Delete"
+                            aria-label="delete sub"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
+            );
+          })
+        ) : (
+          <div className="glass-card rounded-3xl border border-dashed glass-divider text-center py-16">
+            <div className="w-16 h-16 glass-chip rounded-full flex items-center justify-center mx-auto mb-3 text-gray-600">
+              <CornerDownRight size={28} />
             </div>
-
-            <div className="flex gap-2 shrink-0">
-              <button
-                onClick={() => openEdit(cat)}
-                className="w-10 h-10 rounded-full glass-icon-btn text-gray-800 flex items-center justify-center active:scale-95"
-                type="button"
-                title="แก้ไข"
-              >
-                <Edit2 size={18} />
-              </button>
-
-              <button
-                onClick={() => del(cat.id)}
-                className="w-10 h-10 rounded-full bg-red-500/10 text-red-700 flex items-center justify-center active:scale-95 border border-red-500/15"
-                type="button"
-                title="ลบ"
-              >
-                <Trash2 size={18} />
-              </button>
-            </div>
+            <p className="text-gray-800 font-extrabold">ไม่พบหมวดหมู่</p>
+            <button onClick={() => openNew("")} className="mt-3 text-emerald-700 text-sm font-extrabold" type="button">
+              เพิ่มหมวดหมู่
+            </button>
           </div>
-        ))}
-
-        <button
-          onClick={openNew}
-          className="w-full py-4 border-2 border-dashed glass-divider rounded-2xl text-gray-800 font-extrabold flex items-center justify-center gap-2 hover:bg-white/10"
-          type="button"
-        >
-          <Plus size={20} /> เพิ่มหมวดหมู่ใหม่
-        </button>
+        )}
       </div>
 
       {open ? (
-        <ModalShell
-          title={editingId ? "แก้ไขหมวดหมู่ + Keywords" : "สร้างหมวดหมู่ใหม่ + Keywords"}
-          onClose={() => {
-            setOpen(false);
-            resetForm();
-          }}
-        >
-          <label className="text-xs font-bold text-gray-700 mb-1 block">ชื่อหมวดหมู่</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 mb-4 font-extrabold text-gray-900"
-            placeholder="เช่น อาหาร, ค่าเช่า"
-          />
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="glass-panel border border-white/20 rounded-2xl p-3">
-              <div className="text-xs font-bold text-gray-700 mb-2">ไอคอน</div>
-              <div className="w-full rounded-2xl bg-white/15 border border-white/15 h-[56px] flex items-center justify-center text-2xl">
-                {icon}
-              </div>
-            </div>
-
-            <div className="glass-panel border border-white/20 rounded-2xl p-3">
-              <div className="text-xs font-bold text-gray-700 mb-2">สี</div>
-              <div className="flex gap-2 flex-wrap">
-                {PRESET_COLORS.slice(0, 12).map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setColor(c)}
-                    className={`w-7 h-7 rounded-full border border-white/30 active:scale-95 ${
-                      color === c ? "ring-2 ring-offset-1 ring-gray-700" : ""
-                    }`}
-                    style={{ backgroundColor: c }}
-                    type="button"
-                    aria-label="choose-color"
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <label className="text-xs font-bold text-gray-700 mb-1 block">เลือกไอคอน</label>
-          <div className="glass-panel border border-white/20 rounded-2xl p-2 mb-4 max-h-[220px] overflow-y-auto">
-            <div className="grid grid-cols-6 gap-2">
-              {EMOJI_PRESETS.map((e, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setIcon(e)}
-                  className={`h-11 w-full flex items-center justify-center text-xl rounded-xl transition-all active:scale-95 ${
-                    icon === e ? "bg-white/25 ring-1 ring-gray-900" : "hover:bg-white/10"
-                  }`}
-                  type="button"
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Keywords */}
-          <div className="glass-panel border border-white/20 rounded-2xl p-4 mb-4">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <div className="text-sm font-extrabold text-gray-900">Keywords ของหมวดนี้</div>
-              <div className="text-[11px] text-gray-700/70">{keywords.length} คำ</div>
-            </div>
-
-            <div className="flex gap-2">
+        <ModalShell title={editingId ? "แก้ไขหมวดหมู่" : "เพิ่มหมวดหมู่"} onClose={() => setOpen(false)}>
+          <div className="space-y-4">
+            <label className="text-xs font-bold text-gray-900/60 block">
+              ชื่อหมวด
               <input
-                value={kwInput}
-                onChange={(e) => setKwInput(e.target.value)}
-                className="flex-1 glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-                placeholder="เช่น ก๋วยเตี๋ยว, ข้าวมันไก่ (ใส่หลายคำคั่นด้วย , ได้)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                placeholder="เช่น อาหาร, กาแฟ"
               />
-              <button
-                type="button"
-                onClick={addKeyword}
-                className="px-4 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold active:scale-95"
-              >
-                เพิ่ม
-              </button>
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-xs font-bold text-gray-900/60">
+                Icon (emoji)
+                <input
+                  value={icon}
+                  onChange={(e) => setIcon(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  placeholder="🏷️"
+                />
+              </label>
+              <label className="text-xs font-bold text-gray-900/60">
+                สี
+                <select
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                >
+                  {PRESET_COLORS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
-            {keywords.length ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {keywords.map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => removeKeyword(k)}
-                    className="px-3 py-1.5 rounded-full glass-chip text-xs font-extrabold text-gray-900/80 active:scale-95"
-                    title="กดเพื่อลบ"
-                  >
-                    {k} <span className="text-gray-500">×</span>
-                  </button>
+            <div>
+              <div className="text-xs font-extrabold text-gray-900/70 mb-1">โครงสร้าง (หมวดหลัก / หมวดย่อย)</div>
+              {editingHasChildren ? (
+                <div className="text-[11px] text-amber-900/70 mb-2">
+                  หมวดนี้มีหมวดย่อยอยู่แล้ว จึงถูกล็อกให้เป็น “หมวดหลัก” (กันโครงสร้างซ้อน 3 ชั้น)
+                </div>
+              ) : null}
+              <select
+                value={editingHasChildren ? "" : parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                disabled={editingHasChildren}
+                className={`w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold ${
+                  editingHasChildren ? "opacity-70" : ""
+                }`}
+              >
+                <option value="">(หมวดหลัก)</option>
+                {parentOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.icon} {p.name}
+                  </option>
                 ))}
+              </select>
+              <div className="text-[11px] text-gray-900/55 mt-1">
+                ถ้าเลือก “หมวดหลัก” ว่างไว้ = เป็นหมวดหลัก • ถ้าเลือกหมวดหลักด้านบน = เป็นหมวดย่อยของหมวดนั้น
               </div>
-            ) : (
-              <div className="mt-3 text-[12px] text-gray-700/70">
-                ยังไม่มี keyword • แนะนำใส่ชื่อเมนู/สินค้า/คำที่เจอบ่อยในบิล เพื่อให้ระบบจัดหมวดหลังสแกนแม่นขึ้น
-              </div>
-            )}
-          </div>
+            </div>
 
-          <div className="flex gap-3">
+            {/* Keywords */}
+            <div>
+              <div className="text-xs font-extrabold text-gray-900/70 mb-1">Keywords (ช่วยจัดหมวดจากการสแกน)</div>
+              <div className="flex gap-2">
+                <input
+                  value={kwInput}
+                  onChange={(e) => setKwInput(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  placeholder="พิมพ์คำ แล้วกดเพิ่ม (คั่นด้วย , หรือขึ้นบรรทัดใหม่ได้)"
+                />
+                <button
+                  type="button"
+                  onClick={addKeyword}
+                  className="px-4 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+                >
+                  + เพิ่ม
+                </button>
+              </div>
+
+              {keywords.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {keywords.map((kw) => (
+                    <button
+                      key={kw}
+                      type="button"
+                      onClick={() => removeKeyword(kw)}
+                      className="px-3 py-1.5 rounded-full bg-white/20 border border-white/20 text-[11px] font-extrabold text-gray-900/80 active:scale-95"
+                      title="ลบ keyword"
+                    >
+                      {kw} <span className="text-gray-900/50">×</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-[11px] text-gray-900/55">ยังไม่มี keyword</div>
+              )}
+            </div>
+
             <button
-              onClick={() => {
-                setOpen(false);
-                resetForm();
-              }}
-              className="flex-1 py-3 text-gray-800 font-extrabold glass-chip rounded-2xl active:scale-95"
               type="button"
-            >
-              ยกเลิก
-            </button>
-            <button
               onClick={addOrSave}
-              className="flex-1 py-3 text-white font-extrabold bg-gray-900/90 rounded-2xl shadow-lg active:scale-95 inline-flex items-center justify-center gap-2"
-              type="button"
+              className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
             >
-              <Check size={18} /> {editingId ? "บันทึก" : "สร้าง"}
+              <Check size={18} />
+              {editingId ? "บันทึก" : "สร้างหมวด"}
             </button>
           </div>
         </ModalShell>

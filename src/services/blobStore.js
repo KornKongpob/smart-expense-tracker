@@ -103,6 +103,27 @@ export async function getBlobUrl(id) {
 }
 
 /**
+ * getBlobInfo(id) -> { url, mimeType, size }
+ * Useful to render non-image attachments (e.g., PDF).
+ */
+export async function getBlobInfo(id) {
+  if (!id) return { url: null, mimeType: "", size: 0 };
+
+  const blob = await getBlob(id);
+  if (!blob) return { url: null, mimeType: "", size: 0 };
+
+  // Reuse cached object URL if available
+  let url = urlCache.get(id) || null;
+  if (!url) {
+    url = URL.createObjectURL(blob);
+    urlCache.set(id, url);
+  }
+
+  return { url, mimeType: String(blob.type || ""), size: Number(blob.size || 0) };
+}
+
+
+/**
  * deleteBlob(id)
  * Remove a stored attachment.
  */

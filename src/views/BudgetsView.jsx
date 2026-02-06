@@ -108,12 +108,24 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
   const [month, setMonth] = useState(() => toMonthKey(new Date())); // "YYYY-MM"
 
-  const spentMap = useMemo(
-    () => calcSpentByCategoryInMonth(state.transactions || [], month),
-    [state.transactions, month]
+  const catsAll = state.categories?.expense || [];
+  const catsActive = useMemo(() => (catsAll || []).filter((c) => !(c?.deletedAt || c?.isDeleted)), [catsAll]);
+  const catsMain = useMemo(
+    () =>
+      (catsActive || [])
+        .filter((c) => !String(c?.parentId || "").trim())
+        .slice()
+        .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "th")),
+    [catsActive]
   );
 
-  const cats = state.categories?.expense || [];
+  // ✅ Aggregate spending to main categories (parent buckets) so budgets can be set at the main level
+  const spentMap = useMemo(
+    () => calcSpentByCategoryInMonth(state.transactions || [], month, catsAll),
+    [state.transactions, month, catsAll]
+  );
+
+  const cats = catsMain;
   const budgets = state.budgets || [];
 
   // ✅ Used for "Daily budget" preview (only meaningful for current month)

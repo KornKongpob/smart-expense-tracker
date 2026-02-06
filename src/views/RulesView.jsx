@@ -1,5 +1,6 @@
 // src/views/RulesView.jsx
 import { useMemo, useState } from "react";
+import CategorySelect from "../components/CategorySelect";
 import { ArrowLeft, Plus, Trash2, Edit2, ArrowUp, ArrowDown, X, Check, ToggleLeft, ToggleRight, Wand2 } from "lucide-react";
 import { useAppStore } from "../store/store";
 import { formatCurrency } from "../utils/format";
@@ -498,7 +499,7 @@ const applyTemplate = (tpl) => {
               <div className="grid grid-cols-1 gap-3">
                 <div>
                   <div className="text-xs font-extrabold text-gray-900 mb-1">ตั้งประเภท (Type)</div>
-                  <select value={setType} onChange={(e) => setSetType(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
+                  <select value={setType} onChange={(e) => { const v = e.target.value; setSetType(v); setSetCategoryId(""); }} className="w-full px-3 py-2 rounded-xl glass-input">
                     {TYPE_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
@@ -509,14 +510,20 @@ const applyTemplate = (tpl) => {
 
                 <div>
                   <div className="text-xs font-extrabold text-gray-900 mb-1">หมวดหมู่ (Category)</div>
-                  <select value={setCategoryId} onChange={(e) => setSetCategoryId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
-                    <option value="">(ไม่ตั้งค่า)</option>
-                    {categoryOptions.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
+                  {setType === "expense" || setType === "income" ? (
+                    <CategorySelect
+                      categories={(setType === "income" ? (categories.income || []) : (categories.expense || []))}
+                      value={setCategoryId}
+                      onChange={(e) => setSetCategoryId(e.target.value)}
+                      allowEmpty
+                      emptyLabel="(ไม่ตั้งค่า)"
+                      className="w-full px-3 py-2 rounded-xl glass-input"
+                    />
+                  ) : (
+                    <select value={setCategoryId} disabled className="w-full px-3 py-2 rounded-xl glass-input opacity-70">
+                      <option value="">(เลือก Type ก่อน)</option>
+                    </select>
+                  )}
                 </div>
                 {setType !== "transfer" && setType !== "credit_payment" ? (
                 <div>

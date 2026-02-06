@@ -24,12 +24,13 @@ import {
 
 import { useAppStore } from "../store/store";
 import AmountField from "../components/AmountField";
+import CategorySelect from "../components/CategorySelect";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../services/blobStore";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput, normalizeThaiDigits } from "../utils/money";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
-import { useBlobUrl } from "../utils/useBlobUrl";
+import { useBlobInfo } from "../utils/useBlobInfo";
 import { PRESET_COLORS } from "../constants/presets.jsx";
 import { findNearbyMerchant, normalizeLatLng } from "../utils/location";
 import {
@@ -47,6 +48,7 @@ import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
+import { buildCategoryHierarchy, splitSelection } from "../utils/categoryHierarchy";
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
@@ -672,7 +674,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return inn || "";
   }, [initialData, transferPair]);
 
-  const attachmentUrl = useBlobUrl(initialAttachmentId);
+  const { url: attachmentUrl, mimeType: attachmentMimeType } = useBlobInfo(initialAttachmentId);
 
   // ===== modes =====
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan"); // scan | manual
@@ -906,8 +908,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const monthKey = useMemo(() => toMonthKey(date), [date]);
 
   const spentMap = useMemo(
-    () => calcSpentByCategoryInMonth(state.transactions || [], monthKey),
-    [state.transactions, monthKey]
+    () => calcSpentByCategoryInMonth(state.transactions || [], monthKey, categories?.expense || []),
+    [state.transactions, monthKey, categories]
   );
 
   const budgetHint = useMemo(() => {
@@ -930,6 +932,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [scanStatus, setScanStatus] = useState("");
   const [queue, setQueue] = useState([]); // queue items
   const [expandedId, setExpandedId] = useState(null);
+  const [dropActive, setDropActive] = useState(false);
+  const dropZoneRef = useRef(null);
 
   // scan batch
   const scanBatchIdRef = useRef(0);
@@ -951,6 +955,15 @@ const existingRefSet = useMemo(() => {
   const incomeCatsAll = categories.income || [];
   const expenseCats = expenseCatsAll.filter((c) => !isDeletedCat(c));
   const incomeCats = incomeCatsAll.filter((c) => !isDeletedCat(c));
+
+  // ====== category hierarchy (Main -> Sub) ======
+  const catsForType = useMemo(() => (type === "income" ? incomeCats : expenseCats), [type, incomeCats, expenseCats]);
+  const catHierarchy = useMemo(() => buildCategoryHierarchy(catsForType), [catsForType]);
+  const { mainId: selectedMainId } = useMemo(() => splitSelection(categoryId, catHierarchy), [categoryId, catHierarchy]);
+  const subCatsForMain = useMemo(
+    () => (selectedMainId ? catHierarchy.childrenByParent.get(selectedMainId) || [] : []),
+    [catHierarchy, selectedMainId]
+  );
 
   // ✅ กันการสร้าง category ซ้ำใน "batch scan" เดียวกัน
   const createdCatRef = useRef({ expense: new Map(), income: new Map() });
@@ -1458,12 +1471,103 @@ const existingRefSet = useMemo(() => {
     slipFileInputRef.current?.click();
   };
 
-  const handleFilesSelected = async (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
+  // ===== file helpers (image + PDF) =====
+  const isPdfFile = (f) => {
+    const t = String(f?.type || "").toLowerCase();
+    const name = String(f?.name || "").toLowerCase();
+    return t === "application/pdf" || name.endsWith(".pdf");
+  };
 
+  const isImageFile = (f) => String(f?.type || "").toLowerCase().startsWith("image/");
+
+  const filterAllowedUploads = (files) => {
+    const arr = Array.isArray(files) ? files : Array.from(files || []);
+    return arr.filter((f) => f && (isImageFile(f) || isPdfFile(f)));
+  };
+
+  const coerceClipboardFile = (blob, idx = 0) => {
+    if (!blob) return null;
+    if (blob instanceof File) return blob;
+    try {
+      const type = String(blob.type || "").toLowerCase();
+      const ext = type === "application/pdf" ? "pdf" : type.startsWith("image/") ? (type.split("/")[1] || "png") : "bin";
+      const name = `clipboard-${Date.now()}-${idx}.${ext}`;
+      return new File([blob], name, { type: blob.type || "application/octet-stream" });
+    } catch {
+      return null;
+    }
+  };
+
+  const handleDropZonePaste = (e) => {
+    try {
+      if (isScanning) return;
+      const dt = e?.clipboardData;
+      const rawFiles = Array.from(dt?.files || []);
+      const items = Array.from(dt?.items || []);
+      const itemFiles = items
+        .filter((it) => it && it.kind === "file")
+        .map((it, idx) => coerceClipboardFile(it.getAsFile?.(), idx))
+        .filter(Boolean);
+
+      const files = filterAllowedUploads([...rawFiles, ...itemFiles]);
+      if (!files.length) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      handleFilesSelected(files);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDropZoneDragOver = (e) => {
+    try {
+      if (isScanning) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dropActive) setDropActive(true);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDropZoneDragLeave = (e) => {
+    try {
+      if (isScanning) return;
+      // only deactivate when leaving the drop zone (not when moving between children)
+      if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+      setDropActive(false);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDropZoneDrop = (e) => {
+    try {
+      if (isScanning) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDropActive(false);
+
+      const files = filterAllowedUploads(Array.from(e?.dataTransfer?.files || []));
+      if (!files.length) {
+        showAlert?.("รองรับเฉพาะไฟล์รูปภาพและ PDF");
+        return;
+      }
+      handleFilesSelected(files);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleFilesSelected = async (eOrFiles) => {
+    const fromEvent = !!(eOrFiles && eOrFiles.target && eOrFiles.target.files);
+    const raw = Array.isArray(eOrFiles) ? eOrFiles : Array.from(eOrFiles?.target?.files || []);
+    if (fromEvent) eOrFiles.target.value = "";
+
+    const files = filterAllowedUploads(raw);
     if (!files.length) {
-      showAlert?.("ไม่พบรูปที่เลือก");
+      showAlert?.("ไม่พบไฟล์ที่รองรับ (รองรับรูปภาพและ PDF)");
       return;
     }
 
@@ -1514,6 +1618,8 @@ const existingRefSet = useMemo(() => {
             id: qid,
             batchId,
             fileName: file.name,
+            fileKind: isPdfFile(file) ? "pdf" : "image",
+            fileMimeType: file.type || "",
             previewUrl,
             previewUrlSource,
             attachmentId,
@@ -3533,7 +3639,18 @@ const handleClose = () => {
       {/* ===== SCAN MODE ===== */}
       {!isEditMode && entryMode === "scan" ? (
         <>
-          <div className="glass-card rounded-3xl p-5 mb-5">
+          <div
+            ref={dropZoneRef}
+            tabIndex={0}
+            onClick={() => dropZoneRef.current?.focus?.()}
+            onPaste={handleDropZonePaste}
+            onDragOver={handleDropZoneDragOver}
+            onDragLeave={handleDropZoneDragLeave}
+            onDrop={handleDropZoneDrop}
+            className={`glass-card rounded-3xl p-5 mb-5 outline-none ${
+              dropActive ? "ring-2 ring-indigo-500/40 bg-indigo-500/5" : ""
+            }`}
+          >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
@@ -3543,6 +3660,9 @@ const handleClose = () => {
                 <div className="text-xs text-gray-800/60 mt-1">
                   เลือกได้หลายรูป • แนบ evidence ลง note อัตโนมัติ • จำหมวดจากร้าน/เลขบัญชีเดิมได้ • เปลี่ยนประเภทได้ •
                   โอนเข้าบัตรเครดิตจะถูกจัดเป็น “ชำระบัตร”
+                </div>
+                <div className="mt-2 text-[11px] font-bold text-gray-900/60">
+                  Tip: ลากไฟล์มาวาง (drag & drop) หรือกด Ctrl+V เพื่อวางจาก clipboard (รองรับรูปภาพ + PDF)
                 </div>
               </div>
 
@@ -3555,7 +3675,7 @@ const handleClose = () => {
                 >
                   <span className="inline-flex items-center gap-2">
                     {isScanning ? <Loader size={18} className="animate-spin" /> : <Camera size={18} />}
-                    เลือกรูป
+                    เลือกรูป / PDF
                   </span>
                 </button>
 
@@ -3567,7 +3687,7 @@ const handleClose = () => {
                 >
                   <span className="inline-flex items-center gap-2">
                     <ArrowRightLeft size={18} />
-                    อัปโหลดสลิป
+                    อัปโหลดสลิป / PDF
                   </span>
                 </button>
               </div>
@@ -3575,7 +3695,7 @@ const handleClose = () => {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 multiple
                 className="hidden"
                 onChange={handleFilesSelected}
@@ -3585,7 +3705,7 @@ const handleClose = () => {
               <input
                 ref={slipFileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 className="hidden"
                 onChange={handleFilesSelected}
                 disabled={isScanning}
@@ -3640,7 +3760,20 @@ const handleClose = () => {
                     <div key={q.id} className="glass-card rounded-3xl overflow-hidden">
                       <div className="p-4 flex gap-3">
                         <div className="w-14 h-14 rounded-2xl overflow-hidden border border-white/15 bg-white/20 shrink-0">
-                          {q.previewUrl ? <img src={q.previewUrl} alt="preview" className="w-full h-full object-cover" /> : null}
+                          {q.previewUrl ? (
+                            <a href={q.previewUrl} target="_blank" rel="noreferrer noopener" className="block w-full h-full">
+                              {q.fileKind === "pdf" ? (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <div className="inline-flex flex-col items-center text-gray-900/80">
+                                    <FileText size={16} />
+                                    <span className="text-[10px] font-extrabold mt-1">PDF</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <img src={q.previewUrl} alt="preview" className="w-full h-full object-cover" />
+                              )}
+                            </a>
+                          ) : null}
                         </div>
 
                         <div className="min-w-0 flex-1">
@@ -3938,20 +4071,14 @@ const handleClose = () => {
                                           <div className="grid grid-cols-5 gap-2 items-start">
                                             <div className="col-span-3">
                                               <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
-                                              <select
+                                              <CategorySelect
+                                                categories={expenseCats}
                                                 value={g.categoryId || ""}
                                                 onChange={(e) => updateQueueGroup(q.id, idx, { categoryId: e.target.value })}
+                                                allowEmpty
+                                                emptyLabel="เลือกหมวด"
                                                 className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                                              >
-                                                <option value="" disabled>
-                                                  เลือกหมวด
-                                                </option>
-                                                {expenseCats.map((c) => (
-                                                  <option key={c.id} value={c.id}>
-                                                    {c.icon} {c.name}
-                                                  </option>
-                                                ))}
-                                              </select>
+                                              />
                                               <div className="text-[10px] text-gray-900/55 mt-1">
                                                 tag: <span className="font-bold">{categoryNameFromKey(g.key)}</span>
                                               </div>
@@ -3981,20 +4108,14 @@ const handleClose = () => {
                                 ) : (
                                   <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                     <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหมู่</div>
-                                    <select
+                                    <CategorySelect
+                                      categories={(q.txType === "income" ? incomeCats : expenseCats)}
                                       value={q.categoryId || ""}
                                       onChange={(e) => updateQueueItem(q.id, { categoryId: e.target.value })}
+                                      allowEmpty
+                                      emptyLabel="เลือกหมวดหมู่"
                                       className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
-                                    >
-                                      <option value="" disabled>
-                                        เลือกหมวดหมู่
-                                      </option>
-                                      {(q.txType === "income" ? incomeCats : expenseCats).map((c) => (
-                                        <option key={c.id} value={c.id}>
-                                          {c.icon} {c.name}
-                                        </option>
-                                      ))}
-                                    </select>
+                                    />
 
                                     {q.suggestedCategoryId ? (
                                       <div className="mt-2 text-[11px] text-sky-900/70">Suggested จากประวัติแล้ว (แก้ได้ตามต้องการ)</div>
@@ -4353,20 +4474,14 @@ const handleClose = () => {
                           <div className="grid grid-cols-5 gap-2 items-start mt-2">
                             <div className="col-span-3">
                               <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
-                              <select
+                              <CategorySelect
+                                categories={(type === "income" ? incomeCats : expenseCats)}
                                 value={l.categoryId || ""}
                                 onChange={(e) => updateSplitLine(idx, { categoryId: e.target.value })}
+                                allowEmpty
+                                emptyLabel="เลือกหมวด"
                                 className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                              >
-                                <option value="" disabled>
-                                  เลือกหมวด
-                                </option>
-                                {(type === "income" ? incomeCats : expenseCats).map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.icon} {c.name}
-                                  </option>
-                                ))}
-                              </select>
+                              />
                             </div>
 
                             <div className="col-span-2">
@@ -4418,13 +4533,13 @@ const handleClose = () => {
               {!isSplitMode ? (
                 <>
                   <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">หมวดหมู่</h3>
-                  <div className="grid grid-cols-4 gap-3 mb-6">
-                    {(type === "income" ? incomeCats : expenseCats).map((cat) => (
+                  <div className="grid grid-cols-4 gap-3 mb-4">
+                    {catHierarchy.main.map((cat) => (
                       <button
                         key={cat.id}
                         onClick={() => setCategoryId(cat.id)}
                         className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
-                          categoryId === cat.id
+                          selectedMainId === cat.id
                             ? "glass-card ring-2 ring-gray-900/80 border-white/20"
                             : "glass-chip border-white/15 hover:bg-white/10"
                         }`}
@@ -4436,12 +4551,55 @@ const handleClose = () => {
                         >
                           {cat.icon}
                         </div>
-                        <span className="text-[10px] font-extrabold text-gray-900/70 truncate w-full text-center">
+                        <div className="text-[11px] font-extrabold text-gray-900/90 leading-tight text-center">
                           {cat.name}
-                        </span>
+                        </div>
                       </button>
                     ))}
                   </div>
+
+                  {selectedMainId && subCatsForMain.length ? (
+                    <div className="mb-6">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-[11px] font-extrabold text-gray-900/60 uppercase ml-1">หมวดย่อย (ถ้าต้องการ)</h4>
+                        {categoryId !== selectedMainId ? (
+                          <button
+                            type="button"
+                            onClick={() => setCategoryId(selectedMainId)}
+                            className="text-[11px] font-extrabold text-gray-900/70 hover:text-gray-900"
+                          >
+                            ใช้หมวดหลักนี้
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="grid grid-cols-4 gap-3">
+                        {subCatsForMain.map((cat) => (
+                          <button
+                            key={cat.id}
+                            onClick={() => setCategoryId(cat.id)}
+                            className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
+                              categoryId === cat.id
+                                ? "glass-card ring-2 ring-gray-900/80 border-white/20"
+                                : "glass-chip border-white/15 hover:bg-white/10"
+                            }`}
+                            type="button"
+                          >
+                            <div
+                              className="w-12 h-12 rounded-full flex items-center justify-center text-xl mb-2"
+                              style={{ backgroundColor: `${cat.color}20` }}
+                            >
+                              {cat.icon}
+                            </div>
+                            <div className="text-[11px] font-extrabold text-gray-900/90 leading-tight text-center">
+                              {cat.name}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-6" />
+                  )}
                 </>
               ) : null}
             </>
@@ -4458,7 +4616,16 @@ const handleClose = () => {
                   rel="noreferrer noopener"
                   className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
                 >
-                  <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
+                  {String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
+                    <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center bg-white/10">
+                      <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
+                        <FileText size={18} />
+                        Open PDF
+                      </div>
+                    </div>
+                  ) : (
+                    <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
+                  )}
                 </a>
               ) : (
                 <div className="text-sm text-gray-900/60">Loading image…</div>
