@@ -401,7 +401,7 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     date: safeISODate(d?.date),
     merchant: d?.merchant ?? null,
     note: d?.note ?? d?.merchant ?? null,
-    ref: d?.ref ?? null,
+    ref: (d?.ref ?? d?.referenceId ?? d?.reference_id) ?? null,
     category: d?.category ?? null,
     category_key: d?.category_key ?? d?.category ?? null,
     payment_method: d?.payment_method ?? d?.paymentMethod ?? null,
@@ -447,12 +447,24 @@ async function dataUrlToBlob(dataUrl) {
   return await res.blob();
 }
 
-async function postMultipart(url, { imageDataUrl, fileName, accounts }, { timeoutMs = 45000 } = {}) {
+function isPdfFileLike(file) {
+  if (!file) return false;
+  const mt = String(file?.type || "").toLowerCase().trim();
+  if (mt === "application/pdf") return true;
+  const name = String(file?.name || "").toLowerCase().trim();
+  return name.endsWith(".pdf");
+}
+
+async function postMultipart(
+  url,
+  { file, imageDataUrl, fileName, accounts },
+  { timeoutMs = 45000 } = {}
+) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const blob = await dataUrlToBlob(imageDataUrl);
+    const blob = file ? file : await dataUrlToBlob(imageDataUrl);
     if (!blob) {
       const e = new Error("missing_image_data");
       e.code = "missing_image_data";
@@ -460,7 +472,7 @@ async function postMultipart(url, { imageDataUrl, fileName, accounts }, { timeou
     }
 
     const form = new FormData();
-    form.append("file", blob, fileName || "receipt.jpg");
+    form.append("file", blob, fileName || (isPdfFileLike(file) ? "receipt.pdf" : "receipt.jpg"));
     if (Array.isArray(accounts) && accounts.length) {
       form.append("accounts", JSON.stringify(accounts));
     }
@@ -518,6 +530,7 @@ function isExplicitEndpointProvided(endpoint) {
  *
  * onStatus steps:
  * - "encoding_image"
+ * - "preparing_file" (PDF)
  * - "calling_api"
  * - "calling_api_fallback"
  * - "done"
@@ -535,20 +548,36 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
     throw e;
   }
 
-  onStatus?.("encoding_image");
-  // ✅ Keep quality high for OCR, but still prevent oversized payloads.
-  // If image is already small enough, it will be kept as-is.
-  const imageDataUrl = await fileToOptimizedDataUrl(file, {
-    // receipts are high-value OCR targets; always run the enhancement pass
-    forceProcess: true,
-    maxDim: 2800,
-  });
+  const isPdf = isPdfFileLike(file);
+
+  // For images: optimize for OCR and payload size.
+  // For PDFs: send the raw file (avoid base64 conversion overhead).
+  let imageDataUrl = "";
+  if (!isPdf) {
+    onStatus?.("encoding_image");
+    // ✅ Keep quality high for OCR, but still prevent oversized payloads.
+    // If image is already small enough, it will be kept as-is.
+    imageDataUrl = await fileToOptimizedDataUrl(file, {
+      // receipts are high-value OCR targets; always run the enhancement pass
+      forceProcess: true,
+      maxDim: 2800,
+    });
+  } else {
+    onStatus?.("preparing_file");
+  }
+
+  const multipartPayload = {
+    file: isPdf ? file : null,
+    imageDataUrl: isPdf ? "" : imageDataUrl,
+    fileName: file?.name,
+    accounts,
+  };
 
   // ---- 1) Try primary endpoint (/api/scan by default) ----
   onStatus?.("calling_api");
   let primary;
   try {
-    primary = await postMultipart(url, { imageDataUrl, fileName: file?.name, accounts });
+    primary = await postMultipart(url, multipartPayload);
   } catch (err) {
     const e = new Error("scan_network_error");
     e.code = "scan_network_error";
@@ -559,7 +588,7 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   // If primary endpoint missing and user didn't force endpoint: try fallback /api/scan-receipt
   if (primary?.res?.status === 404 && !explicitEndpoint) {
     // fallback uses multipart too
-    if (!imageDataUrl) {
+    if (!imageDataUrl && !isPdf) {
       const e = new Error("scan_api_not_found");
       e.code = "scan_api_not_found";
       throw e;
@@ -570,7 +599,7 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
 
     let fb;
     try {
-      fb = await postMultipart(fallbackUrl, { imageDataUrl, fileName: file?.name, accounts });
+      fb = await postMultipart(fallbackUrl, multipartPayload);
     } catch (err) {
       const e = new Error("scan_network_error");
       e.code = "scan_network_error";

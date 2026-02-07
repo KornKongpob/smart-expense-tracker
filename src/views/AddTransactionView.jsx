@@ -1,6 +1,12 @@
 // src/views/AddTransactionView.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { bestMatchAccountCandidate, bestMatchAccountId, getAccountDigitCandidates, matchFromToAccounts } from "../utils/accountMatch";
+import {
+  bestMatchAccountCandidate,
+  bestMatchAccountId,
+  getAccountDigitCandidates,
+  matchFromToAccounts,
+  isCreditAccount,
+} from "../utils/accountMatch";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -30,6 +36,7 @@ import { putBlob, getBlobUrl } from "../services/blobStore";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput, normalizeThaiDigits } from "../utils/money";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
+import { expandTransactionToInstallments } from "../utils/installments";
 import { useBlobInfo } from "../utils/useBlobInfo";
 import { PRESET_COLORS } from "../constants/presets.jsx";
 import { findNearbyMerchant, normalizeLatLng } from "../utils/location";
@@ -51,9 +58,36 @@ import {
 import { buildCategoryHierarchy, splitSelection } from "../utils/categoryHierarchy";
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
+const normalizeRefKey = (ref) => {
+  const s0 = String(ref || "").trim();
+  if (!s0) return "";
+  const compact = s0.replace(/[\s\u200b\-_\.]/g, "");
+  const alnum = compact.replace(/[^A-Za-z0-9]/g, "");
+  return (alnum || compact).toUpperCase();
+};
+
 
 function isPositiveNumber(n) {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
+}
+
+function humanizeScanStatus(status, fileName) {
+  const s = String(status || "").trim();
+  if (!s) return `กำลังอ่าน: ${fileName || ""}`.trim();
+  switch (s) {
+    case "encoding_image":
+      return "กำลังเตรียมรูปเพื่อสแกน...";
+    case "preparing_file":
+      return "กำลังเตรียมไฟล์เพื่อสแกน...";
+    case "calling_api":
+      return "กำลังสแกน...";
+    case "calling_api_fallback":
+      return "กำลังสแกน... (fallback)";
+    case "done":
+      return "สแกนเสร็จแล้ว";
+    default:
+      return s;
+  }
 }
 
 // ===== image helpers =====
@@ -70,14 +104,6 @@ function getAccountVisual(acc) {
   const icon = String(acc.icon || "").trim();
   if (isImageSrc(icon)) return { kind: "img", src: icon };
   return { kind: "emoji", value: icon || "💳" };
-}
-
-function isCreditAccount(acc) {
-  const t = String(acc?.type || "").toLowerCase().trim();
-  if (t === "credit") return true;
-  // fallback: if it has creditLimit field, treat as credit-like
-  if (Number(acc?.creditLimit || 0) > 0) return true;
-  return false;
 }
 
 // ===== modal dropdown (shows real image + no overlap issues) =====
@@ -774,6 +800,26 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [isSplitMode, setIsSplitMode] = useState(isEditingSplitGroup);
   const [splitLabel, setSplitLabel] = useState(String(initialData?.splitLabel || ""));
 
+  // ===== Credit Card Installment (manual + edit UI) =====
+  // NOTE: We only allow installment on NEW expense transactions paid by a credit account (not split).
+  const selectedManualAccount = useMemo(
+    () => accounts.find((a) => String(a?.id || "") === String(accountId || "")) || null,
+    [accounts, accountId]
+  );
+  const [isInstallment, setIsInstallment] = useState(false);
+  const [installmentMonths, setInstallmentMonths] = useState(3);
+
+  useEffect(() => {
+    // Auto-disable when not eligible
+    if (type !== "expense" || isSplitMode) {
+      setIsInstallment(false);
+      return;
+    }
+    if (!isCreditAccount(selectedManualAccount)) {
+      setIsInstallment(false);
+    }
+  }, [type, isSplitMode, selectedManualAccount]);
+
   const [splitLines, setSplitLines] = useState(() => {
     if (isEditingSplitGroup && splitGroupTransactions.length) {
       const sorted = [...splitGroupTransactions].filter((t) => !t?.isSplitParent).sort((a, b) => {
@@ -942,7 +988,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 const existingRefSet = useMemo(() => {
     const set = new Set();
     for (const t of state.transactions || []) {
-      const r = String(t.ref || "").trim();
+      const r = normalizeRefKey(t.ref || t.referenceId || t.reference_id || "");
       if (r) set.add(r);
     }
     return set;
@@ -1383,6 +1429,7 @@ const existingRefSet = useMemo(() => {
             ...x,
             txType: "transfer",
             splitByCategory: false,
+            isInstallment: false,
             groups: [],
             categoryId: "transfer",
             fromAccountId: x.fromAccountId || x.accountId || fallbackAcc,
@@ -1408,6 +1455,7 @@ const existingRefSet = useMemo(() => {
             ...x,
             txType: "credit_payment",
             splitByCategory: false,
+            isInstallment: false,
             groups: [],
             categoryId: "transfer",
             fromAccountId: pickedFrom,
@@ -1447,6 +1495,7 @@ const existingRefSet = useMemo(() => {
           ...x,
           txType: nextType,
           splitByCategory: false,
+          isInstallment: false,
           groups: nextType === "expense" ? x.groups : [],
           categoryId: nextCategoryId,
           accountId: pickedAccountId || fallbackAcc,
@@ -1641,6 +1690,9 @@ const existingRefSet = useMemo(() => {
             items: [],
             groups: [],
             splitByCategory: false,
+            // Credit Card Installment (scan review)
+            isInstallment: false,
+            installmentMonths: 3,
             fromDigits: "",
             toDigits: "",
             suggestedCategoryId: "",
@@ -1649,9 +1701,9 @@ const existingRefSet = useMemo(() => {
         ]);
 
         try {
-          setScanStatus(`กำลังอ่าน: ${file.name}`);
+          setScanStatus(humanizeScanStatus("", file.name));
           const result = await scanReceiptOpenAI(file, {
-            onStatus: (s) => setScanStatus(s || `กำลังอ่าน: ${file.name}`),
+            onStatus: (s) => setScanStatus(humanizeScanStatus(s, file.name)),
             accounts,
           });
 
@@ -1674,6 +1726,7 @@ const existingRefSet = useMemo(() => {
 
           const contextText = `${merchant} ${noteText} ${evidenceText}`.trim();
           const rref = String(result?.ref || "").trim();
+          const rrefKey = normalizeRefKey(rref);
 
           // Slip Hunter: enrich transfer slips with time + receiver bank (best-effort)
           const slipTime = parseSlipTimeFromText(evidenceText || contextText);
@@ -1985,8 +2038,8 @@ if (
             }
           }
 
-          const dupByRef = rref ? batchRefSet.has(rref) || isDuplicateByRef(state.transactions || [], rref) : false;
-          if (rref) batchRefSet.add(rref);
+          const dupByRef = rrefKey ? (batchRefSet.has(rrefKey) || isDuplicateByRef(state.transactions || [], rref)) : false;
+          if (rrefKey) batchRefSet.add(rrefKey);
 
 
           const pickedAmount = (() => {
@@ -2702,6 +2755,18 @@ if (
       } else {
         if (!q.accountId) return showAlert?.("กรุณาเลือกบัญชีให้ครบ");
 
+        // ✅ Credit card installment validation (scan review)
+        if (q.isInstallment) {
+          if (q.txType !== "expense") return showAlert?.("ผ่อนชำระใช้ได้เฉพาะรายการรายจ่าย");
+          if (q.splitByCategory) return showAlert?.("ผ่อนชำระ: ไม่สามารถใช้ร่วมกับโหมดแยกหมวดได้");
+
+          const acc = accounts.find((a) => String(a?.id || "") === String(q.accountId || "")) || null;
+          if (!acc || !isCreditAccount(acc)) return showAlert?.("ผ่อนชำระ: ต้องเลือกบัญชีเป็นบัตรเครดิต");
+
+          const m = Math.max(2, Math.min(120, Math.trunc(Number(q.installmentMonths) || 2)));
+          if (m < 2) return showAlert?.("ผ่อนชำระ: จำนวนงวดต้องมากกว่าหรือเท่ากับ 2");
+        }
+
         if (q.txType === "expense" && q.splitByCategory && Array.isArray(q.groups) && q.groups.length) {
           // ✅ Ignore zero/invalid lines: only create split transactions for amount > 0
           const positives = q.groups
@@ -2994,7 +3059,7 @@ if (
 
       // ✅ Preserve receipt breakdown (items + discounts/fees + children) even when saving as a single transaction
       const receiptLines =
-        txType === "expense" && Array.isArray(q.groups) && q.groups.length
+        q.txType === "expense" && Array.isArray(q.groups) && q.groups.length
           ? (q.groups || [])
               .map((g, idx) => {
                 const gg = g && typeof g === "object" ? g : {};
@@ -3041,7 +3106,7 @@ if (
         ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "add").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
         : null;
 
-      txs.push({
+      const baseTx = {
         id: generateId(),
         type: q.txType === "income" ? "income" : "expense",
         amount: Number(q.amount),
@@ -3074,7 +3139,34 @@ if (
         from_account: String(q.fromDigits || "").trim() || null,
         to_account: String(q.toDigits || "").trim() || null,
         counterparty_digits: String(q.toDigits || q.fromDigits || "").trim() || null,
-      });
+      };
+
+      // ✅ Credit card installment (scan review) - expand into monthly transactions
+      if (q.isInstallment) {
+        const m = Math.max(2, Math.min(120, Math.trunc(Number(q.installmentMonths) || 2)));
+        const groupId = generateId();
+        const expanded = expandTransactionToInstallments(
+          { ...baseTx, id: undefined, installmentGroupId: groupId },
+          m,
+          { groupId, makeId: () => generateId() }
+        ).map((t, idx) => {
+          // keep heavy receipt breakdown only on the first installment (saves storage)
+          const keep = idx === 0;
+          return {
+            ...t,
+            id: t.id || generateId(),
+            receiptLines: keep ? baseTx.receiptLines : null,
+            receiptPaidTotalSatang: keep ? baseTx.receiptPaidTotalSatang : null,
+            receiptItemsSubtotalSatang: keep ? baseTx.receiptItemsSubtotalSatang : null,
+            receiptDiscountSatang: keep ? baseTx.receiptDiscountSatang : null,
+            receiptSurchargeSatang: keep ? baseTx.receiptSurchargeSatang : null,
+          };
+        });
+
+        txs.push(...expanded);
+      } else {
+        txs.push(baseTx);
+      }
     }
 
     bulkUpsertTransactions(txs, { navigateToDashboard });
@@ -3416,7 +3508,8 @@ const inId =
       if (deleteIds.length) deleteManyTransactions(deleteIds, { navigateToDashboard: false });
     }
 
-    upsertTransaction({
+    const baseTx = {
+      // id is intentionally omitted for new installments (generated per-tx)
       id: initialData?.id,
       type: type === "income" ? "income" : "expense",
       amount: amountNumber,
@@ -3444,7 +3537,23 @@ const inId =
       isSplitChild: false,
       splitIndex: null,
       splitParentId: null,
-    });
+    };
+
+    // ✅ Credit card installment (manual)
+    if (!isEditMode && isInstallment && type === "expense" && !isSplitMode && isCreditAccount(selectedManualAccount)) {
+      const m = Math.max(2, Math.min(120, Math.trunc(Number(installmentMonths) || 2)));
+      const groupId = generateId();
+      const txs = expandTransactionToInstallments(
+        { ...baseTx, id: undefined, installmentGroupId: groupId },
+        m,
+        { groupId, makeId: () => generateId() }
+      ).map((t) => ({ ...t, id: t.id || generateId() }));
+
+      bulkUpsertTransactions(txs, { navigateToDashboard: true });
+      return;
+    }
+
+    upsertTransaction(baseTx);
 
     // ✅ Learn from edits (so next scan is smarter)
     try {
@@ -3921,7 +4030,13 @@ const handleClose = () => {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => updateQueueItem(q.id, { splitByCategory: !q.splitByCategory })}
+                                onClick={() =>
+                                  updateQueueItem(q.id, {
+                                    splitByCategory: !q.splitByCategory,
+                                    // split mode is incompatible with installment
+                                    ...(q.splitByCategory ? {} : { isInstallment: false }),
+                                  })
+                                }
                                 className={`w-14 h-8 rounded-full transition-all relative border ${
                                   q.splitByCategory ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
                                 }`}
@@ -4045,11 +4160,67 @@ const handleClose = () => {
                                   <AccountDropdown
                                     accounts={accounts}
                                     value={q.accountId}
-                                    onChange={(v) => updateQueueItem(q.id, { accountId: v })}
+                                    onChange={(v) => {
+                                      const acc = accounts.find((a) => String(a?.id || "") === String(v || "")) || null;
+                                      // auto-disable installment if switched to non-credit
+                                      const patch = { accountId: v };
+                                      if (!isCreditAccount(acc)) patch.isInstallment = false;
+                                      updateQueueItem(q.id, patch);
+                                    }}
                                     title="เลือกบัญชี"
                                     placeholder="เลือกบัญชี"
                                   />
                                 </div>
+
+                                {/* Credit Card Installment (expense + credit account only) */}
+                                {q.txType === "expense" && !q.splitByCategory && isCreditAccount(accounts.find((a) => a.id === q.accountId)) ? (
+                                  <div className="glass-panel border border-indigo-500/20 rounded-2xl p-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="text-sm font-extrabold text-indigo-900">ผ่อนชำระ</div>
+                                        <div className="text-[12px] text-indigo-900/70">
+                                          เปิดแล้วระบบจะสร้างหลายรายการล่วงหน้า (งวดที่ x/y)
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateQueueItem(q.id, { isInstallment: !q.isInstallment })}
+                                        className={`w-14 h-8 rounded-full transition-all relative border ${
+                                          q.isInstallment ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
+                                        }`}
+                                        title={q.isInstallment ? "เปิด" : "ปิด"}
+                                      >
+                                        <span
+                                          className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
+                                            q.isInstallment ? "left-7" : "left-1"
+                                          }`}
+                                        />
+                                      </button>
+                                    </div>
+
+                                    {q.isInstallment ? (
+                                      <div className="mt-3 grid grid-cols-2 gap-2 items-end">
+                                        <div>
+                                          <div className="text-[11px] text-gray-900/60 font-bold mb-1">จำนวนงวด (เดือน)</div>
+                                          <input
+                                            type="number"
+                                            min={2}
+                                            max={120}
+                                            value={Number(q.installmentMonths || 3)}
+                                            onChange={(e) => {
+                                              const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
+                                              updateQueueItem(q.id, { installmentMonths: n });
+                                            }}
+                                            className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
+                                          />
+                                        </div>
+                                        <div className="text-[11px] text-gray-900/55">
+                                          ยอดจะถูกหารเป็นงวดเท่า ๆ กัน (เศษสตางค์จะกระจาย)
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
 
                                 {/* Split groups editor */}
                                 {q.txType === "expense" && q.splitByCategory && hasGroups ? (
@@ -4413,6 +4584,58 @@ const handleClose = () => {
               ) : null}
             </div>
           )}
+
+          {/* Credit Card Installment (Manual) */}
+          {!isEditMode && type === "expense" && !isSplitMode && isCreditAccount(selectedManualAccount) ? (
+            <div className="glass-card rounded-3xl p-5 mb-6 border border-indigo-500/15">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-indigo-900/70 uppercase flex items-center gap-2">
+                    <CreditCard size={14} /> ผ่อนชำระ
+                  </div>
+                  <div className="text-[11px] text-indigo-900/60 mt-1 break-words">
+                    ถ้าเปิด ระบบจะสร้างรายการล่วงหน้าตามจำนวนงวด และใส่ Note ว่า (งวดที่ x/y)
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsInstallment((v) => !v)}
+                  className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
+                    isInstallment
+                      ? "bg-gray-900/90 text-white border-white/10 shadow-sm"
+                      : "glass-chip text-gray-900 border-white/15 hover:bg-white/10"
+                  }`}
+                >
+                  {isInstallment ? "ON" : "OFF"}
+                </button>
+              </div>
+
+              {isInstallment ? (
+                <div className="mt-4 grid grid-cols-2 gap-3 items-end">
+                  <div className="glass-panel border border-white/20 rounded-2xl p-3">
+                    <div className="text-xs font-bold text-gray-900/70 mb-1">จำนวนงวด (เดือน)</div>
+                    <input
+                      type="number"
+                      min={2}
+                      max={120}
+                      value={installmentMonths}
+                      onChange={(e) => {
+                        const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
+                        setInstallmentMonths(n);
+                      }}
+                      className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
+                    />
+                    <div className="text-[11px] text-gray-900/55 mt-1">เศษสตางค์จะกระจายอัตโนมัติ</div>
+                  </div>
+
+                  <div className="text-[12px] text-gray-900/60">
+                    * โหมดผ่อนจะปิดอัตโนมัติถ้าเปลี่ยนเป็น Split หรือเลือกบัญชีที่ไม่ใช่บัตรเครดิต
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {/* Split + Categories */}
           {type !== "transfer" && type !== "credit_payment" ? (

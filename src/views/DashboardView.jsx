@@ -5,6 +5,7 @@ import TransactionCard from "../components/TransactionCard";
 import { useAppStore } from "../store/store";
 import { getBudget, toMonthKey } from "../store/selectors";
 import { formatCurrency, toISODate } from "../utils/format";
+import { isCreditAccount } from "../utils/accountMatch";
 
 const BUDGET_TOTAL_ID = "__TOTAL__";
 const BUDGET_DAILY_ID = "__DAILY__";
@@ -181,13 +182,6 @@ useEffect(() => {
       if (c === "transfer") return true;
       // future-proof: allow other internal tags to still behave as 2-legs
       if (String(t.transferId || "").trim()) return true;
-      return false;
-    };
-
-    const isCreditAccount = (acc) => {
-      const t = String(acc?.type || "").toLowerCase().trim();
-      if (t === "credit") return true;
-      if (Number(acc?.creditLimit || 0) > 0) return true;
       return false;
     };
 

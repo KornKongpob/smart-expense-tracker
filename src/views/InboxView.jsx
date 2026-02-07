@@ -19,7 +19,9 @@ import { findFuzzyDuplicate } from "../store/selectors";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
+import { expandTransactionToInstallments } from "../utils/installments";
 import { useBlobInfo } from "../utils/useBlobInfo";
+import { isCreditAccount } from "../utils/accountMatch";
 import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
@@ -59,12 +61,26 @@ function normalizeTxType(t) {
   return "expense";
 }
 
-function buildTransactionsFromInboxItem(item) {
+function buildTransactionsFromInboxItem(item, ctx = {}) {
+  const accounts = Array.isArray(ctx?.accounts) ? ctx.accounts : [];
   const txType = normalizeTxType(item?.type || item?.txType);
   const date = item?.date ? String(item.date).slice(0, 10) : toISODate(new Date());
   const merchant = item?.merchant || "";
   const note = appendEvidenceToNote(item?.note || "", item?.evidence);
   const ref = item?.referenceId || item?.ref || "";
+
+  const wantsInstallment = !!item?.isInstallment;
+  const installmentMonths = Math.max(2, Math.min(120, Math.trunc(Number(item?.installmentMonths) || 2)));
+
+  // ✅ Credit card installment validation (Inbox)
+  if (wantsInstallment) {
+    if (txType !== "expense") throw new Error("ผ่อนชำระใช้ได้เฉพาะรายการรายจ่าย");
+    if (!!item?.splitByCategory) throw new Error("ผ่อนชำระ: กรุณาปิด Split ก่อน");
+
+    const acc = accounts.find((a) => String(a?.id || "") === String(item?.accountId || "")) || null;
+    if (!acc || !isCreditAccount(acc)) throw new Error("ผ่อนชำระ: ต้องเลือกบัญชีเป็นบัตรเครดิต");
+    if (installmentMonths < 2) throw new Error("ผ่อนชำระ: จำนวนงวดต้องมากกว่าหรือเท่ากับ 2");
+  }
 
   // Split (receipt items): create 1 parent transaction + N child transactions
   // ✅ Ignore zero/invalid lines (amount <= 0)
@@ -383,31 +399,53 @@ function buildTransactionsFromInboxItem(item) {
   if (!categoryId) throw new Error("ยังไม่ได้เลือก Category");
   if (!isPositiveNumber(amount)) throw new Error("ยอดเงินต้องมากกว่า 0");
 
-  return [
-    {
-      id: generateId(),
-      type: txType,
-      amount,
-      date,
-      merchant,
-      note,
-      ref,
-      category: categoryId,
-      accountId,
-      paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
-      isTransfer: false,
-      transferId: null,
-      attachmentId: item?.attachmentId || null,
+  const baseTx = {
+    id: generateId(),
+    type: txType,
+    amount,
+    date,
+    merchant,
+    note,
+    ref,
+    category: categoryId,
+    accountId,
+    paymentMethod: String(item?.paymentMethod || item?.payment_method || "cash"),
+    isTransfer: false,
+    transferId: null,
+    attachmentId: item?.attachmentId || null,
 
-      receiptLines: receiptLines || null,
-      receiptPaidTotalSatang: receiptLines ? amount : null,
-      receiptItemsSubtotalSatang: receiptItemsSubtotalSatang,
-      receiptDiscountSatang: receiptDiscountSatang,
-      receiptSurchargeSatang: receiptSurchargeSatang,
+    receiptLines: receiptLines || null,
+    receiptPaidTotalSatang: receiptLines ? amount : null,
+    receiptItemsSubtotalSatang: receiptItemsSubtotalSatang,
+    receiptDiscountSatang: receiptDiscountSatang,
+    receiptSurchargeSatang: receiptSurchargeSatang,
 
-      source: "inbox",
-    },
-  ];
+    source: "inbox",
+  };
+
+  // ✅ Credit card installment (Inbox) - expand into monthly transactions
+  if (wantsInstallment) {
+    const groupId = generateId();
+    const expanded = expandTransactionToInstallments(
+      { ...baseTx, id: undefined, installmentGroupId: groupId },
+      installmentMonths,
+      { groupId, makeId: () => generateId() }
+    ).map((t, idx) => {
+      const keep = idx === 0;
+      return {
+        ...t,
+        id: t.id || generateId(),
+        receiptLines: keep ? baseTx.receiptLines : null,
+        receiptPaidTotalSatang: keep ? baseTx.receiptPaidTotalSatang : null,
+        receiptItemsSubtotalSatang: keep ? baseTx.receiptItemsSubtotalSatang : null,
+        receiptDiscountSatang: keep ? baseTx.receiptDiscountSatang : null,
+        receiptSurchargeSatang: keep ? baseTx.receiptSurchargeSatang : null,
+      };
+    });
+    return expanded;
+  }
+
+  return [baseTx];
 }
 
 function typeBadge(type) {
@@ -645,6 +683,9 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       fromAccountId: String(item?.fromAccountId || ""),
       toAccountId: String(item?.toAccountId || ""),
       paymentMethod,
+      // Credit card installment (inbox editor)
+      isInstallment: !!item?.isInstallment,
+      installmentMonths: Math.max(2, Math.min(120, Math.trunc(Number(item?.installmentMonths) || 3))),
       note: String(item?.note || ""),
       referenceId: String(item?.referenceId || item?.ref || ""),
 
@@ -683,6 +724,9 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
     Array.isArray(draft?.groups);
 
   const hasBreakdown = (txType === "expense" || txType === "income") && Array.isArray(draft?.groups) && draft.groups.length > 0;
+
+  const selectedAcc = accounts.find((a) => String(a?.id || "") === String(draft?.accountId || "")) || null;
+  const canInstallment = txType === "expense" && !isSplitMode && isCreditAccount(selectedAcc);
 
   const breakdownNet = (() => {
     if (!hasBreakdown) return 0;
@@ -843,6 +887,8 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
         return {
           ...d,
           splitByCategory: true,
+          // split mode is incompatible with installment
+          isInstallment: false,
           groups: rec?.groupsDraft || seeded,
           splitGroupId: String(d.splitGroupId || "").trim() || generateSplitGroupId(),
           splitLabel: String(d.splitLabel || d.merchant || d.note || "Split"),
@@ -981,6 +1027,21 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       }
     }
 
+    // ✅ Credit card installment validation (inbox editor)
+    const wantsInstallment = txType === "expense" && !isSplitMode && !!draft?.isInstallment;
+    const installmentMonths = Math.max(2, Math.min(120, Math.trunc(Number(draft?.installmentMonths) || 2)));
+    if (wantsInstallment) {
+      const acc = accounts.find((a) => String(a?.id || "") === String(draft?.accountId || "")) || null;
+      if (!acc || !isCreditAccount(acc)) {
+        showAlert?.("ผ่อนชำระ: ต้องเลือกบัญชีเป็นบัตรเครดิต");
+        return;
+      }
+      if (installmentMonths < 2) {
+        showAlert?.("ผ่อนชำระ: จำนวนงวดต้องมากกว่าหรือเท่ากับ 2");
+        return;
+      }
+    }
+
     const patch = {
       type: txType,
       amount,
@@ -988,6 +1049,8 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       merchant: String(draft.merchant || "").trim(),
       note: String(draft.note || ""),
       referenceId: String(draft.referenceId || ""),
+      isInstallment: wantsInstallment,
+      installmentMonths: wantsInstallment ? installmentMonths : 0,
       categoryId:
         txType === "transfer" || txType === "credit_payment"
           ? "transfer"
@@ -1223,7 +1286,17 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 Account
                 <select
                   value={draft.accountId}
-                  onChange={(e) => setDraft((d) => ({ ...d, accountId: e.target.value }))}
+                  onChange={(e) =>
+                    setDraft((d) => {
+                      const nextId = e.target.value;
+                      const acc = accounts.find((a) => String(a?.id || "") === String(nextId || "")) || null;
+                      return {
+                        ...d,
+                        accountId: nextId,
+                        ...(acc && isCreditAccount(acc) ? {} : { isInstallment: false }),
+                      };
+                    })
+                  }
                   className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
                 >
                   <option value="">เลือกบัญชี</option>
@@ -1283,6 +1356,56 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                   />
                 </button>
               </div>
+
+              {/* ✅ Credit Card Installment (inbox editor) */}
+              {canInstallment ? (
+                <div className="rounded-2xl bg-white/20 border border-indigo-500/20 p-3 mt-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold text-indigo-900">ผ่อนชำระ</div>
+                      <div className="text-[12px] text-indigo-900/80">สร้างรายการล่วงหน้าตามจำนวนงวด (ยอดรวมหารจำนวนงวด)</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDraft((d) => ({ ...d, isInstallment: !d?.isInstallment }))}
+                      className={`w-12 h-7 rounded-full border border-white/20 bg-white/20 relative active:scale-95 transition-transform ${
+                        draft?.isInstallment ? "bg-gray-900/80" : "bg-white/20"
+                      }`}
+                      aria-label="toggle installment"
+                    >
+                      <span
+                        className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                          draft?.isInstallment ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {draft?.isInstallment ? (
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <label className="text-xs font-bold text-gray-900/60 min-w-0">
+                        จำนวนงวด (เดือน)
+                        <input
+                          type="number"
+                          min={2}
+                          max={120}
+                          value={Number(draft?.installmentMonths || 3)}
+                          onChange={(e) =>
+                            setDraft((d) => ({
+                              ...d,
+                              installmentMonths: Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2))),
+                            }))
+                          }
+                          className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                        />
+                      </label>
+                      <div className="text-[12px] text-gray-900/60 flex items-end pb-2">
+                        * note จะใส่ (งวดที่ x/y)
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {isSplitMode ? (
                 <>
@@ -1564,7 +1687,7 @@ export default function InboxView({ showAlert, showConfirm }) {
           ...it,
           duplicate: true,
           duplicateInfo: {
-            kind: "fuzzy",
+            kind: (f?.score === 1 ? "ref" : "fuzzy"),
             matchId: f.matchId || null,
             score: f.score || 0,
             reasons: f.reasons || [],
@@ -1637,7 +1760,15 @@ export default function InboxView({ showAlert, showConfirm }) {
     const items = pending.filter((x) => list.includes(x.id));
     if (!items.length) return;
 
-    const dupCount = items.filter((x) => !!x?.duplicate).length;
+    const dupCount = items.reduce((n, it) => {
+      if (it?.duplicate) return n + 1;
+      try {
+        const f = findFuzzyDuplicate(state.transactions || [], it);
+        return f?.isDuplicate ? n + 1 : n;
+      } catch {
+        return n;
+      }
+    }, 0);
 
     const doApprove = () => {
       try {
@@ -1653,7 +1784,7 @@ export default function InboxView({ showAlert, showConfirm }) {
             nextIt = { ...nextIt, accountId: defaultCashAccountId, paymentMethod: pm };
           }
           normalizedItems.push(nextIt);
-          const txs = buildTransactionsFromInboxItem(nextIt);
+          const txs = buildTransactionsFromInboxItem(nextIt, { accounts });
           allTxs.push(...txs);
         }
 
@@ -2083,7 +2214,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               ...patch,
               duplicate: dup,
               duplicateInfo: dup
-                ? { kind: "fuzzy", matchId: f.matchId || null, score: f.score || 0, reasons: f.reasons || [] }
+                ? { kind: (f?.score === 1 ? "ref" : "fuzzy"), matchId: f.matchId || null, score: f.score || 0, reasons: f.reasons || [] }
                 : null,
             };
             nextItem = { ...nextItem, duplicate: dup, duplicateInfo: patch.duplicateInfo };

@@ -79,11 +79,25 @@ export function toMonthKey(input) {
 
 // -----------------------------
 // Receipt scan / duplication helpers
+function normalizeRefKey(ref) {
+  const s0 = String(ref || '').trim();
+  if (!s0) return '';
+  // Remove common separators/spaces and compare case-insensitively.
+  // Keep alphanumerics only (Thai slip refs are typically latin+digits).
+  const compact = s0.replace(/[\s\u200b\-_\.]/g, '');
+  const alnum = compact.replace(/[^A-Za-z0-9]/g, '');
+  const base = (alnum || compact).toUpperCase();
+  return base;
+}
+
 // -----------------------------
 export function isDuplicateByRef(transactions, ref) {
-  const r = String(ref || "").trim();
+  const r = normalizeRefKey(ref);
   if (!r) return false;
-  return (transactions || []).some((t) => String(t?.ref || "").trim() === r);
+  return (transactions || []).some((t) => {
+    const tr = normalizeRefKey(t?.ref || t?.referenceId || t?.reference_id || '');
+    return !!tr && tr === r;
+  });
 }
 
 /**
@@ -101,6 +115,28 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     threshold: Number(opts.threshold) || 0.62,
     ...opts,
   };
+  const candType = String(candidate?.txType || candidate?.type || "").toLowerCase();
+  const candRef = String(candidate?.referenceId || candidate?.ref || "").trim();
+
+  // ✅ Ref-first duplicate detection (primary key)
+  // If the scan extracted a reference number, treat it as the strongest signal
+  // and flag duplicates even when amount/date are missing or mismatched.
+  const candRefKey = normalizeRefKey(candRef);
+  if (candRefKey) {
+    for (const t of transactions || []) {
+      if (!t) continue;
+      const tRefKey = normalizeRefKey(t?.ref || t?.referenceId || t?.reference_id || "");
+      if (tRefKey && tRefKey === candRefKey) {
+        return {
+          isDuplicate: true,
+          score: 1,
+          reasons: ["ref exact match"],
+          matchId: String(t?.id || ""),
+          match: t,
+        };
+      }
+    }
+  }
 
   const candAmount = Number(candidate?.amount);
   if (!Number.isFinite(candAmount) || candAmount <= 0) {
@@ -108,8 +144,6 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
   }
 
   const candDate = parseDateSafe(candidate?.date);
-  const candType = String(candidate?.txType || candidate?.type || "").toLowerCase();
-  const candRef = String(candidate?.referenceId || candidate?.ref || "").trim();
   const candMerchant = String(candidate?.merchant || "").trim();
   const candNote = String(candidate?.note || "").trim();
 
@@ -216,7 +250,11 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     const a = String(candRefRaw || "").trim();
     const b = String(tRefRaw || "").trim();
     if (!a || !b) return 0;
-    if (a === b) return 1; // immediate
+
+    // Compare normalized ref keys first (ignores spaces/hyphens/case)
+    const ak = normalizeRefKey(a);
+    const bk = normalizeRefKey(b);
+    if (ak && bk && ak === bk) return 1; // immediate
 
     const ad = lastN(a, 12);
     const bd = lastN(b, 12);
