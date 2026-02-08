@@ -26,6 +26,8 @@ import {
   CreditCard,
   Inbox,
   Layers,
+  Search,
+  ChevronRight,
 } from "lucide-react";
 
 import { useAppStore } from "../store/store";
@@ -49,7 +51,13 @@ import {
   calcAccountBalance,
 } from "../store/selectors";
 import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
-import { reconcileReceiptGroups, signedReceiptGroupSatang, isAdjustmentLike } from "../utils/receiptAdjustments";
+import {
+  reconcileReceiptGroups,
+  signedReceiptGroupSatang,
+  isAdjustmentLike,
+  computeReceiptSumsSatang,
+  chooseReceiptPaidTotalSatang,
+} from "../utils/receiptAdjustments";
 import { deriveAutomationPatch } from "../utils/rulesEngine";
 import {
   resolveMerchantCanonical,
@@ -65,6 +73,9 @@ const normalizeRefKey = (ref) => {
   const alnum = compact.replace(/[^A-Za-z0-9]/g, "");
   return (alnum || compact).toUpperCase();
 };
+
+// Tombstone category helper (module-scope => safe for hooks deps)
+const isTombstoneCategory = (c) => !!(c?.deletedAt || c?.isDeleted);
 
 
 function isPositiveNumber(n) {
@@ -996,20 +1007,152 @@ const existingRefSet = useMemo(() => {
 
   // ✅ Tombstone strategy: hide deleted categories from pickers/suggestions,
   // but keep them in state for historical reports.
-  const isDeletedCat = (c) => !!(c?.deletedAt || c?.isDeleted);
   const expenseCatsAll = categories.expense || [];
   const incomeCatsAll = categories.income || [];
-  const expenseCats = expenseCatsAll.filter((c) => !isDeletedCat(c));
-  const incomeCats = incomeCatsAll.filter((c) => !isDeletedCat(c));
+  const expenseCats = expenseCatsAll.filter((c) => !isTombstoneCategory(c));
+  const incomeCats = incomeCatsAll.filter((c) => !isTombstoneCategory(c));
 
   // ====== category hierarchy (Main -> Sub) ======
-  const catsForType = useMemo(() => (type === "income" ? incomeCats : expenseCats), [type, incomeCats, expenseCats]);
-  const catHierarchy = useMemo(() => buildCategoryHierarchy(catsForType), [catsForType]);
+  const catsForTypeAll = useMemo(() => (type === "income" ? incomeCatsAll : expenseCatsAll), [type, incomeCatsAll, expenseCatsAll]);
+  const catsForTypeActive = useMemo(() => (type === "income" ? incomeCats : expenseCats), [type, incomeCats, expenseCats]);
+
+  // ✅ Important UX for tombstone categories:
+  // - Hide deleted categories from pickers by default
+  // - BUT if the currently selected category is deleted (or under a deleted parent),
+  //   we must still display it so edit screens don't look "blank".
+  const catsForTypePicker = useMemo(() => {
+    const active = Array.isArray(catsForTypeActive) ? catsForTypeActive.filter(Boolean) : [];
+    const all = Array.isArray(catsForTypeAll) ? catsForTypeAll.filter(Boolean) : [];
+    const selId = String(categoryId || "").trim();
+    if (!selId) return active;
+
+    // Fast path: selected already visible
+    if (active.some((c) => String(c?.id || "").trim() === selId)) return active;
+
+    const byId = new Map();
+    for (const c of all) {
+      const id = String(c?.id || "").trim();
+      if (id) byId.set(id, c);
+    }
+
+    // Include selected + ancestors (so main/sub relationship stays intact)
+    const toAdd = [];
+    let cur = selId;
+    const seen = new Set();
+    for (let i = 0; i < 8; i++) {
+      if (!cur || seen.has(cur)) break;
+      seen.add(cur);
+      const c = byId.get(cur);
+      if (!c) break;
+      toAdd.push(c);
+      cur = String(c?.parentId || "").trim();
+    }
+
+    if (!toAdd.length) return active;
+
+    const activeIds = new Set(active.map((c) => String(c?.id || "").trim()).filter(Boolean));
+    const dedupAdd = toAdd.filter((c) => {
+      const id = String(c?.id || "").trim();
+      if (!id || activeIds.has(id)) return false;
+      activeIds.add(id);
+      return true;
+    });
+
+    return dedupAdd.length ? [...active, ...dedupAdd] : active;
+  }, [catsForTypeActive, catsForTypeAll, categoryId]);
+
+  const catHierarchy = useMemo(() => buildCategoryHierarchy(catsForTypePicker), [catsForTypePicker]);
   const { mainId: selectedMainId } = useMemo(() => splitSelection(categoryId, catHierarchy), [categoryId, catHierarchy]);
   const subCatsForMain = useMemo(
     () => (selectedMainId ? catHierarchy.childrenByParent.get(selectedMainId) || [] : []),
     [catHierarchy, selectedMainId]
   );
+
+  // ====== category picker UX state ======
+  const [catQuery, setCatQuery] = useState("");
+
+  // Reset search when switching tx type to keep UI predictable
+  useEffect(() => {
+    setCatQuery("");
+  }, [type]);
+
+  const selectedCatBreadcrumb = useMemo(() => {
+    const id = String(categoryId || "").trim();
+    if (!id) return "";
+    const { mainId, subId } = splitSelection(id, catHierarchy);
+    const main = mainId ? catHierarchy.byId.get(mainId) : null;
+    const sub = subId ? catHierarchy.byId.get(subId) : null;
+    const mainName = main?.name ? String(main.name) : "";
+    const subName = sub?.name ? String(sub.name) : "";
+    if (mainName && subName) return `${mainName} › ${subName}`;
+    return mainName || subName || "";
+  }, [categoryId, catHierarchy]);
+
+  const recentCatsForPicker = useMemo(() => {
+    const txType = type === "income" ? "income" : type === "expense" ? "expense" : "";
+    if (!txType) return [];
+    const txs = Array.isArray(state.transactions) ? state.transactions : [];
+
+    const sorted = [...txs]
+      .filter((t) => (t?.type === txType) && !t?.isTransfer)
+      .sort((a, b) => String(b?.date || "").localeCompare(String(a?.date || "")));
+
+    const out = [];
+    const seen = new Set();
+    for (const t of sorted) {
+      const cid = String(t?.category || "").trim();
+      if (!cid || seen.has(cid)) continue;
+      const c = catHierarchy.byId.get(cid);
+      if (!c) continue;
+      // Keep list tidy: don't suggest deleted categories (unless currently selected)
+      if (isTombstoneCategory(c) && cid !== String(categoryId || "").trim()) continue;
+      seen.add(cid);
+      out.push(c);
+      if (out.length >= 6) break;
+    }
+    return out;
+  }, [state.transactions, type, catHierarchy, categoryId]);
+
+  const catSearchResults = useMemo(() => {
+    const q = String(catQuery || "").trim().toLowerCase();
+    if (!q) return [];
+    const idNow = String(categoryId || "").trim();
+
+    const all = Array.from(catHierarchy.byId.values());
+    const matches = all
+      .filter((c) => {
+        if (!c) return false;
+        const id = String(c?.id || "").trim();
+        if (!id) return false;
+        // Hide deleted categories from search by default
+        if (isTombstoneCategory(c) && id !== idNow) return false;
+        const name = String(c?.name || "").toLowerCase();
+        return name.includes(q);
+      })
+      .map((c) => {
+        const { mainId, subId } = splitSelection(c.id, catHierarchy);
+        const main = mainId ? catHierarchy.byId.get(mainId) : null;
+        const sub = subId ? catHierarchy.byId.get(subId) : null;
+        const breadcrumb = sub ? `${main?.name || ""} › ${sub?.name || ""}` : (main?.name || sub?.name || "");
+        const isSub = !!subId;
+        return {
+          cat: c,
+          breadcrumb,
+          mainName: String(main?.name || ""),
+          isSub,
+        };
+      });
+
+    // sort for readability
+    matches.sort((a, b) => {
+      if (a.isSub !== b.isSub) return a.isSub ? 1 : -1;
+      const aKey = `${a.mainName}|${a.breadcrumb}`;
+      const bKey = `${b.mainName}|${b.breadcrumb}`;
+      return aKey.localeCompare(bKey, "th");
+    });
+
+    return matches.slice(0, 30);
+  }, [catQuery, categoryId, catHierarchy]);
 
   // ✅ กันการสร้าง category ซ้ำใน "batch scan" เดียวกัน
   const createdCatRef = useRef({ expense: new Map(), income: new Map() });
@@ -1204,7 +1347,7 @@ const existingRefSet = useMemo(() => {
   const ensureCategory = (typeForCat, scannedCategory) => {
     const listAll = categories[typeForCat] || [];
     // Only active categories are eligible for matching/suggestion
-    const list = (listAll || []).filter((c) => !isDeletedCat(c));
+    const list = (listAll || []).filter((c) => !isTombstoneCategory(c));
     const key = sanitizeCategoryKey(scannedCategory);
 
     const mem = createdCatRef.current?.[typeForCat];
@@ -1303,8 +1446,10 @@ const existingRefSet = useMemo(() => {
         if (!groups[gidx]) return x;
         groups[gidx] = { ...groups[gidx], ...patch };
         // ✅ Use signed sum so discount lines (adjustmentEffect='subtract') reduce the net total.
+        // Sync amount from groups unless user manually edited amount (amountEdited=true).
         const signedSum = groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
-        return { ...x, groups, amount: x.splitByCategory ? signedSum : x.amount };
+        const shouldSyncAmount = !!x.splitByCategory || !x.amountEdited;
+        return { ...x, groups, amount: shouldSyncAmount ? signedSum : x.amount };
       })
     );
   };
@@ -1953,13 +2098,18 @@ if (
           }
 
           // ✅ Reconcile receipt total with an explicit adjustment line (e.g. discount)
+          // IMPORTANT: Discounts must reduce paid total (net = items + surcharge - discount).
           const aiTotal = amountSatang != null ? amountSatang : 0;
-          const reconciled = reconcileReceiptGroups(groups, aiTotal, {
+          const chosenTotal = chooseReceiptPaidTotalSatang({ aiTotalSatang: aiTotal, groups, toleranceSatang: 200 });
+          const usedNetOverride = !!chosenTotal?.usedNetOverride;
+          const recTarget = Number(chosenTotal?.targetTotalSatang || 0);
+          const reconciled = reconcileReceiptGroups(groups, recTarget, {
             ensureCategoryId: (k) => ensureCategory("expense", k),
             baseLineCountMin: 1,
           });
           groups = reconciled.groups;
-          const groupSum = groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+          const sumsAfter = computeReceiptSumsSatang(groups);
+          const groupSum = Math.abs(Number(sumsAfter?.netSatang || 0));
           // ✅ Default to split for receipts with multiple purchased items
           // (convenience-store receipts are the #1 pain point)
           const positiveScannedItemCount = Array.isArray(scannedItems)
@@ -1975,6 +2125,7 @@ if (
           if (scanFlags?.needs_human_review) scanWarnings.push("NEEDS_HUMAN_REVIEW");
           if (scanFlags?.has_zero_price_lines) scanWarnings.push("HAS_ZERO_PRICE_LINES");
           if (scanFlags?.has_discount_lines) scanWarnings.push("HAS_DISCOUNT_LINES");
+          if (usedNetOverride) scanWarnings.push("DISCOUNT_MATH_FIXED");
 
           if (finalTxType === "expense" && (docType === "receipt" || docType === "unknown") && amountSatang != null && groupSum > 0) {
             const diff = Math.abs(groupSum - amountSatang);
@@ -2045,33 +2196,27 @@ if (
           const pickedAmount = (() => {
             const a = amountSatang != null && amountSatang > 0 ? amountSatang : null;
             const g = groupSum && groupSum > 0 ? groupSum : null;
-            const t = aiTotal && aiTotal > 0 ? aiTotal : null;
 
-            if (finalTxType === "transfer" || finalTxType === "credit_payment") return a ?? t ?? g;
-            if (splitByCategory) return a ?? g ?? t;
-            return a ?? g ?? t;
+            // Prefer the computed "net" total (items +/- adjustments) so discount truly reduces expense.
+            if (finalTxType === "transfer" || finalTxType === "credit_payment") return a ?? g;
+            if (finalTxType === "expense") return g ?? a;
+            return a ?? g;
           })();
 
-          const itemsSubtotalSatang = (groups || [])
-            .filter((g) => !isAdjustmentLike(g))
-            .reduce((s, g) => s + (Number(g?.amount) || 0), 0);
           const reconcileMeta = {
             ...(reconciled?.meta || {}),
-            itemsSubtotalSatang,
-            discountSatang:
-              String(reconciled?.meta?.adjustmentEffect || "").toLowerCase().trim() === "subtract"
-                ? Number(reconciled?.meta?.adjustmentSatang || 0)
-                : 0,
-            surchargeSatang:
-              String(reconciled?.meta?.adjustmentEffect || "").toLowerCase().trim() === "add"
-                ? Number(reconciled?.meta?.adjustmentSatang || 0)
-                : 0,
+            itemsSubtotalSatang: Number(sumsAfter?.itemsSubtotalSatang || 0),
+            discountSatang: Number(sumsAfter?.discountSatang || 0),
+            surchargeSatang: Number(sumsAfter?.surchargeSatang || 0),
+            netSatang: Number(sumsAfter?.netSatang || 0),
+            usedNetOverride,
           };
 
           let patch = {
             status: "ready",
             txType: finalTxType,
             amount: pickedAmount,
+            amountEdited: false,
             date: d,
             note: mergedNote,
             merchant,
@@ -2923,11 +3068,14 @@ if (
 
         const parentId = generateId();
 
-        // ✅ Parent total is the paid total. We reconcile children by adding an explicit adjustment line.
+        // ✅ Parent total is the paid total (net = items + surcharge - discount).
+        // If an older queue item has a gross total (discount accidentally added), auto-correct.
         let parentAmount = Number(q.amount) || 0;
-        if (!parentAmount || parentAmount <= 0) {
-          // fallback: best-effort paid total from current groups (no adjustment)
-          parentAmount = groups.reduce((s, g) => s + (Number(g.amount) || 0), 0);
+        const chosenParent = chooseReceiptPaidTotalSatang({ aiTotalSatang: parentAmount, groups, toleranceSatang: 200 });
+        parentAmount = Math.abs(Number(chosenParent?.targetTotalSatang || 0));
+        if (!(parentAmount > 0)) {
+          // fallback: derive from current groups using signed math
+          parentAmount = Math.abs(groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0));
         }
 
         const rec = reconcileReceiptGroups(groups, parentAmount, {
@@ -3096,20 +3244,25 @@ if (
               .filter((l) => Number(l?.amount || 0) > 0)
           : null;
 
-      const receiptItemsSubtotalSatang = receiptLines
-        ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() !== "adjustment").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
+      // ✅ Receipt totals must respect adjustments (discount subtracts from paid total)
+      const receiptChosen = receiptLines
+        ? chooseReceiptPaidTotalSatang({ aiTotalSatang: Number(q.amount) || 0, groups: receiptLines, toleranceSatang: 200 })
         : null;
-      const receiptDiscountSatang = receiptLines
-        ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "subtract").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
-        : null;
-      const receiptSurchargeSatang = receiptLines
-        ? receiptLines.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "add").reduce((s, l) => s + (Number(l?.amount) || 0), 0)
-        : null;
+      const receiptPaidTotalSatang = receiptLines ? Math.abs(Number(receiptChosen?.targetTotalSatang || 0)) : null;
+      const receiptItemsSubtotalSatang = receiptLines ? Number(receiptChosen?.itemsSubtotalSatang || 0) : null;
+      const receiptDiscountSatang = receiptLines ? Number(receiptChosen?.discountSatang || 0) : null;
+      const receiptSurchargeSatang = receiptLines ? Number(receiptChosen?.surchargeSatang || 0) : null;
+
+      const baseAmountSatang = receiptLines
+        ? receiptPaidTotalSatang > 0
+          ? receiptPaidTotalSatang
+          : Number(q.amount) || 0
+        : Number(q.amount) || 0;
 
       const baseTx = {
         id: generateId(),
         type: q.txType === "income" ? "income" : "expense",
-        amount: Number(q.amount),
+        amount: baseAmountSatang,
         category: q.categoryId,
         accountId: q.accountId,
         date: d,
@@ -3129,7 +3282,7 @@ if (
         paymentMethod: q.paymentMethod || "cash",
 
         receiptLines: receiptLines || null,
-        receiptPaidTotalSatang: receiptLines ? Number(q.amount) : null,
+        receiptPaidTotalSatang: receiptPaidTotalSatang,
         receiptItemsSubtotalSatang: receiptItemsSubtotalSatang,
         receiptDiscountSatang: receiptDiscountSatang,
         receiptSurchargeSatang: receiptSurchargeSatang,
@@ -4061,7 +4214,11 @@ const handleClose = () => {
                                 value={q.amount != null ? formatMoneyInputFromSatang(q.amount) : ""}
                                 onChange={(e) => {
                                   const cleaned = sanitizeMoneyInput(e.target.value);
-                                  updateQueueItem(q.id, { amount: parseMoneyToSatang(cleaned), splitByCategory: false });
+                                  updateQueueItem(q.id, {
+                                    amount: parseMoneyToSatang(cleaned),
+                                    splitByCategory: false,
+                                    amountEdited: true,
+                                  });
                                 }}
                                 className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
                                 placeholder="0.00"
@@ -4243,7 +4400,7 @@ const handleClose = () => {
                                             <div className="col-span-3">
                                               <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
                                               <CategorySelect
-                                                categories={expenseCats}
+                                                categories={expenseCatsAll}
                                                 value={g.categoryId || ""}
                                                 onChange={(e) => updateQueueGroup(q.id, idx, { categoryId: e.target.value })}
                                                 allowEmpty
@@ -4280,7 +4437,7 @@ const handleClose = () => {
                                   <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                     <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหมู่</div>
                                     <CategorySelect
-                                      categories={(q.txType === "income" ? incomeCats : expenseCats)}
+                                      categories={(q.txType === "income" ? incomeCatsAll : expenseCatsAll)}
                                       value={q.categoryId || ""}
                                       onChange={(e) => updateQueueItem(q.id, { categoryId: e.target.value })}
                                       allowEmpty
@@ -4306,7 +4463,7 @@ const handleClose = () => {
                                   const isAdj = isAdjustmentLike(g);
                                   const effect = String(g?.adjustmentEffect || "").toLowerCase().trim();
                                   const sign = isAdj ? (effect === "subtract" ? "-" : "+") : "";
-                                  const cat = expenseCats.find((c) => String(c.id) === String(g?.categoryId)) || null;
+                                  const cat = expenseCatsAll.find((c) => String(c.id) === String(g?.categoryId)) || null;
                                   const title = String(g?.note || "").trim() || cat?.name || "—";
                                   const subtitle = cat && title !== cat.name ? cat.name : isAdj ? (effect === "subtract" ? "ส่วนลด" : "ค่าธรรมเนียม") : "";
                                   return (
@@ -4698,7 +4855,9 @@ const handleClose = () => {
                             <div className="col-span-3">
                               <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
                               <CategorySelect
-                                categories={(type === "income" ? incomeCats : expenseCats)}
+                                // Pass full list (including tombstones) so CategorySelect can
+                                // show the currently selected deleted category in edit mode.
+                                categories={(type === "income" ? incomeCatsAll : expenseCatsAll)}
                                 value={l.categoryId || ""}
                                 onChange={(e) => updateSplitLine(idx, { categoryId: e.target.value })}
                                 allowEmpty
@@ -4754,76 +4913,199 @@ const handleClose = () => {
               </div>
 
               {!isSplitMode ? (
-                <>
-                  <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">หมวดหมู่</h3>
-                  <div className="grid grid-cols-4 gap-3 mb-4">
-                    {catHierarchy.main.map((cat) => (
+                <div className="glass-card rounded-3xl p-5 mb-6 border border-white/20">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-gray-900/60 uppercase">หมวดหมู่</div>
+                      <div className="text-[11px] text-gray-900/55 mt-1">
+                        เลือกหมวดหลักก่อน แล้วเลือกหมวดย่อย (ถ้ามี) • ใช้ค้นหาเพื่อเลือกได้เร็วขึ้น
+                      </div>
+                    </div>
+                    {categoryId ? (
                       <button
-                        key={cat.id}
-                        onClick={() => setCategoryId(cat.id)}
-                        className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
-                          selectedMainId === cat.id
-                            ? "glass-card ring-2 ring-gray-900/80 border-white/20"
-                            : "glass-chip border-white/15 hover:bg-white/10"
-                        }`}
                         type="button"
+                        onClick={() => {
+                          setCategoryId("");
+                          setCatQuery("");
+                        }}
+                        className="shrink-0 px-3 py-2 rounded-2xl text-[11px] font-extrabold glass-chip border-white/15 text-gray-900/80 hover:text-gray-900 active:scale-95"
                       >
-                        <div
-                          className="w-12 h-12 rounded-full flex items-center justify-center text-xl mb-2"
-                          style={{ backgroundColor: `${cat.color}20` }}
-                        >
-                          {cat.icon}
-                        </div>
-                        <div className="text-[11px] font-extrabold text-gray-900/90 leading-tight text-center">
-                          {cat.name}
-                        </div>
+                        ล้าง
                       </button>
-                    ))}
+                    ) : null}
                   </div>
 
-                  {selectedMainId && subCatsForMain.length ? (
-                    <div className="mb-6">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-[11px] font-extrabold text-gray-900/60 uppercase ml-1">หมวดย่อย (ถ้าต้องการ)</h4>
-                        {categoryId !== selectedMainId ? (
-                          <button
-                            type="button"
-                            onClick={() => setCategoryId(selectedMainId)}
-                            className="text-[11px] font-extrabold text-gray-900/70 hover:text-gray-900"
-                          >
-                            ใช้หมวดหลักนี้
-                          </button>
-                        ) : null}
+                  {/* Search */}
+                  <div className="mt-4">
+                    <div className="glass-panel rounded-2xl px-3 py-2 flex items-center gap-2">
+                      <Search size={16} className="text-gray-900/55" />
+                      <input
+                        value={catQuery}
+                        onChange={(e) => setCatQuery(e.target.value)}
+                        className="flex-1 bg-transparent outline-none text-sm font-extrabold text-gray-900"
+                        placeholder="ค้นหาหมวดหมู่ เช่น อาหาร, กาแฟ, น้ำมัน"
+                      />
+                      {catQuery ? (
+                        <button
+                          type="button"
+                          onClick={() => setCatQuery("")}
+                          className="w-8 h-8 rounded-xl glass-chip border-white/15 flex items-center justify-center text-gray-900/70 active:scale-95"
+                          aria-label="clear category search"
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {/* Selected breadcrumb */}
+                    <div className="mt-2 text-[11px] font-extrabold text-gray-900/70 flex items-center gap-2">
+                      <div className="px-3 py-2 rounded-2xl bg-white/10 border border-white/15 inline-flex items-center gap-2">
+                        <span className="text-gray-900/55">เลือกแล้ว:</span>
+                        <span className="text-gray-900">
+                          {selectedCatBreadcrumb || "(ยังไม่เลือก)"}
+                        </span>
                       </div>
-                      <div className="grid grid-cols-4 gap-3">
-                        {subCatsForMain.map((cat) => (
-                          <button
-                            key={cat.id}
-                            onClick={() => setCategoryId(cat.id)}
-                            className={`flex flex-col items-center p-3 rounded-2xl transition-all active:scale-95 border ${
-                              categoryId === cat.id
-                                ? "glass-card ring-2 ring-gray-900/80 border-white/20"
-                                : "glass-chip border-white/15 hover:bg-white/10"
-                            }`}
-                            type="button"
-                          >
-                            <div
-                              className="w-12 h-12 rounded-full flex items-center justify-center text-xl mb-2"
-                              style={{ backgroundColor: `${cat.color}20` }}
+                    </div>
+                  </div>
+
+                  {/* Search results */}
+                  {catQuery.trim() ? (
+                    <div className="mt-4">
+                      <div className="text-[11px] font-extrabold text-gray-900/60 uppercase mb-2">ผลการค้นหา</div>
+                      <div className="max-h-[46dvh] overflow-auto pr-1 space-y-2">
+                        {catSearchResults.length ? (
+                          catSearchResults.map(({ cat, breadcrumb }) => (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              onClick={() => {
+                                setCategoryId(cat.id);
+                                setCatQuery("");
+                              }}
+                              className={`w-full flex items-center justify-between gap-3 px-3 py-3 rounded-2xl border transition-all active:scale-95 ${
+                                String(categoryId || "") === String(cat.id)
+                                  ? "glass-card border-white/20 ring-2 ring-gray-900/70"
+                                  : "glass-chip border-white/15 hover:bg-white/10"
+                              } ${isTombstoneCategory(cat) ? "opacity-70" : ""}`}
                             >
-                              {cat.icon}
-                            </div>
-                            <div className="text-[11px] font-extrabold text-gray-900/90 leading-tight text-center">
-                              {cat.name}
-                            </div>
-                          </button>
-                        ))}
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div
+                                  className="w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0"
+                                  style={{ backgroundColor: `${String(cat.color || "#999")}20` }}
+                                >
+                                  {cat.icon}
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="text-sm font-extrabold text-gray-900 truncate">
+                                    {cat.name}{isTombstoneCategory(cat) ? " (Deleted)" : ""}
+                                  </div>
+                                  <div className="text-[11px] text-gray-900/55 truncate">{breadcrumb}</div>
+                                </div>
+                              </div>
+
+                              <ChevronRight size={16} className="text-gray-900/50 shrink-0" />
+                            </button>
+                          ))
+                        ) : (
+                          <div className="text-sm text-gray-900/55 px-3 py-4">ไม่พบหมวดที่ตรงกับคำค้นหา</div>
+                        )}
                       </div>
                     </div>
                   ) : (
-                    <div className="mb-6" />
+                    <>
+                      {/* Recent */}
+                      {recentCatsForPicker.length ? (
+                        <div className="mt-4">
+                          <div className="text-[11px] font-extrabold text-gray-900/60 uppercase mb-2">ล่าสุด</div>
+                          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                            {recentCatsForPicker.map((cat) => (
+                              <button
+                                key={cat.id}
+                                type="button"
+                                onClick={() => setCategoryId(cat.id)}
+                                className={`shrink-0 px-3 py-2 rounded-2xl border transition-all active:scale-95 inline-flex items-center gap-2 ${
+                                  String(categoryId || "") === String(cat.id)
+                                    ? "glass-card border-white/20 ring-2 ring-gray-900/70"
+                                    : "glass-chip border-white/15 hover:bg-white/10"
+                                }`}
+                              >
+                                <span className="text-base">{cat.icon}</span>
+                                <span className="text-xs font-extrabold text-gray-900/90 whitespace-nowrap">{cat.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* Main categories */}
+                      <div className="mt-4">
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <div className="text-[11px] font-extrabold text-gray-900/60 uppercase">หมวดหลัก</div>
+                          <div className="text-[11px] text-gray-900/45">เลื่อนซ้าย/ขวา</div>
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                          {catHierarchy.main.map((cat) => (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              onClick={() => setCategoryId(cat.id)}
+                              className={`shrink-0 px-3 py-2 rounded-2xl border transition-all active:scale-95 inline-flex items-center gap-2 ${
+                                selectedMainId === cat.id
+                                  ? "glass-card border-white/20 ring-2 ring-gray-900/70"
+                                  : "glass-chip border-white/15 hover:bg-white/10"
+                              } ${isTombstoneCategory(cat) ? "opacity-70" : ""}`}
+                            >
+                              <span
+                                className="w-3 h-3 rounded-full"
+                                style={{ backgroundColor: String(cat.color || "#999") }}
+                                aria-hidden="true"
+                              />
+                              <span className="text-base">{cat.icon}</span>
+                              <span className="text-xs font-extrabold text-gray-900/90 whitespace-nowrap">{cat.name}</span>
+                              {isTombstoneCategory(cat) ? <span className="text-[10px] font-extrabold text-red-700/70">(Deleted)</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Sub categories */}
+                      {selectedMainId && subCatsForMain.length ? (
+                        <div className="mt-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-[11px] font-extrabold text-gray-900/60 uppercase">หมวดย่อย (ถ้าต้องการ)</div>
+                            {categoryId !== selectedMainId ? (
+                              <button
+                                type="button"
+                                onClick={() => setCategoryId(selectedMainId)}
+                                className="text-[11px] font-extrabold text-gray-900/70 hover:text-gray-900"
+                              >
+                                ใช้หมวดหลักนี้
+                              </button>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {subCatsForMain.map((cat) => (
+                              <button
+                                key={cat.id}
+                                type="button"
+                                onClick={() => setCategoryId(cat.id)}
+                                className={`px-3 py-2 rounded-2xl border transition-all active:scale-95 inline-flex items-center gap-2 ${
+                                  String(categoryId || "") === String(cat.id)
+                                    ? "glass-card border-white/20 ring-2 ring-gray-900/70"
+                                    : "glass-chip border-white/15 hover:bg-white/10"
+                                } ${isTombstoneCategory(cat) ? "opacity-70" : ""}`}
+                              >
+                                <span className="text-base">{cat.icon}</span>
+                                <span className="text-xs font-extrabold text-gray-900/90">{cat.name}</span>
+                                {isTombstoneCategory(cat) ? <span className="text-[10px] font-extrabold text-red-700/70">(Deleted)</span> : null}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
                   )}
-                </>
+                </div>
               ) : null}
             </>
           ) : null}

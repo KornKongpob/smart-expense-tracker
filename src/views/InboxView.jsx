@@ -27,7 +27,12 @@ import {
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
 import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
-import { reconcileReceiptGroups, signedReceiptGroupSatang, isAdjustmentLike } from "../utils/receiptAdjustments";
+import {
+  reconcileReceiptGroups,
+  signedReceiptGroupSatang,
+  isAdjustmentLike,
+  chooseReceiptPaidTotalSatang,
+} from "../utils/receiptAdjustments";
 
 function appendEvidenceToNote(note, evidence) {
   if (!evidence) return note || "";
@@ -148,7 +153,13 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
       const categoryId = String(g0?.categoryId || item?.categoryId || "").trim();
       if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับรายการนี้");
 
-      let amount = asSatang(item?.amount);
+      // Amount must respect adjustment math (discount subtracts from paid total)
+      const receiptChosen = chooseReceiptPaidTotalSatang({
+        aiTotalSatang: asSatang(item?.amount),
+        groups: usableGroups,
+        toleranceSatang: 200,
+      });
+      let amount = Math.abs(Number(receiptChosen?.targetTotalSatang || 0));
       if (!isPositiveNumber(amount)) {
         const signed = usableGroups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
         amount = Math.abs(signed);
@@ -173,17 +184,19 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
 
           receiptLines: usableGroups || null,
           receiptPaidTotalSatang: amount,
-          receiptItemsSubtotalSatang: usableGroups ? usableGroups.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() !== "adjustment").reduce((s, l) => s + (Number(l?.amount) || 0), 0) : null,
-          receiptDiscountSatang: usableGroups ? usableGroups.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "subtract").reduce((s, l) => s + (Number(l?.amount) || 0), 0) : null,
-          receiptSurchargeSatang: usableGroups ? usableGroups.filter((l) => String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment" && String(l?.adjustmentEffect || "").toLowerCase().trim() === "add").reduce((s, l) => s + (Number(l?.amount) || 0), 0) : null,
+          receiptItemsSubtotalSatang: Number(receiptChosen?.itemsSubtotalSatang || 0) || null,
+          receiptDiscountSatang: Number(receiptChosen?.discountSatang || 0) || null,
+          receiptSurchargeSatang: Number(receiptChosen?.surchargeSatang || 0) || null,
 
           source: "inbox",
         },
       ];
     }
 
-    // Parent amount: prefer item.amount if provided, else signed sum
+    // Parent amount: must respect adjustment math (discount subtracts from paid total)
     let parentAmount = asSatang(item?.amount);
+    const parentChosen = chooseReceiptPaidTotalSatang({ aiTotalSatang: parentAmount, groups: usableGroups, toleranceSatang: 200 });
+    parentAmount = Math.abs(Number(parentChosen?.targetTotalSatang || parentAmount));
     if (!isPositiveNumber(parentAmount)) {
       const signed = usableGroups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
       parentAmount = Math.abs(signed);

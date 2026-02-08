@@ -1,11 +1,11 @@
 // src/app/App.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
-import { useAppStore } from "../store/store";
 
+import { useAppStore } from "../store/store";
 import { STORAGE_SAVE_ERROR_EVENT } from "../services/storage";
 
-// ✅ Use single navbar source
+// ✅ Single navbar source
 import Navbar from "../components/Navbar.jsx";
 
 import DashboardView from "../views/DashboardView.jsx";
@@ -20,16 +20,17 @@ import InboxView from "../views/InboxView.jsx";
 import RulesView from "../views/RulesView.jsx";
 import MerchantLibraryView from "../views/MerchantLibraryView.jsx";
 
+// 🔒 Privacy PIN Lock
+import PinLockScreen from "../components/PinLockScreen.jsx";
+
 /**
  * UI spacing for fixed bottom navbar
- * - Navbar is fixed + has "bottom-3" + padding + safe area
- * - If content has buttons at the bottom (especially forms), it may be covered.
- * - We add app-level padding to guarantee clickability.
- *
- * Note: Many views already use pb-28, but app-level padding makes it consistent
- * and prevents "some screens forgot pb-xx" bugs.
+ * - Navbar is fixed + has safe-area padding
+ * - Some screens have bottom actions; this prevents the navbar from blocking clicks.
  */
 const NAV_SAFE_PAD_CLASS = "pb-[calc(7rem+env(safe-area-inset-bottom))]"; // ~112px + safe-area
+
+const PIN_STORAGE_KEY = "privacy_pin";
 
 function AlertToast({ text, onClose, showNavbar }) {
   if (!text) return null;
@@ -130,11 +131,11 @@ function ConfirmModal({ open, title, message, danger, onCancel, onConfirm }) {
           <button
             type="button"
             onClick={onConfirm}
-            className={`
-              flex-1 py-3 rounded-2xl font-extrabold text-white active:scale-95
-              shadow-[0_18px_34px_-22px_rgba(0,0,0,0.7)]
-              ${danger ? "bg-red-600/90" : "bg-gray-900/90"}
-            `}
+            className={
+              `flex-1 py-3 rounded-2xl font-extrabold text-white active:scale-95 ` +
+              `shadow-[0_18px_34px_-22px_rgba(0,0,0,0.7)] ` +
+              (danger ? "bg-red-600/90" : "bg-gray-900/90")
+            }
           >
             ยืนยัน
           </button>
@@ -148,6 +149,41 @@ export default function App() {
   const store = useAppStore();
   const { state } = store;
 
+  // Keep latest navigate in a ref so global event listeners don't need re-binding.
+  const navigateRef = useRef(null);
+  useEffect(() => {
+    navigateRef.current = store?.navigate || null;
+  }, [store?.navigate]);
+
+  // ===== Privacy PIN Lock =====
+  const [savedPin, setSavedPin] = useState("");
+  const [isUnlocked, setIsUnlocked] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const read = () => {
+      try {
+        setSavedPin(String(window.localStorage.getItem(PIN_STORAGE_KEY) || ""));
+      } catch {
+        setSavedPin("");
+      }
+    };
+
+    read();
+    const onStorage = (e) => {
+      if (!e || e.key === PIN_STORAGE_KEY) read();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const needsLock = /^[0-9]{6}$/.test(String(savedPin || ""));
+  useEffect(() => {
+    // If no PIN is configured, app is always accessible.
+    if (!needsLock) setIsUnlocked(true);
+  }, [needsLock]);
+
   // ===== alert / confirm API for views =====
   const [alertText, setAlertText] = useState("");
   const [confirm, setConfirm] = useState({
@@ -158,13 +194,21 @@ export default function App() {
     onConfirm: null,
   });
 
-  const showAlert = (text) => {
-    setAlertText(String(text || ""));
-    window.clearTimeout(showAlert._t);
-    showAlert._t = window.setTimeout(() => setAlertText(""), 2500);
-  };
+  const alertTimerRef = useRef(null);
+  useEffect(() => {
+    return () => {
+      if (alertTimerRef.current) window.clearTimeout(alertTimerRef.current);
+    };
+  }, []);
 
-  const showConfirm = (title, message, onConfirm, danger = false) => {
+  const showAlert = useCallback((text) => {
+    if (typeof window === "undefined") return;
+    setAlertText(String(text || ""));
+    if (alertTimerRef.current) window.clearTimeout(alertTimerRef.current);
+    alertTimerRef.current = window.setTimeout(() => setAlertText(""), 2500);
+  }, []);
+
+  const showConfirm = useCallback((title, message, onConfirm, danger = false) => {
     setConfirm({
       open: true,
       title: String(title || "ยืนยัน"),
@@ -172,9 +216,9 @@ export default function App() {
       danger: !!danger,
       onConfirm: typeof onConfirm === "function" ? onConfirm : null,
     });
-  };
+  }, []);
 
-  const closeConfirm = () => setConfirm((c) => ({ ...c, open: false }));
+  const closeConfirm = useCallback(() => setConfirm((c) => ({ ...c, open: false })), []);
 
   // ✅ Warn user when LocalStorage saving fails (usually quota exceeded)
   const storageErrorShownAtRef = useRef(0);
@@ -195,7 +239,7 @@ export default function App() {
         `ระบบไม่สามารถบันทึกข้อมูลลงเครื่องได้ (LocalStorage อาจเกินโควต้า ~5MB)${sizeHint}\n\nแนะนำ:\n1) ไปที่ More → Export Backup ทันที\n2) ลบรายการ/รูปที่ไม่จำเป็น (รูปภาพกินพื้นที่มาก)\n3) หากยังไม่หาย ลองเปิดด้วย Browser อื่น หรือเคลียร์พื้นที่เก็บข้อมูล`,
         () => {
           try {
-            store.navigate?.("more");
+            navigateRef.current?.("more");
           } catch {
             // ignore
           }
@@ -206,68 +250,50 @@ export default function App() {
 
     window.addEventListener(STORAGE_SAVE_ERROR_EVENT, onStorageSaveError);
     return () => window.removeEventListener(STORAGE_SAVE_ERROR_EVENT, onStorageSaveError);
-  }, [store, showConfirm]);
+  }, [showConfirm]);
 
   const view = state?.ui?.view || "dashboard";
 
-  const content = useMemo(() => {
+  // 🔒 Lock gate (all hooks executed above)
+  if (needsLock && !isUnlocked) {
+    return <PinLockScreen savedPin={savedPin} title="Privacy Lock" onUnlocked={() => setIsUnlocked(true)} />;
+  }
+
+  const showNavbar = !["categories", "budgets", "recurring", "rules", "merchants", "add"].includes(view);
+  const shellPadClass = showNavbar ? NAV_SAFE_PAD_CLASS : "pb-safe";
+
+  const content = (() => {
     switch (view) {
       case "dashboard":
         return <DashboardView />;
-
       case "add":
         return <AddTransactionView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "accounts":
         return <AccountsView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "stats":
         return <StatsView />;
-
       case "more":
         return <MoreView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "categories":
         return <CategoriesView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "budgets":
         return <BudgetsView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "recurring":
         return <RecurringView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "inbox":
         return <InboxView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "rules":
         return <RulesView showAlert={showAlert} showConfirm={showConfirm} />;
-
       case "merchants":
         return <MerchantLibraryView showAlert={showAlert} showConfirm={showConfirm} />;
-
       default:
         return <DashboardView />;
     }
-  }, [view]);
-
-  /**
-   * ✅ ซ่อน Navbar ในหน้าที่เสี่ยงชนปุ่ม/ฟอร์ม:
-   * - add: หน้ากรอก/บันทึกรายการ
-   * - categories/budgets/recurring: หน้าตั้งค่าลึก + มักมี modal/bottom actions
-   */
-  const showNavbar = !["categories", "budgets", "recurring", "rules", "merchants", "add"].includes(view);
-
-  /**
-   * ✅ Critical fix: Reserve space for fixed navbar so it won't block clicks.
-   * Even if some views forget pb-xx, the App shell still protects UI.
-   */
-  const shellPadClass = showNavbar ? NAV_SAFE_PAD_CLASS : "pb-safe";
+  })();
 
   return (
     <div className={`min-h-dvh ${shellPadClass}`}>
-      {/* App background (glass feel)
-          - body already has a glassy gradient; this layer adds soft blobs on top
-          - pointer-events-none so it never blocks clicks */}
+      {/* App background layer (pointer-events-none so it never blocks clicks) */}
       <div className="fixed inset-0 -z-10 pointer-events-none">
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/70 via-white/40 to-purple-50/70" />
         <div className="absolute -top-28 -right-28 w-80 h-80 rounded-full bg-indigo-300/18 blur-3xl" />
@@ -276,16 +302,12 @@ export default function App() {
       </div>
 
       <div className="mx-auto max-w-[520px] min-h-dvh relative">
-        {/* ✅ Content */}
         {content}
 
-        {/* ✅ Single Navbar (avoid multiple nav layers / z-index conflicts) */}
         {showNavbar ? <Navbar /> : null}
 
-        {/* Toast */}
         <AlertToast text={alertText} onClose={() => setAlertText("")} showNavbar={showNavbar} />
 
-        {/* Confirm */}
         <ConfirmModal
           open={confirm.open}
           title={confirm.title}

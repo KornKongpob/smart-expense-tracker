@@ -163,3 +163,82 @@ export function reconcileReceiptGroups(groups, targetTotalSatang, { ensureCatego
     },
   };
 }
+
+/**
+ * Compute receipt totals from groups (all amounts are POSITIVE satang integers).
+ *
+ * - itemsSubtotalSatang: sum of non-adjustment lines
+ * - discountSatang: sum of adjustment lines with adjustmentEffect='subtract'
+ * - surchargeSatang: sum of adjustment lines with adjustmentEffect='add'
+ * - netSatang: items + surcharge - discount
+ * - grossWithDiscountAddedSatang: items + surcharge + discount (a common OCR mistake)
+ */
+export function computeReceiptSumsSatang(groups) {
+  const list = Array.isArray(groups) ? groups : [];
+
+  let itemsSubtotalSatang = 0;
+  let discountSatang = 0;
+  let surchargeSatang = 0;
+
+  for (const g0 of list) {
+    const g = g0 && typeof g0 === "object" ? g0 : {};
+    const amt = sat(g.amount, 0);
+    if (!(amt > 0)) continue;
+
+    const isAdj = isAdjustmentLike(g);
+    if (!isAdj) {
+      itemsSubtotalSatang += amt;
+      continue;
+    }
+
+    const eff = String(g.adjustmentEffect || g.effect || "add").toLowerCase().trim();
+    if (eff === "subtract") discountSatang += amt;
+    else surchargeSatang += amt;
+  }
+
+  const netSatang = itemsSubtotalSatang + surchargeSatang - discountSatang;
+  const grossWithDiscountAddedSatang = itemsSubtotalSatang + surchargeSatang + discountSatang;
+
+  return {
+    itemsSubtotalSatang,
+    discountSatang,
+    surchargeSatang,
+    netSatang,
+    grossWithDiscountAddedSatang,
+  };
+}
+
+/**
+ * Decide what the receipt "paid total" should be.
+ *
+ * We keep the discount as an Expense (adjustmentEffect='subtract'), so the paid total must be:
+ *   net = items + surcharge - discount
+ *
+ * Some OCR/AI outputs mistakenly return: items + surcharge + discount.
+ * When we detect that pattern (gross is closer than net), we override to net.
+ */
+export function chooseReceiptPaidTotalSatang({ aiTotalSatang, groups, toleranceSatang = 200 } = {}) {
+  const ai = sat(aiTotalSatang, 0);
+  const sums = computeReceiptSumsSatang(groups);
+
+  let targetTotalSatang = ai > 0 ? ai : sums.netSatang > 0 ? sums.netSatang : 0;
+  let usedNetOverride = false;
+
+  if (ai > 0 && sums.discountSatang > 0 && sums.netSatang > 0) {
+    const diffNet = Math.abs(ai - sums.netSatang);
+    const diffGross = Math.abs(ai - sums.grossWithDiscountAddedSatang);
+
+    // If "gross" is clearly closer than "net", treat AI total as wrong and use net.
+    if (diffGross + Math.max(0, toleranceSatang) < diffNet) {
+      targetTotalSatang = sums.netSatang;
+      usedNetOverride = true;
+    }
+  }
+
+  return {
+    aiTotalSatang: ai,
+    targetTotalSatang,
+    usedNetOverride,
+    ...sums,
+  };
+}

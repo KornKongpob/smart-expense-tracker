@@ -59,8 +59,10 @@ export default function CategorySelect({
   const mainValue = allowEmpty ? mainId : mainId || "";
   const subValue = subId || "";
 
+  const hasChildren = !!(selectedMain && children.length);
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
       <select
         value={mainValue}
         disabled={disabled}
@@ -73,17 +75,17 @@ export default function CategorySelect({
           // selecting main always sets value to main id (Option B)
           emit(nextMain);
         }}
-        className={className}
+        className={`${className} ${hasChildren ? "" : "sm:col-span-2"}`}
       >
         {allowEmpty ? <option value="">{emptyLabel}</option> : null}
         {hierarchy.main.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.icon} {c.name}
+          <option key={c.id} value={c.id} disabled={isDeletedCategory(c)}>
+            {c.icon} {c.name}{isDeletedCategory(c) ? " (Deleted)" : ""}
           </option>
         ))}
       </select>
 
-      {selectedMain && children.length ? (
+      {hasChildren ? (
         <select
           value={subValue}
           disabled={disabled}
@@ -100,8 +102,8 @@ export default function CategorySelect({
         >
           <option value="">(ใช้หมวดหลักนี้)</option>
           {children.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.icon} {c.name}
+            <option key={c.id} value={c.id} disabled={isDeletedCategory(c)}>
+              {c.icon} {c.name}{isDeletedCategory(c) ? " (Deleted)" : ""}
             </option>
           ))}
         </select>

@@ -37,6 +37,22 @@ function safeNumber(n) {
   return Number.isFinite(x) ? x : 0;
 }
 
+// Expense math must respect receipt adjustments.
+// - normal expense line => +amount
+// - discount adjustment (adjustmentEffect='subtract') => -amount
+function signedExpenseAmount(tx) {
+  const t = tx && typeof tx === "object" ? tx : {};
+  if (String(t?.type || "").toLowerCase().trim() !== "expense") return 0;
+  const amt = safeNumber(t?._amt ?? t?.amount);
+  const eff = String(t?.adjustmentEffect || "").toLowerCase().trim();
+  return eff === "subtract" ? -amt : amt;
+}
+
+function isSplitParentTx(tx) {
+  const t = tx && typeof tx === "object" ? tx : {};
+  return !!t?.isSplitParent;
+}
+
 function toISODateFromDate(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -168,7 +184,17 @@ const TxRow = memo(function TxRow({ tx, cat, accountName }) {
         </div>
 
         <div className="shrink-0 text-right">
-          <div className="text-sm font-extrabold text-rose-700">-{formatCurrency(safeNumber(tx?.amount))}</div>
+          {(() => {
+            const signed = signedExpenseAmount(tx);
+            const isDiscount = signed < 0;
+            const absAmt = Math.abs(safeNumber(tx?._amt ?? tx?.amount));
+            return (
+              <div className={`text-sm font-extrabold ${isDiscount ? "text-emerald-700" : "text-rose-700"}`}>
+                {isDiscount ? "+" : "-"}
+                {formatCurrency(absAmt)}
+              </div>
+            );
+          })()}
           <div className="text-[11px] text-gray-800/55 mt-0.5">{tx?.type || "expense"}</div>
         </div>
       </div>
@@ -221,10 +247,11 @@ export default function StatsView() {
     let sum = 0;
     for (const t of normalizedTxs) {
       if (t?.isTransfer) continue;
-      if (t?.type !== "expense") continue;
-      if (t?._iso === todayIso) sum += t._amt;
+      if (isSplitParentTx(t)) continue;
+      if (t?._iso !== todayIso) continue;
+      sum += signedExpenseAmount(t);
     }
-    return sum;
+    return Math.max(0, sum);
   }, [normalizedTxs, todayIso]);
 
   // Filter by selected period (still excludes Transfer)
@@ -232,6 +259,7 @@ export default function StatsView() {
     const out = [];
     for (const t of normalizedTxs) {
       if (t?.isTransfer) continue;
+      if (isSplitParentTx(t)) continue;
 
       if (period === "today") {
         if (t._iso === todayIso) out.push(t);
@@ -264,13 +292,25 @@ export default function StatsView() {
 
   const totals = useMemo(() => {
     let income = 0;
-    let expense = 0;
+    let expenseSigned = 0;
+    let discountSaved = 0;
 
     for (const t of filtered) {
-      if (t.type === "income") income += t._amt;
-      else if (t.type === "expense") expense += t._amt;
+      if (t.type === "income") {
+        income += t._amt;
+        continue;
+      }
+
+      if (t.type === "expense") {
+        const s = signedExpenseAmount(t);
+        expenseSigned += s;
+        if (String(t?.adjustmentEffect || "").toLowerCase().trim() === "subtract") {
+          discountSaved += safeNumber(t?._amt);
+        }
+      }
     }
 
+    const expense = Math.max(0, expenseSigned);
     const net = income - expense;
 
     const start = periodStart;
@@ -279,14 +319,18 @@ export default function StatsView() {
     const days = Math.max(1, daysRaw);
     const avgSpendPerDay = expense / days;
 
-    return { income, expense, net, avgSpendPerDay, days };
+    return { income, expense, net, avgSpendPerDay, days, discountSaved };
   }, [filtered, periodStart, now]);
 
   const pieData = useMemo(() => {
     const map = new Map();
     for (const t of deferredFiltered) {
       if (t.type !== "expense") continue;
-      map.set(t.category, (map.get(t.category) || 0) + t._amt);
+      // Exclude discount adjustments from category distribution (they are savings)
+      // but keep them in overall expense totals (totals.expense).
+      const s = signedExpenseAmount(t);
+      if (!(s > 0)) continue;
+      map.set(t.category, (map.get(t.category) || 0) + s);
     }
 
     const items = [...map.entries()]
@@ -328,7 +372,10 @@ export default function StatsView() {
       const prev = map.get(iso) || { iso, date: formatDateShort(iso), income: 0, expense: 0, net: 0 };
 
       if (t.type === "income") prev.income += t._amt;
-      else if (t.type === "expense") prev.expense += t._amt;
+      else if (t.type === "expense") prev.expense += signedExpenseAmount(t);
+
+      // Don't let expense go below 0 on chart (e.g., discount-only day)
+      if (prev.expense < 0) prev.expense = 0;
 
       prev.net = prev.income - prev.expense;
       map.set(iso, prev);
@@ -357,7 +404,7 @@ export default function StatsView() {
     return txs;
   }, [filtered, selectedCatId]);
 
-  const catTotal = useMemo(() => catTxs.reduce((s, t) => s + safeNumber(t._amt), 0), [catTxs]);
+  const catTotal = useMemo(() => catTxs.reduce((s, t) => s + signedExpenseAmount(t), 0), [catTxs]);
 
   const openCategory = (catId) => {
     setSelectedCatId(catId);
@@ -372,7 +419,7 @@ export default function StatsView() {
           <div className="min-w-0">
             <h1 className="text-2xl font-extrabold text-gray-900">สรุปผลการเงิน</h1>
             <p className="text-sm text-gray-800/60 mt-1">
-              ช่วงเวลา: <span className="font-extrabold text-gray-900">{periodLabel}</span> • ไม่รวม Transfer
+              ช่วงเวลา: <span className="font-extrabold text-gray-900">{periodLabel}</span> • ไม่รวม Transfer / Split parent
               {isPending ? <span className="ml-2 text-[11px] text-gray-800/55">กำลังอัปเดต…</span> : null}
             </p>
           </div>
@@ -417,7 +464,11 @@ export default function StatsView() {
           tone="expense"
           title="รายจ่ายรวม"
           value={formatCurrency(totals.expense)}
-          sub={hasAny ? `เฉลี่ย/วัน ≈ ${formatCurrency(totals.avgSpendPerDay)}` : ""}
+          sub={
+            hasAny
+              ? `เฉลี่ย/วัน ≈ ${formatCurrency(totals.avgSpendPerDay)}${totals.discountSaved ? ` • ส่วนลด ${formatCurrency(totals.discountSaved)}` : ""}`
+              : ""
+          }
           icon={<TrendingDown size={18} />}
         />
         <GlassKpiCard
@@ -431,7 +482,7 @@ export default function StatsView() {
           tone="today"
           title="ค่าใช้จ่ายวันนี้"
           value={formatCurrency(todayExpense)}
-          sub="เฉพาะ Expense (ไม่นับ Transfer)"
+          sub="Expense สุทธิ (หักส่วนลด) • ไม่นับ Transfer / Split parent"
           icon={<CalendarDays size={18} />}
         />
       </div>
@@ -617,9 +668,9 @@ export default function StatsView() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-xs font-extrabold text-gray-900/70">รวมทั้งสิ้น</div>
-                <div className="mt-1 text-2xl font-extrabold text-rose-700">-{formatCurrency(catTotal)}</div>
+                <div className="mt-1 text-2xl font-extrabold text-rose-700">-{formatCurrency(Math.max(0, catTotal))}</div>
                 <div className="text-[11px] text-gray-800/55 mt-1">
-                  {catTxs.length} รายการ • ไม่รวม Transfer • ช่วงเวลา {periodLabel}
+                  {catTxs.length} รายการ • ไม่รวม Transfer / Split parent • ช่วงเวลา {periodLabel}
                 </div>
               </div>
               <div className="shrink-0 w-11 h-11 rounded-2xl glass-chip flex items-center justify-center text-gray-700">
