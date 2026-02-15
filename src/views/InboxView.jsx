@@ -182,6 +182,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
           isTransfer: false,
           transferId: null,
           attachmentId: item?.attachmentId || null,
+          fileHash: String(item?.fileHash || '').trim() || null,
 
           receiptLines: usableGroups || null,
           receiptPaidTotalSatang: amount,
@@ -247,6 +248,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
       isTransfer: false,
       transferId: null,
       attachmentId: item?.attachmentId || null,
+      fileHash: String(item?.fileHash || '').trim() || null,
       source: "inbox",
 
       splitGroupId,
@@ -283,6 +285,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         isTransfer: false,
         transferId: null,
         attachmentId: item?.attachmentId || null,
+        fileHash: String(item?.fileHash || '').trim() || null,
         source: "inbox",
 
         splitGroupId,
@@ -329,6 +332,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         category: "transfer",
         accountId: fromAccountId,
         attachmentId: item?.attachmentId || null,
+        fileHash: String(item?.fileHash || '').trim() || null,
         source: "inbox",
         transferKind,
       },
@@ -345,6 +349,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         category: "transfer",
         accountId: toAccountId,
         attachmentId: item?.attachmentId || null,
+        fileHash: String(item?.fileHash || '').trim() || null,
         source: "inbox",
         transferKind,
       },
@@ -427,6 +432,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
     isTransfer: false,
     transferId: null,
     attachmentId: item?.attachmentId || null,
+    fileHash: String(item?.fileHash || '').trim() || null,
 
     receiptLines: receiptLines || null,
     receiptPaidTotalSatang: receiptLines ? amount : null,
@@ -1707,7 +1713,7 @@ export default function InboxView({ showAlert, showConfirm }) {
           ...it,
           duplicate: true,
           duplicateInfo: {
-            kind: (f?.score === 1 ? "ref" : "fuzzy"),
+            kind: (Array.isArray(f?.reasons) && f.reasons.includes('ref exact match')) ? 'ref' : (Array.isArray(f?.reasons) && f.reasons.includes('file exact match')) ? 'file' : 'fuzzy',
             matchId: f.matchId || null,
             score: f.score || 0,
             reasons: f.reasons || [],
@@ -2227,7 +2233,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               ...patch,
               duplicate: dup,
               duplicateInfo: dup
-                ? { kind: (f?.score === 1 ? "ref" : "fuzzy"), matchId: f.matchId || null, score: f.score || 0, reasons: f.reasons || [] }
+                ? { kind: (Array.isArray(f?.reasons) && f.reasons.includes('ref exact match')) ? 'ref' : (Array.isArray(f?.reasons) && f.reasons.includes('file exact match')) ? 'file' : 'fuzzy', matchId: f.matchId || null, score: f.score || 0, reasons: f.reasons || [] }
                 : null,
             };
             nextItem = { ...nextItem, duplicate: dup, duplicateInfo: patch.duplicateInfo };

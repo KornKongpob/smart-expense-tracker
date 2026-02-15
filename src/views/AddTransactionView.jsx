@@ -40,6 +40,7 @@ import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput, normalizeThaiDigits } from "../utils/money";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { expandTransactionToInstallments } from "../utils/installments";
+import { computeFileSha256Hex } from "../utils/fileHash";
 import { useBlobInfo } from "../utils/useBlobInfo";
 import { PRESET_COLORS } from "../constants/presets.jsx";
 import { findNearbyMerchant, normalizeLatLng } from "../utils/location";
@@ -67,12 +68,62 @@ import {
 import { buildCategoryHierarchy, splitSelection } from "../utils/categoryHierarchy";
 
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
+
+// OCR sometimes returns template words as "Ref" (e.g., "SCB", "PromptPay").
+// We must ignore those to prevent false duplicate detection.
+const BAD_REF_KEYS = new Set(
+  [
+    'REF',
+    'REFERENCE',
+    'REFERENCENO',
+    'REFERENCENUMBER',
+    'TRANSACTION',
+    'TRANSACTIONID',
+    'TXID',
+    'PAYMENT',
+    'TRANSFER',
+    'SLIP',
+    'RECEIPT',
+    'INVOICE',
+    'SUCCESS',
+    'APPROVED',
+    'COMPLETED',
+    'PROMPTPAY',
+    'MOBILEBANKING',
+    'MOBILEAPP',
+    'SCB',
+    'KBANK',
+    'KPLUS',
+    'KTB',
+    'BBL',
+    'BAY',
+    'TTB',
+    'UOB',
+    'GSB',
+    'BAAC',
+  ].map((x) => String(x).trim().toUpperCase())
+);
+
+const isValidRefKey = (key) => {
+  const k = String(key || '').trim().toUpperCase();
+  if (!k) return false;
+  if (BAD_REF_KEYS.has(k)) return false;
+  if (k.length < 6) return false;
+  const digits = (k.match(/\d/g) || []).length;
+  const letters = (k.match(/[A-Z]/g) || []).length;
+  if (digits === 0) return false;
+  if (digits >= 4) return true;
+  if (digits >= 2 && letters >= 2) return true;
+  return false;
+};
+
 const normalizeRefKey = (ref) => {
   const s0 = String(ref || "").trim();
   if (!s0) return "";
   const compact = s0.replace(/[\s\u200b\-_\.]/g, "");
   const alnum = compact.replace(/[^A-Za-z0-9]/g, "");
-  return (alnum || compact).toUpperCase();
+  const base = (alnum || compact).toUpperCase();
+  return isValidRefKey(base) ? base : "";
 };
 
 // Tombstone category helper (module-scope => safe for hooks deps)
@@ -1436,7 +1487,90 @@ const existingRefSet = useMemo(() => {
   };
 
   const updateQueueItem = (id, patch) => {
-    setQueue((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+    setQueue((prev) => {
+      const pool = [
+        ...(state.transactions || []),
+        ...prev
+          .filter((q) => q?.status === "ready" && q?.id !== id)
+          .map((q) => ({
+            ...q,
+            type: q.txType,
+            isTransfer: q.txType === "transfer" || q.txType === "credit_payment",
+          })),
+      ];
+
+      const affectsDup =
+        patch &&
+        ["amount", "date", "merchant", "note", "ref", "accountId", "fromAccountId", "toAccountId", "txType", "fileHash", "fromDigits", "toDigits", "dateWasDefault"].some(
+          (k) => Object.prototype.hasOwnProperty.call(patch, k)
+        );
+
+      const patchHasDup =
+        patch &&
+        (Object.prototype.hasOwnProperty.call(patch, "duplicate") ||
+          Object.prototype.hasOwnProperty.call(patch, "duplicateInfo"));
+
+      return prev.map((x) => {
+        if (x.id !== id) return x;
+
+        let next = { ...x, ...patch };
+
+        // If user edits the date manually, it's no longer a default fallback date.
+        if (Object.prototype.hasOwnProperty.call(patch || {}, "date")) {
+          next.dateWasDefault = false;
+          next.dateEdited = true;
+        }
+
+        // Normalize structure when switching type (keeps fields consistent)
+        try {
+          next = normalizeQueueItemType(next);
+        } catch {
+          // ignore
+        }
+
+        // Recalculate duplicate only when user edits key identity fields
+        if (next.status === "ready" && affectsDup && !patchHasDup) {
+          try {
+            const f = findFuzzyDuplicate(pool, {
+              ...next,
+              type: next.txType,
+              isTransfer: next.txType === "transfer" || next.txType === "credit_payment",
+              ref: next.ref || next.referenceId,
+              referenceId: next.ref || next.referenceId,
+            });
+
+            const isDup = !!f?.isDuplicate;
+            const reasons = Array.isArray(f?.reasons) ? f.reasons : [];
+            const kind = reasons.includes('ref exact match')
+              ? 'ref'
+              : reasons.includes('file exact match')
+              ? 'file'
+              : 'fuzzy';
+
+            next.duplicate = isDup;
+            next.duplicateInfo = isDup
+              ? {
+                  kind,
+                  matchId: f?.matchId || null,
+                  score: f?.score || 0,
+                  reasons,
+                }
+              : null;
+
+            // If it newly becomes duplicate, default to blocking; otherwise keep user's choice.
+            if (isDup) {
+              next.includeDuplicate = x.duplicate ? !!x.includeDuplicate : false;
+            } else {
+              next.includeDuplicate = true;
+            }
+          } catch {
+            // ignore duplicate recalc errors
+          }
+        }
+
+        return next;
+      });
+    });
   };
 
   const updateQueueGroup = (qid, gidx, patch) => {
@@ -1786,6 +1920,9 @@ const existingRefSet = useMemo(() => {
         // Persist attachment in IndexedDB (offline-first)
         const attachmentId = `att_${qid}`;
 
+        // Best-effort: compute file hash for exact-duplicate detection (same bytes)
+        const fileHashPromise = computeFileSha256Hex(file);
+
         // Provide immediate preview while we persist
         const tmpUrl = URL.createObjectURL(file);
         let previewUrl = tmpUrl;
@@ -1818,11 +1955,14 @@ const existingRefSet = useMemo(() => {
             previewUrl,
             previewUrlSource,
             attachmentId,
+            fileHash: "",
             status: "scanning",
             error: "",
             txType: "expense",
             amount: null,
             date: toISODate(new Date()),
+            dateWasDefault: true,
+            dateEdited: false,
             note: "",
             merchant: "",
             ref: "",
@@ -1853,6 +1993,8 @@ const existingRefSet = useMemo(() => {
             accounts,
           });
 
+          const fileHash = await fileHashPromise;
+
           const aiTxType =
             result?.tx_type === "transfer" ? "transfer" : result?.tx_type === "income" ? "income" : "expense";
 
@@ -1862,7 +2004,9 @@ const existingRefSet = useMemo(() => {
           const amountSatang = amount != null ? parseMoneyToSatang(amount) : null;
 
           // NOTE: Thai slips may use Buddhist year (25xx). Normalize to AD (20xx).
-          const d = fixBuddhistYearISO(result?.date || "") || toISODate(new Date());
+          const extractedDate = fixBuddhistYearISO(result?.date || "");
+          const dateWasDefault = !extractedDate;
+          const d = extractedDate || toISODate(new Date());
 
           const merchant = String(result?.merchant || "").trim();
           const noteText = String(result?.note || "").trim();
@@ -2215,10 +2359,13 @@ if (
 
           let patch = {
             status: "ready",
+            fileHash: fileHash || "",
             txType: finalTxType,
             amount: pickedAmount,
             amountEdited: false,
             date: d,
+            dateWasDefault,
+            dateEdited: false,
             note: mergedNote,
             merchant,
             ref: rref,
@@ -2234,6 +2381,7 @@ if (
             scanWarnings,
             scanMeta: {
               docType,
+              dateWasDefault,
               flags: scanFlags || null,
               confidence: scanConfidence || null,
               model: result?._model || null,
@@ -2360,7 +2508,7 @@ if (
                 ? dupByRef
                   ? { kind: "ref", matchId: fuzzy?.matchId || null, score: 1, reasons: ["ref exact match"] }
                   : {
-                      kind: "fuzzy",
+                      kind: (fuzzy?.reasons || []).includes('file exact match') ? 'file' : (fuzzy?.reasons || []).includes('ref exact match') ? 'ref' : 'fuzzy',
                       matchId: fuzzy?.matchId || null,
                       score: fuzzy?.score || 0,
                       reasons: fuzzy?.reasons || [],
@@ -2374,10 +2522,12 @@ if (
           // add to batch pool so next files can fuzzy-match within the same batch
           batchFuzzyPool.push({
             id: qid,
+            fileHash: patch.fileHash || "",
             txType: patch.txType,
             type: patch.txType,
             amount: patch.amount,
             date: patch.date,
+            dateWasDefault: patch.dateWasDefault,
             merchant: patch.merchant,
             note: patch.note,
             ref: patch.ref,
@@ -2984,6 +3134,7 @@ if (
           source: "scan",
           transferKind: kind,
           attachmentId: q.attachmentId || null,
+          fileHash: String(q.fileHash || '').trim() || null,
 
           // Smart Geolocation
           location: locationForSave,
@@ -3012,6 +3163,7 @@ if (
           source: "scan",
           transferKind: kind,
           attachmentId: q.attachmentId || null,
+          fileHash: String(q.fileHash || '').trim() || null,
 
           // Smart Geolocation
           location: locationForSave,
@@ -3127,6 +3279,7 @@ if (
           ref: q.ref || null,
           source: "scan",
           attachmentId: q.attachmentId || null,
+          fileHash: String(q.fileHash || '').trim() || null,
 
           // Smart Geolocation
           location: locationForSave,
@@ -3173,6 +3326,7 @@ if (
             ref: null,
             source: "scan",
             attachmentId: q.attachmentId || null,
+            fileHash: String(q.fileHash || '').trim() || null,
 
             // Smart Geolocation
             location: locationForSave,
@@ -3273,6 +3427,7 @@ if (
         ref: q.ref || null,
         source: "scan",
         attachmentId: q.attachmentId || null,
+        fileHash: String(q.fileHash || '').trim() || null,
 
         // Smart Geolocation
         location: locationForSave,
@@ -4037,6 +4192,10 @@ const handleClose = () => {
                   const hasGroups = q.txType === "expense" && nonAdjGroupCount >= 2;
                   const hasReceiptLines = q.txType === "expense" && Array.isArray(q.groups) && q.groups.length > 0;
 
+                  const dupKind = q?.duplicateInfo?.kind || (q.duplicate ? "fuzzy" : "");
+                  const dupBadgeText =
+                    dupKind === "ref" ? "Duplicate (Ref)" : dupKind === "file" ? "Duplicate (File)" : "Possible duplicate";
+
                   return (
                     <div key={q.id} className="glass-card rounded-3xl overflow-hidden">
                       <div className="p-4 flex gap-3">
@@ -4077,7 +4236,7 @@ const handleClose = () => {
 
                             {q.duplicate ? (
                               <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-amber-500/15 text-amber-800 inline-flex items-center gap-1 border border-amber-500/20">
-                                <AlertTriangle size={12} /> Duplicate Ref
+                                <AlertTriangle size={12} /> {dupBadgeText}
                               </span>
                             ) : null}
 
@@ -4170,10 +4329,25 @@ const handleClose = () => {
                           {q.duplicate ? (
                             <div className="glass-panel border border-amber-500/20 rounded-2xl p-3 mb-3 flex items-center justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="text-sm font-extrabold text-amber-800">พบ Ref ซ้ำ</div>
+                                <div className="text-sm font-extrabold text-amber-800">พบรายการที่อาจซ้ำ</div>
                                 <div className="text-[12px] text-amber-800/80">
-                                  ระบบจะไม่สร้างรายการซ้ำโดยอัตโนมัติ (คุณสามารถเปิดเพื่อบันทึกซ้ำได้)
+                                  ระบบจะกันรายการนี้ไว้ก่อนเพื่อป้องกันซ้ำ (คุณสามารถเปิดเพื่อบันทึกซ้ำได้)
                                 </div>
+
+                                {q.duplicateInfo ? (
+                                  <div className="mt-2 text-[11px] text-amber-900/70">
+                                    <div>
+                                      {q.duplicateInfo.kind === 'ref'
+                                        ? 'สาเหตุ: Ref ตรงกัน'
+                                        : q.duplicateInfo.kind === 'file'
+                                        ? 'สาเหตุ: ไฟล์ซ้ำ (เหมือนเดิม)'
+                                        : `ความเหมือน ~${Math.round((q.duplicateInfo.score || 0) * 100)}%`}
+                                    </div>
+                                    {Array.isArray(q.duplicateInfo.reasons) && q.duplicateInfo.reasons.length ? (
+                                      <div className="mt-1 truncate">• {q.duplicateInfo.reasons.join(' • ')}</div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </div>
                               <button
                                 type="button"

@@ -217,6 +217,271 @@ async function fileToOptimizedDataUrl(file, opts = {}) {
   return out;
 }
 
+// ===============================
+// OCR accuracy boosters (multi-view)
+// ===============================
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * Find a tight bounding box around the "content" of a receipt/screen.
+ * This helps OCR by removing large margins and increasing effective font size.
+ */
+function findContentBox(
+  img,
+  { sampleWidth = 520, borderSample = 8, minFillRatio = 0.18, expandRatio = 0.02 } = {}
+) {
+  const w0 = img.naturalWidth || img.width;
+  const h0 = img.naturalHeight || img.height;
+  if (!w0 || !h0) return null;
+
+  const scale = Math.min(1, sampleWidth / w0);
+  const sw = Math.max(64, Math.round(w0 * scale));
+  const sh = Math.max(64, Math.round(h0 * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, sw, sh);
+  const { data } = ctx.getImageData(0, 0, sw, sh);
+
+  const lumAt = (i) => 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+
+  // Estimate background luminance from borders.
+  let bgSum = 0;
+  let bgCount = 0;
+  const bs = clamp(borderSample, 2, 24);
+  for (let y = 0; y < sh; y++) {
+    const isBorderY = y < bs || y >= sh - bs;
+    for (let x = 0; x < sw; x++) {
+      const isBorderX = x < bs || x >= sw - bs;
+      if (!isBorderY && !isBorderX) continue;
+      const i = (y * sw + x) * 4;
+      if (data[i + 3] === 0) continue;
+      bgSum += lumAt(i);
+      bgCount += 1;
+    }
+  }
+  const bgLum = bgCount ? bgSum / bgCount : 245;
+  const thresh = clamp(bgLum - 22, 70, 235);
+
+  let minX = sw,
+    minY = sh,
+    maxX = -1,
+    maxY = -1,
+    hit = 0;
+
+  // stride by 2px for speed
+  for (let y = 0; y < sh; y += 2) {
+    for (let x = 0; x < sw; x += 2) {
+      const i = (y * sw + x) * 4;
+      if (data[i + 3] === 0) continue;
+      if (lumAt(i) < thresh) {
+        hit += 1;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) return null;
+  const fillRatio = hit / ((sw * sh) / 4);
+  if (fillRatio < minFillRatio) return null;
+
+  // Expand a little to avoid cutting off glyphs.
+  const ex = Math.round(sw * expandRatio);
+  const ey = Math.round(sh * expandRatio);
+  minX = clamp(minX - ex, 0, sw - 1);
+  minY = clamp(minY - ey, 0, sh - 1);
+  maxX = clamp(maxX + ex, 0, sw - 1);
+  maxY = clamp(maxY + ey, 0, sh - 1);
+
+  const cw = Math.max(1, maxX - minX + 1);
+  const ch = Math.max(1, maxY - minY + 1);
+  const inv = 1 / scale;
+  const sx = Math.round(minX * inv);
+  const sy = Math.round(minY * inv);
+  const sw0 = Math.round(cw * inv);
+  const sh0 = Math.round(ch * inv);
+  if (sw0 < w0 * 0.35 || sh0 < h0 * 0.35) return null;
+
+  return { sx, sy, sw: clamp(sw0, 1, w0 - sx), sh: clamp(sh0, 1, h0 - sy) };
+}
+
+async function imageCropToOptimizedDataUrl(
+  img,
+  crop,
+  {
+    maxDim = 2800,
+    maxBytes = 3_500_000,
+    qualityStart = 0.96,
+    qualityMin = 0.78,
+    qualityStep = 0.05,
+    contrast = 1.35,
+    brightness = 1.06,
+    sharpen = true,
+  } = {}
+) {
+  const w0 = img.naturalWidth || img.width;
+  const h0 = img.naturalHeight || img.height;
+  const sx = clamp(Math.round(crop?.sx ?? 0), 0, w0 - 1);
+  const sy = clamp(Math.round(crop?.sy ?? 0), 0, h0 - 1);
+  const sw = clamp(Math.round(crop?.sw ?? w0), 1, w0 - sx);
+  const sh = clamp(Math.round(crop?.sh ?? h0), 1, h0 - sy);
+
+  const scale = Math.min(1, maxDim / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) throw new Error("canvas_unsupported");
+  try {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+  } catch {
+    // ignore
+  }
+
+  try {
+    if ("filter" in ctx) ctx.filter = `grayscale(1) contrast(${contrast}) brightness(${brightness})`;
+  } catch {
+    // ignore
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  try {
+    if ("filter" in ctx) ctx.filter = "none";
+  } catch {
+    // ignore
+  }
+
+  // Mild sharpen (same kernel as fileToOptimizedDataUrl)
+  if (sharpen) {
+    try {
+      const px = w * h;
+      if (px <= 4_000_000) {
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+        const out2 = new Uint8ClampedArray(data.length);
+        const idx = (x, y) => (y * w + x) * 4;
+        for (let yy = 1; yy < h - 1; yy++) {
+          for (let xx = 1; xx < w - 1; xx++) {
+            const i = idx(xx, yy);
+            for (let c = 0; c < 3; c++) {
+              const v =
+                -data[idx(xx, yy - 1) + c] +
+                -data[idx(xx - 1, yy) + c] +
+                5 * data[i + c] +
+                -data[idx(xx + 1, yy) + c] +
+                -data[idx(xx, yy + 1) + c];
+              out2[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+            }
+            out2[i + 3] = data[i + 3];
+          }
+        }
+        for (let xx = 0; xx < w; xx++) {
+          const t = idx(xx, 0);
+          const b = idx(xx, h - 1);
+          out2[t] = data[t]; out2[t + 1] = data[t + 1]; out2[t + 2] = data[t + 2]; out2[t + 3] = data[t + 3];
+          out2[b] = data[b]; out2[b + 1] = data[b + 1]; out2[b + 2] = data[b + 2]; out2[b + 3] = data[b + 3];
+        }
+        for (let yy = 0; yy < h; yy++) {
+          const l = idx(0, yy);
+          const r = idx(w - 1, yy);
+          out2[l] = data[l]; out2[l + 1] = data[l + 1]; out2[l + 2] = data[l + 2]; out2[l + 3] = data[l + 3];
+          out2[r] = data[r]; out2[r + 1] = data[r + 1]; out2[r + 2] = data[r + 2]; out2[r + 3] = data[r + 3];
+        }
+        imgData.data.set(out2);
+        ctx.putImageData(imgData, 0, 0);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  let q = qualityStart;
+  let outUrl = canvas.toDataURL("image/jpeg", q);
+  while (approxDataUrlBytes(outUrl) > maxBytes) {
+    if (q > qualityMin) {
+      q = Math.max(qualityMin, q - qualityStep);
+      outUrl = canvas.toDataURL("image/jpeg", q);
+      continue;
+    }
+    if (canvas.width <= 1600 || canvas.height <= 1600) break;
+    const nw = Math.max(1, Math.round(canvas.width * 0.9));
+    const nh = Math.max(1, Math.round(canvas.height * 0.9));
+    const tmp = document.createElement("canvas");
+    tmp.width = nw;
+    tmp.height = nh;
+    const tctx = tmp.getContext("2d", { alpha: false });
+    if (!tctx) break;
+    try {
+      tctx.imageSmoothingEnabled = true;
+      tctx.imageSmoothingQuality = "high";
+    } catch {
+      // ignore
+    }
+    tctx.drawImage(canvas, 0, 0, nw, nh);
+    canvas.width = nw;
+    canvas.height = nh;
+    ctx.drawImage(tmp, 0, 0);
+    q = qualityStart;
+    outUrl = canvas.toDataURL("image/jpeg", q);
+  }
+  return outUrl;
+}
+
+/**
+ * Build OCR-friendly multi-views for receipts/slips.
+ * Returns 1-2 images normally.
+ * For long receipts, returns 2 images (top + bottom tiles).
+ */
+async function fileToOcrDataUrls(file, { maxDim = 2800, maxBytes = 3_500_000 } = {}) {
+  const original = await fileToDataUrl(file);
+  if (!original.startsWith("data:image/")) return [original];
+  if (typeof document === "undefined" || typeof Image === "undefined") return [original];
+
+  const img = await loadImageFromDataUrl(original);
+  const w0 = img.naturalWidth || img.width;
+  const h0 = img.naturalHeight || img.height;
+  if (!w0 || !h0) return [original];
+
+  const tight = findContentBox(img) || { sx: 0, sy: 0, sw: w0, sh: h0 };
+  const aspect = h0 / w0;
+  const isLongReceipt = aspect > 2.15 && h0 > 2200;
+
+  if (isLongReceipt) {
+    const base = tight;
+    const top = { sx: base.sx, sy: base.sy, sw: base.sw, sh: Math.round(base.sh * 0.64) };
+    const bottom = {
+      sx: base.sx,
+      sy: clamp(base.sy + Math.round(base.sh * 0.36), 0, h0 - 1),
+      sw: base.sw,
+      sh: Math.round(base.sh * 0.64),
+    };
+    const [d1, d2] = await Promise.all([
+      imageCropToOptimizedDataUrl(img, top, { maxDim, maxBytes }),
+      imageCropToOptimizedDataUrl(img, bottom, { maxDim, maxBytes }),
+    ]);
+    return [d1, d2].filter(Boolean);
+  }
+
+  const full = await imageCropToOptimizedDataUrl(img, { sx: 0, sy: 0, sw: w0, sh: h0 }, { maxDim, maxBytes });
+  const isTightMeaningful =
+    tight && (tight.sw < w0 * 0.92 || tight.sh < h0 * 0.92) && tight.sw > w0 * 0.45 && tight.sh > h0 * 0.45;
+  if (!isTightMeaningful) return [full];
+  const cropped = await imageCropToOptimizedDataUrl(img, tight, { maxDim, maxBytes });
+  return [full, cropped].filter(Boolean);
+}
+
 async function fileToBestDataUrl(file) {
   // ✅ Always apply a best-effort OCR-friendly re-render.
   // Even if the image is already under the body-size limit, the grayscale/contrast
@@ -457,22 +722,43 @@ function isPdfFileLike(file) {
 
 async function postMultipart(
   url,
-  { file, imageDataUrl, fileName, accounts },
+  { file, imageDataUrl, imageDataUrls, fileName, accounts },
   { timeoutMs = 45000 } = {}
 ) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const blob = file ? file : await dataUrlToBlob(imageDataUrl);
-    if (!blob) {
+    const blobs = [];
+    if (file) {
+      blobs.push({ blob: file, name: fileName || (isPdfFileLike(file) ? "receipt.pdf" : "receipt.jpg") });
+    } else {
+      const list = (Array.isArray(imageDataUrls) && imageDataUrls.length ? imageDataUrls : [imageDataUrl])
+        .map((x) => String(x || "").trim())
+        .filter(Boolean);
+      for (let i = 0; i < list.length; i++) {
+        const b = await dataUrlToBlob(list[i]);
+        if (b) {
+          const baseName = (fileName || "receipt.jpg").replace(/\.[a-z0-9]+$/i, "");
+          const ext = "jpg";
+          const name = list.length === 1 ? `${baseName}.${ext}` : `${baseName}-${i + 1}.${ext}`;
+          blobs.push({ blob: b, name });
+        }
+      }
+    }
+
+    if (!blobs.length) {
       const e = new Error("missing_image_data");
       e.code = "missing_image_data";
       throw e;
     }
 
     const form = new FormData();
-    form.append("file", blob, fileName || (isPdfFileLike(file) ? "receipt.pdf" : "receipt.jpg"));
+    // Support multi-view uploads by repeating the same field name.
+    // Backend will treat them as crops/enhancements of the same document.
+    for (const f of blobs.slice(0, 3)) {
+      form.append("file", f.blob, f.name);
+    }
     if (Array.isArray(accounts) && accounts.length) {
       form.append("accounts", JSON.stringify(accounts));
     }
@@ -553,15 +839,18 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   // For images: optimize for OCR and payload size.
   // For PDFs: send the raw file (avoid base64 conversion overhead).
   let imageDataUrl = "";
+  let imageDataUrls = [];
   if (!isPdf) {
     onStatus?.("encoding_image");
-    // ✅ Keep quality high for OCR, but still prevent oversized payloads.
-    // If image is already small enough, it will be kept as-is.
-    imageDataUrl = await fileToOptimizedDataUrl(file, {
-      // receipts are high-value OCR targets; always run the enhancement pass
-      forceProcess: true,
+    // ✅ Multi-view OCR booster:
+    // - normal enhanced view
+    // - plus either tight crop (most slips) or top+bottom tiles (long receipts)
+    // Sending 2 views to the backend significantly improves text recognition.
+    imageDataUrls = await fileToOcrDataUrls(file, {
       maxDim: 2800,
+      maxBytes: 3_500_000,
     });
+    imageDataUrl = imageDataUrls?.[0] || "";
   } else {
     onStatus?.("preparing_file");
   }
@@ -569,6 +858,7 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   const multipartPayload = {
     file: isPdf ? file : null,
     imageDataUrl: isPdf ? "" : imageDataUrl,
+    imageDataUrls: isPdf ? [] : imageDataUrls,
     fileName: file?.name,
     accounts,
   };

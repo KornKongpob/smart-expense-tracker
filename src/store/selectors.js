@@ -79,6 +79,69 @@ export function toMonthKey(input) {
 
 // -----------------------------
 // Receipt scan / duplication helpers
+const BAD_REF_KEYS = new Set(
+  [
+    // generic labels
+    'REF',
+    'REFERENCE',
+    'REFERENCENO',
+    'REFERENCENUMBER',
+    'TRANSACTION',
+    'TRANSACTIONID',
+    'TXID',
+    'PAYMENT',
+    'TRANSFER',
+    'SLIP',
+    'RECEIPT',
+    'INVOICE',
+    'SUCCESS',
+    'APPROVED',
+    'COMPLETED',
+    // common bank/app words that OCR sometimes mislabels as "ref"
+    'PROMPTPAY',
+    'MOBILEBANKING',
+    'MOBILEAPP',
+    // bank abbreviations
+    'SCB',
+    'KBANK',
+    'KPLUS',
+    'KTB',
+    'BBL',
+    'BAY',
+    'TTB',
+    'UOB',
+    'GSB',
+    'BAAC',
+  ].map((x) => String(x).trim().toUpperCase())
+);
+
+function isValidRefKey(key) {
+  const k = String(key || '').trim().toUpperCase();
+  if (!k) return false;
+  if (BAD_REF_KEYS.has(k)) return false;
+
+  // Too short -> usually not a real transaction reference
+  if (k.length < 6) return false;
+
+  const digits = (k.match(/\d/g) || []).length;
+  const letters = (k.match(/[A-Z]/g) || []).length;
+
+  // Most Thai slip references are digit-heavy, or mixed alnum.
+  // Reject pure-letter strings (e.g., "SCB", "PROMPTPAY")
+  if (digits === 0) return false;
+
+  // Too long often means OCR accidentally captured a whole sentence
+  if (k.length > 40) return false;
+
+  // Prefer digit-heavy keys: typical refs are 10–20 digits.
+  if (digits >= 6) return true;
+
+  // Allow mixed alnum, but still require enough digits to avoid matching account labels
+  if (digits >= 4 && letters >= 2) return true;
+
+  return false;
+}
+
 function normalizeRefKey(ref) {
   const s0 = String(ref || '').trim();
   if (!s0) return '';
@@ -87,8 +150,70 @@ function normalizeRefKey(ref) {
   const compact = s0.replace(/[\s\u200b\-_\.]/g, '');
   const alnum = compact.replace(/[^A-Za-z0-9]/g, '');
   const base = (alnum || compact).toUpperCase();
-  return base;
+  return isValidRefKey(base) ? base : '';
 }
+
+const GENERIC_TEXT_TOKENS = new Set(
+  [
+    // English
+    'bank',
+    'transfer',
+    'payment',
+    'transaction',
+    'slip',
+    'receipt',
+    'invoice',
+    'ref',
+    'reference',
+    'success',
+    'approved',
+    'completed',
+    'promptpay',
+    'mobile',
+    'app',
+    // Thai (common slip/receipt boilerplate)
+    'ธนาคาร',
+    'โอน',
+    'โอนเงิน',
+    'ชำระ',
+    'ชำระเงิน',
+    'รายการ',
+    'รายการโอน',
+    'สลิป',
+    'ใบเสร็จ',
+    'เลขที่',
+    'อ้างอิง',
+    'สำเร็จ',
+    'บัญชี',
+    'จำนวนเงิน',
+    'ยอดเงิน',
+    'บาท',
+    'วันที่',
+    'เวลา',
+    'ค่าธรรมเนียม',
+  ].map((x) => String(x).trim().toLowerCase())
+);
+
+const GENERIC_MERCHANT_KEYS = new Set(
+  [
+    'scb',
+    'ไทยพาณิชย์',
+    'kbank',
+    'กสิกร',
+    'ktb',
+    'กรุงไทย',
+    'bbl',
+    'กรุงเทพ',
+    'bay',
+    'กรุงศรี',
+    'ttb',
+    'tmb',
+    'uob',
+    'gsb',
+    'baac',
+    'promptpay',
+  ].map((x) => String(x).trim().toLowerCase().replace(/\s+/g, ''))
+);
 
 // -----------------------------
 export function isDuplicateByRef(transactions, ref) {
@@ -106,16 +231,33 @@ export function isDuplicateByRef(transactions, ref) {
  * Returns best match (if any).
  */
 export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
+  const candType = String(candidate?.txType || candidate?.type || "").toLowerCase();
+  const candDocType = String(
+    candidate?.docType || candidate?.doc_type || candidate?.meta?.docType || candidate?.scanMeta?.docType || ''
+  )
+    .toLowerCase()
+    .trim();
+
+  const isTransferLike =
+    candType === 'transfer' ||
+    candType === 'credit_payment' ||
+    candDocType.includes('slip') ||
+    candDocType.includes('bill_payment') ||
+    candDocType.includes('billpayment');
+
   const options = {
-    maxDays: Number(opts.maxDays) || 7,
+    // 🔒 Reduce false positives:
+    // - transfer slips are *very* template-heavy, so be much stricter
+    maxDays: Number(opts.maxDays) || (isTransferLike ? 2 : 1),
     // A hard cap to avoid obviously-non-duplicate matches
-    maxAbsAmountDiff: Number(opts.maxAbsAmountDiff) || 2000,
-    // Relative cap (e.g., 5% of amount)
-    maxRelAmountDiff: Number(opts.maxRelAmountDiff) || 0.05,
-    threshold: Number(opts.threshold) || 0.62,
+    maxAbsAmountDiff: Number(opts.maxAbsAmountDiff) || (isTransferLike ? 500 : 2000),
+    // Relative cap
+    maxRelAmountDiff: Number(opts.maxRelAmountDiff) || (isTransferLike ? 0.02 : 0.05),
+    // Higher threshold by default
+    threshold: Number(opts.threshold) || (isTransferLike ? 0.82 : 0.88),
     ...opts,
   };
-  const candType = String(candidate?.txType || candidate?.type || "").toLowerCase();
+
   const candRef = String(candidate?.referenceId || candidate?.ref || "").trim();
 
   // ✅ Ref-first duplicate detection (primary key)
@@ -136,6 +278,31 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
         };
       }
     }
+  }
+
+  // ✅ Exact file duplicate (same attachment bytes)
+  const candFileHash = String(candidate?.fileHash || '').trim();
+  if (candFileHash) {
+    for (const t of transactions || []) {
+      if (!t) continue;
+      const tHash = String(t?.fileHash || '').trim();
+      if (tHash && tHash === candFileHash) {
+        return {
+          isDuplicate: true,
+          score: 1,
+          reasons: ['file exact match'],
+          matchId: String(t?.id || ''),
+          match: t,
+        };
+      }
+    }
+  }
+
+  // ✅ If scan couldn't extract a real date (fallbacked to today), be conservative.
+  // Only allow duplicate by REF or FILE hash in that case.
+  const dateWasDefault = !!(candidate?.dateWasDefault || candidate?.scanMeta?.dateWasDefault);
+  if (dateWasDefault) {
+    return { isDuplicate: false, score: 0, reasons: [], matchId: null, match: null };
   }
 
   const candAmount = Number(candidate?.amount);
@@ -162,15 +329,33 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
       .replace(/\s+/g, " ")
       .trim();
 
-  const tokens = (s) => {
+  const isGenericText = (raw) => {
+    const n = norm(raw);
+    const k = n.replace(/\s+/g, '');
+    if (!k) return true;
+    if (GENERIC_MERCHANT_KEYS.has(k)) return true;
+
+    // If the string becomes only boilerplate after dropping common tokens, treat as generic.
+    const basic = n
+      .split(' ')
+      .map((x) => x.trim())
+      .filter((x) => x.length >= 2);
+    const meaningful = basic.filter((x) => !GENERIC_TEXT_TOKENS.has(x));
+    if (!meaningful.length) return true;
+    if (meaningful.length === 1 && meaningful[0].length <= 3) return true;
+    return false;
+  };
+
+  const tokens = (s, { dropGeneric = true } = {}) => {
     const t = norm(s);
     if (!t) return [];
-    // keep meaningful tokens only
+    // keep meaningful tokens only (drop boilerplate tokens)
     return t
-      .split(" ")
+      .split(' ')
       .map((x) => x.trim())
       .filter((x) => x.length >= 2)
-      .slice(0, 30);
+      .filter((x) => (dropGeneric ? !GENERIC_TEXT_TOKENS.has(x) : true))
+      .slice(0, 40);
   };
 
   const jaccard = (a, b) => {
@@ -194,10 +379,75 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     return d.length <= n ? d : d.slice(-n);
   };
 
-  const candRefDigits = lastN(candRef, 12);
   const candMerchantTokens = tokens(candMerchant);
   const candNoteTokens = tokens(candNote);
   const candTextTokens = Array.from(new Set([...candMerchantTokens, ...candNoteTokens]));
+
+  const extractSlipTime = (obj) => {
+    const s =
+      obj?.meta?.slip?.time ||
+      obj?.scanMeta?.slip?.time ||
+      obj?.slip?.time ||
+      obj?.slipTime ||
+      '';
+    return String(s || '').trim();
+  };
+
+  const normalizeTime = (s) => {
+    const x = String(s || '').trim();
+    if (!x) return '';
+    // Accept HH:MM or HHMM; normalize to HH:MM
+    const m1 = x.match(/^(\d{1,2})\s*[:.]\s*(\d{2})$/);
+    if (m1) return `${String(m1[1]).padStart(2, '0')}:${m1[2]}`;
+    const m2 = x.match(/^(\d{2})(\d{2})$/);
+    if (m2) return `${m2[1]}:${m2[2]}`;
+    return '';
+  };
+
+  const candSlipTime = normalizeTime(extractSlipTime(candidate));
+
+  const extractItemTexts = (obj) => {
+    const out = [];
+
+    const add = (v) => {
+      const s = String(v || '').trim();
+      if (!s) return;
+      out.push(s);
+    };
+
+    // raw items
+    if (Array.isArray(obj?.items)) {
+      for (const it of obj.items) add(it?.name || it?.title || it?.desc || it?.itemName);
+    }
+
+    // queue groups (receipt categorizer)
+    if (Array.isArray(obj?.groups)) {
+      for (const g of obj.groups) {
+        add(g?.note || g?.name);
+        if (Array.isArray(g?.children)) for (const c of g.children) add(c?.name);
+      }
+    }
+
+    // saved receipts
+    if (Array.isArray(obj?.receiptLines)) {
+      for (const l of obj.receiptLines) {
+        add(l?.note);
+        if (Array.isArray(l?.children)) for (const c of l.children) add(c?.name);
+      }
+    }
+
+    add(obj?.itemName);
+
+    return out.filter(Boolean).slice(0, 40);
+  };
+
+  const toTokenSet = (texts) => {
+    const all = [];
+    for (const s of texts || []) all.push(...tokens(s));
+    return Array.from(new Set(all)).slice(0, 120);
+  };
+
+  const candItemTokens = toTokenSet(extractItemTexts(candidate));
 
   const scoreAmount = (a, b) => {
     const diff = Math.abs(a - b);
@@ -225,6 +475,8 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     const a = norm(m1Raw);
     const b = norm(m2Raw);
     if (!a || !b) return 0;
+    // If either side is generic/template text (e.g., bank name), don't use it as identity.
+    if (isGenericText(a) || isGenericText(b)) return 0;
     if (a === b) return 0.2;
     if (a.includes(b) || b.includes(a)) return 0.17;
     const j = jaccard(m1Tokens, m2Tokens);
@@ -266,6 +518,21 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     return 0;
   };
 
+  const scoreItems = (candTokens, tTokens) => {
+    if (!candTokens?.length || !tTokens?.length) return 0;
+    const j = jaccard(candTokens, tTokens);
+    if (j >= 0.55) return 0.2;
+    if (j >= 0.4) return 0.15;
+    if (j >= 0.28) return 0.1;
+    return 0;
+  };
+
+  const scoreTime = (a, b) => {
+    if (!a || !b) return 0;
+    if (a === b) return 0.12;
+    return 0;
+  };
+
   let best = { score: 0, match: null, matchId: null, reasons: [] };
 
   for (const t of transactions || []) {
@@ -277,6 +544,9 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     const tDate = parseDateSafe(t?.date);
     const dDays = daysDiff(candDate, tDate);
     if (dDays > options.maxDays) continue;
+
+    // ✅ Receipts: require same-day to avoid false positives from same template on different days
+    if (!isTransferLike && dDays > 0.01) continue;
 
     const absDiff = Math.abs(candAmount - tAmount);
     const relDiff = absDiff / Math.max(Math.abs(candAmount), Math.abs(tAmount), 1);
@@ -312,6 +582,10 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     const tNoteTokens = tokens(tNote);
     const tTextTokens = Array.from(new Set([...tMerchantTokens, ...tNoteTokens]));
 
+    const tSlipTime = normalizeTime(extractSlipTime(t));
+
+    const tItemTokens = toTokenSet(extractItemTexts(t));
+
     const tAccountId = String(t?.accountId || "").trim();
 
     // try to derive digits from historical tx
@@ -333,6 +607,9 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     const merchScore = scoreMerchant(candMerchantTokens, tMerchantTokens, candMerchant, tMerchant);
     const noteScore = scoreMerchant(candTextTokens, tTextTokens, candNote || candMerchant, tNote || tMerchant);
     const textScore = Math.max(merchScore, noteScore);
+
+    const itemScore = scoreItems(candItemTokens, tItemTokens);
+    const timeScore = scoreTime(candSlipTime, tSlipTime);
 
     // Account match bonus
     let accScore = 0;
@@ -371,9 +648,38 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
       reasons.push("account match");
     }
 
-    // Require at least some evidence besides amount+date to reduce false positives
-    const hasIdentityEvidence = refScore > 0 || textScore > 0 || digitsScore > 0 || accScore > 0;
-    const passes = score >= options.threshold && amountScore >= 0.16 && dateScore > 0 && hasIdentityEvidence;
+    if (itemScore) {
+      score += itemScore;
+      reasons.push('items similar');
+    }
+
+    if (timeScore) {
+      score += timeScore;
+      reasons.push('time match');
+    }
+
+    // -----------------
+    // ✅ Stricter pass criteria to avoid false positives when templates look similar
+    // -----------------
+    const sameDay = dDays <= 0.01;
+    const hardEvidence = refScore >= 0.15 || digitsScore > 0 || itemScore >= 0.15 || timeScore > 0;
+    const softEvidence = textScore >= 0.15 || accScore > 0;
+
+    // If dates differ, only allow duplicates when there is strong identity (ref/items/time).
+    if (!sameDay && refScore < 0.15 && itemScore < 0.15 && timeScore === 0) continue;
+
+    // Transfer slips: must have a hard identity signal (digits/ref/time) — text is too template-heavy.
+    if (isTransferLike && !(digitsScore > 0 || refScore >= 0.15 || timeScore > 0)) continue;
+
+    const minAmountScore = isTransferLike ? 0.3 : 0.34;
+
+    // Non-transfer receipts: if only text matches (no ref/digits/items), require account match too.
+    const okEvidence =
+      hardEvidence ||
+      (textScore >= 0.17 && accScore > 0) ||
+      (softEvidence && (refScore >= 0.15 || digitsScore > 0 || itemScore > 0));
+
+    const passes = score >= options.threshold && amountScore >= minAmountScore && dateScore > 0 && okEvidence;
 
     if (passes && score > best.score) {
       best = {

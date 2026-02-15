@@ -590,6 +590,7 @@ function normalizeInboxItem(raw) {
     note: String(it.note || ''),
     referenceId: String(it.referenceId || it.ref || ''),
     attachmentId: it.attachmentId || null,
+    fileHash: String(it.fileHash || '').trim() || null,
   };
 }
 

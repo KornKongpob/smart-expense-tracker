@@ -270,7 +270,7 @@ async function readJson(req) {
   }
 }
 
-function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
+function parseMultipart(req, { maxBytes = 10 * 1024 * 1024, maxFiles = 3 } = {}) {
   return new Promise((resolve, reject) => {
     let done = false;
     const finish = (err, val) => {
@@ -282,12 +282,12 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
 
     const bb = Busboy({
       headers: req.headers,
-      limits: { fileSize: maxBytes, files: 1 },
+      // fileSize is PER FILE; we also enforce a total budget below.
+      limits: { fileSize: maxBytes, files: maxFiles },
     });
 
-    let fileBuffer = null;
-    let mimeType = "";
-    let filename = "";
+    const files = [];
+    let totalBytes = 0;
     const fields = {};
 
     bb.on("field", (name, val) => {
@@ -301,14 +301,27 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
 
     bb.on("file", (fieldname, file, info) => {
       const chunks = [];
-      filename = info?.filename || "";
-      mimeType = info?.mimeType || info?.mimetype || "";
+      const filename = info?.filename || "";
+      const mimeType = info?.mimeType || info?.mimetype || "";
 
-      file.on("data", (d) => chunks.push(d));
+      file.on("data", (d) => {
+        totalBytes += d.length;
+        if (totalBytes > maxBytes) {
+          finish(new Error("file_too_large"));
+          try {
+            file.resume();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        chunks.push(d);
+      });
       file.on("limit", () => finish(new Error("file_too_large")));
       file.on("end", () => {
         try {
-          fileBuffer = Buffer.concat(chunks);
+          const buffer = Buffer.concat(chunks);
+          if (buffer?.length) files.push({ fileBuffer: buffer, mimeType, filename });
         } catch (e) {
           finish(e);
         }
@@ -317,7 +330,7 @@ function parseMultipart(req, { maxBytes = 10 * 1024 * 1024 } = {}) {
     });
 
     bb.on("error", (e) => finish(e));
-    bb.on("finish", () => finish(null, { fileBuffer, mimeType, filename, fields }));
+    bb.on("finish", () => finish(null, { files, fields }));
 
     try {
       req.pipe(bb);
@@ -376,6 +389,104 @@ function toArabicDigits(s) {
 
 function normalizeDigits(s) {
   return toArabicDigits(String(s || "")).replace(/[^\d]/g, "");
+}
+
+function normalizeScannedDate(v) {
+  const raw = String(v || "").trim();
+  if (!raw) return null;
+
+  const s = raw.replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
+  const pad2 = (n) => String(n).padStart(2, "0");
+
+  const toISO = (yy, mm, dd) => {
+    let y = Number(yy);
+    const m = Number(mm);
+    const d = Number(dd);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+    if (y < 100) y = y >= 70 ? 1900 + y : 2000 + y;
+    if (y >= 2400) y = y - 543; // Buddhist Era → Gregorian
+    if (y < 1900 || y > 2100) return null;
+    if (m < 1 || m > 12) return null;
+    if (d < 1 || d > 31) return null;
+    return `${y}-${pad2(m)}-${pad2(d)}`;
+  };
+
+  // Try first token as a date head.
+  const head = s.split(/\s+/)[0];
+
+  // yyyy-mm-dd / yyyy/mm/dd
+  let m1 = head.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (m1) return toISO(m1[1], m1[2], m1[3]);
+
+  // dd/mm/yyyy
+  m1 = head.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m1) return toISO(m1[3], m1[2], m1[1]);
+
+  // dd MMM yyyy (Thai/English months)
+  const thMonths = {
+    "ม.ค": 1,
+    "มกราคม": 1,
+    "ก.พ": 2,
+    "กุมภาพันธ์": 2,
+    "มี.ค": 3,
+    "มีนาคม": 3,
+    "เม.ย": 4,
+    "เมษายน": 4,
+    "พ.ค": 5,
+    "พฤษภาคม": 5,
+    "มิ.ย": 6,
+    "มิถุนายน": 6,
+    "ก.ค": 7,
+    "กรกฎาคม": 7,
+    "ส.ค": 8,
+    "สิงหาคม": 8,
+    "ก.ย": 9,
+    "กันยายน": 9,
+    "ต.ค": 10,
+    "ตุลาคม": 10,
+    "พ.ย": 11,
+    "พฤศจิกายน": 11,
+    "ธ.ค": 12,
+    "ธันวาคม": 12,
+  };
+  const enMonths = {
+    jan: 1,
+    january: 1,
+    feb: 2,
+    february: 2,
+    mar: 3,
+    march: 3,
+    apr: 4,
+    april: 4,
+    may: 5,
+    jun: 6,
+    june: 6,
+    jul: 7,
+    july: 7,
+    aug: 8,
+    august: 8,
+    sep: 9,
+    sept: 9,
+    september: 9,
+    oct: 10,
+    october: 10,
+    nov: 11,
+    november: 11,
+    dec: 12,
+    december: 12,
+  };
+
+  const m2 = s.match(/(\d{1,2})\s*([A-Za-z]{3,9}|[\u0E00-\u0E7F\.]{2,12})\s*(\d{2,4})/);
+  if (m2) {
+    const d = m2[1];
+    const token0 = String(m2[2] || "").trim();
+    const token = token0.replace(/\.+$/g, "");
+    const keyTh = token0.replace(/\s+/g, "");
+    const mm = thMonths[keyTh] || thMonths[token] || enMonths[token.toLowerCase()] || null;
+    if (mm) return toISO(m2[3], mm, d);
+  }
+
+  return null;
 }
 
 function parseDataUrlMaybe(dataUrl) {
@@ -1048,7 +1159,7 @@ function refineTxTypeAndSubtype({ parsedTxType, evidence, rawText }) {
   return { tx_type: safeType, tx_subtype: safeType === "transfer" ? "transfer" : null, is_credit_card_payment: false };
 }
 
-async function callOpenAI({ base64, mimeType, filename, accounts = [] }) {
+async function callOpenAI({ base64, mimeType, filename, accounts = [], images = null }) {
   const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) {
     return {
@@ -1182,11 +1293,35 @@ async function callOpenAI({ base64, mimeType, filename, accounts = [] }) {
   // Override with OPENAI_MODEL. Optionally set OPENAI_FALLBACK_MODEL for retries (model-not-found / access issues).
   const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-5.1");
   const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_FALLBACK_MODEL || "gpt-5.1");
-  const mtNorm = normalizeInputMime(mimeType || "image/jpeg");
-  const dataUrl = `data:${mtNorm || "image/jpeg"};base64,${base64}`;
-  const isPdf = mtNorm === "application/pdf";
+  // Allow multi-view images (crops/tiles of the same doc) for better OCR.
+  const imageList = Array.isArray(images) && images.length
+    ? images
+    : [{ base64, mimeType: mimeType || "image/jpeg", filename }];
+
+  const firstMime = normalizeInputMime(imageList?.[0]?.mimeType || mimeType || "image/jpeg");
+  const isPdf = firstMime === "application/pdf";
+  const mtNorm = firstMime;
+
+  const dataUrls = isPdf
+    ? [`data:${mtNorm};base64,${String(imageList?.[0]?.base64 || base64 || "")}`]
+    : imageList
+        .slice(0, 3)
+        .map((x) => {
+          const mt = normalizeInputMime(x?.mimeType || mtNorm || "image/jpeg");
+          const b64 = String(x?.base64 || "");
+          if (!b64) return null;
+          return `data:${mt};base64,${b64}`;
+        })
+        .filter(Boolean);
+
+  if (!isPdf && (!Array.isArray(dataUrls) || dataUrls.length === 0)) {
+    return {
+      status: 400,
+      body: { ok: false, code: "missing_image_data", message: "Missing image data" },
+    };
+  }
   const safeFilename = (() => {
-    const raw = String(filename || "").trim();
+    const raw = String(filename || imageList?.[0]?.filename || "").trim();
     if (raw) return raw;
     return isPdf ? "receipt.pdf" : "receipt.jpg";
   })();
@@ -1206,6 +1341,11 @@ async function callOpenAI({ base64, mimeType, filename, accounts = [] }) {
   const prompt = `
 You are an OCR+parser for Thai receipts and Thai bank/payment transfer slips used in a personal expense tracker.
 Return STRICT JSON ONLY. No markdown. No extra text.
+
+IMPORTANT:
+- If multiple images are provided, they are CROPS/ENHANCEMENTS/TILES of the SAME document.
+  Combine information across all images. Prefer the clearest text instance.
+  Do NOT double-count or duplicate line items.
 
 Decide doc_type:
 - receipt: itemized receipt/invoice with purchased line items
@@ -1441,6 +1581,18 @@ ${accountsText}
     }
   };
 
+  const buildContent = () => {
+    const content = [{ type: "input_text", text: prompt }];
+    if (isPdf) {
+      content.push({ type: "input_file", filename: safeFilename, file_data: dataUrls[0] });
+      return content;
+    }
+    for (const u of dataUrls.slice(0, 3)) {
+      content.push({ type: "input_image", image_url: u });
+    }
+    return content;
+  };
+
   const buildPayload = ({ m, useSchema }) => ({
     model: m,
     temperature: 0,
@@ -1448,12 +1600,7 @@ ${accountsText}
     input: [
       {
         role: "user",
-        content: [
-          { type: "input_text", text: prompt },
-          isPdf
-            ? { type: "input_file", filename: safeFilename, file_data: dataUrl }
-            : { type: "input_image", image_url: dataUrl },
-        ],
+        content: buildContent(),
       },
     ],
   });
@@ -1764,10 +1911,17 @@ Output JSON schema:
           input: [
             {
               role: "user",
-              content: [
-                { type: "input_text", text: itemsPrompt },
-                { type: "input_image", image_url: dataUrl },
-              ],
+              content: (() => {
+                const c = [{ type: "input_text", text: itemsPrompt }];
+                if (isPdf) {
+                  c.push({ type: "input_file", filename: safeFilename, file_data: dataUrls[0] });
+                  return c;
+                }
+                for (const u of dataUrls.slice(0, 3)) {
+                  c.push({ type: "input_image", image_url: u });
+                }
+                return c;
+              })(),
             },
           ],
         }),
@@ -1912,7 +2066,7 @@ Output JSON schema:
 
     amount: Number.isFinite(amount) ? amount : null,
     currency: parsed?.currency != null && String(parsed.currency).trim() ? String(parsed.currency).trim().toUpperCase() : null,
-    date: parsed.date ? String(parsed.date).slice(0, 10) : null,
+    date: normalizeScannedDate(parsed.date) || (parsed.date ? String(parsed.date).slice(0, 10) : null),
     merchant,
     note,
     ref: parsed.ref ? String(parsed.ref).trim() : null,
@@ -2018,7 +2172,7 @@ export default async function handler(req, res) {
 
     // 1) multipart/form-data
     if (ct.includes("multipart/form-data")) {
-      const { fileBuffer, mimeType, filename, fields } = await parseMultipart(req, { maxBytes: MAX_UPLOAD_BYTES });
+      const { files, fields } = await parseMultipart(req, { maxBytes: MAX_UPLOAD_BYTES, maxFiles: 3 });
       const accounts = (() => {
         try {
           const f = fields && typeof fields === 'object' ? fields : {};
@@ -2029,19 +2183,37 @@ export default async function handler(req, res) {
           return [];
         }
       })();
-      if (!fileBuffer || fileBuffer.length === 0) {
+      if (!Array.isArray(files) || files.length === 0) {
         res.status(400).json({ ok: false, code: "missing_file", message: "No file uploaded" });
         return;
       }
-      const mt = assertAllowedInputMime(mimeType || "image/jpeg");
-      if (!mt) {
+
+      // Allow multi-view uploads (2-3 images) to improve OCR on long receipts.
+      // If a PDF is present, we only use the first PDF file.
+      const normalized = files
+        .map((f) => {
+          const mt = assertAllowedInputMime(f?.mimeType || "");
+          if (!mt) return null;
+          const buf = f?.fileBuffer;
+          if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) return null;
+          return {
+            base64: buf.toString("base64"),
+            mimeType: mt,
+            filename: String(f?.filename || "").trim() || (mt === "application/pdf" ? "receipt.pdf" : "receipt.jpg"),
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+
+      if (!normalized.length) {
         res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
         return;
       }
 
-
-      const base64 = fileBuffer.toString("base64");
-      const out = await callOpenAI({ base64, mimeType: mt, filename, accounts });
+      const pdf = normalized.find((x) => x.mimeType === "application/pdf");
+      const out = pdf
+        ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
+        : await callOpenAI({ images: normalized, accounts });
       res.status(out.status).json(out.body);
       return;
     }
@@ -2054,6 +2226,42 @@ export default async function handler(req, res) {
       : Array.isArray(body?.accountsContext)
       ? body.accountsContext
       : [];
+
+    // Multi-image JSON payload (optional): { images: [dataUrl1, dataUrl2, ...] }
+    // Each image should be a crop/enhancement of the same document.
+    const imagesList = Array.isArray(body?.images)
+      ? body.images
+      : Array.isArray(body?.imageDataUrls)
+      ? body.imageDataUrls
+      : null;
+
+    if (Array.isArray(imagesList) && imagesList.length) {
+      const normalized = imagesList
+        .map((u) => parseDataUrlMaybe(String(u || "").trim()))
+        .filter(Boolean)
+        .map((p, idx) => {
+          const mt = assertAllowedInputMime(p?.mimeType || "");
+          if (!mt) return null;
+          const b64 = String(p?.base64 || "").trim();
+          if (!b64) return null;
+          return {
+            base64: b64,
+            mimeType: mt,
+            filename: `receipt-${idx + 1}.${mt === "image/png" ? "png" : mt === "image/webp" ? "webp" : "jpg"}`,
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+
+      if (normalized.length) {
+        const pdf = normalized.find((x) => x.mimeType === "application/pdf");
+        const out = pdf
+          ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
+          : await callOpenAI({ images: normalized, accounts });
+        res.status(out.status).json(out.body);
+        return;
+      }
+    }
 
     // Prefer imageDataUrl if present
     const imageDataUrl = String(body?.imageDataUrl || "").trim();
