@@ -27,6 +27,7 @@ import {
 import { formatCurrency, formatDateShort } from "../utils/format";
 import { useAppStore } from "../store/store";
 import { parseDateSafe } from "../store/selectors";
+import AppHeader from "../components/AppHeader";
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -99,7 +100,7 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
       : "bg-white/18 border-white/20 text-gray-800";
 
   return (
-    <div className="glass-card rounded-3xl p-4">
+    <div className="ui-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-extrabold text-gray-900/70">{title}</div>
@@ -114,9 +115,9 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
   );
 }
 
-function EmptyState() {
+function StatsEmptyState() {
   return (
-    <div className="glass-card rounded-3xl text-center py-12">
+    <div className="ui-card text-center py-12">
       <Activity size={48} className="mx-auto mb-3 opacity-25 text-gray-600" />
       <p className="font-extrabold text-gray-800">ไม่มีข้อมูลในช่วงเวลานี้</p>
       <p className="text-sm text-gray-800/60 mt-1">ลองเปลี่ยนช่วงเวลา หรือเพิ่มรายการก่อน</p>
@@ -412,26 +413,21 @@ export default function StatsView() {
   };
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh">
-      {/* Header */}
-      <div className="mb-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-extrabold text-gray-900">สรุปผลการเงิน</h1>
-            <p className="text-sm text-gray-800/60 mt-1">
-              ช่วงเวลา: <span className="font-extrabold text-gray-900">{periodLabel}</span> • ไม่รวม Transfer / Split parent
-              {isPending ? <span className="ml-2 text-[11px] text-gray-800/55">กำลังอัปเดต…</span> : null}
-            </p>
-          </div>
-
+    <div className="min-h-dvh">
+      <AppHeader
+        title="สรุปผล"
+        subtitle={`ช่วงเวลา: ${periodLabel} • ไม่รวม Transfer / Split parent${isPending ? " • กำลังอัปเดต…" : ""}`}
+        right={
           <div className="shrink-0 w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600/20 via-purple-600/15 to-rose-600/15 border border-white/20 flex items-center justify-center">
             <Sparkles size={18} className="text-indigo-700" />
           </div>
-        </div>
-      </div>
+        }
+      />
+
+      <main className="ui-page pt-4 pb-6">
 
       {/* Period segmented */}
-      <div className="glass-panel p-1 rounded-2xl mb-5 flex">
+      <div className="ui-card p-1 rounded-2xl mb-5 flex">
         {[
           { id: "today", label: "วันนี้" },
           { id: "week", label: "7 วัน" },
@@ -452,7 +448,7 @@ export default function StatsView() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <GlassKpiCard
           tone="income"
           title="รายรับรวม"
@@ -488,11 +484,11 @@ export default function StatsView() {
       </div>
 
       {!hasAny ? (
-        <EmptyState />
+        <StatsEmptyState />
       ) : (
         <>
           {/* Expenses Breakdown */}
-          <div className="glass-card rounded-3xl p-5 mb-6">
+          <div className="ui-card p-5 mb-6">
             <div className="flex items-center justify-between gap-3 mb-4">
               <div className="min-w-0">
                 <div className="font-extrabold text-gray-900 flex items-center gap-2">
@@ -700,6 +696,7 @@ export default function StatsView() {
           )}
         </ModalShell>
       ) : null}
+      </main>
     </div>
   );
 }

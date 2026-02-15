@@ -22,7 +22,7 @@ export default function CategorySelect({
   onChange,
   allowEmpty = false,
   emptyLabel = "(ไม่เลือก)",
-  className = "",
+  className = "ui-select",
   disabled = false,
 }) {
   const cleanCats = useMemo(() => (Array.isArray(categories) ? categories : []).filter((c) => !!c), [categories]);

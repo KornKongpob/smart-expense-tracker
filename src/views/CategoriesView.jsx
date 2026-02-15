@@ -1,6 +1,7 @@
 // src/views/CategoriesView.jsx
 import { useMemo, useState } from "react";
 import { ChevronRight, Plus, Trash2, Edit2, X, Check, Search, CornerDownRight } from "lucide-react";
+import AppHeader from "../components/AppHeader";
 import { PRESET_COLORS } from "../constants/presets.jsx";
 import { useAppStore } from "../store/store";
 
@@ -272,35 +273,30 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   }, [q, catsActive, activeMain, activeChildrenByParent]);
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh">
-      <header className="mb-4 flex items-center gap-3">
-        <button
-          onClick={onBack}
-          className="w-10 h-10 rounded-full glass-icon-btn flex items-center justify-center text-gray-700"
-          type="button"
-        >
-          <ChevronRight className="rotate-180" size={24} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-extrabold text-gray-900">จัดการหมวดหมู่</h1>
-          <p className="text-gray-600 text-sm">สร้างหมวดหลัก/หมวดย่อย + ตั้ง Keywords เพื่อช่วยจัดหมวดจากการสแกน</p>
-        </div>
+    <div className="min-h-dvh">
+      <AppHeader
+        title="หมวดหมู่"
+        subtitle="จัดหมวดหลัก/หมวดย่อย และคีย์เวิร์ดเพื่อช่วยจัดหมวดจากการสแกน"
+        onBack={onBack}
+        right={
+          <button
+            type="button"
+            onClick={() => openNew("")}
+            className="ui-icon-btn text-gray-800 active:scale-95"
+            aria-label="เพิ่มหมวด"
+            title="เพิ่มหมวด"
+          >
+            <Plus size={18} />
+          </button>
+        }
+      />
 
-        <button
-          type="button"
-          onClick={() => openNew("")}
-          className="shrink-0 w-10 h-10 rounded-full bg-gray-900/90 text-white flex items-center justify-center active:scale-95"
-          aria-label="add category"
-          title="เพิ่มหมวด"
-        >
-          <Plus size={18} />
-        </button>
-      </header>
+      <main className="ui-page pt-4 pb-6">
 
-      <div className="glass-panel p-1 rounded-xl flex mb-4">
+      <div className="ui-card p-1 rounded-2xl flex mb-4">
         <button
           onClick={() => setTab("expense")}
-          className={`flex-1 py-2 rounded-lg text-sm font-extrabold ${
+          className={`flex-1 py-2.5 rounded-xl text-sm font-extrabold ${
             tab === "expense" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
           }`}
           type="button"
@@ -309,7 +305,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
         </button>
         <button
           onClick={() => setTab("income")}
-          className={`flex-1 py-2 rounded-lg text-sm font-extrabold ${
+          className={`flex-1 py-2.5 rounded-xl text-sm font-extrabold ${
             tab === "income" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
           }`}
           type="button"
@@ -319,13 +315,13 @@ export default function CategoriesView({ showAlert, showConfirm }) {
       </div>
 
       <div className="mb-4">
-        <div className="glass-input rounded-2xl px-3 py-2 flex items-center gap-2">
+        <div className="ui-card p-3 flex items-center gap-2">
           <Search size={16} className="text-gray-600" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="ค้นหาหมวด หรือ keyword"
-            className="w-full outline-none text-sm bg-transparent text-gray-800 placeholder:text-gray-500"
+            className="ui-input !bg-transparent !border-0 !p-0"
           />
         </div>
       </div>
@@ -335,7 +331,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
           renderTree.map(({ parent, children }) => {
             const kids = children || [];
             return (
-              <div key={parent.id} className="glass-card rounded-2xl overflow-hidden border border-white/15">
+              <div key={parent.id} className="ui-card overflow-hidden">
                 <div className="p-4 flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 min-w-0">
                     <div
@@ -576,6 +572,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
           </div>
         </ModalShell>
       ) : null}
+      </main>
     </div>
   );
 }

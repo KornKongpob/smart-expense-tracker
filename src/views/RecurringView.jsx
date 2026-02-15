@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
 import { ChevronRight, Plus, Trash2, Check, X, Repeat, Pencil, PlayCircle, CalendarClock } from "lucide-react";
+import AppHeader from "../components/AppHeader";
 import { useAppStore } from "../store/store";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
@@ -195,36 +196,27 @@ export default function RecurringView({ showAlert, showConfirm }) {
   };
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh">
-      <header className="mb-6 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+    <div className="min-h-dvh">
+      <AppHeader
+        title="รายการประจำ"
+        subtitle={`เปิดใช้งาน ${recurringStats.enabled}/${recurringStats.total}${recurringStats.due ? ` • ถึงรอบวันนี้ ~${recurringStats.due}` : ""}`}
+        onBack={() => navigate("more")}
+        right={
           <button
-            onClick={() => navigate("more")}
-            className="w-10 h-10 rounded-full glass-icon-btn flex items-center justify-center text-gray-700"
+            onClick={openNew}
+            className="ui-icon-btn text-gray-900 active:scale-95"
             type="button"
+            aria-label="เพิ่มรายการประจำ"
+            title="เพิ่มรายการประจำ"
           >
-            <ChevronRight className="rotate-180" size={24} />
+            <Plus size={18} />
           </button>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-extrabold text-gray-900">Recurring</h1>
-            <p className="text-gray-600 text-sm truncate">
-              สร้างรายการอัตโนมัติรายสัปดาห์/รายเดือน • เปิดใช้งาน {recurringStats.enabled}/{recurringStats.total}
-              {recurringStats.due ? ` • ถึงรอบวันนี้ ~${recurringStats.due}` : ""}
-            </p>
-          </div>
-        </div>
+        }
+      />
 
-        <button
-          onClick={openNew}
-          className="w-11 h-11 bg-gray-900/90 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95"
-          type="button"
-          aria-label="add recurring"
-        >
-          <Plus size={18} />
-        </button>
-      </header>
+      <main className="ui-page pt-4 pb-6">
 
-      <div className="glass-card rounded-2xl p-4 mb-4 flex items-center justify-between">
+      <div className="ui-card p-4 mb-4 flex items-center justify-between">
         <div className="min-w-0">
           <div className="font-extrabold text-gray-900 flex items-center gap-2">
             <span className="w-9 h-9 rounded-2xl glass-chip flex items-center justify-center text-emerald-700">
@@ -279,7 +271,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
               const isDue = r.enabled !== false && nextDue <= today;
 
               return (
-                <div key={r.id} className="glass-card rounded-2xl p-4">
+                <div key={r.id} className="ui-card p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0">
                       <div
@@ -365,7 +357,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
               );
             })
         ) : (
-          <div className="glass-card rounded-3xl border border-dashed glass-divider text-center py-16">
+          <div className="ui-card border border-dashed border-white/30 text-center py-16">
             <div className="w-16 h-16 glass-chip rounded-full flex items-center justify-center mx-auto mb-3 text-gray-600">
               <Repeat size={32} />
             </div>
@@ -521,6 +513,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
           ) : null}
         </ModalShell>
       ) : null}
+      </main>
     </div>
   );
 }

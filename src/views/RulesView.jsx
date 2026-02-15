@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
 import { ArrowLeft, Plus, Trash2, Edit2, ArrowUp, ArrowDown, X, Check, ToggleLeft, ToggleRight, Wand2 } from "lucide-react";
+import AppHeader from "../components/AppHeader";
 import { useAppStore } from "../store/store";
 import { formatCurrency } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
@@ -274,35 +275,21 @@ const applyTemplate = (tpl) => {
   };
 
   return (
-    <div className="pb-28 pt-6 px-4">
-      <div className="flex items-center justify-between mb-4">
-        <button
-          type="button"
-          onClick={() => navigate("more")}
-          className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-          aria-label="back"
-        >
-          <ArrowLeft size={18} />
-        </button>
+    <div className="min-h-dvh">
+      <AppHeader
+        title="กฎอัตโนมัติ"
+        subtitle={`เปิดใช้งาน ${enabledCount} จาก ${rules.length} กฎ`}
+        onBack={() => navigate("more")}
+        right={
+          <button type="button" onClick={openNew} className="ui-icon-btn text-gray-900 active:scale-95" aria-label="เพิ่มกฎ">
+            <Plus size={18} />
+          </button>
+        }
+      />
 
-        <div className="text-center flex-1">
-          <div className="text-xl font-extrabold text-gray-900">Automation Rules</div>
-          <div className="text-xs text-gray-700/70 mt-0.5">
-            เปิดใช้งาน {enabledCount} จาก {rules.length} กฎ
-          </div>
-        </div>
+      <main className="ui-page pt-4 pb-6">
 
-        <button
-          type="button"
-          onClick={openNew}
-          className="w-10 h-10 rounded-full bg-gray-900/90 text-white flex items-center justify-center active:scale-95"
-          aria-label="add"
-        >
-          <Plus size={18} />
-        </button>
-      </div>
-
-      <div className="glass-card rounded-2xl overflow-hidden">
+      <div className="ui-card overflow-hidden">
         {rules.length ? (
           rules.map((r, idx) => (
             <div key={r.id} className={`p-4 ${idx === rules.length - 1 ? "" : "border-b glass-divider"}`}>
@@ -586,6 +573,7 @@ const applyTemplate = (tpl) => {
           </div>
         </ModalShell>
       ) : null}
+      </main>
     </div>
   );
 }

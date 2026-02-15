@@ -18,6 +18,7 @@ import { useAppStore } from "../store/store";
 import { findFuzzyDuplicate } from "../store/selectors";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, toISODate } from "../utils/format";
+import AppHeader from "../components/AppHeader";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { expandTransactionToInstallments } from "../utils/installments";
 import { useBlobInfo } from "../utils/useBlobInfo";
@@ -1646,6 +1647,12 @@ export default function InboxView({ showAlert, showConfirm }) {
     learnMerchant,
   } = useAppStore();
 
+  // ✅ IMPORTANT: define `accounts` in this scope.
+  // Inbox approve flow builds transactions from items and needs the full account list
+  // (e.g., for installment validation / credit-account checks).
+  // A missing `accounts` reference causes a runtime ReferenceError on Approve.
+  const accounts = Array.isArray(state?.accounts) ? state.accounts : [];
+
   const inbox = state.inbox || [];
   const [tab, setTab] = useState("pending");
   const [query, setQuery] = useState("");
@@ -1861,38 +1868,31 @@ export default function InboxView({ showAlert, showConfirm }) {
   const statusLine = tab === "pending" ? `${pendingCount} pending` : `${approved.length} approved`;
 
   return (
-    <div className="p-4 pb-28 min-w-0 overflow-x-hidden">
-      {/* Header: stack on small screens to prevent action buttons from overflowing (no horizontal scroll) */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-2xl bg-gray-900/10 flex items-center justify-center">
-              <Inbox size={20} />
-            </div>
-            <div>
-              <div className="text-lg font-extrabold text-gray-900">Inbox</div>
-              <div className="text-xs text-gray-900/60">{statusLine}</div>
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center gap-2">
-            <PillTab active={tab === "pending"} onClick={() => setTab("pending")} label="Pending" count={pendingCount} />
-            <PillTab active={tab === "approved"} onClick={() => setTab("approved")} label="Approved" count={approved.length} />
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 min-w-0 w-full sm:w-auto">
+    <div className="min-h-dvh min-w-0 overflow-x-hidden">
+      <AppHeader
+        title="Inbox"
+        subtitle={statusLine}
+        right={
           <button
             type="button"
             onClick={() => startNewTransaction?.() ?? navigate("add")}
-            className="w-full sm:w-auto px-3 py-2 rounded-xl bg-white/30 border border-white/20 text-gray-900/70 font-bold active:scale-95"
+            className="ui-btn ui-btn-secondary active:scale-[0.99]"
           >
-            <span className="inline-flex items-center gap-2">
-              <Check size={16} />
-              Scan
-            </span>
+            <Check size={18} />
+            Scan
           </button>
+        }
+      />
 
+      <main className="ui-page pt-4 pb-6 min-w-0">
+        {/* Tabs + actions */}
+      <div className="mt-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <PillTab active={tab === "pending"} onClick={() => setTab("pending")} label="Pending" count={pendingCount} />
+          <PillTab active={tab === "approved"} onClick={() => setTab("approved")} label="Approved" count={approved.length} />
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 min-w-0 w-full sm:w-auto">
           {tab === "approved" ? (
             <button
               type="button"
@@ -2256,6 +2256,7 @@ export default function InboxView({ showAlert, showConfirm }) {
           showAlert?.("บันทึกการแก้ไขแล้ว");
         }}
       />
+      </main>
     </div>
   );
 }

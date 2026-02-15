@@ -1,6 +1,7 @@
 // src/views/BudgetsView.jsx
 import { useMemo, useState } from "react";
 import { ChevronRight, Bell, Trash2, Check, X, ChevronLeft, Sparkles } from "lucide-react";
+import AppHeader from "../components/AppHeader";
 import { useAppStore } from "../store/store";
 import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors";
 import { formatCurrency, toISODate } from "../utils/format";
@@ -242,52 +243,39 @@ export default function BudgetsView({ showAlert, showConfirm }) {
   }, [limit, alertPct, editingSpent]);
 
   return (
-    <div className="pb-28 pt-6 px-4 min-h-dvh">
-      <header className="mb-6 flex items-center gap-3">
-        <button
-          onClick={() => navigate("more")}
-          className="w-10 h-10 rounded-full glass-icon-btn flex items-center justify-center text-gray-700"
-          type="button"
-          aria-label="back"
-          title="ย้อนกลับ"
-        >
-          <ChevronRight className="rotate-180" size={24} />
-        </button>
+    <div className="min-h-dvh">
+      <AppHeader
+        title="งบประมาณ"
+        subtitle={`${formatMonthLabelTH(month)} (${month})`}
+        onBack={() => navigate("more")}
+        right={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMonth((m) => shiftMonthKey(m, -1))}
+              className="ui-icon-btn text-gray-700 active:scale-95"
+              aria-label="เดือนก่อนหน้า"
+              title="เดือนก่อนหน้า"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMonth((m) => shiftMonthKey(m, +1))}
+              className="ui-icon-btn text-gray-700 active:scale-95"
+              aria-label="เดือนถัดไป"
+              title="เดือนถัดไป"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        }
+      />
 
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-extrabold text-gray-900 flex items-center gap-2">
-            <Sparkles size={18} className="text-indigo-600" />
-            Budget Alert
-          </h1>
-          <p className="text-gray-600 text-sm truncate">
-            {formatMonthLabelTH(month)} <span className="text-gray-500">({month})</span>
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setMonth((m) => shiftMonthKey(m, -1))}
-            className="w-10 h-10 rounded-full glass-icon-btn flex items-center justify-center text-gray-700 active:scale-95"
-            aria-label="prev month"
-            title="เดือนก่อนหน้า"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setMonth((m) => shiftMonthKey(m, +1))}
-            className="w-10 h-10 rounded-full glass-icon-btn flex items-center justify-center text-gray-700 active:scale-95"
-            aria-label="next month"
-            title="เดือนถัดไป"
-          >
-            <ChevronRight size={20} />
-          </button>
-        </div>
-      </header>
+      <main className="ui-page pt-4 pb-6">
 
       {/* Summary */}
-      <div className="glass-card rounded-3xl p-5 mb-5">
+      <div className="ui-card p-5 mb-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs font-bold text-gray-900/60 uppercase">สรุปเดือนนี้</div>
@@ -326,7 +314,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
       </div>
 
       {/* ✅ Dashboard budgets (Daily / Monthly) */}
-      <div className="glass-card rounded-3xl p-5 mb-5">
+      <div className="ui-card p-5 mb-5">
         <div className="text-xs font-bold text-gray-900/60 uppercase">งบสำหรับ Dashboard</div>
 
         {(() => {
@@ -681,6 +669,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
           ) : null}
         </ModalShell>
       ) : null}
+      </main>
     </div>
   );
 }

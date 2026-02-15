@@ -3,6 +3,8 @@ import CategorySelect from "../components/CategorySelect";
 import { ArrowLeft, Plus, Search, Trash2, GitMerge, Edit2, Check, X } from "lucide-react";
 
 import { useAppStore } from "../store/store";
+import AppHeader from "../components/AppHeader";
+import EmptyState from "../components/EmptyState";
 import { generateId } from "../utils/id";
 
 function Modal({ open, children, onClose }) {
@@ -153,32 +155,20 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
   };
 
   return (
-    <div className="p-4 pb-28">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <button
-            type="button"
-            onClick={() => navigate("more")}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95"
-          >
-            <ArrowLeft size={16} />
-            Back
+    <div className="min-h-dvh">
+      <AppHeader
+        title="Merchant Library"
+        subtitle="จำร้าน → หมวด/บัญชี อัตโนมัติ (หลัง Save scan หรือ Approve ใน Inbox)"
+        onBack={() => navigate("more")}
+        right={
+          <button type="button" onClick={openAdd} className="ui-btn ui-btn-primary active:scale-[0.99]">
+            <Plus size={18} />
+            เพิ่ม
           </button>
-          <div className="mt-3 text-xl font-black text-gray-900">Merchant Library</div>
-          <div className="mt-1 text-sm text-gray-900/60">
-            ระบบจะ “จำร้าน → หมวด/บัญชี” อัตโนมัติเมื่อคุณ Save scan หรือแก้ไข/Approve ใน Inbox
-          </div>
-        </div>
+        }
+      />
 
-        <button
-          type="button"
-          onClick={openAdd}
-          className="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold active:scale-95 inline-flex items-center gap-2"
-        >
-          <Plus size={16} />
-          Add
-        </button>
-      </div>
+      <main className="ui-page pt-4 pb-6">
 
       <div className="mt-4">
         <div className="relative">
@@ -187,7 +177,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search merchant (canonical / alias)"
-            className="w-full pl-10 pr-10 py-3 rounded-2xl bg-white/30 border border-white/20 outline-none"
+            className="ui-input pl-10 pr-10"
           />
           {q ? (
             <button
@@ -203,10 +193,12 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="mt-8 glass-card rounded-3xl p-6 text-center border border-white/20">
-          <div className="text-lg font-extrabold text-gray-900">ยังไม่มี merchant</div>
-          <div className="mt-1 text-sm text-gray-900/60">ลองสแกน/แก้ไขใน Inbox แล้วระบบจะเรียนรู้เอง หรือกด Add</div>
-        </div>
+        <div className="mt-6">
+        <EmptyState
+          title="ยังไม่มี merchant"
+          description="ลองสแกน/แก้ไขใน Inbox แล้วระบบจะเรียนรู้เอง หรือกด Add"
+        />
+      </div>
       ) : (
         <div className="mt-4 grid gap-3">
           {filtered.map((m) => {
@@ -215,7 +207,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             const expAcc = pickNameById(accounts, m?.prefs?.expense?.accountId);
             const incAcc = pickNameById(accounts, m?.prefs?.income?.accountId);
             return (
-              <div key={m.id} className="glass-card rounded-3xl p-4 border border-white/20">
+              <div key={m.id} className="ui-card p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -249,7 +241,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                     <button
                       type="button"
                       onClick={() => openEdit(m)}
-                      className="px-4 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
+                      className="ui-btn ui-btn-secondary"
                     >
                       <Edit2 size={16} />
                       Edit
@@ -257,7 +249,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                     <button
                       type="button"
                       onClick={() => openMerge(m)}
-                      className="px-4 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
+                      className="ui-btn ui-btn-secondary"
                     >
                       <GitMerge size={16} />
                       Merge
@@ -462,6 +454,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
           </button>
         </div>
       </Modal>
+      </main>
     </div>
   );
 }

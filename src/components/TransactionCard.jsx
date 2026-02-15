@@ -180,7 +180,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
   let badgeText = "";
 
   if (isDiscountAdjustment) {
-    badgeText = "DISCOUNT";
+    badgeText = "ส่วนลด";
   }
 
   // -------- Transfer / Credit Card Payment (special rendering) --------
@@ -215,7 +215,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
       ? toAcc?.name
         ? `ชำระบัตรเครดิต • ${toAcc.name}`
         : "ชำระบัตรเครดิต"
-      : "Transfer";
+      : "โอนเงิน";
 
     subtitle = `${fromName}${fromHint ? ` (${fromHint})` : ""} → ${toName}${toHint ? ` (${toHint})` : ""} • ${safeDateLabel(
       outTx?.date || tx?.date
@@ -228,7 +228,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     leadingIsLucide = true;
     leadingIcon = isCcPayment ? CreditCard : ArrowRightLeft;
     leadingBg = "rgba(99,102,241,0.10)"; // indigo-ish
-    badgeText = isCcPayment ? "PAYMENT" : "TRANSFER";
+    badgeText = isCcPayment ? "ชำระ" : "โอน";
   }
 
   // -------- Split Group (special rendering) --------
@@ -239,13 +239,13 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     amountText = formatCurrency(Math.abs(total));
 
     const label = String(tx?.splitLabel || "").trim();
-    title = label || `Split (${(splitLines || []).length})`;
+    title = label || `แยก (${(splitLines || []).length})`;
     subtitle = `${accountName || "—"} • ${safeDateLabel(tx?.date)}`;
 
     leadingIcon = Layers;
     leadingIsLucide = true;
     leadingBg = "rgba(168,85,247,0.15)";
-    badgeText = "SPLIT";
+    badgeText = "แยก";
   }
 
   const Leading = leadingIsLucide ? leadingIcon : null;
@@ -260,7 +260,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     <button
       type="button"
       onClick={onClick}
-      className="w-full glass-card rounded-3xl p-4 text-left hover:scale-[1.01] active:scale-[0.99] transition-transform"
+      className="w-full ui-card p-4 text-left transition-[transform,box-shadow] hover:shadow-[0_18px_55px_rgba(0,0,0,0.10)] active:scale-[0.99] focus-visible:ring-4 focus-visible:ring-indigo-300/35"
     >
       <div className="flex items-center gap-3">
         {/* leading */}
@@ -293,7 +293,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
             </div>
 
             <div className="shrink-0 flex items-center gap-2">
-              <div className={`text-sm font-extrabold ${amountClass}`}>
+              <div className={`text-sm font-extrabold tabular-nums ${amountClass}`}>
                 {amountPrefix}
                 {amountText}
               </div>
@@ -312,7 +312,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
               onPointerDown={(e) => e.stopPropagation()}
             >
               <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
-                Breakdown ({splitLines.length})
+                รายละเอียด ({splitLines.length})
               </div>
               <div className="space-y-2 pr-1">
                 {splitLines.map((l) => {
@@ -353,7 +353,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
               onPointerDown={(e) => e.stopPropagation()}
             >
               <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
-                Receipt ({receiptLines.length})
+                ใบเสร็จ ({receiptLines.length})
               </div>
               <div className="space-y-2 pr-1">
                 {receiptLines.map((l, idx) => {

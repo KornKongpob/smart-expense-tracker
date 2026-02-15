@@ -6,10 +6,14 @@ import { Delete, Lock } from "lucide-react";
  * Privacy PIN Lock Screen (6 digits)
  *
  * Notes:
- * - This component only validates a PIN already stored (App.jsx decides the storage key).
- * - If you want a "set/change PIN" screen later, keep that logic elsewhere.
+ * - Only validates a PIN already stored (App.jsx decides storage key)
+ * - UI-only component; no business logic side effects
  */
-export default function PinLockScreen({ savedPin, onUnlocked, title = "Enter PIN" }) {
+export default function PinLockScreen({
+  savedPin,
+  onUnlocked,
+  title = "ปลดล็อกด้วย PIN",
+}) {
   const PIN_LEN = 6;
 
   const [input, setInput] = useState("");
@@ -79,29 +83,21 @@ export default function PinLockScreen({ savedPin, onUnlocked, title = "Enter PIN
     <div className="min-h-dvh relative">
       {/* Background (match app glass feel) */}
       <div className="fixed inset-0 -z-10 pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/70 via-white/40 to-purple-50/70" />
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/70 via-white/50 to-purple-50/70" />
         <div className="absolute -top-28 -right-28 w-80 h-80 rounded-full bg-indigo-300/18 blur-3xl" />
         <div className="absolute -bottom-28 -left-28 w-80 h-80 rounded-full bg-purple-300/16 blur-3xl" />
         <div className="absolute inset-0 bg-white/20" />
       </div>
 
       <div className="mx-auto max-w-[520px] min-h-dvh flex flex-col items-center justify-center px-5 pb-[calc(2rem+env(safe-area-inset-bottom))]">
-        <div
-          className="
-            w-full max-w-sm
-            rounded-3xl p-6
-            bg-white/22 backdrop-blur-2xl
-            border border-white/30
-            shadow-[0_22px_60px_-32px_rgba(0,0,0,0.65)]
-          "
-        >
+        <div className="w-full max-w-sm ui-card-strong rounded-3xl p-6 shadow-[0_28px_78px_-44px_rgba(0,0,0,0.7)]">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-white/25 border border-white/30 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-2xl bg-white/70 border border-slate-900/10 flex items-center justify-center">
               <Lock size={20} className="text-gray-900" />
             </div>
             <div className="min-w-0">
               <div className="text-lg font-extrabold text-gray-900">{title}</div>
-              <div className="text-sm text-gray-800/70">กรอกรหัส 6 หลักเพื่อปลดล็อก</div>
+              <div className="text-sm text-gray-800/70">กรอกรหัส 6 หลักเพื่อเข้าใช้งาน</div>
             </div>
           </div>
 
@@ -134,12 +130,8 @@ export default function PinLockScreen({ savedPin, onUnlocked, title = "Enter PIN
                 key={k}
                 type="button"
                 onClick={() => pressDigit(k)}
-                className="
-                  h-14 rounded-2xl
-                  bg-white/20 border border-white/30
-                  font-extrabold text-lg text-gray-900
-                  active:scale-95
-                "
+                className="h-14 rounded-2xl ui-btn ui-btn-secondary text-lg font-black tabular-nums active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
+                aria-label={`digit ${k}`}
               >
                 {k}
               </button>
@@ -149,26 +141,17 @@ export default function PinLockScreen({ savedPin, onUnlocked, title = "Enter PIN
             <button
               type="button"
               onClick={clear}
-              className="
-                h-14 rounded-2xl
-                bg-white/14 border border-white/25
-                font-extrabold text-sm text-gray-800
-                active:scale-95
-              "
+              className="h-14 rounded-2xl ui-btn ui-btn-secondary text-sm font-extrabold active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
             >
-              Clear
+              ล้าง
             </button>
 
             {/* 0 */}
             <button
               type="button"
               onClick={() => pressDigit("0")}
-              className="
-                h-14 rounded-2xl
-                bg-white/20 border border-white/30
-                font-extrabold text-lg text-gray-900
-                active:scale-95
-              "
+              className="h-14 rounded-2xl ui-btn ui-btn-secondary text-lg font-black tabular-nums active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
+              aria-label="digit 0"
             >
               0
             </button>
@@ -177,26 +160,20 @@ export default function PinLockScreen({ savedPin, onUnlocked, title = "Enter PIN
             <button
               type="button"
               onClick={backspace}
-              className="
-                h-14 rounded-2xl
-                bg-white/14 border border-white/25
-                font-extrabold text-gray-900
-                flex items-center justify-center
-                active:scale-95
-              "
-              aria-label="backspace"
+              className="h-14 rounded-2xl ui-btn ui-btn-secondary active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
+              aria-label="ลบตัวเลข"
             >
               <Delete size={18} />
             </button>
           </div>
 
           <div className="mt-5 text-center text-xs text-gray-800/65 leading-relaxed">
-            หากลืม PIN: สามารถลบค่า LocalStorage key ของ PIN ในเบราว์เซอร์เพื่อเข้าใช้งานใหม่
+            หากลืม PIN: สามารถลบค่า PIN ใน LocalStorage ของเบราว์เซอร์เพื่อเข้าใช้งานใหม่
           </div>
         </div>
       </div>
 
-      {/* local keyframes (Tailwind arbitrary) */}
+      {/* local keyframes */}
       <style>{`
         @keyframes shake {
           0% { transform: translateX(0); }

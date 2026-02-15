@@ -20,6 +20,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 
+import AppHeader from "../components/AppHeader";
+
 /**
  * AccountsView
  * - Manage accounts (cash/bank/credit)
@@ -353,28 +355,38 @@ const create = () => {
   }, [openCreate, openEdit]);
 
   return (
-    <div className="px-4 pb-28">
-      {/* Header */}
-      <div className="mt-4 glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-xl">
+    <div className="min-h-dvh">
+      <AppHeader
+        title="บัญชี"
+        subtitle="จัดการบัญชี/บัตร และเลขท้ายเพื่อช่วยสแกนแม่นขึ้น"
+        right={
+          <button
+            type="button"
+            onClick={() => {
+              resetCreate();
+              setOpenCreate(true);
+            }}
+            className="ui-btn ui-btn-primary active:scale-[0.99]"
+          >
+            <Plus size={18} />
+            เพิ่ม
+          </button>
+        }
+      />
+
+      <main className="ui-page pt-4 pb-6">
+        {/* Header Card */}
+      <div className="mt-4 ui-card p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-xl font-black text-gray-900">Accounts</div>
+            <div className="text-lg font-black text-gray-900">คำแนะนำ</div>
             <div className="text-xs text-gray-800/60 font-bold mt-1 leading-relaxed">
               จัดการบัญชี/บัตรที่ใช้บันทึกรายการ (แนะนำใส่ <span className="font-black text-gray-900">เลขท้าย 4–6 หลัก</span> จากสลิป)
               และถ้ามีหลายแบบให้ใส่หลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span> เพื่อ map แม่นขึ้น
             </div>
           </div>
 
-          <button
-            onClick={() => {
-              resetCreate();
-              setOpenCreate(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
-          >
-            <Plus size={18} />
-            เพิ่ม
-          </button>
+          <div className="hidden sm:block" aria-hidden="true" />
         </div>
 
         {/* Search */}
@@ -1314,6 +1326,7 @@ const create = () => {
           - ถ้าเป็นบัตรเครดิต บางสลิปอาจแสดงเลขคนละส่วน/คนละตำแหน่ง ให้ใส่หลายชุดจะช่วยลดการ map ผิดบัญชี
         </div>
       </div>
+      </main>
     </div>
   );
 }

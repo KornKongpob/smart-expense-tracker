@@ -33,6 +33,7 @@ import {
 import { useAppStore } from "../store/store";
 import AmountField from "../components/AmountField";
 import CategorySelect from "../components/CategorySelect";
+import AppHeader from "../components/AppHeader";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../services/blobStore";
 import { formatCurrency, toISODate } from "../utils/format";
@@ -2404,7 +2405,7 @@ if (
   };
 
   const canCreateFromQueue = useMemo(() => {
-    // ✅ Allow "Save now" as long as there is at least one ready item.
+    // ✅ Allow "บันทึกทันที" as long as there is at least one ready item.
     // Duplicates will be blocked until the user explicitly confirms.
     // Allow click even if amount is 0/missing; validation happens on save.
     return (queue || []).some((q) => q.status === "ready");
@@ -2416,7 +2417,7 @@ if (
 
   
   // Count only duplicates that are still "blocked" (user hasn't allowed saving duplicates yet)
-  // If user toggled includeDuplicate = true, Save now should proceed normally.
+  // If user toggled includeDuplicate = true, บันทึกทันที should proceed normally.
   const duplicateReadyCount = useMemo(() => {
     return (queue || []).filter((q) => q.status === "ready" && !!q.duplicate && !q.includeDuplicate).length;
   }, [queue]);
@@ -2646,7 +2647,7 @@ if (
     sendBatchToInbox(cfg.batchId);
   }, [queue, isScanning]);
 
-  // Send only *blocked duplicates* to Inbox (used when user chose "Save now" but wants to handle duplicates later)
+  // Send only *blocked duplicates* to Inbox (used when user chose "บันทึกทันที" but wants to handle duplicates later)
   const sendDuplicateQueueToInbox = () => {
     const dups = (queue || []).filter((q) => q.status === "ready" && !!q.duplicate && !q.includeDuplicate);
     if (!dups.length) {
@@ -2803,7 +2804,7 @@ if (
       return showAlert?.("ไม่มีรายการที่พร้อมสร้าง (หรือถูกติ๊กว่าเป็นรายการซ้ำ)");
     }
 
-    // ✅ Normalize scanned queue items so "Save now" works even when:
+    // ✅ Normalize scanned queue items so "บันทึกทันที" works even when:
     // - split receipts have missing/invalid per-line categories
     // - split receipts end up with <2 purchasable lines (auto-fallback to non-split)
     // - parent amount is missing but line totals exist (use signed sum)
@@ -2864,7 +2865,7 @@ if (
       return next;
     });
 
-    // ✅ Allow clicking "Save now" even if amount is 0/missing, but block saving until amounts are valid.
+    // ✅ Allow clicking "บันทึกทันที" even if amount is 0/missing, but block saving until amounts are valid.
     const badAmounts = normalizedReady.filter((q) => {
       // For split receipts, allow saving if the group total is positive even when parent amount is missing.
       if (
@@ -3822,58 +3823,76 @@ const handleClose = () => {
 
   return (
     <div
-      className="pb-28 pt-6 px-4 min-h-dvh overflow-x-hidden"
+      className="pb-[calc(7rem+env(safe-area-inset-bottom))] min-h-dvh overflow-x-hidden"
       style={{
         overflowX: "hidden",
         touchAction: "pan-y",
       }}
     >
-      {/* Header */}
-      <div className="flex justify-between items-center mb-4">
-        <button
-          onClick={handleClose}
-          className="w-10 h-10 rounded-full glass-icon-btn flex items-center justify-center text-gray-800 active:scale-95 leading-none"
-          type="button"
-          aria-label="close"
-        >
-          <X size={20} />
-        </button>
-
-        <h2 className="text-lg font-extrabold text-gray-900">
-          {isEditMode
+      <AppHeader
+        title={
+          isEditMode
             ? initialData.isTransfer
               ? isEditingCreditPayment
                 ? "แก้ไขชำระบัตร"
-                : "แก้ไข Transfer"
+                : "แก้ไขโอนเงิน"
               : "แก้ไขรายการ"
-            : "เพิ่มรายการ"}
-        </h2>
-
-        {isEditMode ? (
+            : "เพิ่มรายการ"
+        }
+        subtitle={
+          !isEditMode
+            ? entryMode === "scan"
+              ? "สแกนใบเสร็จ/สลิป แล้วตรวจสอบก่อนบันทึก"
+              : "กรอกข้อมูลเองแบบรวดเร็ว"
+            : initialData.isTransfer
+            ? isEditingCreditPayment
+              ? "บันทึกเป็นการชำระบัตรเครดิต"
+              : "สร้างคู่รายการโอนระหว่างบัญชี"
+            : "แก้ไขรายละเอียดรายการเดิม"
+        }
+        left={
           <button
-            onClick={handleDelete}
-            className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/15 flex items-center justify-center text-red-700 active:scale-95 leading-none"
+            onClick={handleClose}
+            className="ui-icon-btn"
             type="button"
-            aria-label="delete"
+            aria-label="close"
+            title="ปิด"
           >
-            <Trash2 size={20} />
+            <X size={18} />
           </button>
-        ) : (
-          <button
-            onClick={clearQueue}
-            className={`w-10 h-10 rounded-full flex items-center justify-center leading-none active:scale-95 transition-all ${
-              queue.length ? "bg-gray-900/90 text-white shadow-lg" : "glass-icon-btn text-gray-400 opacity-60"
-            }`}
-            type="button"
-            title="ล้างคิว"
-            aria-label="ล้างคิว"
-            disabled={!queue.length}
-          >
-            <Trash size={18} />
-          </button>
-        )}
-      </div>
+        }
+        right={
+          isEditMode ? (
+            <button
+              onClick={handleDelete}
+              className="ui-icon-btn bg-red-500/10 border border-red-500/15 text-red-700"
+              type="button"
+              aria-label="delete"
+              title="ลบ"
+            >
+              <Trash2 size={18} />
+            </button>
+          ) : (
+            <button
+              onClick={clearQueue}
+              className={
+                "ui-icon-btn " +
+                (queue.length
+                  ? "bg-gray-900/90 text-white border-white/20 shadow-[0_18px_45px_rgba(0,0,0,0.14)]"
+                  : "text-gray-400 opacity-60")
+              }
+              type="button"
+              title="ล้างคิว"
+              aria-label="ล้างคิว"
+              disabled={!queue.length}
+            >
+              <Trash size={18} />
+            </button>
+          )
+        }
+      />
 
+      <main className="ui-page pt-4">
       {/* Mode Tabs (new only) */}
       {!isEditMode ? (
         <div className="glass-panel border border-white/20 p-1.5 rounded-2xl flex mb-5">
@@ -5199,7 +5218,7 @@ const handleClose = () => {
           <button
             onClick={handleSaveManual}
             disabled={isSaving}
-            className={`fixed bottom-6 left-4 right-4 bg-gray-900/90 text-white py-4 rounded-2xl font-extrabold shadow-xl transition-all flex items-center justify-center gap-2 ${
+            className={`fixed left-4 right-4 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] bg-gray-900/90 text-white py-4 rounded-2xl font-extrabold shadow-xl transition-all flex items-center justify-center gap-2 ${
               isSaving ? "opacity-60 cursor-not-allowed" : "active:scale-95"
             }`}
             type="button"
@@ -5212,7 +5231,7 @@ const handleClose = () => {
 
       {/* Fixed actions (scan mode) */}
       {!isEditMode && entryMode === "scan" && queue.length ? (
-        <div className="fixed bottom-6 left-4 right-4 grid grid-cols-2 gap-2">
+        <div className="fixed left-4 right-4 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] grid grid-cols-2 gap-2">
           <button
             onClick={sendQueueToInbox}
             className={`py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
@@ -5224,7 +5243,7 @@ const handleClose = () => {
             disabled={!canSendToInbox}
           >
             <Inbox size={18} />
-            Send to Inbox
+            ส่งไป Inbox
           </button>
 
           <button
@@ -5238,12 +5257,12 @@ const handleClose = () => {
             disabled={!canCreateFromQueue}
           >
             <Check size={18} />
-            Save now
+            บันทึกทันที
           </button>
         </div>
       ) : null}
 
-      {/* Duplicate decision modal (Save now) */}
+      {/* Duplicate decision modal (บันทึกทันที) */}
       {dupDecisionOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
@@ -5274,14 +5293,14 @@ const handleClose = () => {
                 onClick={() => handleDupDecision("send")}
                 className="w-full py-4 rounded-2xl bg-gray-900/90 text-white font-extrabold shadow-xl active:scale-95"
               >
-                Send duplicates to Inbox
+                ส่งรายการซ้ำไปที่ Inbox
               </button>
               <button
                 type="button"
                 onClick={() => handleDupDecision("skip")}
                 className="w-full py-4 rounded-2xl bg-white/30 text-gray-900 font-extrabold border border-white/20 active:scale-95"
               >
-                Skip duplicates
+                ข้ามรายการซ้ำ
               </button>
 
               <button
@@ -5289,12 +5308,14 @@ const handleClose = () => {
                 onClick={() => handleDupDecision("save")}
                 className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-indigo-200 active:scale-95"
               >
-                Save duplicates now
+                บันทึกรายการซ้ำตอนนี้
               </button>
             </div>
           </div>
         </div>
       ) : null}
+      </main>
+
     </div>
   );
 }
