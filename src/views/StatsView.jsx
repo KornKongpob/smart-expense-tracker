@@ -1,5 +1,5 @@
 // src/views/StatsView.jsx
-import { memo, useDeferredValue, useMemo, useState, useTransition } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import {
   Activity,
   TrendingUp,
@@ -10,6 +10,7 @@ import {
   CalendarDays,
   X,
   ReceiptText,
+  Info,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -36,6 +37,29 @@ function clamp(n, a, b) {
 function safeNumber(n) {
   const x = Number(n);
   return Number.isFinite(x) ? x : 0;
+}
+
+function useIsSmallScreen() {
+  const [isSm, setIsSm] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return true;
+    return window.matchMedia("(max-width: 640px)").matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(max-width: 640px)");
+    const onChange = (e) => setIsSm(!!e.matches);
+    try {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    } catch {
+      // Safari fallback
+      mq.addListener(onChange);
+      return () => mq.removeListener(onChange);
+    }
+  }, []);
+
+  return isSm;
 }
 
 // Expense math must respect receipt adjustments.
@@ -103,12 +127,63 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
     <div className="ui-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-extrabold text-gray-900/70">{title}</div>
-          <div className="mt-1 text-2xl font-extrabold text-gray-900 truncate">{value}</div>
-          {sub ? <div className="mt-1 text-[11px] text-gray-800/60">{sub}</div> : null}
+          <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">{title}</div>
+          <div className="mt-1 text-[22px] leading-tight font-black text-gray-900 truncate tabular-nums">{value}</div>
+          {sub ? <div className="mt-1 text-[11px] font-bold text-gray-800/60 leading-snug">{sub}</div> : null}
         </div>
         <div className={`shrink-0 w-11 h-11 rounded-2xl border flex items-center justify-center ${toneCls}`}>
           {icon}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TonePill({ tone, children }) {
+  const cls =
+    tone === "income"
+      ? "bg-emerald-600/15 text-emerald-800 border-emerald-700/15"
+      : tone === "expense"
+      ? "bg-rose-600/15 text-rose-800 border-rose-700/15"
+      : tone === "net"
+      ? "bg-indigo-600/15 text-indigo-800 border-indigo-700/15"
+      : "bg-white/60 text-gray-800 border-gray-900/10";
+
+  return (
+    <span
+      className={"inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[12px] font-extrabold " + cls}
+    >
+      {children}
+    </span>
+  );
+}
+
+function SummaryMetaCard({ rangeText, countText, discountSaved }) {
+  return (
+    <div className="ui-card-strong p-4 mb-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <TonePill tone="net">
+              <CalendarDays size={14} />
+              {rangeText}
+            </TonePill>
+            <TonePill tone="neutral">{countText}</TonePill>
+          </div>
+          <div className="mt-2 text-[12px] font-bold text-gray-800/65 leading-snug">
+            {discountSaved ? (
+              <>
+                ส่วนลดที่พบในบิล (ไม่นับเป็นค่าใช้จ่ายตามหมวด):
+                <span className="ml-1 tabular-nums">{formatCurrency(discountSaved)}</span>
+              </>
+            ) : (
+              "ข้อมูลสรุปตามรายการที่บันทึกไว้ (ไม่นับ Transfer / Split parent)"
+            )}
+          </div>
+        </div>
+
+        <div className="shrink-0 w-10 h-10 rounded-2xl bg-indigo-600/10 border border-indigo-600/15 flex items-center justify-center">
+          <Info size={18} className="text-indigo-700" />
         </div>
       </div>
     </div>
@@ -207,6 +282,7 @@ export default function StatsView() {
   const { state } = useAppStore();
   const [period, setPeriod] = useState("month"); // today | week | month | year
   const [isPending, startTransition] = useTransition();
+  const isSm = useIsSmallScreen();
 
   // Drill-down modal state
   const [openCat, setOpenCat] = useState(false);
@@ -390,6 +466,25 @@ export default function StatsView() {
 
   const hasAny = filtered.length > 0;
 
+  const rangeText = useMemo(() => {
+    const startIso = toISODateFromDate(periodStart);
+    const endIso = todayIso;
+    if (period === "today") return formatDateShort(endIso);
+    return formatDateShort(startIso) + " – " + formatDateShort(endIso);
+  }, [period, periodStart, todayIso]);
+
+  const countText = useMemo(() => {
+    const n = filtered.length;
+    const d = totals.days;
+    return n.toLocaleString("th-TH") + " รายการ • " + d.toLocaleString("th-TH") + " วัน";
+  }, [filtered.length, totals.days]);
+
+  const xInterval = useMemo(() => {
+    const len = trend.length;
+    if (!isSm) return 0;
+    return Math.max(0, Math.ceil(len / 6) - 1);
+  }, [trend.length, isSm]);
+
   // Drill-down list for selected category in current period
   const selectedCat = useMemo(() => {
     if (!selectedCatId) return null;
@@ -424,7 +519,7 @@ export default function StatsView() {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-10">
 
       {/* Period segmented */}
       <div className="ui-card p-1 rounded-2xl mb-5 flex">
@@ -446,6 +541,8 @@ export default function StatsView() {
           </button>
         ))}
       </div>
+
+      <SummaryMetaCard rangeText={rangeText} countText={countText} discountSaved={totals.discountSaved} />
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -488,7 +585,7 @@ export default function StatsView() {
       ) : (
         <>
           {/* Expenses Breakdown */}
-          <div className="ui-card p-5 mb-6">
+          <div className="ui-card-strong p-5 mb-6">
             <div className="flex items-center justify-between gap-3 mb-4">
               <div className="min-w-0">
                 <div className="font-extrabold text-gray-900 flex items-center gap-2">
@@ -514,15 +611,15 @@ export default function StatsView() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-              <div className="h-64 w-full">
+              <div className={isSm ? "h-60 w-full" : "h-64 w-full"}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={pieData}
                       cx="50%"
                       cy="50%"
-                      innerRadius={62}
-                      outerRadius={92}
+                      innerRadius={isSm ? 56 : 62}
+                      outerRadius={isSm ? 88 : 92}
                       paddingAngle={6}
                       dataKey="value"
                       nameKey="name"
@@ -533,7 +630,6 @@ export default function StatsView() {
                       ))}
                     </Pie>
                     <Tooltip formatter={(v) => formatCurrency(v)} />
-                    <Legend verticalAlign="bottom" height={36} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -594,7 +690,7 @@ export default function StatsView() {
           </div>
 
           {/* Trend */}
-          <div className="glass-card rounded-3xl p-5">
+          <div className="ui-card-strong rounded-3xl p-5">
             <div className="flex items-center justify-between gap-3 mb-4">
               <div>
                 <div className="font-extrabold text-gray-900 flex items-center gap-2">
@@ -612,14 +708,24 @@ export default function StatsView() {
               </div>
             </div>
 
-            <div className="h-72 w-full text-xs">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <TonePill tone="income">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                รายรับ
+              </TonePill>
+              <TonePill tone="expense">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                รายจ่าย
+              </TonePill>
+            </div>
+
+            <div className={isSm ? "h-72 w-full text-xs" : "h-80 w-full text-xs"}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trend}>
+                <BarChart data={trend} margin={{ top: 8, right: 12, left: 0, bottom: isSm ? 26 : 16 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date" tickMargin={8} />
+                  <XAxis dataKey="date" tickMargin={10} interval={xInterval} angle={isSm ? -25 : 0} textAnchor={isSm ? "end" : "middle"} height={isSm ? 50 : 30} />
                   <YAxis hide />
                   <Tooltip formatter={(v, name) => [formatCurrency(v), name]} />
-                  <Legend verticalAlign="bottom" height={32} />
                   <Bar dataKey="income" name="รายรับ" radius={[6, 6, 0, 0]} fill="#10b981" isAnimationActive={false} />
                   <Bar
                     dataKey="expense"
@@ -635,13 +741,13 @@ export default function StatsView() {
             {/* Quick insights */}
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="glass-panel border border-white/20 rounded-2xl p-4">
-                <div className="text-xs font-extrabold text-gray-900/70">เฉลี่ยรายจ่ายต่อวัน</div>
+                <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">เฉลี่ยรายจ่ายต่อวัน</div>
                 <div className="mt-1 text-xl font-extrabold text-gray-900">{formatCurrency(totals.avgSpendPerDay)}</div>
                 <div className="text-[11px] text-gray-800/55 mt-1">คำนวณจากจำนวนวันในช่วง {periodLabel}</div>
               </div>
 
               <div className="glass-panel border border-white/20 rounded-2xl p-4">
-                <div className="text-xs font-extrabold text-gray-900/70">หมวดที่ใช้มากสุด</div>
+                <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">หมวดที่ใช้มากสุด</div>
                 <div className="mt-1 text-xl font-extrabold text-gray-900">
                   {topCategory ? `${topCategory.icon || ""} ${topCategory.name}`.trim() : "—"}
                 </div>
@@ -663,7 +769,7 @@ export default function StatsView() {
           <div className="glass-panel border border-white/20 rounded-2xl p-4 mb-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-xs font-extrabold text-gray-900/70">รวมทั้งสิ้น</div>
+                <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">รวมทั้งสิ้น</div>
                 <div className="mt-1 text-2xl font-extrabold text-rose-700">-{formatCurrency(Math.max(0, catTotal))}</div>
                 <div className="text-[11px] text-gray-800/55 mt-1">
                   {catTxs.length} รายการ • ไม่รวม Transfer / Split parent • ช่วงเวลา {periodLabel}
