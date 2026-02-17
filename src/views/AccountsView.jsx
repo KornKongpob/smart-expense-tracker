@@ -200,17 +200,37 @@ function AccountVisualPicker({
                   type="button"
                   key={it.id}
                   onClick={() => setIconId(String(it.id))}
-                  className={`min-h-[44px] rounded-2xl border text-gray-900 flex flex-col items-center justify-center gap-1 px-2 py-2 overflow-hidden ${
-                    selected ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                  className={`relative min-h-[44px] rounded-2xl border text-gray-900 flex flex-col items-center justify-center gap-1 px-2 py-2 overflow-hidden ${
+                    selected
+                      ? "bg-white/95 border-gray-900/25 ring-4 ring-indigo-300/60"
+                      : "bg-white/50 border-gray-900/10 hover:bg-white/70"
                   }`}
                   title={it.name}
+                  aria-pressed={selected}
                 >
+                  {selected ? (
+                    <span className="absolute top-1 right-1">
+                      <CheckCircle2 size={18} className="text-indigo-700 drop-shadow" />
+                    </span>
+                  ) : null}
                   <span className="text-gray-900">{it.icon}</span>
                   <span className="text-[10px] font-extrabold text-gray-800/70 truncate max-w-full">{it.name}</span>
                 </button>
               );
             })}
           </div>
+
+          {(() => {
+            const it = (ACCOUNT_ICONS || []).find((x) => String(x?.id || "") === String(iconId || ""));
+            if (!it) return null;
+            return (
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <span className="ui-chip bg-white/70 border-gray-900/10">
+                  เลือกอยู่: <span className="ml-1 font-black text-gray-900">{it.name}</span>
+                </span>
+              </div>
+            );
+          })()}
 
           <div className="mt-2 ui-help">
             แนะนำ: {type === "bank" ? "ธนาคาร" : type === "cash" ? "เงินสด" : type === "credit" ? "บัตรเครดิต" : "กระเป๋า"}
@@ -250,16 +270,32 @@ function AccountVisualPicker({
                   type="button"
                   key={em}
                   onClick={() => setEmoji(String(em))}
-                  className={`h-10 w-10 rounded-2xl flex items-center justify-center border ${
-                    selected ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                  className={`relative h-10 w-10 rounded-2xl flex items-center justify-center border ${
+                    selected
+                      ? "bg-white/95 border-gray-900/25 ring-4 ring-indigo-300/60"
+                      : "bg-white/50 border-gray-900/10 hover:bg-white/70"
                   }`}
                   title={String(em)}
+                  aria-pressed={selected}
                 >
+                  {selected ? (
+                    <span className="absolute -top-1 -right-1">
+                      <CheckCircle2 size={18} className="text-indigo-700 drop-shadow" />
+                    </span>
+                  ) : null}
                   <span className="text-[18px] leading-none">{em}</span>
                 </button>
               );
             })}
           </div>
+
+          {String(emoji || "").trim() ? (
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <span className="ui-chip bg-white/70 border-gray-900/10">
+                เลือกอยู่: <span className="ml-1 font-black text-gray-900">{String(emoji || "").trim()}</span>
+              </span>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -430,6 +466,13 @@ export default function AccountsView() {
     return s.startsWith("-") ? s.slice(1) : `-${s}`;
   };
 
+  const forceSignNumberString = (val, sign = 1) => {
+    const s = String(val || "").trim();
+    const abs = s.replace(/^-/, "");
+    if (!abs) return sign < 0 ? "-" : "";
+    return sign < 0 ? `-${abs}` : abs;
+  };
+
   // Create modal
   const [openCreate, setOpenCreate] = useState(false);
   const [cName, setCName] = useState("");
@@ -518,7 +561,7 @@ const create = () => {
   };
 
   const initRaw = String(cInitialBalance || "").trim();
-  if (initRaw) {
+  if (initRaw && initRaw !== "-") {
     const desired = parseMoneyToSatang(initRaw);
     if (desired !== 0) {
       setPendingCreateAccount(baseAccount);
@@ -637,7 +680,7 @@ const create = () => {
     };
 
     const desiredRaw = String(eDesiredBalance || "").trim();
-    if (!desiredRaw) {
+    if (!desiredRaw || desiredRaw === "-") {
       updateAccount(partial);
       closeEditModal();
       showAlert?.("บันทึกแล้ว");
@@ -1153,25 +1196,76 @@ const create = () => {
 
               <div className="mt-4">
                 <label className="ui-label">ยอดตั้งต้นในบัญชี (ไม่บังคับ)</label>
-                <div className="flex items-center gap-2 min-w-0">
+
+                {cType === "credit" ? (
+                  <div className="mt-2 ui-card-strong p-4">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-xs font-extrabold text-gray-800/70">เครื่องหมาย</div>
+                      <div className="flex items-center rounded-2xl overflow-hidden border border-gray-900/10 bg-white/50">
+                        <button
+                          type="button"
+                          onClick={() => setCInitialBalance(forceSignNumberString(cInitialBalance, +1))}
+                          className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                            !String(cInitialBalance || "").trim().startsWith("-")
+                              ? "bg-gray-900 text-white"
+                              : "text-gray-900/80 hover:bg-white/60"
+                          }`}
+                        >
+                          บวก
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCInitialBalance(forceSignNumberString(cInitialBalance, -1))}
+                          className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                            String(cInitialBalance || "").trim().startsWith("-")
+                              ? "bg-gray-900 text-white"
+                              : "text-gray-900/80 hover:bg-white/60"
+                          }`}
+                        >
+                          ติดลบ
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <input
+                        value={String(cInitialBalance || "").replace(/^-/, "")}
+                        onChange={(e) => {
+                          const cleaned = sanitizeMoneyInput(e.target.value, { maxDecimals: 2 });
+                          const abs = cleaned.replace(/^-/, "");
+                          const hasNeg = String(cInitialBalance || "").trim().startsWith("-");
+                          const wantsNeg = cleaned.startsWith("-") ? true : hasNeg;
+                          const next = abs ? (wantsNeg ? `-${abs}` : abs) : wantsNeg ? "-" : "";
+                          setCInitialBalance(next);
+                        }}
+                        className="ui-input text-lg font-extrabold tabular-nums"
+                        placeholder="เช่น 5000.00"
+                        inputMode="decimal"
+                        autoComplete="off"
+                      />
+                      <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                        <div className="ui-help">ใช้ “ติดลบ” สำหรับหนี้บัตรเครดิต/ยอดค้าง</div>
+                        <div className="text-xs font-black tabular-nums text-gray-900">
+                          {(() => {
+                            const v = String(cInitialBalance || "").trim();
+                            if (!v || v === "-") return "—";
+                            return formatCurrency(parseMoneyToSatang(v));
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                   <input
                     value={cInitialBalance}
                     onChange={(e) => setCInitialBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
-                    className="ui-input flex-1"
-                    placeholder={cType === "credit" ? "เช่น -5000.00" : "เช่น 500.00"}
+                    className="ui-input tabular-nums"
+                    placeholder="เช่น 500.00"
                     inputMode="decimal"
+                    autoComplete="off"
                   />
-                  {cType === "credit" ? (
-                    <button
-                      type="button"
-                      onClick={() => setCInitialBalance(toggleSignedNumberString(cInitialBalance))}
-                      className="ui-btn ui-btn-secondary w-12 px-0"
-                      title="สลับเครื่องหมายบวก/ลบ"
-                    >
-                      ±
-                    </button>
-                  ) : null}
-                </div>
+                )}
+
                 <div className="ui-help mt-1">
                   ถ้ากรอก ระบบจะถามว่าจะบันทึกยอดตั้งต้นเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
                 </div>
@@ -1480,25 +1574,97 @@ const create = () => {
 
                 <div>
                   <label className="ui-label">ตั้งยอดบัญชีใหม่ (ไม่บังคับ)</label>
-                  <div className="flex items-center gap-2">
+
+                  {eType === "credit" ? (
+                    <div className="mt-2 ui-card-strong p-4">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="text-xs font-extrabold text-gray-800/70">เครื่องหมาย</div>
+                        <div className="flex items-center rounded-2xl overflow-hidden border border-gray-900/10 bg-white/50">
+                          <button
+                            type="button"
+                            onClick={() => setEDesiredBalance(forceSignNumberString(eDesiredBalance, +1))}
+                            className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                              !String(eDesiredBalance || "").trim().startsWith("-")
+                                ? "bg-gray-900 text-white"
+                                : "text-gray-900/80 hover:bg-white/60"
+                            }`}
+                          >
+                            บวก
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEDesiredBalance(forceSignNumberString(eDesiredBalance, -1))}
+                            className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                              String(eDesiredBalance || "").trim().startsWith("-")
+                                ? "bg-gray-900 text-white"
+                                : "text-gray-900/80 hover:bg-white/60"
+                            }`}
+                          >
+                            ติดลบ
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <input
+                          value={String(eDesiredBalance || "").replace(/^-/, "")}
+                          onChange={(e) => {
+                            const cleaned = sanitizeMoneyInput(e.target.value, { maxDecimals: 2 });
+                            const abs = cleaned.replace(/^-/, "");
+                            const hasNeg = String(eDesiredBalance || "").trim().startsWith("-");
+                            const wantsNeg = cleaned.startsWith("-") ? true : hasNeg;
+                            const next = abs ? (wantsNeg ? `-${abs}` : abs) : wantsNeg ? "-" : "";
+                            setEDesiredBalance(next);
+                          }}
+                          className="ui-input text-lg font-extrabold tabular-nums"
+                          placeholder="เช่น 5000.00"
+                          inputMode="decimal"
+                          autoComplete="off"
+                        />
+
+                        <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                          <div className="ui-help">ตั้งยอดติดลบเพื่อสะท้อนยอดหนี้บัตรเครดิต</div>
+                          <div className="text-xs font-black tabular-nums text-gray-900">
+                            {(() => {
+                              const v = String(eDesiredBalance || "").trim();
+                              if (!v || v === "-") return "—";
+                              return formatCurrency(parseMoneyToSatang(v));
+                            })()}
+                          </div>
+                        </div>
+
+                        {(() => {
+                          const v = String(eDesiredBalance || "").trim();
+                          if (!v || v === "-") return null;
+                          const desired = parseMoneyToSatang(v);
+                          const current = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
+                          const delta = desired - current;
+                          if (delta === 0) return <div className="mt-3 ui-help">ยอดใหม่เท่ากับยอดเดิม</div>;
+                          return (
+                            <div className="mt-3 ui-card p-3">
+                              <div className="text-xs font-extrabold text-gray-800/70">ส่วนต่างที่จะบันทึก</div>
+                              <div className="mt-1 text-sm font-black text-gray-900 tabular-nums">
+                                {formatCurrency(Math.abs(delta))} ({delta > 0 ? "เพิ่ม" : "ลด"})
+                              </div>
+                              <div className="mt-1 text-[11px] text-gray-800/60 font-bold leading-relaxed">
+                                เมื่อกดบันทึก ระบบจะถามว่าจะเก็บส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือปรับเงียบๆ
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  ) : (
                     <input
                       value={eDesiredBalance}
                       onChange={(e) => setEDesiredBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
-                      className="ui-input flex-1"
-                      placeholder={eType === "credit" ? "เช่น -5000" : "เช่น 505"}
+                      className="ui-input tabular-nums"
+                      placeholder="เช่น 505.00"
                       inputMode="decimal"
+                      autoComplete="off"
                     />
-                    {eType === "credit" ? (
-                      <button
-                        type="button"
-                        onClick={() => setEDesiredBalance(toggleSignedNumberString(eDesiredBalance))}
-                        className="ui-btn ui-btn-secondary w-12 px-0"
-                        title="สลับเครื่องหมายบวก/ลบ"
-                      >
-                        ±
-                      </button>
-                    ) : null}
-                  </div>
+                  )}
+
                   <div className="ui-help mt-1">
                     ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
                   </div>
