@@ -5,6 +5,7 @@ import { useAppStore } from "../store/store";
 import { calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
+import { ACCOUNT_COLORS, ACCOUNT_ICONS, EMOJI_PRESETS } from "../constants/presets.jsx";
 import {
   Plus,
   Trash2,
@@ -21,6 +22,331 @@ import {
 } from "lucide-react";
 
 import AppHeader from "../components/AppHeader";
+
+// ===== Visual helpers =====
+const isImageSrc = (v) => {
+  const s = String(v || "").trim();
+  return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://");
+};
+
+const resolvePresetIcon = (iconId) => {
+  const id = String(iconId || "").trim();
+  if (!id) return null;
+  const found = (ACCOUNT_ICONS || []).find((x) => String(x?.id || "") === id);
+  return found?.icon || null;
+};
+
+const defaultEmojiForType = (t) => {
+  if (t === "cash") return "💵";
+  if (t === "bank") return "🏦";
+  if (t === "credit") return "💳";
+  return "💳";
+};
+
+const defaultIconIdForType = (t) => {
+  if (t === "cash") return "cash";
+  if (t === "bank") return "bank";
+  if (t === "credit") return "card";
+  return "wallet";
+};
+
+const pickRandomColor = () => {
+  const palette = Array.isArray(ACCOUNT_COLORS) && ACCOUNT_COLORS.length ? ACCOUNT_COLORS : ["#111827"];
+  return palette[Math.floor(Math.random() * palette.length)];
+};
+
+const shadeHex = (hex, pct = -18) => {
+  const h = String(hex || "#111827").trim();
+  const m = h.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  if (!m) return h;
+  const clamp = (n) => Math.min(255, Math.max(0, n));
+  const r = clamp(parseInt(m[1], 16) + Math.round((pct / 100) * 255));
+  const g = clamp(parseInt(m[2], 16) + Math.round((pct / 100) * 255));
+  const b = clamp(parseInt(m[3], 16) + Math.round((pct / 100) * 255));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+};
+
+function AccountVisualPreview({ name, type, currency, color, mode, iconId, emoji, image }) {
+  const bg = String(color || "#111827");
+  const bg2 = shadeHex(bg, -14);
+
+  const iconNode = (() => {
+    if (mode === "image" && isImageSrc(image)) {
+      return (
+        <img
+          src={String(image)}
+          alt=""
+          className="w-full h-full object-cover"
+          draggable={false}
+        />
+      );
+    }
+    if (mode === "preset") {
+      const preset = resolvePresetIcon(iconId);
+      if (preset) return <span className="text-white">{preset}</span>;
+    }
+    const raw = String(emoji || "").trim() || defaultEmojiForType(type);
+    return <span className="text-white text-[22px] leading-none drop-shadow">{raw}</span>;
+  })();
+
+  return (
+    <div
+      className="ui-card-strong p-4 overflow-hidden"
+      style={{
+        background:
+          `radial-gradient(900px 300px at 15% 0%, rgba(255,255,255,0.22), transparent 60%), ` +
+          `linear-gradient(135deg, ${bg}, ${bg2})`,
+        borderColor: "rgba(255,255,255,0.18)",
+      }}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div
+          className="w-14 h-14 rounded-3xl overflow-hidden flex items-center justify-center border border-white/15 shadow-lg shrink-0"
+          style={{ background: "rgba(255,255,255,0.10)" }}
+          aria-hidden="true"
+        >
+          {iconNode}
+        </div>
+        <div className="min-w-0">
+          <div className="text-base font-black text-white truncate">{String(name || "").trim() || "บัญชีใหม่"}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span
+              className="ui-chip"
+              style={{
+                background: "rgba(255,255,255,0.14)",
+                borderColor: "rgba(255,255,255,0.18)",
+                color: "white",
+              }}
+            >
+              {typeLabel(type)}
+            </span>
+            <span
+              className="ui-chip"
+              style={{
+                background: "rgba(255,255,255,0.14)",
+                borderColor: "rgba(255,255,255,0.18)",
+                color: "white",
+              }}
+            >
+              {currencyLabel(currency)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountVisualPicker({
+  type,
+  mode,
+  setMode,
+  iconId,
+  setIconId,
+  emoji,
+  setEmoji,
+  image,
+  setImage,
+  color,
+  setColor,
+  onRandomColor,
+}) {
+  const [emojiSearch, setEmojiSearch] = useState("");
+
+  const emojiList = useMemo(() => {
+    const list = Array.isArray(EMOJI_PRESETS) ? EMOJI_PRESETS : [];
+    const s = String(emojiSearch || "").trim();
+    if (!s) return list;
+    return list.filter((x) => String(x).includes(s));
+  }, [emojiSearch]);
+
+  return (
+    <div className="mt-4 ui-card p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-sm font-black text-gray-900">รูปลักษณ์บัญชี</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setMode("preset")}
+            className={`ui-chip ${mode === "preset" ? "bg-white/90" : ""}`}
+          >
+            ชุดไอคอน
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("emoji")}
+            className={`ui-chip ${mode === "emoji" ? "bg-white/90" : ""}`}
+          >
+            Emoji
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("image")}
+            className={`ui-chip ${mode === "image" ? "bg-white/90" : ""}`}
+          >
+            รูป
+          </button>
+        </div>
+      </div>
+
+      {mode === "preset" ? (
+        <div className="mt-3">
+          <div className="text-xs font-extrabold text-gray-800/70">เลือกไอคอน</div>
+          <div className="mt-2 grid grid-cols-4 sm:grid-cols-6 gap-2">
+            {(ACCOUNT_ICONS || []).map((it) => {
+              const selected = String(iconId || "") === String(it?.id || "");
+              return (
+                <button
+                  type="button"
+                  key={it.id}
+                  onClick={() => setIconId(String(it.id))}
+                  className={`min-h-[44px] rounded-2xl border text-gray-900 flex flex-col items-center justify-center gap-1 px-2 py-2 overflow-hidden ${
+                    selected ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                  }`}
+                  title={it.name}
+                >
+                  <span className="text-gray-900">{it.icon}</span>
+                  <span className="text-[10px] font-extrabold text-gray-800/70 truncate max-w-full">{it.name}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 ui-help">
+            แนะนำ: {type === "bank" ? "ธนาคาร" : type === "cash" ? "เงินสด" : type === "credit" ? "บัตรเครดิต" : "กระเป๋า"}
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "emoji" ? (
+        <div className="mt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="ui-label">Emoji</label>
+              <input
+                value={emoji}
+                onChange={(e) => setEmoji(e.target.value)}
+                className="ui-input"
+                placeholder={defaultEmojiForType(type)}
+              />
+              <div className="ui-help mt-1">ใส่ 1 ตัว (หรือ 2 ตัว) เพื่อเป็นรูปบัญชี</div>
+            </div>
+            <div>
+              <label className="ui-label">ค้นหา (ไม่บังคับ)</label>
+              <input
+                value={emojiSearch}
+                onChange={(e) => setEmojiSearch(e.target.value)}
+                className="ui-input"
+                placeholder="วาง emoji เพื่อกรอง"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-8 sm:grid-cols-10 gap-1.5">
+            {emojiList.slice(0, 60).map((em) => {
+              const selected = String(emoji || "").trim() === String(em);
+              return (
+                <button
+                  type="button"
+                  key={em}
+                  onClick={() => setEmoji(String(em))}
+                  className={`h-10 w-10 rounded-2xl flex items-center justify-center border ${
+                    selected ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                  }`}
+                  title={String(em)}
+                >
+                  <span className="text-[18px] leading-none">{em}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "image" ? (
+        <div className="mt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="ui-label">อัปโหลดรูป</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const f = e.target.files && e.target.files[0];
+                  if (!f) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const src = String(reader.result || "");
+                    setImage(src);
+                  };
+                  reader.readAsDataURL(f);
+                }}
+                className="ui-input"
+              />
+              <div className="ui-help mt-1">แนะนำรูปสี่เหลี่ยมจัตุรัส (จะครอปอัตโนมัติ)</div>
+            </div>
+            <div>
+              <label className="ui-label">หรือใส่ลิงก์รูป</label>
+              <input
+                value={isImageSrc(image) ? image : ""}
+                onChange={(e) => setImage(e.target.value)}
+                className="ui-input"
+                placeholder="https://... หรือ data:image/..."
+              />
+            </div>
+          </div>
+
+          {isImageSrc(image) ? (
+            <div className="mt-3 flex items-center gap-3">
+              <div className="w-14 h-14 rounded-3xl overflow-hidden border border-gray-900/10 bg-white/70 shadow-sm">
+                <img src={String(image)} alt="" className="w-full h-full object-cover" draggable={false} />
+              </div>
+              <button type="button" className="ui-btn ui-btn-secondary" onClick={() => setImage("")}
+              >
+                ลบรูป
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-4">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-xs font-extrabold text-gray-800/70">สีบัญชี</div>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={String(color || "#111827")}
+              onChange={(e) => setColor(e.target.value)}
+              className="w-12 h-11 rounded-2xl bg-transparent border border-gray-900/10 overflow-hidden"
+              title="เลือกสี"
+            />
+            <button type="button" onClick={onRandomColor} className="ui-btn ui-btn-secondary">
+              <Sparkles size={18} />
+              สุ่มสี
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          {(ACCOUNT_COLORS || []).slice(0, 16).map((c) => {
+            const selected = String(c).toLowerCase() === String(color || "").toLowerCase();
+            return (
+              <button
+                key={c}
+                type="button"
+                className={`w-10 h-10 rounded-2xl border shadow-sm ${selected ? "ring-4 ring-indigo-300" : ""}`}
+                style={{ background: c, borderColor: "rgba(15, 23, 42, 0.12)" }}
+                onClick={() => setColor(c)}
+                title={c}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * AccountsView
@@ -72,19 +398,8 @@ const formatMoney = (n, currency = "THB") => {
   }
 };
 
-const randomColor = () => {
-  const palette = [
-    "#111827",
-    "#0F766E",
-    "#1D4ED8",
-    "#7C3AED",
-    "#B45309",
-    "#BE123C",
-    "#0E7490",
-    "#15803D",
-  ];
-  return palette[Math.floor(Math.random() * palette.length)];
-};
+// keep legacy function name used throughout the view
+const randomColor = () => pickRandomColor();
 
 const generateId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -121,7 +436,11 @@ export default function AccountsView() {
   const [cType, setCType] = useState("bank");
   const [cCurrency, setCCurrency] = useState("THB");
   const [cAccountNumber, setCAccountNumber] = useState("");
-  const [cIcon, setCIcon] = useState("💳");
+  // visual
+  const [cIconMode, setCIconMode] = useState("preset"); // preset | emoji | image
+  const [cIconId, setCIconId] = useState(defaultIconIdForType("bank"));
+  const [cIcon, setCIcon] = useState(defaultEmojiForType("bank")); // legacy emoji fallback
+  const [cImage, setCImage] = useState("");
   const [cColor, setCColor] = useState(randomColor());
 
   // ✅ Opening balance (create)
@@ -144,12 +463,31 @@ export default function AccountsView() {
     setOpenCreateAdjustConfirm(false);
     setPendingCreateAccount(null);
     setPendingCreateAdjust(null);
-    setCIcon("💳");
+    setCIconMode("preset");
+    setCIconId(defaultIconIdForType("bank"));
+    setCIcon(defaultEmojiForType("bank"));
+    setCImage("");
     setCColor(randomColor());
     setCCreditLimit("");
     setCStatementDay(20);
     setCDueDay(5);
   };
+
+  // auto-suggest icon when changing account type (create modal only)
+  useEffect(() => {
+    if (!openCreate) return;
+    // keep emoji fallback aligned
+    if (cIconMode !== "emoji") setCIcon(defaultEmojiForType(cType));
+    // if using preset and icon is one of the default set, follow the type
+    if (cIconMode === "preset") {
+      const defaults = new Set(["cash", "bank", "card"]);
+      if (!cIconId || defaults.has(String(cIconId))) {
+        setCIconId(defaultIconIdForType(cType));
+      }
+    }
+    // image mode does not auto-change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cType, openCreate, cIconMode]);
 
 const create = () => {
   if (!cName.trim()) return showAlert?.("กรุณาใส่ชื่อบัญชี");
@@ -160,7 +498,10 @@ const create = () => {
   const baseAccount = {
     id: generateId(),
     name: cName.trim(),
-    icon: (cIcon || "💳").trim() || "💳",
+    // keep emoji as fallback for legacy rendering
+    icon: (String(cIcon || "").trim() || defaultEmojiForType(cType)).slice(0, 4),
+    iconId: cIconMode === "preset" ? String(cIconId || defaultIconIdForType(cType)) : "",
+    image: cIconMode === "image" && isImageSrc(cImage) ? String(cImage) : "",
     color: cColor,
     type: cType,
     currency: cCurrency,
@@ -208,7 +549,11 @@ const create = () => {
   const [eType, setEType] = useState("bank");
   const [eCurrency, setECurrency] = useState("THB");
   const [eAccountNumber, setEAccountNumber] = useState("");
-  const [eIcon, setEIcon] = useState("💳");
+  // visual
+  const [eIconMode, setEIconMode] = useState("preset"); // preset | emoji | image
+  const [eIconId, setEIconId] = useState("");
+  const [eIcon, setEIcon] = useState("💳"); // legacy emoji fallback
+  const [eImage, setEImage] = useState("");
   const [eColor, setEColor] = useState("#111827");
 
   // credit-only edit fields
@@ -228,7 +573,12 @@ const create = () => {
     setEType(acc?.type || "bank");
     setECurrency(acc?.currency || "THB");
     setEAccountNumber(Array.isArray(acc.matchDigits) && acc.matchDigits.length ? acc.matchDigits.join(", ") : String(acc.accountNumber || ""));
-    setEIcon(acc?.icon || "💳");
+    const hasImg = isImageSrc(acc?.image) || isImageSrc(acc?.icon);
+    const hasPreset = String(acc?.iconId || "").trim();
+    setEIconMode(hasImg ? "image" : hasPreset ? "preset" : "emoji");
+    setEIconId(String(acc?.iconId || ""));
+    setEIcon(acc?.icon || defaultEmojiForType(acc?.type));
+    setEImage(String(acc?.image || (isImageSrc(acc?.icon) ? acc?.icon : "")));
     setEColor(acc?.color || "#111827");
 
     setECreditLimit(acc?.creditLimit != null ? formatMoneyInputFromSatang(acc.creditLimit, { emptyIfZero: true }) : "");
@@ -250,7 +600,10 @@ const create = () => {
     setEType("bank");
     setECurrency("THB");
     setEAccountNumber("");
+    setEIconMode("preset");
+    setEIconId("");
     setEIcon("💳");
+    setEImage("");
     setEColor("#111827");
     setECreditLimit("");
     setEStatementDay(20);
@@ -267,7 +620,10 @@ const create = () => {
     const partial = {
       id: eEditing,
       name: eName.trim(),
-      icon: (eIcon || "💳").trim() || "💳",
+      // keep emoji as fallback for legacy rendering
+      icon: (String(eIcon || "").trim() || defaultEmojiForType(eType)).slice(0, 4),
+      iconId: eIconMode === "preset" ? String(eIconId || defaultIconIdForType(eType)) : "",
+      image: eIconMode === "image" && isImageSrc(eImage) ? String(eImage) : "",
       color: eColor,
       type: eType,
       currency: eCurrency,
@@ -532,11 +888,20 @@ const create = () => {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3 min-w-0">
                         <div
-                          className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg border border-white/20"
+                          className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg border border-white/20 overflow-hidden"
                           style={{ background: acc.color || "#111827", color: "white" }}
                           title={acc.name}
                         >
-                          <span className="drop-shadow text-[22px] leading-none">{acc.icon || "💳"}</span>
+                          {(() => {
+                            const img = isImageSrc(acc?.image) ? acc.image : isImageSrc(acc?.icon) ? acc.icon : "";
+                            if (img) {
+                              return <img src={String(img)} alt="" className="w-full h-full object-cover" draggable={false} />;
+                            }
+                            const preset = resolvePresetIcon(acc?.iconId);
+                            if (preset) return <span className="text-white">{preset}</span>;
+                            const raw = String(acc?.icon || "").trim() || defaultEmojiForType(acc?.type);
+                            return <span className="drop-shadow text-[22px] leading-none">{raw}</span>;
+                          })()}
                         </div>
 
                         <div className="min-w-0">
@@ -640,189 +1005,191 @@ const create = () => {
 
       {openCreate ? (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
-          <div className="w-full max-w-lg glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
-            <div className="flex items-start justify-between gap-2">
-              <div>
+          <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <div className="text-lg font-black text-gray-900">เพิ่มบัญชี</div>
-                <div className="text-xs text-gray-800/60 font-bold mt-1 leading-relaxed">
-                  ใส่เลขช่วยจำสำหรับ map ได้หลายชุด เช่น{" "}
-                  <span className="font-black text-gray-900">6345, 4373</span>
+                <div className="text-xs text-gray-800/65 font-bold mt-1 leading-relaxed">
+                  กรอกข้อมูลหลักให้ครบ แล้วค่อยเพิ่ม “เลขช่วยจำ” เพื่อช่วย map จากสลิปได้แม่นยำขึ้น
                 </div>
               </div>
-              <button
-                onClick={() => setOpenCreate(false)}
-                className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
-                title="ปิด"
-              >
+              <button onClick={() => setOpenCreate(false)} className="ui-btn ui-btn-secondary px-3" title="ปิด">
                 <X size={18} />
               </button>
             </div>
 
             <div className="mt-4">
-              <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                ชื่อบัญชี
-              </label>
-              <input
-                value={cName}
-                onChange={(e) => setCName(e.target.value)}
-                className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-                placeholder="เช่น KBank / เงินสด / Visa"
+              <AccountVisualPreview
+                name={cName}
+                type={cType}
+                currency={cCurrency}
+                color={cColor}
+                mode={cIconMode}
+                iconId={cIconId}
+                emoji={cIcon}
+                image={cImage}
               />
             </div>
 
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  ประเภท
-                </label>
-                <select
-                  value={cType}
-                  onChange={(e) => setCType(e.target.value)}
-                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                >
-                  <option value="bank">บัญชีธนาคาร</option>
-                  <option value="cash">เงินสด</option>
-                  <option value="credit">บัตรเครดิต</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  สกุลเงิน
-                </label>
-                <select
-                  value={cCurrency}
-                  onChange={(e) => setCCurrency(e.target.value)}
-                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                >
-                  <option value="THB">THB (฿)</option>
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                </select>
-              </div>
-            </div>
-
-
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  ไอคอน (Emoji)
-                </label>
-                <input
-                  value={cIcon}
-                  onChange={(e) => setCIcon(e.target.value)}
-                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                  placeholder="💳"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  สี
-                </label>
-                <div className="flex items-center gap-2">
+            <div className="mt-4 ui-card p-4">
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="ui-label">ชื่อบัญชี</label>
                   <input
-                    type="color"
-                    value={cColor}
-                    onChange={(e) => setCColor(e.target.value)}
-                    className="w-12 h-12 rounded-2xl bg-transparent border border-white/20 overflow-hidden"
-                    title="เลือกสี"
+                    value={cName}
+                    onChange={(e) => setCName(e.target.value)}
+                    className="ui-input"
+                    placeholder="เช่น KBank / เงินสด / Visa"
+                    autoComplete="off"
                   />
-                  <button
-                    onClick={() => setCColor(randomColor())}
-                    className="flex-1 px-3 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold flex items-center justify-center gap-2 active:scale-[0.98]"
-                    title="สุ่มสี"
-                  >
-                    <Sparkles size={18} />
-                    สุ่ม
-                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="ui-label">ประเภท</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCType("bank")}
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                          cType === "bank" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                        }`}
+                      >
+                        <Wallet size={18} /> ธนาคาร
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCType("cash")}
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                          cType === "cash" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                        }`}
+                      >
+                        <Banknote size={18} /> เงินสด
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCType("credit")}
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                          cType === "credit" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                        }`}
+                      >
+                        <CreditCard size={18} /> บัตร
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="ui-label">สกุลเงิน</label>
+                    <select value={cCurrency} onChange={(e) => setCCurrency(e.target.value)} className="ui-select">
+                      <option value="THB">THB (฿)</option>
+                      <option value="USD">USD ($)</option>
+                      <option value="EUR">EUR (€)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-4">
-            <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-              เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)
-            </label>
-            <input
-              value={cAccountNumber}
-              onChange={(e) => setCAccountNumber(e.target.value)}
-              className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-              placeholder="เช่น 6345, 4373 หรือ 1234567890"
-              inputMode="numeric"
-              autoComplete="off"
+            <AccountVisualPicker
+              type={cType}
+              mode={cIconMode}
+              setMode={setCIconMode}
+              iconId={cIconId}
+              setIconId={setCIconId}
+              emoji={cIcon}
+              setEmoji={(v) => {
+                setCIconMode("emoji");
+                setCIcon(v);
+              }}
+              image={cImage}
+              setImage={(v) => {
+                setCIconMode("image");
+                setCImage(v);
+              }}
+              color={cColor}
+              setColor={setCColor}
+              onRandomColor={() => setCColor(randomColor())}
             />
-            <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
-              รองรับหลายชุด (คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค) • แนะนำใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิป
-              และถ้าสลิปแสดงเลขได้หลายแบบ ให้ใส่หลายชุด เช่น <span className="font-bold">6345, 4373</span> (เหมาะมากกับบัญชีบัตรเครดิต)
-            </p>
 
-            {(() => {
-              const list = parseDigitsList(cAccountNumber);
-              const primary = choosePrimaryDigits(list);
-              if (!list.length) return null;
-              return (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {list.map((d) => (
-                    <span
-                      key={d}
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
-                        d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/30 text-gray-900 border-white/20"
-                      }`}
-                      title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
-                    >
-                      {formatDigitsChip(d)}
-                      {d === primary ? <span className="ml-1 opacity-90">• หลัก</span> : null}
-                    </span>
-                  ))}
+            <div className="mt-4 ui-card p-4">
+              <div className="text-sm font-black text-gray-900">รายละเอียดเพิ่มเติม</div>
+
+              <div className="mt-3">
+                <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
+                <input
+                  value={cAccountNumber}
+                  onChange={(e) => setCAccountNumber(e.target.value)}
+                  className="ui-input"
+                  placeholder="เช่น 6345, 4373 หรือ 1234567890"
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+                <div className="ui-help mt-1">
+                  รองรับหลายชุด (คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค) • แนะนำใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิป
                 </div>
-              );
-            })()}
-          </div>
 
-            <div className="mt-4">
-  <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-    ยอดตั้งต้นในบัญชี (ไม่บังคับ)
-  </label>
-  <div className="flex items-center gap-2 min-w-0">
-    <input
-      value={cInitialBalance}
-      onChange={(e) => setCInitialBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
-      className="flex-1 min-w-0 glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-      placeholder={cType === "credit" ? "เช่น -5000.00" : "เช่น 500.00"}
-      inputMode="decimal"
-    />
-    {cType === "credit" ? (
-      <button
-        type="button"
-        onClick={() => setCInitialBalance(toggleSignedNumberString(cInitialBalance))}
-        className="shrink-0 w-12 h-12 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
-        title="สลับเครื่องหมายบวก/ลบ"
-      >
-        ±
-      </button>
-    ) : null}
-  </div>
-  <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
-    ถ้ากรอก ระบบจะถามว่าจะบันทึกยอดตั้งต้นเป็นรายการ{" "}
-    <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
-  </p>
-</div>
+                {(() => {
+                  const list = parseDigitsList(cAccountNumber);
+                  const primary = choosePrimaryDigits(list);
+                  if (!list.length) return null;
+                  return (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {list.map((d) => (
+                        <span
+                          key={d}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
+                            d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/70 text-gray-900 border-gray-900/10"
+                          }`}
+                          title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
+                        >
+                          {formatDigitsChip(d)}
+                          {d === primary ? <span className="ml-1 opacity-90">• หลัก</span> : null}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
 
-{/* Credit-only */}
+              <div className="mt-4">
+                <label className="ui-label">ยอดตั้งต้นในบัญชี (ไม่บังคับ)</label>
+                <div className="flex items-center gap-2 min-w-0">
+                  <input
+                    value={cInitialBalance}
+                    onChange={(e) => setCInitialBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
+                    className="ui-input flex-1"
+                    placeholder={cType === "credit" ? "เช่น -5000.00" : "เช่น 500.00"}
+                    inputMode="decimal"
+                  />
+                  {cType === "credit" ? (
+                    <button
+                      type="button"
+                      onClick={() => setCInitialBalance(toggleSignedNumberString(cInitialBalance))}
+                      className="ui-btn ui-btn-secondary w-12 px-0"
+                      title="สลับเครื่องหมายบวก/ลบ"
+                    >
+                      ±
+                    </button>
+                  ) : null}
+                </div>
+                <div className="ui-help mt-1">
+                  ถ้ากรอก ระบบจะถามว่าจะบันทึกยอดตั้งต้นเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
+                </div>
+              </div>
+            </div>
+
             {cType === "credit" ? (
-              <div className="mt-4 glass-card rounded-3xl p-4 bg-white/20 border border-white/20">
+              <div className="mt-4 ui-card p-4">
                 <div className="text-sm font-black text-gray-900 flex items-center gap-2">
-                  <CreditCard size={18} />
-                  ตั้งค่าบัตรเครดิต
+                  <CreditCard size={18} /> ตั้งค่าบัตรเครดิต
                 </div>
 
                 <div className="mt-3">
-                  <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                    วงเงิน
-                  </label>
+                  <label className="ui-label">วงเงิน</label>
                   <input
                     value={cCreditLimit}
                     onChange={(e) => setCCreditLimit(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
-                    className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                    className="ui-input"
                     placeholder="เช่น 50000.00"
                     inputMode="decimal"
                   />
@@ -830,50 +1197,38 @@ const create = () => {
 
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                      วันตัดรอบ
-                    </label>
+                    <label className="ui-label">วันตัดรอบ</label>
                     <input
                       value={cStatementDay}
                       onChange={(e) => setCStatementDay(Number(e.target.value || 1))}
-                      className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                      className="ui-input"
                       placeholder="20"
                       inputMode="numeric"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                      วันครบกำหนด
-                    </label>
+                    <label className="ui-label">วันครบกำหนด</label>
                     <input
                       value={cDueDay}
                       onChange={(e) => setCDueDay(Number(e.target.value || 1))}
-                      className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                      className="ui-input"
                       placeholder="5"
                       inputMode="numeric"
                     />
                   </div>
                 </div>
 
-                <div className="text-[11px] text-gray-800/55 mt-2 leading-relaxed">
-                  แนะนำใส่เลขช่วยจำสำหรับ map เป็น <span className="font-black text-gray-900">เลขท้ายบนสลิป</span> และ
-                  <span className="font-black text-gray-900">เลขท้ายหน้าบัตร</span> ถ้ามีหลายแบบ เช่น{" "}
-                  <span className="font-black text-gray-900">6345, 4373</span>
+                <div className="ui-help mt-2">
+                  แนะนำใส่เลขช่วยจำให้ตรงกับเลขท้ายบนสลิป และเลขท้ายหน้าบัตร (ถ้ามีหลายแบบ ใส่หลายชุดได้)
                 </div>
               </div>
             ) : null}
 
             <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setOpenCreate(false)}
-                className="px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
-              >
+              <button onClick={() => setOpenCreate(false)} className="ui-btn ui-btn-secondary">
                 ยกเลิก
               </button>
-              <button
-                onClick={create}
-                className="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
-              >
+              <button onClick={create} className="ui-btn ui-btn-primary">
                 บันทึก
               </button>
             </div>
@@ -967,206 +1322,202 @@ const create = () => {
 {/* Edit Modal */}
       {openEdit ? (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
-          <div className="w-full max-w-lg glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
-            <div className="flex items-start justify-between gap-2">
-              <div>
+          <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <div className="text-lg font-black text-gray-900">แก้ไขบัญชี</div>
-                <div className="text-xs text-gray-800/60 font-bold mt-1">
-                  รองรับเลขช่วยจำหลายชุด เช่น{" "}
-                  <span className="font-black text-gray-900">6345, 4373</span>
+                <div className="text-xs text-gray-800/65 font-bold mt-1">
+                  รองรับเลขช่วยจำหลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span>
                 </div>
               </div>
-              <button
-                onClick={closeEditModal}
-                className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
-                title="ปิด"
-              >
+              <button onClick={closeEditModal} className="ui-btn ui-btn-secondary px-3" title="ปิด">
                 <X size={18} />
               </button>
             </div>
 
             <div className="mt-4">
-              <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                ชื่อบัญชี
-              </label>
-              <input
-                value={eName}
-                onChange={(e) => setEName(e.target.value)}
-                className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-                placeholder="เช่น KBank / เงินสด / Visa"
+              <AccountVisualPreview
+                name={eName}
+                type={eType}
+                currency={eCurrency}
+                color={eColor}
+                mode={eIconMode}
+                iconId={eIconId}
+                emoji={eIcon}
+                image={eImage}
               />
             </div>
 
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  ประเภท
-                </label>
-                <select
-                  value={eType}
-                  onChange={(e) => setEType(e.target.value)}
-                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                >
-                  <option value="bank">บัญชีธนาคาร</option>
-                  <option value="cash">เงินสด</option>
-                  <option value="credit">บัตรเครดิต</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  สกุลเงิน
-                </label>
-                <select
-                  value={eCurrency}
-                  onChange={(e) => setECurrency(e.target.value)}
-                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                >
-                  <option value="THB">THB (฿)</option>
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                </select>
-              </div>
-            </div>
+            <div className="mt-4 ui-card p-4">
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="ui-label">ชื่อบัญชี</label>
+                  <input value={eName} onChange={(e) => setEName(e.target.value)} className="ui-input" placeholder="เช่น KBank / เงินสด / Visa" />
+                </div>
 
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  ไอคอน (Emoji)
-                </label>
-                <input
-                  value={eIcon}
-                  onChange={(e) => setEIcon(e.target.value)}
-                  className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                  placeholder="💳"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                  สี
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={eColor}
-                    onChange={(e) => setEColor(e.target.value)}
-                    className="w-12 h-12 rounded-2xl bg-transparent border border-white/20 overflow-hidden"
-                    title="เลือกสี"
-                  />
-                  <button
-                    onClick={() => setEColor(randomColor())}
-                    className="flex-1 px-3 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold flex items-center justify-center gap-2 active:scale-[0.98]"
-                    title="สุ่มสี"
-                  >
-                    <Sparkles size={18} />
-                    สุ่ม
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="ui-label">ประเภท</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEType("bank")}
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                          eType === "bank" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                        }`}
+                      >
+                        <Wallet size={18} /> ธนาคาร
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEType("cash")}
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                          eType === "cash" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                        }`}
+                      >
+                        <Banknote size={18} /> เงินสด
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEType("credit")}
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                          eType === "credit" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
+                        }`}
+                      >
+                        <CreditCard size={18} /> บัตร
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="ui-label">สกุลเงิน</label>
+                    <select value={eCurrency} onChange={(e) => setECurrency(e.target.value)} className="ui-select">
+                      <option value="THB">THB (฿)</option>
+                      <option value="USD">USD ($)</option>
+                      <option value="EUR">EUR (€)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
 
-                        <div className="mt-4 min-w-0">
-                          <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                            เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)
-                          </label>
-                          <input
-                            value={eAccountNumber}
-                            onChange={(e) => setEAccountNumber(e.target.value)}
-                            className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 font-extrabold text-gray-900"
-                            placeholder="เช่น 6345, 4373 หรือ 1234567890"
-                            inputMode="numeric"
-                            autoComplete="off"
-                          />
-                          <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
-                            รองรับหลายชุด (คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค) • ใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิปได้เลย — ถ้าเป็นบัตรเครดิต แนะนำใส่ทั้งเลขที่สลิปแสดงและเลขท้ายหน้าบัตร เช่น{" "}
-                            <span className="font-bold">6345, 4373</span>
-                          </p>
+            <AccountVisualPicker
+              type={eType}
+              mode={eIconMode}
+              setMode={setEIconMode}
+              iconId={eIconId}
+              setIconId={(v) => {
+                setEIconMode("preset");
+                setEIconId(v);
+              }}
+              emoji={eIcon}
+              setEmoji={(v) => {
+                setEIconMode("emoji");
+                setEIcon(v);
+              }}
+              image={eImage}
+              setImage={(v) => {
+                setEIconMode("image");
+                setEImage(v);
+              }}
+              color={eColor}
+              setColor={setEColor}
+              onRandomColor={() => setEColor(randomColor())}
+            />
 
-                          {/* ✅ Adjust balance */}
-                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
-                            <div className="col-span-2 sm:col-span-1 min-w-0">
-                              <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                                ยอดปัจจุบัน (คำนวณ)
-                              </label>
-                              <div className="w-full rounded-2xl px-4 py-3 bg-white/20 border border-white/20 font-extrabold text-gray-900">
-                                {(() => {
-                                  const n = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
-                                  return (eCurrency || "THB") === "THB"
-                                    ? formatCurrency(n)
-                                    : `${Number(n || 0).toLocaleString()} ${(eCurrency || "").toUpperCase()}`;
-                                })()}
-                              </div>
-                            </div>
+            <div className="mt-4 ui-card p-4">
+              <div className="text-sm font-black text-gray-900">การจับคู่บัญชี + ปรับยอด</div>
 
-                            <div className="col-span-2 sm:col-span-1 min-w-0">
-                              <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                                ตั้งยอดบัญชีใหม่ (ไม่บังคับ)
-                              </label>
+              <div className="mt-3">
+                <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
+                <input
+                  value={eAccountNumber}
+                  onChange={(e) => setEAccountNumber(e.target.value)}
+                  className="ui-input"
+                  placeholder="เช่น 6345, 4373 หรือ 1234567890"
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+                <div className="ui-help mt-1">
+                  แนะนำ: ใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิป • ถ้าเป็นบัตรเครดิต ใส่ทั้งเลขท้ายบนสลิป และเลขท้ายหน้าบัตร
+                </div>
 
-                              <div className="flex items-center gap-2 min-w-0">
-                                <input
-                                  value={eDesiredBalance}
-                                  onChange={(e) => setEDesiredBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
-                                  className="flex-1 min-w-0 glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
-                                  placeholder={eType === "credit" ? "เช่น -5000" : "เช่น 505"}
-                                  inputMode="decimal"
-                                />
-                                {eType === "credit" ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setEDesiredBalance(toggleSignedNumberString(eDesiredBalance))}
-                                    className="shrink-0 w-12 h-12 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
-                                    title="สลับเครื่องหมายบวก/ลบ"
-                                  >
-                                    ±
-                                  </button>
-                                ) : null}
-                              </div>
+                {(() => {
+                  const list = parseDigitsList(eAccountNumber);
+                  const primary = choosePrimaryDigits(list);
+                  if (!list.length) return null;
+                  return (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {list.map((d) => (
+                        <span
+                          key={d}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
+                            d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/70 text-gray-900 border-gray-900/10"
+                          }`}
+                          title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
+                        >
+                          {formatDigitsChip(d)}
+                          {d === primary ? <span className="ml-1 opacity-90">• หลัก</span> : null}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
 
-                              <p className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
-                                ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ{" "}
-                                <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (นับเป็น Income/Expense) หรือไม่
-                              </p>
-                            </div>
-                          </div>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="ui-label">ยอดปัจจุบัน (คำนวณ)</label>
+                  <div className="ui-input bg-white/40" aria-disabled="true">
+                    {(() => {
+                      const n = calcAccountBalance(store.state.accounts, store.state.transactions, eEditing);
+                      return (eCurrency || "THB") === "THB"
+                        ? formatCurrency(n)
+                        : `${Number(n || 0).toLocaleString()} ${(eCurrency || "").toUpperCase()}`;
+                    })()}
+                  </div>
+                </div>
 
-                          {(() => {
-                            const list = parseDigitsList(eAccountNumber);
-                            const primary = choosePrimaryDigits(list);
-                            if (!list.length) return null;
-                            return (
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {list.map((d) => (
-                                  <span
-                                    key={d}
-                                    className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
-                                      d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/30 text-gray-900 border-white/20"
-                                    }`}
-                                    title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
-                                  >
-                                    {formatDigitsChip(d)}
-                                    {d === primary ? <span className="ml-1 opacity-90">• หลัก</span> : null}
-                                  </span>
-                                ))}
-                              </div>
-                            );
-                          })()}
-                        </div>
-{/* Credit-only */}
+                <div>
+                  <label className="ui-label">ตั้งยอดบัญชีใหม่ (ไม่บังคับ)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={eDesiredBalance}
+                      onChange={(e) => setEDesiredBalance(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
+                      className="ui-input flex-1"
+                      placeholder={eType === "credit" ? "เช่น -5000" : "เช่น 505"}
+                      inputMode="decimal"
+                    />
+                    {eType === "credit" ? (
+                      <button
+                        type="button"
+                        onClick={() => setEDesiredBalance(toggleSignedNumberString(eDesiredBalance))}
+                        className="ui-btn ui-btn-secondary w-12 px-0"
+                        title="สลับเครื่องหมายบวก/ลบ"
+                      >
+                        ±
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="ui-help mt-1">
+                    ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {eType === "credit" ? (
-              <div className="mt-4 glass-card rounded-3xl p-4 bg-white/20 border border-white/20">
+              <div className="mt-4 ui-card p-4">
                 <div className="text-sm font-black text-gray-900 flex items-center gap-2">
-                  <CreditCard size={18} />
-                  ตั้งค่าบัตรเครดิต
+                  <CreditCard size={18} /> ตั้งค่าบัตรเครดิต
                 </div>
 
                 <div className="mt-3">
-                  <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                    วงเงิน
-                  </label>
+                  <label className="ui-label">วงเงิน</label>
                   <input
                     value={eCreditLimit}
                     onChange={(e) => setECreditLimit(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
-                    className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                    className="ui-input"
                     placeholder="เช่น 50000.00"
                     inputMode="decimal"
                   />
@@ -1174,25 +1525,21 @@ const create = () => {
 
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                      วันตัดรอบ
-                    </label>
+                    <label className="ui-label">วันตัดรอบ</label>
                     <input
                       value={eStatementDay}
                       onChange={(e) => setEStatementDay(Number(e.target.value || 1))}
-                      className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                      className="ui-input"
                       placeholder="20"
                       inputMode="numeric"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-gray-800/70 mb-1 block">
-                      วันครบกำหนด
-                    </label>
+                    <label className="ui-label">วันครบกำหนด</label>
                     <input
                       value={eDueDay}
                       onChange={(e) => setEDueDay(Number(e.target.value || 1))}
-                      className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none font-extrabold text-gray-900"
+                      className="ui-input"
                       placeholder="5"
                       inputMode="numeric"
                     />
@@ -1201,7 +1548,7 @@ const create = () => {
               </div>
             ) : null}
 
-            <div className="mt-4 flex items-center justify-between gap-2">
+            <div className="mt-4 flex items-center justify-between gap-2 flex-wrap">
               <button
                 onClick={() => {
                   if (!eEditing) return;
@@ -1213,23 +1560,17 @@ const create = () => {
                   closeEditModal();
                   showAlert("ลบแล้ว", "warn");
                 }}
-                className="px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold flex items-center gap-2 active:scale-[0.98]"
+                className="ui-btn ui-btn-secondary border-red-200 bg-red-50/70 text-red-700"
               >
                 <Trash2 size={18} />
                 ลบบัญชี
               </button>
 
               <div className="flex items-center gap-2">
-                <button
-                  onClick={closeEditModal}
-                  className="px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
-                >
+                <button onClick={closeEditModal} className="ui-btn ui-btn-secondary">
                   ยกเลิก
                 </button>
-                <button
-                  onClick={saveEdit}
-                  className="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
-                >
+                <button onClick={saveEdit} className="ui-btn ui-btn-primary">
                   บันทึก
                 </button>
               </div>
