@@ -147,10 +147,41 @@ const ensureCategories = (cats) => {
     ? mergeCategoriesById(incomeIn, DEFAULT_CATEGORIES.income)
     : DEFAULT_CATEGORIES.income;
 
+  const sanitizeAndMigrate = (type, merged) => {
+    const sanitized = sanitizeHierarchyOneLevel(merged);
+
+    // ✅ Lightweight migration: keep existing users tidy when we introduce new mains.
+    // Only apply when a category is still a root (parentId empty) and NOT deleted.
+    // (Users who intentionally reorganized categories won't be affected.)
+    const list = sanitized.map((c) => ({ ...c }));
+    const byId = new Map(list.map((c) => [String(c.id), c]));
+
+    const setParentIfRoot = (childId, newParentId) => {
+      const child = byId.get(String(childId));
+      const parent = byId.get(String(newParentId));
+      if (!child || !parent) return;
+      if (child.isDeleted || child.deletedAt) return;
+      if (parent.isDeleted || parent.deletedAt) return;
+      const pid = String(child.parentId || "").trim();
+      if (pid) return;
+      child.parentId = String(newParentId);
+    };
+
+    if (type === "expense") {
+      setParentIfRoot("rent", "housing");
+      setParentIfRoot("home", "housing");
+      setParentIfRoot("kids", "family");
+      setParentIfRoot("pets", "family");
+      setParentIfRoot("beauty", "personal_care");
+    }
+
+    return sanitizeHierarchyOneLevel(list);
+  };
+
   // ✅ keep hierarchy valid (no self parent, no missing parent, no parent of parent)
   return {
-    expense: sanitizeHierarchyOneLevel(mergedExpense),
-    income: sanitizeHierarchyOneLevel(mergedIncome),
+    expense: sanitizeAndMigrate("expense", mergedExpense),
+    income: sanitizeAndMigrate("income", mergedIncome),
   };
 };
 

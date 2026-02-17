@@ -1,5 +1,7 @@
 // src/utils/receiptCategorizer.js
 
+import { DEFAULT_CATEGORIES } from "../constants/categories";
+
 const norm = (s) =>
   String(s || "")
     .toLowerCase()
@@ -235,59 +237,21 @@ export function sanitizeCategoryKey(raw) {
   if (!r) return "";
   if (ALIAS[r]) return ALIAS[r];
 
-  // Keep this list aligned with DEFAULT_CATEGORIES ids (plus special ids)
-  const known = new Set([
-    // expense
-    "food",
-    "drinks",
-    "snacks",
-    "groceries",
-    "transport",
-    "fuel",
-    "bills",
-    "rent",
-    "shopping",
-    "coffee",
-    "dining",
-    "entertainment",
-    "travel",
-    "health",
-    "fitness",
-    "beauty",
-    "pets",
-    "kids",
-    "home",
-    "education",
-    "work",
-    "phone_internet",
-    "subscriptions",
-    "fees",
-    "discount",
-    "adjust_balance",
-    "insurance",
-    "donation",
-    "gift",
-    "mixed",
-    "other",
-    // income
-    "salary",
-    "bonus",
-    "freelance",
-    "business",
-    "investment",
-    "interest",
-    "dividend",
-    "refund",
-    "gift_income",
-    "other_income",
-    // system
-    "transfer",
-  ]);
+  // ✅ Auto-sync with DEFAULT_CATEGORIES ids (plus special ids)
+  const known = (() => {
+    const ids = new Set();
+    for (const c of (DEFAULT_CATEGORIES?.expense || [])) ids.add(String(c?.id || "").trim());
+    for (const c of (DEFAULT_CATEGORIES?.income || [])) ids.add(String(c?.id || "").trim());
+    ids.add("transfer");
+    ids.delete("");
+    return ids;
+  })();
 
   if (known.has(r)) return r;
 
   // allow "food & beverage", "transportation", etc.
   for (const k of known) {
+    if (!k) continue;
     if (r.includes(k)) return k;
   }
   return "";

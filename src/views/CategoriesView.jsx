@@ -1,5 +1,5 @@
 // src/views/CategoriesView.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Plus, Trash2, Edit2, X, Check, Search, CornerDownRight } from "lucide-react";
 import AppHeader from "../components/AppHeader";
 import { PRESET_COLORS } from "../constants/presets.jsx";
@@ -67,6 +67,31 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   const [editingId, setEditingId] = useState("");
   const [q, setQ] = useState("");
 
+  // ✅ Collapsible main categories (reduce long scroll when defaults are large)
+  const expandedStorageKey = useMemo(() => `cat_expanded_${tab}`, [tab]);
+  const loadExpanded = (key) => {
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = JSON.parse(raw || "[]");
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  };
+  const [expandedIds, setExpandedIds] = useState(() => loadExpanded("cat_expanded_expense"));
+
+  useEffect(() => {
+    setExpandedIds(loadExpanded(expandedStorageKey));
+  }, [expandedStorageKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(expandedStorageKey, JSON.stringify(expandedIds));
+    } catch {
+      // ignore
+    }
+  }, [expandedStorageKey, expandedIds]);
+
   const catsAll = useMemo(() => state.categories?.[tab] ?? [], [state.categories, tab]);
   const catsActive = useMemo(() => (catsAll || []).filter(isActiveCat), [catsAll]);
 
@@ -98,6 +123,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   const [icon, setIcon] = useState("🏷️");
   const [color, setColor] = useState(PRESET_COLORS[0]);
   const [parentId, setParentId] = useState(""); // "" = main
+  const [level, setLevel] = useState("main"); // main | sub
   const [kwInput, setKwInput] = useState("");
   const [keywords, setKeywords] = useState([]);
 
@@ -109,13 +135,16 @@ export default function CategoriesView({ showAlert, showConfirm }) {
     setIcon("🏷️");
     setColor(PRESET_COLORS[0]);
     setParentId("");
+    setLevel("main");
     setKwInput("");
     setKeywords([]);
   };
 
   const openNew = (prefillParentId = "") => {
     resetForm();
-    setParentId(String(prefillParentId || "").trim());
+    const pid = String(prefillParentId || "").trim();
+    setParentId(pid);
+    setLevel(pid ? "sub" : "main");
     setOpen(true);
   };
 
@@ -124,7 +153,9 @@ export default function CategoriesView({ showAlert, showConfirm }) {
     setName(String(cat?.name || ""));
     setIcon(String(cat?.icon || "🏷️"));
     setColor(String(cat?.color || PRESET_COLORS[0]));
-    setParentId(String(cat?.parentId || "").trim());
+    const pid = String(cat?.parentId || "").trim();
+    setParentId(pid);
+    setLevel(pid ? "sub" : "main");
     setKwInput("");
     setKeywords(uniqKeywords(cat?.keywords || []));
     setOpen(true);
@@ -184,8 +215,13 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   const addOrSave = () => {
     if (!String(name || "").trim()) return showAlert?.("กรุณาใส่ชื่อหมวดหมู่");
 
+    const desiredLevel = editingHasChildren ? "main" : level;
+    if (desiredLevel === "sub" && !String(parentId || "").trim()) {
+      return showAlert?.("กรุณาเลือกหมวดหลักสำหรับหมวดย่อย");
+    }
+
     // prevent picking a deleted/missing parent in UI layer
-    const pid = String(parentId || "").trim();
+    const pid = desiredLevel === "sub" ? String(parentId || "").trim() : "";
     const isPidOk = !pid || byIdActive.has(pid);
     const finalParentId = isPidOk ? pid : "";
 
@@ -272,6 +308,33 @@ export default function CategoriesView({ showAlert, showConfirm }) {
     });
   }, [q, catsActive, activeMain, activeChildrenByParent]);
 
+  const isSearching = String(q || "").trim().length > 0;
+  const expandedSet = useMemo(() => new Set((expandedIds || []).map(String)), [expandedIds]);
+  const parentIdsInView = useMemo(
+    () => renderTree.map((x) => String(x?.parent?.id || "")).filter(Boolean),
+    [renderTree]
+  );
+
+  const toggleExpanded = (id) => {
+    const key = String(id || "").trim();
+    if (!key) return;
+    setExpandedIds((prev) => {
+      const s = new Set((prev || []).map(String));
+      if (s.has(key)) s.delete(key);
+      else s.add(key);
+      return Array.from(s);
+    });
+  };
+
+  const expandAll = () => setExpandedIds(parentIdsInView);
+  const collapseAll = () => setExpandedIds([]);
+
+  const counts = useMemo(() => {
+    const mains = (activeMain || []).length;
+    const subs = (catsActive || []).filter((c) => !!String(c?.parentId || "").trim()).length;
+    return { mains, subs, total: mains + subs };
+  }, [activeMain, catsActive]);
+
   return (
     <div className="min-h-dvh">
       <AppHeader
@@ -326,14 +389,49 @@ export default function CategoriesView({ showAlert, showConfirm }) {
         </div>
       </div>
 
+      <div className="ui-card p-3 rounded-2xl mb-4 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-extrabold text-gray-900/70">สรุป</div>
+          <div className="text-sm font-extrabold text-gray-900 truncate">
+            หมวดหลัก {counts.mains} • หมวดย่อย {counts.subs} • ทั้งหมด {counts.total}
+          </div>
+          {isSearching ? <div className="text-[11px] text-gray-900/55 mt-0.5">กำลังแสดงผลตามคำค้นหา</div> : null}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={collapseAll}
+            className="px-3 py-2 rounded-2xl bg-white/25 border border-white/20 text-xs font-extrabold text-gray-900/80 active:scale-95"
+            title="ย่อทั้งหมด"
+          >
+            ย่อทั้งหมด
+          </button>
+          <button
+            type="button"
+            onClick={expandAll}
+            className="px-3 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+            title="ขยายทั้งหมด"
+          >
+            ขยายทั้งหมด
+          </button>
+        </div>
+      </div>
+
       <div className="space-y-3">
         {renderTree.length ? (
           renderTree.map(({ parent, children }) => {
             const kids = children || [];
+            const canExpand = kids.length > 0;
+            const isExpanded = isSearching ? true : expandedSet.has(String(parent.id));
             return (
               <div key={parent.id} className="ui-card overflow-hidden">
                 <div className="p-4 flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => (canExpand ? toggleExpanded(parent.id) : undefined)}
+                    className="flex items-start gap-3 min-w-0 text-left active:scale-[0.99]"
+                    aria-label={canExpand ? (isExpanded ? "ย่อหมวด" : "ขยายหมวด") : "หมวด"}
+                  >
                     <div
                       className="w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0"
                       style={{ backgroundColor: `${parent.color}20` }}
@@ -341,7 +439,22 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                       {parent.icon}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-extrabold text-gray-900 truncate">{parent.name}</div>
+                      <div className="font-extrabold text-gray-900 truncate flex items-center gap-2">
+                        {canExpand ? (
+                          <span
+                            className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/25 border border-white/20 text-gray-900/70 transition-transform ${
+                              isExpanded ? "rotate-90" : "rotate-0"
+                            }`}
+                          >
+                            <ChevronRight size={16} />
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/20 border border-white/15 text-gray-900/35">
+                            <ChevronRight size={16} />
+                          </span>
+                        )}
+                        <span className="truncate">{parent.name}</span>
+                      </div>
                       <div className="text-[11px] text-gray-700/70 mt-0.5">
                         {kids.length ? (
                           <span className="font-bold text-gray-900/70">มีหมวดย่อย {kids.length} รายการ</span>
@@ -354,7 +467,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                         )}
                       </div>
                     </div>
-                  </div>
+                  </button>
 
                   <div className="flex gap-2 shrink-0">
                     <button
@@ -387,58 +500,77 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                   </div>
                 </div>
 
-                {kids.length ? (
-                  <div className="border-t border-white/15 px-4 py-3 space-y-2 bg-white/5">
-                    {kids.map((c) => (
-                      <div key={c.id} className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-2 min-w-0">
-                          <div className="pt-1 text-gray-900/40">
-                            <CornerDownRight size={14} />
-                          </div>
-                          <div className="flex items-start gap-2 min-w-0">
-                            <div
-                              className="w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0"
-                              style={{ backgroundColor: `${c.color}20` }}
-                            >
-                              {c.icon}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="text-sm font-extrabold text-gray-900 truncate">{c.name}</div>
-                              <div className="text-[11px] text-gray-700/70">
-                                {c.keywords?.length ? (
-                                  <>
-                                    Keywords: <span className="font-bold text-gray-900/80">{c.keywords.slice(0, 5).join(", ")}{c.keywords.length > 5 ? " …" : ""}</span>
-                                  </>
-                                ) : (
-                                  <span className="text-gray-500">ยังไม่ได้ตั้ง keyword</span>
-                                )}
+                {kids.length && isExpanded ? (
+                  <div className="border-t border-white/15 px-4 py-3 bg-white/5">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="text-xs font-extrabold text-gray-900/70">หมวดย่อย ({kids.length})</div>
+                      <button
+                        type="button"
+                        onClick={() => openNew(parent.id)}
+                        className="px-3 py-2 rounded-2xl bg-white/25 border border-white/20 text-xs font-extrabold text-gray-900/80 active:scale-95"
+                      >
+                        + เพิ่มหมวดย่อย
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {kids.map((c) => (
+                        <div key={c.id} className="rounded-2xl bg-white/20 border border-white/20 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-2 min-w-0">
+                              <div className="pt-1 text-gray-900/35">
+                                <CornerDownRight size={14} />
+                              </div>
+                              <div className="flex items-start gap-2 min-w-0">
+                                <div
+                                  className="w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0"
+                                  style={{ backgroundColor: `${c.color}20` }}
+                                >
+                                  {c.icon}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-sm font-extrabold text-gray-900 truncate">{c.name}</div>
+                                  <div className="text-[11px] text-gray-700/70">
+                                    {c.keywords?.length ? (
+                                      <>
+                                        Keywords:{" "}
+                                        <span className="font-bold text-gray-900/80">
+                                          {c.keywords.slice(0, 5).join(", ")}
+                                          {c.keywords.length > 5 ? " …" : ""}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="text-gray-500">ยังไม่ได้ตั้ง keyword</span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </div>
+
+                            <div className="flex gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => openEdit(c)}
+                                className="p-2 rounded-xl bg-white/20 border border-white/20 text-gray-900/80 active:scale-95"
+                                title="แก้ไข"
+                                aria-label="edit sub"
+                              >
+                                <Edit2 size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => del(c.id)}
+                                className="p-2 rounded-xl bg-red-500/10 border border-red-500/15 text-red-700 active:scale-95"
+                                title="ลบ"
+                                aria-label="delete sub"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
                           </div>
                         </div>
-
-                        <div className="flex gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(c)}
-                            className="p-2 rounded-xl bg-white/20 border border-white/20 text-gray-900/80 active:scale-95"
-                            title="Edit"
-                            aria-label="edit sub"
-                          >
-                            <Edit2 size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => del(c.id)}
-                            className="p-2 rounded-xl bg-red-500/10 border border-red-500/15 text-red-700 active:scale-95"
-                            title="Delete"
-                            aria-label="delete sub"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -497,30 +629,64 @@ export default function CategoriesView({ showAlert, showConfirm }) {
             </div>
 
             <div>
-              <div className="text-xs font-extrabold text-gray-900/70 mb-1">โครงสร้าง (หมวดหลัก / หมวดย่อย)</div>
+              <div className="text-xs font-extrabold text-gray-900/70 mb-2">โครงสร้าง</div>
               {editingHasChildren ? (
                 <div className="text-[11px] text-amber-900/70 mb-2">
                   หมวดนี้มีหมวดย่อยอยู่แล้ว จึงถูกล็อกให้เป็น “หมวดหลัก” (กันโครงสร้างซ้อน 3 ชั้น)
                 </div>
               ) : null}
-              <select
-                value={editingHasChildren ? "" : parentId}
-                onChange={(e) => setParentId(e.target.value)}
-                disabled={editingHasChildren}
-                className={`w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold ${
-                  editingHasChildren ? "opacity-70" : ""
-                }`}
-              >
-                <option value="">(หมวดหลัก)</option>
-                {parentOptions.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.icon} {p.name}
-                  </option>
-                ))}
-              </select>
-              <div className="text-[11px] text-gray-900/55 mt-1">
-                ถ้าเลือก “หมวดหลัก” ว่างไว้ = เป็นหมวดหลัก • ถ้าเลือกหมวดหลักด้านบน = เป็นหมวดย่อยของหมวดนั้น
+
+              <div className="ui-card p-1 rounded-2xl flex mb-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLevel("main");
+                    setParentId("");
+                  }}
+                  disabled={editingHasChildren}
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-extrabold ${
+                    editingHasChildren || level === "main" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
+                  } ${editingHasChildren ? "opacity-80" : ""}`}
+                >
+                  หมวดหลัก
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLevel("sub");
+                    if (!String(parentId || "").trim()) {
+                      const first = parentOptions?.[0]?.id ? String(parentOptions[0].id) : "";
+                      setParentId(first);
+                    }
+                  }}
+                  disabled={editingHasChildren}
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-extrabold ${
+                    !editingHasChildren && level === "sub" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
+                  } ${editingHasChildren ? "opacity-80" : ""}`}
+                >
+                  หมวดย่อย
+                </button>
               </div>
+
+              {editingHasChildren || level === "main" ? (
+                <div className="text-[11px] text-gray-900/55">หมวดหลัก = แสดงในรายการหลัก และเลือกได้โดยตรง</div>
+              ) : (
+                <>
+                  <select
+                    value={parentId}
+                    onChange={(e) => setParentId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  >
+                    <option value="">(เลือกหมวดหลัก)</option>
+                    {parentOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.icon} {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="text-[11px] text-gray-900/55 mt-1">หมวดย่อยจะถูกจัดอยู่ใต้หมวดหลักที่เลือก</div>
+                </>
+              )}
             </div>
 
             {/* Keywords */}
