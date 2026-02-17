@@ -510,7 +510,7 @@ const create = () => {
           return (
             <div key={t} className="glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-xl overflow-hidden">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-end flex-wrap gap-2">
                   <div className="w-10 h-10 rounded-2xl bg-white/30 border border-white/20 flex items-center justify-center text-gray-900">
                     {groupIcon(t)}
                   </div>
@@ -523,7 +523,7 @@ const create = () => {
                 </div>
               </div>
 
-              <div className="mt-4 space-y-3">
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                 {items.map((acc) => (
                   <div
                     key={acc.id}
@@ -670,7 +670,7 @@ const create = () => {
               />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-bold text-gray-800/70 mb-1 block">
                   ประเภท
@@ -702,7 +702,7 @@ const create = () => {
             </div>
 
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-bold text-gray-800/70 mb-1 block">
                   ไอคอน (Emoji)
@@ -828,7 +828,7 @@ const create = () => {
                   />
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-bold text-gray-800/70 mb-1 block">
                       วันตัดรอบ
@@ -997,7 +997,7 @@ const create = () => {
               />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-bold text-gray-800/70 mb-1 block">
                   ประเภท
@@ -1028,7 +1028,7 @@ const create = () => {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-bold text-gray-800/70 mb-1 block">
                   ไอคอน (Emoji)
@@ -1082,7 +1082,7 @@ const create = () => {
                           </p>
 
                           {/* ✅ Adjust balance */}
-                          <div className="mt-4 grid grid-cols-2 gap-3 min-w-0">
+                          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
                             <div className="col-span-2 sm:col-span-1 min-w-0">
                               <label className="text-xs font-bold text-gray-800/70 mb-1 block">
                                 ยอดปัจจุบัน (คำนวณ)
@@ -1172,7 +1172,7 @@ const create = () => {
                   />
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-bold text-gray-800/70 mb-1 block">
                       วันตัดรอบ

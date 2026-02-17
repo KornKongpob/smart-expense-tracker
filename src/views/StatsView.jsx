@@ -29,6 +29,7 @@ import { formatCurrency, formatDateShort } from "../utils/format";
 import { useAppStore } from "../store/store";
 import { parseDateSafe } from "../store/selectors";
 import AppHeader from "../components/AppHeader";
+import AccountPill from "../components/AccountPill";
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -237,7 +238,7 @@ const CatIcon = memo(function CatIcon({ icon, color, title }) {
   );
 });
 
-const TxRow = memo(function TxRow({ tx, cat, accountName }) {
+const TxRow = memo(function TxRow({ tx, cat, account }) {
   const note = String(tx?.note || "").trim();
   const ref = String(tx?.ref || "").trim();
   const dateText = tx?._iso ? formatDateShort(tx._iso) : formatDateShort(tx?.date);
@@ -246,8 +247,10 @@ const TxRow = memo(function TxRow({ tx, cat, accountName }) {
     <div className="glass-panel border border-white/20 rounded-2xl p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[11px] text-gray-800/60">
-            {dateText} • <span className="font-extrabold text-gray-900">{accountName || "—"}</span>
+          <div className="text-[11px] text-gray-800/60 flex flex-wrap items-center gap-2">
+            <span className="font-extrabold">{dateText}</span>
+            <span className="text-gray-900/25 font-black">•</span>
+            <AccountPill account={account} fallbackName={account?.name} size="sm" showHint={false} />
           </div>
 
           <div className="mt-1 font-extrabold text-gray-900 truncate">
@@ -785,9 +788,8 @@ export default function StatsView() {
             <div className="space-y-3">
               {catTxs.map((tx) => {
                 const acc = accountMap.get(tx.accountId);
-                const accountName = acc?.name || "";
                 return (
-                  <TxRow key={tx.id} tx={tx} cat={selectedCat} accountName={accountName} />
+                  <TxRow key={tx.id} tx={tx} cat={selectedCat} account={acc || null} />
                 );
               })}
             </div>

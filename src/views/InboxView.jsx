@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
+import AccountPicker from "../components/AccountPicker";
 import {
   Inbox,
   Search,
@@ -544,6 +545,16 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
       || arr.find((a) => String(a?.name || "").includes("เงินสด"))
       || arr.find((a) => String(a?.id || "").toLowerCase().includes("cash"));
     return String(hit?.id || "");
+  }, [accounts]);
+
+  const creditAccounts = useMemo(() => {
+    const arr = Array.isArray(accounts) ? accounts : [];
+    return arr.filter((a) => isCreditAccount(a));
+  }, [accounts]);
+
+  const nonCreditAccounts = useMemo(() => {
+    const arr = Array.isArray(accounts) ? accounts : [];
+    return arr.filter((a) => !isCreditAccount(a));
   }, [accounts]);
 
   // ✅ Keep category keys safe (fallback to "other" if unknown)
@@ -1267,66 +1278,57 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
           </label>
 
           {txType === "transfer" || txType === "credit_payment" ? (
-            <div className="grid grid-cols-2 gap-3 min-w-0">
-              <label className="text-xs font-bold text-gray-900/60 min-w-0">
-                From
-                <select
-                  value={draft.fromAccountId}
-                  onChange={(e) => setDraft((d) => ({ ...d, fromAccountId: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-                >
-                  <option value="">เลือกบัญชี</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-gray-900/60">From</div>
+                <div className="mt-1">
+                  <AccountPicker
+                    accounts={txType === "credit_payment" ? (nonCreditAccounts.length ? nonCreditAccounts : accounts) : accounts}
+                    value={draft.fromAccountId}
+                    onChange={(v) => setDraft((d) => ({ ...d, fromAccountId: v }))}
+                    title="เลือกบัญชีต้นทาง"
+                    placeholder="เลือกบัญชี"
+                  />
+                </div>
+              </div>
 
-              <label className="text-xs font-bold text-gray-900/60 min-w-0">
-                To
-                <select
-                  value={draft.toAccountId}
-                  onChange={(e) => setDraft((d) => ({ ...d, toAccountId: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-                >
-                  <option value="">เลือกบัญชี</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-gray-900/60">To</div>
+                <div className="mt-1">
+                  <AccountPicker
+                    accounts={txType === "credit_payment" ? creditAccounts : accounts}
+                    value={draft.toAccountId}
+                    onChange={(v) => setDraft((d) => ({ ...d, toAccountId: v }))}
+                    title={txType === "credit_payment" ? "เลือกบัตรเครดิต" : "เลือกบัญชีปลายทาง"}
+                    placeholder="เลือกบัญชี"
+                  />
+                </div>
+              </div>
             </div>
           ) : (
             <>
-              <label className="text-xs font-bold text-gray-900/60 min-w-0">
-                Account
-                <select
-                  value={draft.accountId}
-                  onChange={(e) =>
-                    setDraft((d) => {
-                      const nextId = e.target.value;
-                      const acc = accounts.find((a) => String(a?.id || "") === String(nextId || "")) || null;
-                      return {
-                        ...d,
-                        accountId: nextId,
-                        ...(acc && isCreditAccount(acc) ? {} : { isInstallment: false }),
-                      };
-                    })
-                  }
-                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-                >
-                  <option value="">เลือกบัญชี</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-gray-900/60">Account</div>
+                <div className="mt-1">
+                  <AccountPicker
+                    accounts={accounts}
+                    value={draft.accountId}
+                    onChange={(v) =>
+                      setDraft((d) => {
+                        const nextId = v;
+                        const acc = accounts.find((a) => String(a?.id || "") === String(nextId || "")) || null;
+                        return {
+                          ...d,
+                          accountId: nextId,
+                          ...(acc && isCreditAccount(acc) ? {} : { isInstallment: false }),
+                        };
+                      })
+                    }
+                    title="เลือกบัญชี"
+                    placeholder="เลือกบัญชี"
+                  />
+                </div>
+              </div>
 
               <label className="text-xs font-bold text-gray-900/60 min-w-0 mt-3 block">
                 Payment method

@@ -7,7 +7,6 @@ import {
   matchFromToAccounts,
   isCreditAccount,
 } from "../utils/accountMatch";
-import { createPortal } from "react-dom";
 import {
   X,
   Trash2,
@@ -32,6 +31,7 @@ import {
 
 import { useAppStore } from "../store/store";
 import AmountField from "../components/AmountField";
+import AccountPicker from "../components/AccountPicker";
 import CategorySelect from "../components/CategorySelect";
 import AppHeader from "../components/AppHeader";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
@@ -169,196 +169,7 @@ function getAccountVisual(acc) {
   return { kind: "emoji", value: icon || "💳" };
 }
 
-// ===== modal dropdown (shows real image + no overlap issues) =====
-function AccountDropdown({
-  accounts,
-  value,
-  onChange,
-  placeholder = "เลือกบัญชี",
-  title = "เลือกบัญชี",
-  filterFn,
-}) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef(null);
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
-
-  const filtered = useMemo(() => {
-    const arr = Array.isArray(accounts) ? accounts : [];
-    return typeof filterFn === "function" ? arr.filter(filterFn) : arr;
-  }, [accounts, filterFn]);
-
-  // ถ้า value ไม่อยู่ใน filtered (เช่น filterFn เปลี่ยน) ให้ยังพยายามหาใน accounts ทั้งหมดเพื่อโชว์ชื่อถูกต้อง
-  const selected = useMemo(() => {
-    const all = Array.isArray(accounts) ? accounts : [];
-    return all.find((a) => a.id === value) || null;
-  }, [accounts, value]);
-
-  const updatePos = () => {
-    const el = btnRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setPos({
-      top: Math.min(window.innerHeight - 16, r.bottom + 8),
-      left: Math.max(8, Math.min(window.innerWidth - r.width - 8, r.left)),
-      width: r.width,
-    });
-  };
-
-  // ✅ อัปเดตตำแหน่งตอนเปิด + จับ scroll/resize แบบ capture (แก้ซ้อน/คลิกไม่ได้)
-  useEffect(() => {
-    if (!open) return;
-    updatePos();
-
-    const onWin = () => updatePos();
-    window.addEventListener("resize", onWin);
-    window.addEventListener("scroll", onWin, true);
-
-    return () => {
-      window.removeEventListener("resize", onWin);
-      window.removeEventListener("scroll", onWin, true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  // ✅ Lock scroll + ESC ปิด dropdown
-  useEffect(() => {
-    if (!open) return;
-
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
-  const layer = open ? (
-    <div
-      className="fixed inset-0 z-[9999]"
-      onMouseDown={() => setOpen(false)}
-      onTouchStart={() => setOpen(false)}
-      style={{ touchAction: "none" }}
-    >
-      {/* backdrop */}
-      <div className="absolute inset-0 bg-black/45" />
-
-      {/* desktop anchored dropdown */}
-      <div
-        className="hidden sm:block fixed z-[10000] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl"
-        style={{ top: pos.top, left: pos.left, width: pos.width }}
-        onMouseDown={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-      >
-        <div className="px-4 py-3 border-b">
-          <div className="text-sm font-medium">{title}</div>
-        </div>
-        <div className="max-h-72 overflow-auto">
-          {filtered.length === 0 ? (
-            <div className="p-4 text-sm text-gray-500">ไม่พบบัญชี</div>
-          ) : (
-            filtered.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => {
-                  onChange?.(a.id);
-                  setOpen(false);
-                }}
-                className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${
-                  a.id === value ? "bg-gray-50" : ""
-                }`}
-              >
-                <div className="text-sm font-medium">{a.name}</div>
-                <div className="text-xs text-gray-500">
-                  {a.type} • {a.currency}
-                  {a.digits ? ` • •••• ${a.digits}` : ""}
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* mobile bottom sheet */}
-      <div
-        className="sm:hidden fixed left-0 right-0 bottom-0 z-[10000] rounded-t-3xl bg-white shadow-2xl"
-        onMouseDown={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-        style={{ touchAction: "pan-y" }}
-      >
-        <div className="px-4 pt-3 pb-2">
-          <div className="mx-auto h-1.5 w-12 rounded-full bg-gray-200" />
-          <div className="mt-2 text-sm font-medium">{title}</div>
-        </div>
-        <div className="max-h-[60vh] overflow-auto px-2 pb-3">
-          {filtered.length === 0 ? (
-            <div className="p-3 text-sm text-gray-500">ไม่พบบัญชี</div>
-          ) : (
-            filtered.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => {
-                  onChange?.(a.id);
-                  setOpen(false);
-                }}
-                className={`w-full text-left px-3 py-3 rounded-xl hover:bg-gray-50 ${
-                  a.id === value ? "bg-gray-50" : ""
-                }`}
-              >
-                <div className="text-sm font-medium">{a.name}</div>
-                <div className="text-xs text-gray-500">
-                  {a.type} • {a.currency}
-                  {a.digits ? ` • •••• ${a.digits}` : ""}
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-        <div className="px-4 pb-4">
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="w-full rounded-2xl border px-4 py-3 text-sm"
-          >
-            ปิด
-          </button>
-        </div>
-      </div>
-    </div>
-  ) : null;
-
-  return (
-    <div className="relative">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen(true)}
-        className="w-full rounded-2xl border px-4 py-3 text-left"
-      >
-        <div className="text-sm font-medium">
-          {selected ? selected.name : placeholder}
-        </div>
-        {selected && (
-          <div className="text-xs text-gray-500">
-            {selected.type} • {selected.currency}
-            {selected.digits ? ` • •••• ${selected.digits}` : ""}
-          </div>
-        )}
-      </button>
-
-      {open && typeof document !== "undefined"
-        ? createPortal(layer, document.body)
-        : null}
-    </div>
-  );
-}
+// (Account dropdown UI is now shared: src/components/AccountPicker.jsx)
 
 /** ===== merchant memory helpers ===== */
 function normalizeMerchantKey(s) {
@@ -4458,13 +4269,12 @@ const handleClose = () => {
                                   <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
                                     <ArrowRightLeft size={14} /> บัญชีต้นทาง
                                   </div>
-                                  <AccountDropdown
-                                    accounts={accounts}
+                                  <AccountPicker
+                                    accounts={q.txType === "credit_payment" ? (nonCreditAccounts.length ? nonCreditAccounts : accounts) : accounts}
                                     value={q.fromAccountId}
                                     onChange={(v) => updateQueueItem(q.id, { fromAccountId: v })}
                                     title="เลือกบัญชีต้นทาง"
                                     placeholder="เลือกบัญชีต้นทาง"
-                                    filterFn={q.txType === "credit_payment" ? (a) => !isCreditAccount(a) : undefined}
                                   />
                                   {q.txType === "credit_payment" ? (
                                     <div className="text-[11px] text-gray-900/55 mt-1">
@@ -4477,13 +4287,12 @@ const handleClose = () => {
                                   <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
                                     <ArrowRightLeft size={14} /> บัญชีปลายทาง
                                   </div>
-                                  <AccountDropdown
-                                    accounts={accounts}
+                                  <AccountPicker
+                                    accounts={q.txType === "credit_payment" ? accounts.filter((a) => isCreditAccount(a)) : accounts}
                                     value={q.toAccountId}
                                     onChange={(v) => updateQueueItem(q.id, { toAccountId: v })}
                                     title="เลือกบัญชีปลายทาง"
                                     placeholder="เลือกบัญชีปลายทาง"
-                                    filterFn={q.txType === "credit_payment" ? (a) => isCreditAccount(a) : undefined}
                                   />
 
                                   {q.txType === "credit_payment" ? (
@@ -4507,7 +4316,7 @@ const handleClose = () => {
                               <div className="grid grid-cols-1 gap-3">
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                   <div className="text-xs font-bold text-gray-900/70 mb-2">บัญชี</div>
-                                  <AccountDropdown
+                                  <AccountPicker
                                     accounts={accounts}
                                     value={q.accountId}
                                     onChange={(v) => {
@@ -4793,7 +4602,7 @@ const handleClose = () => {
               <div className="space-y-3">
                 <div>
                   <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีต้นทาง</div>
-                  <AccountDropdown
+                  <AccountPicker
                     accounts={accounts}
                     value={fromAccountId}
                     onChange={setFromAccountId}
@@ -4804,7 +4613,7 @@ const handleClose = () => {
 
                 <div>
                   <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีปลายทาง</div>
-                  <AccountDropdown
+                  <AccountPicker
                     accounts={accounts}
                     value={toAccountId}
                     onChange={setToAccountId}
@@ -4846,26 +4655,24 @@ const handleClose = () => {
                 <div className="mt-3 grid grid-cols-1 gap-3">
                   <div>
                     <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีที่จ่าย</div>
-                    <AccountDropdown
-                      accounts={accounts}
+                    <AccountPicker
+                      accounts={nonCreditAccounts.length ? nonCreditAccounts : accounts}
                       value={fromAccountId}
                       onChange={setFromAccountId}
                       title="เลือกบัญชีที่จ่าย"
                       placeholder="เลือกบัญชีที่จ่าย"
-                      filterFn={(a) => !isCreditAccount(a) || nonCreditAccounts.length === 0}
                     />
                     <div className="text-[11px] text-gray-900/55 mt-1">แนะนำ: ใช้บัญชีธนาคาร/เงินสด (ไม่ใช่บัตร)</div>
                   </div>
 
                   <div>
                     <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัตรเครดิตที่ต้องการชำระ</div>
-                    <AccountDropdown
-                      accounts={accounts}
+                    <AccountPicker
+                      accounts={accounts.filter((a) => isCreditAccount(a))}
                       value={toAccountId}
                       onChange={setToAccountId}
                       title="เลือกบัตรเครดิต"
                       placeholder="เลือกบัตรเครดิต"
-                      filterFn={(a) => isCreditAccount(a)}
                     />
                   </div>
 

@@ -1,6 +1,7 @@
 // src/views/RulesView.jsx
 import { useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
+import AccountPicker from "../components/AccountPicker";
 import { ArrowLeft, Plus, Trash2, Edit2, ArrowUp, ArrowDown, X, Check, ToggleLeft, ToggleRight, Wand2 } from "lucide-react";
 import AppHeader from "../components/AppHeader";
 import { useAppStore } from "../store/store";
@@ -515,39 +516,42 @@ const applyTemplate = (tpl) => {
                 {setType !== "transfer" && setType !== "credit_payment" ? (
                 <div>
                   <div className="text-xs font-extrabold text-gray-900 mb-1">บัญชี (Account)</div>
-                  <select value={setAccountId} onChange={(e) => setSetAccountId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
-                    <option value="">(ไม่ตั้งค่า)</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
+                  <AccountPicker
+                    accounts={accounts}
+                    value={setAccountId}
+                    onChange={setSetAccountId}
+                    title="เลือกบัญชี"
+                    placeholder="(ไม่ตั้งค่า)"
+                    allowEmpty
+                    emptyLabel="(ไม่ตั้งค่า)"
+                  />
                 </div>
                 ) : null}
                 {(setType === "transfer" || setType === "credit_payment" || showAdvanced) ? (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <div className="text-xs font-extrabold text-gray-900 mb-1">จากบัญชี (From)</div>
-                    <select value={setFromAccountId} onChange={(e) => setSetFromAccountId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
-                      <option value="">(ไม่ตั้งค่า)</option>
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                    </select>
+                    <AccountPicker
+                      accounts={accounts}
+                      value={setFromAccountId}
+                      onChange={setSetFromAccountId}
+                      title="เลือกบัญชีต้นทาง"
+                      placeholder="(ไม่ตั้งค่า)"
+                      allowEmpty
+                      emptyLabel="(ไม่ตั้งค่า)"
+                    />
                   </div>
                   <div>
                     <div className="text-xs font-extrabold text-gray-900 mb-1">ไปบัญชี (To)</div>
-                    <select value={setToAccountId} onChange={(e) => setSetToAccountId(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input">
-                      <option value="">(ไม่ตั้งค่า)</option>
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                    </select>
+                    <AccountPicker
+                      accounts={accounts}
+                      value={setToAccountId}
+                      onChange={setSetToAccountId}
+                      title="เลือกบัญชีปลายทาง"
+                      placeholder="(ไม่ตั้งค่า)"
+                      allowEmpty
+                      emptyLabel="(ไม่ตั้งค่า)"
+                    />
                   </div>
                 </div>
                 ) : null}

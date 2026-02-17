@@ -4,6 +4,7 @@ import { CalendarDays, Calendar, Search, AlertTriangle, FileText, CreditCard, In
 import TransactionCard from "../components/TransactionCard";
 import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
+import AccountPicker from "../components/AccountPicker";
 import { useAppStore } from "../store/store";
 import { getBudget, toMonthKey } from "../store/selectors";
 import { formatCurrency, toISODate } from "../utils/format";
@@ -538,18 +539,17 @@ useEffect(() => {
 
             <div>
               <div className="ui-label">บัญชี</div>
-              <select
-                value={filterAccount}
-                onChange={(e) => setFilterAccount(e.target.value)}
-                className="ui-select mt-1"
-              >
-                <option value="">ทั้งหมด</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
+              <div className="mt-1">
+                <AccountPicker
+                  accounts={accounts}
+                  value={filterAccount}
+                  onChange={setFilterAccount}
+                  title="เลือกบัญชี"
+                  placeholder="ทั้งหมด"
+                  allowEmpty
+                  emptyLabel="ทั้งหมด"
+                />
+              </div>
             </div>
           </div>
 

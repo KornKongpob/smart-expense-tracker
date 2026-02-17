@@ -1,6 +1,7 @@
 // src/views/RecurringView.jsx
 import { useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
+import AccountPicker from "../components/AccountPicker";
 import { ChevronRight, Plus, Trash2, Check, X, Repeat, Pencil, PlayCircle, CalendarClock } from "lucide-react";
 import AppHeader from "../components/AppHeader";
 import { useAppStore } from "../store/store";
@@ -406,17 +407,13 @@ export default function RecurringView({ showAlert, showConfirm }) {
           />
 
           <label className="text-xs font-bold text-gray-700 mb-1 block mt-4">บัญชี</label>
-          <select
+          <AccountPicker
+            accounts={accounts}
             value={accountId}
-            onChange={(e) => setAccountId(e.target.value)}
-            className="w-full glass-input rounded-2xl px-4 py-3 bg-transparent outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.icon} {a.name}
-              </option>
-            ))}
-          </select>
+            onChange={setAccountId}
+            title="เลือกบัญชี"
+            placeholder="เลือกบัญชี"
+          />
 
           <label className="text-xs font-bold text-gray-700 mb-1 block mt-4">โน้ต</label>
           <input

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
+import AccountPicker from "../components/AccountPicker";
 import { ArrowLeft, Plus, Search, Trash2, GitMerge, Edit2, Check, X } from "lucide-react";
 
 import { useAppStore } from "../store/store";
@@ -320,7 +321,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             />
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs font-bold text-gray-900/60">
               Expense category
               <CategorySelect
@@ -338,24 +339,23 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
               />
             </label>
 
-            <label className="text-xs font-bold text-gray-900/60">
-              Expense account
-              <select
-                value={editing?.prefs?.expense?.accountId || ""}
-                onChange={(e) => setEditing((d) => ({ ...d, prefs: { ...d.prefs, expense: { ...d.prefs.expense, accountId: e.target.value } } }))}
-                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-              >
-                <option value="">(not set)</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-gray-900/60">Expense account</div>
+              <div className="mt-1">
+                <AccountPicker
+                  accounts={accounts}
+                  value={editing?.prefs?.expense?.accountId || ""}
+                  onChange={(v) => setEditing((d) => ({ ...d, prefs: { ...d.prefs, expense: { ...d.prefs.expense, accountId: v } } }))}
+                  title="เลือกบัญชี (Expense)"
+                  placeholder="(not set)"
+                  allowEmpty
+                  emptyLabel="(not set)"
+                />
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs font-bold text-gray-900/60">
               Income category
               <CategorySelect
@@ -373,21 +373,20 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
               />
             </label>
 
-            <label className="text-xs font-bold text-gray-900/60">
-              Income account
-              <select
-                value={editing?.prefs?.income?.accountId || ""}
-                onChange={(e) => setEditing((d) => ({ ...d, prefs: { ...d.prefs, income: { ...d.prefs.income, accountId: e.target.value } } }))}
-                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
-              >
-                <option value="">(not set)</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-gray-900/60">Income account</div>
+              <div className="mt-1">
+                <AccountPicker
+                  accounts={accounts}
+                  value={editing?.prefs?.income?.accountId || ""}
+                  onChange={(v) => setEditing((d) => ({ ...d, prefs: { ...d.prefs, income: { ...d.prefs.income, accountId: v } } }))}
+                  title="เลือกบัญชี (Income)"
+                  placeholder="(not set)"
+                  allowEmpty
+                  emptyLabel="(not set)"
+                />
+              </div>
+            </div>
           </div>
 
           <button
