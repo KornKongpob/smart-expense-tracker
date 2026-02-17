@@ -32,7 +32,9 @@ import {
 import { useAppStore } from "../store/store";
 import AmountField from "../components/AmountField";
 import AccountPicker from "../components/AccountPicker";
+import AccountChipsPicker from "../components/AccountChipsPicker";
 import CategorySelect from "../components/CategorySelect";
+import CategoryPicker from "../components/CategoryPicker";
 import AppHeader from "../components/AppHeader";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../services/blobStore";
@@ -4350,7 +4352,7 @@ const handleClose = () => {
                               <div className="grid grid-cols-1 gap-3">
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                   <div className="text-xs font-bold text-gray-900/70 mb-2">บัญชี</div>
-                                  <AccountPicker
+                                  <AccountChipsPicker
                                     accounts={accounts}
                                     value={q.accountId}
                                     onChange={(v) => {
@@ -4360,8 +4362,8 @@ const handleClose = () => {
                                       if (!isCreditAccount(acc)) patch.isInstallment = false;
                                       updateQueueItem(q.id, patch);
                                     }}
-                                    title="เลือกบัญชี"
-                                    placeholder="เลือกบัญชี"
+                                    showTitle={false}
+                                    showSelectedText
                                   />
                                 </div>
 
@@ -4472,13 +4474,13 @@ const handleClose = () => {
                                 ) : (
                                   <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                     <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหมู่</div>
-                                    <CategorySelect
+                                    <CategoryPicker
                                       categories={(q.txType === "income" ? incomeCatsAll : expenseCatsAll)}
                                       value={q.categoryId || ""}
-                                      onChange={(e) => updateQueueItem(q.id, { categoryId: e.target.value })}
-                                      allowEmpty
-                                      emptyLabel="เลือกหมวดหมู่"
-                                      className="w-full glass-input rounded-2xl px-4 py-3 bg-white/30 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
+                                      onChange={(id) => updateQueueItem(q.id, { categoryId: id })}
+                                      showTitle={false}
+                                      recent={q.txType === type ? recentCatsForPicker : []}
+                                      maxListHeightClass="max-h-[34dvh]"
                                     />
 
                                     {q.suggestedCategoryId ? (

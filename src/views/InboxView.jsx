@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
+import AccountChipsPicker from "../components/AccountChipsPicker";
+import CategoryPicker from "../components/CategoryPicker";
 import {
   Inbox,
   Search,
@@ -534,7 +536,17 @@ function AttachmentThumb({ attachmentId }) {
   );
 }
 
-function EditorModal({ open, item, accounts, categories, onClose, onSave, showAlert }) {
+function EditorModal({
+  open,
+  item,
+  accounts,
+  categories,
+  recentExpenseCats,
+  recentIncomeCats,
+  onClose,
+  onSave,
+  showAlert,
+}) {
   const [draft, setDraft] = useState(null);
 
   const { url: attachmentUrl, mimeType: attachmentMimeType } = useBlobInfo(draft?.attachmentId);
@@ -1308,26 +1320,24 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
           ) : (
             <>
               <div className="min-w-0">
-                <div className="text-xs font-bold text-gray-900/60">Account</div>
-                <div className="mt-1">
-                  <AccountPicker
-                    accounts={accounts}
-                    value={draft.accountId}
-                    onChange={(v) =>
-                      setDraft((d) => {
-                        const nextId = v;
-                        const acc = accounts.find((a) => String(a?.id || "") === String(nextId || "")) || null;
-                        return {
-                          ...d,
-                          accountId: nextId,
-                          ...(acc && isCreditAccount(acc) ? {} : { isInstallment: false }),
-                        };
-                      })
-                    }
-                    title="เลือกบัญชี"
-                    placeholder="เลือกบัญชี"
-                  />
-                </div>
+                <div className="text-xs font-bold text-gray-900/60 mb-2">บัญชี</div>
+                <AccountChipsPicker
+                  accounts={accounts}
+                  value={draft.accountId}
+                  onChange={(v) =>
+                    setDraft((d) => {
+                      const nextId = v;
+                      const acc = accounts.find((a) => String(a?.id || "") === String(nextId || "")) || null;
+                      return {
+                        ...d,
+                        accountId: nextId,
+                        ...(acc && isCreditAccount(acc) ? {} : { isInstallment: false }),
+                      };
+                    })
+                  }
+                  showTitle={false}
+                  showSelectedText
+                />
               </div>
 
               <label className="text-xs font-bold text-gray-900/60 min-w-0 mt-3 block">
@@ -1512,17 +1522,17 @@ function EditorModal({ open, item, accounts, categories, onClose, onSave, showAl
                 </>
               ) : (
                 <>
-                <label className="text-xs font-bold text-gray-900/60 min-w-0">
-                  Category
-                  <CategorySelect
+                <div className="min-w-0">
+                  <CategoryPicker
                     categories={catList}
                     value={draft.categoryId}
-                    onChange={(e) => setDraft((d) => ({ ...d, categoryId: e.target.value }))}
-                    allowEmpty
-                    emptyLabel="เลือกหมวดหมู่"
-                    className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                    onChange={(id) => setDraft((d) => ({ ...d, categoryId: id }))}
+                    title="หมวดหมู่"
+                    placeholder="ค้นหาหมวดหมู่..."
+                    recent={txType === "income" ? (recentIncomeCats || []) : (recentExpenseCats || [])}
+                    maxListHeightClass="max-h-[32dvh]"
                   />
-                </label>
+                </div>
 
                 {!isSplitMode && hasBreakdown ? (
                   <div className="glass-panel border border-white/20 rounded-2xl p-3">
@@ -1725,6 +1735,38 @@ export default function InboxView({ showAlert, showConfirm }) {
       return it;
     });
   }, [activeListBase, state.transactions]);
+
+  const pickRecentCats = (txType, catsList) => {
+    const txs = Array.isArray(state.transactions) ? state.transactions : [];
+    const byId = new Map((Array.isArray(catsList) ? catsList : []).map((c) => [String(c?.id || "").trim(), c]));
+    const out = [];
+    const seen = new Set();
+    // Walk from newest to oldest (txs usually appended)
+    for (let i = txs.length - 1; i >= 0; i -= 1) {
+      const t = txs[i];
+      if (!t) continue;
+      if (String(t.type || "").toLowerCase() !== String(txType || "").toLowerCase()) continue;
+      const cid = String(t.category || "").trim();
+      if (!cid || cid === "transfer" || cid === "mixed") continue;
+      if (seen.has(cid)) continue;
+      const cat = byId.get(cid);
+      if (!cat) continue;
+      seen.add(cid);
+      out.push(cat);
+      if (out.length >= 10) break;
+    }
+    return out;
+  };
+
+  const recentExpenseCatsForPicker = useMemo(
+    () => pickRecentCats("expense", state.categories?.expense || []),
+    [state.transactions, state.categories]
+  );
+
+  const recentIncomeCatsForPicker = useMemo(
+    () => pickRecentCats("income", state.categories?.income || []),
+    [state.transactions, state.categories]
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -2186,6 +2228,8 @@ export default function InboxView({ showAlert, showConfirm }) {
         item={editingItem}
         accounts={state.accounts || []}
         categories={state.categories || { expense: [], income: [] }}
+        recentExpenseCats={recentExpenseCatsForPicker}
+        recentIncomeCats={recentIncomeCatsForPicker}
         showAlert={showAlert}
         onClose={() => setEditingId(null)}
         onSave={(id, patch) => {
