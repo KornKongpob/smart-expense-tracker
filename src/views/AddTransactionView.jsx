@@ -579,6 +579,11 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   // ===== modes =====
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan"); // scan | manual
 
+  // ===== scan picker (receipt vs transfer slip) =====
+  // receipt: multi-file picker (best for receipts)
+  // slip: single-file picker (best for transfer / credit payment slips)
+  const [scanUploadKind, setScanUploadKind] = useState("receipt"); // receipt | slip
+
   // ===== manual form states =====
   const initialType = useMemo(() => {
     if (initialData?.isTransfer) return transferKindForEdit === "credit_payment" ? "credit_payment" : "transfer";
@@ -1609,6 +1614,14 @@ const existingRefSet = useMemo(() => {
 
   const handlePickSlip = () => {
     slipFileInputRef.current?.click();
+  };
+
+  const handlePickScanFiles = () => {
+    if (scanUploadKind === "slip") {
+      handlePickSlip();
+      return;
+    }
+    handlePickFiles();
   };
 
   // ===== file helpers (image + PDF) =====
@@ -3898,45 +3911,66 @@ const handleClose = () => {
               dropActive ? "ring-2 ring-indigo-500/40 bg-indigo-500/5" : ""
             }`}
           >
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
                   <Sparkles size={18} className="text-indigo-600" />
-                  Scan ใบเสร็จ / Slip
+                  สแกนใบเสร็จ / สลิป
                 </div>
                 <div className="text-xs text-gray-800/60 mt-1">
-                  เลือกได้หลายรูป • แนบ evidence ลง note อัตโนมัติ • จำหมวดจากร้าน/เลขบัญชีเดิมได้ • เปลี่ยนประเภทได้ •
-                  โอนเข้าบัตรเครดิตจะถูกจัดเป็น “ชำระบัตร”
+                  รองรับหลายไฟล์ (ใบเสร็จ) หรือไฟล์เดียว (สลิป) • แนบ evidence ลง note อัตโนมัติ • จำหมวดจากร้าน/เลขบัญชีเดิมได้ •
+                  เปลี่ยนประเภทได้ • โอนเข้าบัตรเครดิตจะถูกจัดเป็น “ชำระบัตร”
                 </div>
                 <div className="mt-2 text-[11px] font-bold text-gray-900/60">
                   Tip: ลากไฟล์มาวาง (drag & drop) หรือกด Ctrl+V เพื่อวางจาก clipboard (รองรับรูปภาพ + PDF)
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 items-stretch">
+              <div className="w-full md:w-[340px] flex flex-col gap-2 items-stretch">
+                <div className="bg-white/60 border border-white/25 rounded-2xl p-1 flex items-stretch gap-1" role="tablist" aria-label="ประเภทเอกสาร">
+                  <button
+                    type="button"
+                    onClick={() => setScanUploadKind('receipt')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-[0.99] ${scanUploadKind === 'receipt' ? 'bg-gray-900/90 text-white shadow-sm' : 'text-gray-900/70 hover:bg-white/40'}`}
+                    aria-selected={scanUploadKind === 'receipt'}
+                    role="tab"
+                  >
+                    ใบเสร็จ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScanUploadKind('slip')}
+                    className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-[0.99] ${scanUploadKind === 'slip' ? 'bg-gray-900/90 text-white shadow-sm' : 'text-gray-900/70 hover:bg-white/40'}`}
+                    aria-selected={scanUploadKind === 'slip'}
+                    role="tab"
+                  >
+                    สลิปโอน/ชำระ
+                  </button>
+                </div>
+
                 <button
                   type="button"
-                  onClick={handlePickFiles}
+                  onClick={handlePickScanFiles}
                   className="px-4 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold text-sm active:scale-95 disabled:opacity-60"
                   disabled={isScanning}
                 >
                   <span className="inline-flex items-center gap-2">
-                    {isScanning ? <Loader size={18} className="animate-spin" /> : <Camera size={18} />}
-                    เลือกรูป / PDF
+                    {isScanning ? (
+                      <Loader size={18} className="animate-spin" />
+                    ) : scanUploadKind === 'slip' ? (
+                      <ArrowRightLeft size={18} />
+                    ) : (
+                      <Camera size={18} />
+                    )}
+                    แนบไฟล์เพื่อสแกน
                   </span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handlePickSlip}
-                  className="px-4 py-3 rounded-2xl bg-white/60 text-gray-900 border border-white/30 font-extrabold text-sm active:scale-95 disabled:opacity-60"
-                  disabled={isScanning}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <ArrowRightLeft size={18} />
-                    อัปโหลดสลิป / PDF
-                  </span>
-                </button>
+                <div className="text-[11px] leading-relaxed font-bold text-gray-900/60">
+                  {scanUploadKind === 'slip'
+                    ? 'สลิป: เลือกได้ทีละ 1 ไฟล์ (เหมาะกับโอนเงิน/ชำระบัตร)'
+                    : 'ใบเสร็จ: เลือกได้หลายไฟล์ (ถ้าเลือกมากกว่า 1 ระบบจะส่งเข้า Inbox อัตโนมัติ)'}
+                </div>
               </div>
 
               <input
@@ -4532,7 +4566,7 @@ const handleClose = () => {
                 <Camera size={32} />
               </div>
               <p className="text-gray-900 font-extrabold">ยังไม่มีรูปในคิว</p>
-              <p className="text-gray-900/60 text-sm mt-1">กด “เลือกรูป” เพื่อเริ่มสแกน</p>
+              <p className="text-gray-900/60 text-sm mt-1">กด “แนบไฟล์เพื่อสแกน” เพื่อเริ่มสแกน</p>
             </div>
           )}
         </>
