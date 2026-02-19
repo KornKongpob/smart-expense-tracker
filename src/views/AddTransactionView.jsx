@@ -3873,7 +3873,12 @@ const handleClose = () => {
         }
       />
 
-      <main className="ui-page pt-4">
+      {/*
+        Add view uses its own fixed bottom actions (Save / Scan actions).
+        Use pb-nav here to guarantee enough scroll space on small devices
+        and prevent the last fields from being hidden behind the fixed bar.
+      */}
+      <main className="ui-page pt-4 pb-nav">
       {/* Mode Tabs (new only) */}
       {!isEditMode ? (
         <div className="glass-panel border border-white/20 p-1.5 rounded-2xl flex mb-5">
@@ -5149,7 +5154,7 @@ const handleClose = () => {
           {/* Attachment preview (from scan / inbox) */}
           {initialAttachmentId ? (
             <div className="glass-card rounded-3xl p-4 mb-4 border border-white/20">
-              <div className="text-xs font-bold text-gray-900/55 mb-3 uppercase">Attachment</div>
+              <div className="text-xs font-bold text-gray-900/55 mb-3 uppercase">ไฟล์แนบ</div>
               {attachmentUrl ? (
                 <a
                   href={attachmentUrl}
@@ -5161,7 +5166,7 @@ const handleClose = () => {
                     <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center bg-white/10">
                       <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
                         <FileText size={18} />
-                        Open PDF
+                        เปิดไฟล์ PDF
                       </div>
                     </div>
                   ) : (
@@ -5169,7 +5174,7 @@ const handleClose = () => {
                   )}
                 </a>
               ) : (
-                <div className="text-sm text-gray-900/60">Loading image…</div>
+                <div className="text-sm text-gray-900/60">กำลังโหลดไฟล์…</div>
               )}
               <div className="mt-2 text-[11px] text-gray-900/50">
                 ไฟล์แนบถูกเก็บแบบถาวรในเครื่อง (IndexedDB)
@@ -5178,7 +5183,7 @@ const handleClose = () => {
           ) : null}
 
           {/* Date / Note / Ref */}
-          <div className="glass-card rounded-3xl overflow-hidden mb-24">
+          <div className="glass-card rounded-3xl overflow-hidden mb-6">
             <div className="flex items-center border-b border-white/15 p-4">
               <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-gray-900/50 mr-3">
                 <Calendar size={20} />

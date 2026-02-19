@@ -1,5 +1,5 @@
 // src/views/AccountsView.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseDigitsList, choosePrimaryDigits, formatDigitsSummary } from "../utils/accountMatch";
 import { useAppStore } from "../store/store";
 import { calcAccountBalance } from "../store/selectors";
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import AppHeader from "../components/AppHeader";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 // ===== Visual helpers =====
 const isImageSrc = (v) => {
@@ -441,22 +442,39 @@ const generateId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-export default function AccountsView() {
+export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const store = useAppStore();
   const accounts = store.state.accounts || [];
   const { addAccount, updateAccount, deleteAccount, adjustAccountBalance } = store;
 
   const [q, setQ] = useState("");
 
-  // Alerts (small toast style)
+  // Alerts
+  // - Prefer global toast (App-level) for consistency across the app.
+  // - Keep a local fallback (e.g., if the view is rendered standalone).
   const [alertMsg, setAlertMsg] = useState("");
   const [alertType, setAlertType] = useState("ok"); // ok | warn
-  const showAlert = (msg, type = "ok") => {
+  const alertTimerRef = useRef(null);
 
-    setAlertMsg(msg);
+  useEffect(() => {
+    return () => {
+      if (alertTimerRef.current) window.clearTimeout(alertTimerRef.current);
+    };
+  }, []);
+
+  const showLocalAlert = (msg, type = "ok") => {
+    const m = String(msg || "");
+    setAlertMsg(m);
     setAlertType(type);
-    window.clearTimeout(showAlert._t);
-    showAlert._t = window.setTimeout(() => setAlertMsg(""), 2400);
+    if (alertTimerRef.current) window.clearTimeout(alertTimerRef.current);
+    if (m) {
+      alertTimerRef.current = window.setTimeout(() => setAlertMsg(""), 2400);
+    }
+  };
+
+  const notify = (msg, type = "ok") => {
+    if (typeof showAppAlert === "function") return showAppAlert(String(msg || ""));
+    return showLocalAlert(msg, type);
   };
 
   const toggleSignedNumberString = (val) => {
@@ -533,7 +551,7 @@ export default function AccountsView() {
   }, [cType, openCreate, cIconMode]);
 
 const create = () => {
-  if (!cName.trim()) return showAlert?.("กรุณาใส่ชื่อบัญชี");
+  if (!cName.trim()) return notify("กรุณาใส่ชื่อบัญชี", "warn");
 
   const matchDigits = parseDigitsList(cAccountNumber);
   const primaryDigits = choosePrimaryDigits(matchDigits);
@@ -581,7 +599,7 @@ const create = () => {
 
   resetCreate();
   setOpenCreate(false);
-  showAlert?.("เพิ่มบัญชีแล้ว");
+  notify("เพิ่มบัญชีแล้ว");
 };
 
 
@@ -609,6 +627,9 @@ const create = () => {
   const [openAdjustConfirm, setOpenAdjustConfirm] = useState(false);
   const [pendingEdit, setPendingEdit] = useState(null);
   const [pendingAdjust, setPendingAdjust] = useState(null);
+
+  // Prevent background scroll when any sheet/modal is open.
+  useLockBodyScroll(!!openCreate || !!openEdit || !!openCreateAdjustConfirm || !!openAdjustConfirm);
 
   const openEditModal = (acc) => {
     setEEditing(acc?.id || null);
@@ -655,7 +676,7 @@ const create = () => {
 
   const saveEdit = () => {
     if (!eEditing) return;
-    if (!eName.trim()) return showAlert?.("กรุณาใส่ชื่อบัญชี");
+    if (!eName.trim()) return notify("กรุณาใส่ชื่อบัญชี", "warn");
 
     const matchDigits = parseDigitsList(eAccountNumber);
     const primaryDigits = choosePrimaryDigits(matchDigits);
@@ -683,7 +704,7 @@ const create = () => {
     if (!desiredRaw || desiredRaw === "-") {
       updateAccount(partial);
       closeEditModal();
-      showAlert?.("บันทึกแล้ว");
+      notify("บันทึกแล้ว");
       return;
     }
 
@@ -695,7 +716,7 @@ const create = () => {
     if (delta === 0) {
       updateAccount(partial);
       closeEditModal();
-      showAlert?.("บันทึกแล้ว");
+      notify("บันทึกแล้ว");
       return;
     }
 
@@ -712,12 +733,21 @@ const create = () => {
 
   const del = (id) => {
     if (!id) return;
-    const ok = window.confirm(
-      "ลบบัญชีนี้?\n\nระบบจะลบรายการธุรกรรมทั้งหมดของบัญชีนี้ด้วย (รวมถึงรายการโอนที่เกี่ยวข้อง)"
-    );
-    if (!ok) return;
-    deleteAccount(id);
-    showAlert("ลบแล้ว", "warn");
+
+    const message =
+      "ลบบัญชีนี้?\n\nระบบจะลบรายการธุรกรรมทั้งหมดของบัญชีนี้ด้วย (รวมถึงรายการโอนที่เกี่ยวข้อง)";
+
+    const doDelete = () => {
+      deleteAccount(id);
+      notify("ลบบัญชีแล้ว", "warn");
+    };
+
+    if (typeof showConfirm === "function") {
+      showConfirm("ลบบัญชี", message, doDelete, true, { confirmText: "ลบ" });
+      return;
+    }
+
+    if (window.confirm(message)) doDelete();
   };
 
   const filtered = useMemo(() => {
@@ -1326,6 +1356,9 @@ const create = () => {
                 บันทึก
               </button>
             </div>
+
+            {/* Safe-area spacer (iOS home indicator) */}
+            <div className="h-3 pb-safe" />
           </div>
         </div>
       ) : null}
@@ -1374,7 +1407,7 @@ const create = () => {
             setPendingCreateAdjust(null);
             setOpenCreate(false);
             resetCreate();
-            showAlert?.("เพิ่มบัญชีแล้ว (มีรายการยอดตั้งต้น)");
+            notify("เพิ่มบัญชีแล้ว (มีรายการยอดตั้งต้น)");
           }}
           className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
         >
@@ -1392,7 +1425,7 @@ const create = () => {
             setPendingCreateAdjust(null);
             setOpenCreate(false);
             resetCreate();
-            showAlert?.("เพิ่มบัญชีแล้ว");
+            notify("เพิ่มบัญชีแล้ว");
           }}
           className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
         >
@@ -1409,6 +1442,9 @@ const create = () => {
           ยกเลิก
         </button>
       </div>
+
+      {/* Safe-area spacer (iOS home indicator) */}
+      <div className="h-3 pb-safe" />
     </div>
   </div>
 ) : null}
@@ -1718,13 +1754,21 @@ const create = () => {
               <button
                 onClick={() => {
                   if (!eEditing) return;
-                  const ok = window.confirm(
-                    "ลบบัญชีนี้?\n\nระบบจะลบรายการธุรกรรมทั้งหมดของบัญชีนี้ด้วย (รวมถึงรายการโอนที่เกี่ยวข้อง)"
-                  );
-                  if (!ok) return;
-                  deleteAccount(eEditing);
-                  closeEditModal();
-                  showAlert("ลบแล้ว", "warn");
+                  const message =
+                    "ลบบัญชีนี้?\n\nระบบจะลบรายการธุรกรรมทั้งหมดของบัญชีนี้ด้วย (รวมถึงรายการโอนที่เกี่ยวข้อง)";
+
+                  const doDelete = () => {
+                    deleteAccount(eEditing);
+                    closeEditModal();
+                    notify("ลบบัญชีแล้ว", "warn");
+                  };
+
+                  if (typeof showConfirm === "function") {
+                    showConfirm("ลบบัญชี", message, doDelete, true, { confirmText: "ลบ" });
+                    return;
+                  }
+
+                  if (window.confirm(message)) doDelete();
                 }}
                 className="ui-btn ui-btn-secondary border-red-200 bg-red-50/70 text-red-700"
               >
@@ -1741,6 +1785,9 @@ const create = () => {
                 </button>
               </div>
             </div>
+
+            {/* Safe-area spacer (iOS home indicator) */}
+            <div className="h-3 pb-safe" />
           </div>
         </div>
       ) : null}
@@ -1780,7 +1827,7 @@ const create = () => {
                   });
                   setOpenAdjustConfirm(false);
                   closeEditModal();
-                  showAlert?.("บันทึกแล้ว (มีรายการปรับยอด)");
+                  notify("บันทึกแล้ว (มีรายการปรับยอด)");
                 }}
                 className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
               >
@@ -1798,7 +1845,7 @@ const create = () => {
                   });
                   setOpenAdjustConfirm(false);
                   closeEditModal();
-                  showAlert?.("บันทึกแล้ว");
+                  notify("บันทึกแล้ว");
                 }}
                 className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
               >
@@ -1815,6 +1862,9 @@ const create = () => {
                 ยกเลิก
               </button>
             </div>
+
+            {/* Safe-area spacer (iOS home indicator) */}
+            <div className="h-3 pb-safe" />
           </div>
         </div>
       ) : null}

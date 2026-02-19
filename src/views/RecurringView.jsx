@@ -8,6 +8,7 @@ import { useAppStore } from "../store/store";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { parseDateSafe } from "../store/selectors";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 function ModalShell({ title, children, onClose }) {
   return (
@@ -77,6 +78,9 @@ export default function RecurringView({ showAlert, showConfirm }) {
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
+  // Prevent background scroll while modal is open
+  useLockBodyScroll(open);
 
   const [rtype, setRType] = useState("expense");
   const [amount, setAmount] = useState("0");

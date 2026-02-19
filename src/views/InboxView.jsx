@@ -26,6 +26,7 @@ import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } fr
 import { expandTransactionToInstallments } from "../utils/installments";
 import { useBlobInfo } from "../utils/useBlobInfo";
 import { isCreditAccount } from "../utils/accountMatch";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
@@ -530,7 +531,7 @@ function AttachmentThumb({ attachmentId }) {
           )}
         </a>
       ) : (
-        <div className="text-xs text-gray-900/55">Loading attachment…</div>
+        <div className="text-xs text-gray-900/55">กำลังโหลดไฟล์แนบ…</div>
       )}
     </div>
   );
@@ -547,6 +548,7 @@ function EditorModal({
   onSave,
   showAlert,
 }) {
+  useLockBodyScroll(open);
   const [draft, setDraft] = useState(null);
 
   const { url: attachmentUrl, mimeType: attachmentMimeType } = useBlobInfo(draft?.attachmentId);
@@ -1181,7 +1183,7 @@ function EditorModal({
       <div className="relative w-full max-w-md glass-card rounded-3xl p-5 border border-white/20 max-h-[90vh] overflow-y-auto overflow-x-hidden overscroll-contain">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-extrabold text-gray-900">Edit Inbox item</h3>
+            <h3 className="text-lg font-extrabold text-gray-900">แก้ไขรายการใน Inbox</h3>
             <p className="mt-1 text-sm text-gray-900/70">แก้ไขข้อมูลก่อนอนุมัติ</p>
           </div>
           <button
@@ -1196,7 +1198,7 @@ function EditorModal({
 
         {draft?.attachmentId ? (
           <div className="mt-4 glass-panel border border-white/20 rounded-2xl p-3">
-            <div className="text-xs font-extrabold text-gray-900/60 uppercase mb-2">Attachment</div>
+            <div className="text-xs font-extrabold text-gray-900/60 uppercase mb-2">ไฟล์แนบ</div>
             {attachmentUrl ? (
               <a
                 href={attachmentUrl}
@@ -1208,7 +1210,7 @@ function EditorModal({
                   <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center bg-white/10">
                     <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
                       <FileText size={18} />
-                      Open PDF
+                      เปิดไฟล์ PDF
                     </div>
                   </div>
                 ) : (
@@ -1216,7 +1218,7 @@ function EditorModal({
                 )}
               </a>
             ) : (
-              <div className="text-sm text-gray-900/60">Loading image…</div>
+              <div className="text-sm text-gray-900/60">กำลังโหลดไฟล์…</div>
             )}
           </div>
         ) : null}

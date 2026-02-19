@@ -1,8 +1,9 @@
 // src/components/AccountPicker.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Search, X } from "lucide-react";
 import { cn } from "../utils/cn";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 import AccountPill from "./AccountPill";
 
 function normalizeType(t) {
@@ -52,6 +53,9 @@ export default function AccountPicker({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
 
+  // Desktop popover position (avoid reading refs during render)
+  const [panelStyle, setPanelStyle] = useState({ left: 12, top: 80, width: 360 });
+
   const list = Array.isArray(accounts) ? accounts : [];
   const selected = useMemo(
     () => list.find((a) => String(a?.id || "") === String(value || "")) || null,
@@ -91,27 +95,41 @@ export default function AccountPicker({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // lock body scroll while open
-  useEffect(() => {
-    if (!open) return;
-    const prev = document?.body?.style?.overflow;
-    if (document?.body) document.body.style.overflow = "hidden";
-    return () => {
-      if (document?.body) document.body.style.overflow = prev || "";
-    };
-  }, [open]);
+  // lock body scroll while open (nested-safe)
+  useLockBodyScroll(open);
 
-  const panelStyle = useMemo(() => {
-    const r = btnRef.current?.getBoundingClientRect?.();
-    if (!r) return { left: 12, top: 80, width: 360 };
-    const vw = window?.innerWidth || 390;
-    const left = clamp(r.left, 12, vw - 12);
-    const width = clamp(r.width, 240, 420);
-    const maxLeft = vw - 12 - width;
-    return {
-      left: clamp(left, 12, maxLeft),
-      top: Math.max(12, r.bottom + 8),
-      width,
+  // Measure anchor -> set popover coordinates (desktop)
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (typeof window === "undefined") return;
+
+    let raf = 0;
+    const measure = () => {
+      const r = btnRef.current?.getBoundingClientRect?.();
+      if (!r) return;
+      const vw = window.innerWidth || 390;
+      const vh = window.innerHeight || 812;
+      const maxW = Math.min(420, vw - 24);
+      const width = clamp(r.width, 240, maxW);
+      const left = clamp(r.left, 12, vw - 12 - width);
+      const top = clamp(r.bottom + 8, 12, vh - 12);
+      setPanelStyle({ left, top, width });
+    };
+
+    const schedule = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    };
+
+    schedule();
+    window.addEventListener("resize", schedule);
+    // capture scroll from any scroll container
+    window.addEventListener("scroll", schedule, true);
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
     };
   }, [open]);
 

@@ -4,6 +4,7 @@ import { ChevronRight, Plus, Trash2, Edit2, X, Check, Search, CornerDownRight } 
 import AppHeader from "../components/AppHeader";
 import { PRESET_COLORS } from "../constants/presets.jsx";
 import { useAppStore } from "../store/store";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 const slugify = (s) =>
   String(s || "")
@@ -66,6 +67,9 @@ export default function CategoriesView({ showAlert, showConfirm }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [q, setQ] = useState("");
+
+  // Prevent background scroll while modal is open (mobile/iOS)
+  useLockBodyScroll(open);
 
   // ✅ Collapsible main categories (reduce long scroll when defaults are large)
   const expandedStorageKey = useMemo(() => `cat_expanded_${tab}`, [tab]);

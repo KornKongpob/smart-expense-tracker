@@ -5,6 +5,7 @@ import { isCreditAccount } from "../utils/accountMatch";
 import { useAppStore } from "../store/store";
 import { formatCurrency, formatDateShort } from "../utils/format";
 import { signedReceiptTxSatang } from "../utils/receiptAdjustments";
+import AccountPill from "./AccountPill";
 
 // ---------- small helpers ----------
 const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
@@ -174,6 +175,10 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
   let title = category?.name || "รายการ";
   let subtitle = `${accountName || "—"} • ${safeDateLabel(tx?.date)}`;
 
+  // UI-friendly subtitle (chips) — computed later based on transfer/non-transfer
+  let subtitleNode = null;
+  let transferMeta = null;
+
   let leadingIsLucide = false;
   let leadingIcon = category?.icon || "🧾";
   let leadingBg = category?.color ? `${category.color}20` : "rgba(255,255,255,0.25)";
@@ -221,6 +226,12 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
       outTx?.date || tx?.date
     )}`;
 
+    transferMeta = {
+      fromAcc,
+      toAcc,
+      date: outTx?.date || tx?.date,
+    };
+
     // transfer/payments should be neutral in UI (ไม่ใช่รายจ่ายจริง)
     amountPrefix = "";
     amountClass = "text-gray-900";
@@ -256,6 +267,28 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     ? "text-purple-700"
     : "text-gray-900";
 
+  // Render subtitle as chips for better readability + no overlap
+  const selfAcc = accounts.find((a) => String(a?.id || "") === String(tx?.accountId || "")) || null;
+  if (transferMeta?.fromAcc || transferMeta?.toAcc) {
+    subtitleNode = (
+      <div className="flex flex-wrap items-center gap-2">
+        <AccountPill account={transferMeta.fromAcc} size="sm" showHint={true} className="max-w-full" />
+        <span className="text-gray-900/35 font-black">→</span>
+        <AccountPill account={transferMeta.toAcc} size="sm" showHint={true} className="max-w-full" />
+        <span className="text-gray-900/25 font-black">•</span>
+        <span className="font-extrabold">{safeDateLabel(transferMeta.date)}</span>
+      </div>
+    );
+  } else {
+    subtitleNode = (
+      <div className="flex flex-wrap items-center gap-2">
+        <AccountPill account={selfAcc} fallbackName={accountName} size="sm" showHint={true} className="max-w-full" />
+        <span className="text-gray-900/25 font-black">•</span>
+        <span className="font-extrabold">{safeDateLabel(tx?.date)}</span>
+      </div>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -289,7 +322,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                   </span>
                 ) : null}
               </div>
-              <div className="text-xs text-gray-800/60 whitespace-normal break-words">{subtitle}</div>
+              <div className="text-xs text-gray-800/60 whitespace-normal break-words">{subtitleNode}</div>
             </div>
 
             <div className="shrink-0 flex items-center gap-2">

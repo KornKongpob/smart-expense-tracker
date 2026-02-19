@@ -6,6 +6,7 @@ import { useAppStore } from "../store/store";
 import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 const BUDGET_TOTAL_ID = "__TOTAL__"; // overall monthly budget
 const BUDGET_DAILY_ID = "__DAILY__"; // daily budget (for Dashboard)
@@ -146,6 +147,9 @@ export default function BudgetsView({ showAlert, showConfirm }) {
   const [editingCategoryId, setEditingCategoryId] = useState("");
   const [limit, setLimit] = useState("");
   const [alertPct, setAlertPct] = useState("90");
+
+  // Prevent background scroll while modal is open
+  useLockBodyScroll(open);
 
   const rows = useMemo(() => {
     const list = cats.map((c) => {

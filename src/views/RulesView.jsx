@@ -8,6 +8,7 @@ import { useAppStore } from "../store/store";
 import { formatCurrency } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { validateAutomationRule } from "../utils/rulesEngine";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 function ModalShell({ title, children, onClose }) {
   return (
@@ -25,6 +26,9 @@ function ModalShell({ title, children, onClose }) {
           </button>
         </div>
         {children}
+
+        {/* Safe-area spacer (iOS home indicator) */}
+        <div className="h-3 pb-safe" />
       </div>
     </div>
   );
@@ -62,6 +66,9 @@ export default function RulesView({ showAlert, showConfirm }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Prevent background scroll while modal is open
+  useLockBodyScroll(open);
 
   // form
   const [name, setName] = useState("");

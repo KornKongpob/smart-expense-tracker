@@ -30,6 +30,7 @@ import { useAppStore } from "../store/store";
 import { parseDateSafe } from "../store/selectors";
 import AppHeader from "../components/AppHeader";
 import AccountPill from "../components/AccountPill";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -289,6 +290,9 @@ export default function StatsView() {
 
   // Drill-down modal state
   const [openCat, setOpenCat] = useState(false);
+
+  // Prevent background scroll while the detail sheet is open
+  useLockBodyScroll(openCat);
   const [selectedCatId, setSelectedCatId] = useState(null);
 
   const now = useMemo(() => new Date(), []);
