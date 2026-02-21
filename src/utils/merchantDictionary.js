@@ -27,9 +27,9 @@ export function normalizeMerchantKey(raw) {
     .toLowerCase();
   if (!s) return "";
   return s
-    .replace(/[()\[\]{}]/g, " ")
+    .replace(/[()[\]{}]/g, " ")
     .replace(/["'`]/g, "")
-    .replace(/[^a-z0-9\u0E00-\u0E7F\s\-\/_\.]/gi, " ")
+    .replace(/[^a-z0-9\u0E00-\u0E7F\s/_.-]/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -63,12 +63,12 @@ export function baseNormalizeMerchantName(raw) {
   const lower = s.toLowerCase();
 
   // 7-11 canonicalization
-  if (/\b7\s*[-\/ ]?\s*11\b/.test(lower) || /seven\s*eleven/.test(lower) || /\b7eleven\b/.test(lower)) {
+  if (/\b7\s*[-/ ]?\s*11\b/.test(lower) || /seven\s*eleven/.test(lower) || /\b7eleven\b/.test(lower)) {
     return "7-ELEVEN";
   }
 
   // Small helper: if it's mostly latin and short, uppercase for consistency
-  const latinOnly = /^[a-z0-9\s\-\&\._\/]+$/i.test(s);
+  const latinOnly = /^[a-z0-9\s\-&._/]+$/i.test(s);
   if (latinOnly && s.length <= 26) return s.toUpperCase();
 
   return s;

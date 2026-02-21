@@ -45,23 +45,19 @@ const TYPE_OPTIONS = [
 export default function RulesView({ showAlert, showConfirm }) {
   const { state, navigate, upsertRule, updateRule, deleteRule, moveRule } = useAppStore();
 
+  // Memoize based on full state object to satisfy React Compiler rule
+  // (avoid preserve-manual-memoization warnings).
   const rules = useMemo(() => {
     const list = Array.isArray(state?.rules) ? state.rules : [];
     return list.slice().sort((a, b) => (Number(a?.priority) || 0) - (Number(b?.priority) || 0));
-  }, [state?.rules]);
+  }, [state]);
 
   const enabledCount = useMemo(() => rules.filter((r) => r?.enabled !== false).length, [rules]);
 
   const accounts = useMemo(() => state?.accounts || [], [state?.accounts]);
   const categories = useMemo(() => state?.categories || { expense: [], income: [] }, [state?.categories]);
 
-  const categoryOptions = useMemo(() => {
-    const exp = (categories.expense || []).map((c) => ({ id: c.id, label: `Expense • ${c.name}` }));
-    const inc = (categories.income || []).map((c) => ({ id: c.id, label: `Income • ${c.name}` }));
-    // include special
-    const special = [{ id: "transfer", label: "Special • transfer" }, { id: "adjust_balance", label: "Special • adjust_balance" }];
-    return [...special, ...exp, ...inc];
-  }, [categories]);
+  // (categoryOptions removed) — this was unused, and triggered no-unused-vars.
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState("");

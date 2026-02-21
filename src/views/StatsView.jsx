@@ -483,7 +483,10 @@ export default function StatsView() {
     return [...map.values()]
       .sort((a, b) => String(a.iso).localeCompare(String(b.iso)))
       .slice(-12)
-      .map(({ iso, ...rest }) => rest);
+      .map((x) => {
+        const { iso: _iso, ...rest } = x;
+        return rest;
+      });
   }, [deferredFiltered]);
 
   const hasAny = filtered.length > 0;

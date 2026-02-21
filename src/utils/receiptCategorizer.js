@@ -12,8 +12,10 @@ const containsAny = (text, kws) => kws.some((k) => text.includes(k));
 
 const EXPENSE_KW = {
   // ✅ Snacks (separate from general food)
+  // NOTE: keep a single `snacks` key (duplicate object keys get overwritten at runtime).
   snacks: [
     "ขนม",
+    "ขนมปัง",
     "ทอดกรอบ",
     "กรอบ",
     "บิสกิต",
@@ -21,7 +23,11 @@ const EXPENSE_KW = {
     "เวเฟอร์",
     "มันฝรั่ง",
     "ข้าวโพด",
+    "ข้าวเกรียบ",
+    "ข้าวโพดคั่ว",
     "ถั่ว",
+    "ลูกอม",
+    "ช็อกโกแลต",
     "snack",
     "chips",
     "chip",
@@ -30,6 +36,7 @@ const EXPENSE_KW = {
     "cracker",
     "popcorn",
     "candy",
+    "chocolate",
   ],
   food: [
     "ก๋วยเตี๋ยว",
@@ -168,29 +175,6 @@ const EXPENSE_KW = {
     "เจลประคบ",
   ],
   entertainment: ["netflix", "spotify", "cinema", "movie", "concert", "เกม", "game", "steam", "disney", "prime video"],
-
-  // ✅ Snacks
-  snacks: [
-    "ขนม",
-    "ขนมปัง",
-    "บิสกิต",
-    "คุกกี้",
-    "เวเฟอร์",
-    "มันฝรั่ง",
-    "ทอดกรอบ",
-    "ข้าวเกรียบ",
-    "ข้าวโพดคั่ว",
-    "ลูกอม",
-    "ช็อกโกแลต",
-    "snack",
-    "chips",
-    "cookie",
-    "biscuit",
-    "cracker",
-    "popcorn",
-    "candy",
-    "chocolate",
-  ],
 
   // ✅ Receipt adjustments
   discount: ["ส่วนลด", "discount", "coupon", "promo", "promotion", "voucher"],

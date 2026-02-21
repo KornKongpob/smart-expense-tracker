@@ -60,7 +60,6 @@ function advanceRecurringDate(dateObj, frequency, interval) {
 }
 
 function getNextDueISO(r, todayISO) {
-  const today = parseDateSafe(todayISO);
   const start = parseDateSafe(r?.startDate || todayISO);
 
   const base = r?.lastGenerated ? advanceRecurringDate(parseDateSafe(r.lastGenerated), r.frequency, r.interval) : start;
@@ -74,7 +73,8 @@ export default function RecurringView({ showAlert, showConfirm }) {
   const accounts = state.accounts || [];
   const expenseCats = state.categories?.expense || [];
   const incomeCats = state.categories?.income || [];
-  const recurring = state.recurring || [];
+  // Keep stable reference to avoid exhaustive-deps warnings when state.recurring is undefined.
+  const recurring = useMemo(() => (Array.isArray(state?.recurring) ? state.recurring : []), [state?.recurring]);
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);

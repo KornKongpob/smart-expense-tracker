@@ -10,7 +10,11 @@ import { AppStoreProvider } from "./store/store.jsx";
 (function preventZoom() {
   // iOS Safari pinch zoom
   const prevent = (e) => {
-    try { e.preventDefault(); } catch {}
+    try {
+      e.preventDefault();
+    } catch {
+      // ignore
+    }
   };
   window.addEventListener("gesturestart", prevent, { passive: false });
   window.addEventListener("gesturechange", prevent, { passive: false });

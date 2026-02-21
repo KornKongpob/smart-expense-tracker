@@ -1,6 +1,6 @@
 // src/views/AccountsView.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { parseDigitsList, choosePrimaryDigits, formatDigitsSummary } from "../utils/accountMatch";
+import { parseDigitsList, choosePrimaryDigits } from "../utils/accountMatch";
 import { useAppStore } from "../store/store";
 import { calcAccountBalance } from "../store/selectors";
 import { formatCurrency } from "../utils/format";
@@ -475,13 +475,6 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const notify = (msg, type = "ok") => {
     if (typeof showAppAlert === "function") return showAppAlert(String(msg || ""));
     return showLocalAlert(msg, type);
-  };
-
-  const toggleSignedNumberString = (val) => {
-    const s = String(val || "").trim();
-    if (!s) return "-";
-    if (s === "-") return "";
-    return s.startsWith("-") ? s.slice(1) : `-${s}`;
   };
 
   const forceSignNumberString = (val, sign = 1) => {

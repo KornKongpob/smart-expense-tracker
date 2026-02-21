@@ -147,7 +147,7 @@ function normalizeRefKey(ref) {
   if (!s0) return '';
   // Remove common separators/spaces and compare case-insensitively.
   // Keep alphanumerics only (Thai slip refs are typically latin+digits).
-  const compact = s0.replace(/[\s\u200b\-_\.]/g, '');
+  const compact = s0.replace(/[\s\u200b\-_.]/g, '');
   const alnum = compact.replace(/[^A-Za-z0-9]/g, '');
   const base = (alnum || compact).toUpperCase();
   return isValidRefKey(base) ? base : '';
@@ -316,7 +316,7 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
 
   const candAccountId = String(candidate?.accountId || "").trim();
   const candFromAccountId = String(candidate?.fromAccountId || "").trim();
-  const candToAccountId = String(candidate?.toAccountId || "").trim();
+  // NOTE: candToAccountId was used by older heuristics; kept out to avoid unused-var lint.
 
   const candFromDigits = digitsOnly(candidate?.fromDigits || candidate?.from_account || "");
   const candToDigits = digitsOnly(candidate?.toDigits || candidate?.to_account || candidate?.counterparty_digits || "");
@@ -549,7 +549,6 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
     if (!isTransferLike && dDays > 0.01) continue;
 
     const absDiff = Math.abs(candAmount - tAmount);
-    const relDiff = absDiff / Math.max(Math.abs(candAmount), Math.abs(tAmount), 1);
     if (absDiff > Math.max(options.maxAbsAmountDiff, options.maxRelAmountDiff * Math.max(candAmount, tAmount))) continue;
 
     const tIsTransfer = !!t?.isTransfer;

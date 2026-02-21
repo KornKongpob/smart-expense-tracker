@@ -136,7 +136,7 @@ function looksLikeThaiSlip(text) {
 function fixBuddhistYearISO(isoLike) {
   const s = safeText(isoLike);
   if (!s) return "";
-  const m = s.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  const m = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
   if (!m) return s.slice(0, 10);
   let y = Number(m[1]);
   const mo = Number(m[2]);
@@ -153,7 +153,7 @@ function parseTimeFromText(text) {
   const t = normalizeThaiDigits(t0);
 
   // common: "เวลา 14:22" / "Time 14:22:10" / "14.22"
-  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[\.:](\d{2})(?:[\.:](\d{2}))?/i);
+  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[:.](\d{2})(?:[:.](\d{2}))?/i);
   if (!m) return "";
   const hh = String(m[1]).padStart(2, "0");
   const mm = String(m[2]).padStart(2, "0");
@@ -197,11 +197,11 @@ function parseTransactionRef(result, evidenceText) {
   const t = normalizeThaiDigits(safeText(evidenceText));
   if (!t) return "";
 
-  const m1 = t.match(/(?:เลขอ้างอิง|reference|ref|trx|transaction\s*id)\s*[:：]?\s*([A-Za-z0-9\-]{6,40})/i);
+  const m1 = t.match(/(?:เลขอ้างอิง|reference|ref|trx|transaction\s*id)\s*[:：]?\s*([A-Za-z0-9-]{6,40})/i);
   if (m1 && safeText(m1[1])) return safeText(m1[1]);
 
   // fallback: find a long alnum token
-  const tokens = t.match(/[A-Za-z0-9\-]{8,40}/g) || [];
+  const tokens = t.match(/[A-Za-z0-9-]{8,40}/g) || [];
   if (!tokens.length) return "";
   // Prefer tokens that contain both letters and digits
   const scored = tokens

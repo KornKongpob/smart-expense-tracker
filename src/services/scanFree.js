@@ -68,21 +68,21 @@ function parseDate(text) {
   const t = normalizeText(text).toLowerCase();
 
   // yyyy-mm-dd
-  const m0 = t.match(/(?:^|\s)(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:\s|$)/);
+  const m0 = t.match(/(?:^|\s)(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s|$)/);
   if (m0) {
     const iso = toISODateFromParts(m0[3], m0[2], m0[1]);
     if (iso) return iso;
   }
 
   // dd/mm/yyyy or dd-mm-yyyy
-  const m1 = t.match(/(?:^|\s)(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s|$)/);
+  const m1 = t.match(/(?:^|\s)(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})(?:\s|$)/);
   if (m1) {
     const iso = toISODateFromParts(m1[1], m1[2], m1[3].length === 2 ? `20${m1[3]}` : m1[3]);
     if (iso) return iso;
   }
 
   // dd <thai month> yyyy  (e.g. 14 ธ.ค. 2568)
-  const m2 = t.match(/(?:^|\s)(\d{1,2})\s*([ก-๙a-z\.]{2,12})\s*(\d{2,4})(?:\s|$)/);
+  const m2 = t.match(/(?:^|\s)(\d{1,2})\s*([ก-๙a-z.]{2,12})\s*(\d{2,4})(?:\s|$)/);
   if (m2) {
     const dd = m2[1];
     const monStr = m2[2].replace(/\./g, "");
@@ -266,10 +266,10 @@ function computeOtsuThreshold(gray) {
   return threshold;
 }
 
-function preprocessToCanvases(file, { maxDim = 2200, scaleUp = 2 } = {}) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const bmp = await createImageBitmap(file);
+async function preprocessToCanvases(file, { maxDim = 2200, scaleUp = 2 } = {}) {
+  let bmp = null;
+  try {
+    bmp = await createImageBitmap(file);
 
       // scale
       const w0 = bmp.width;
@@ -376,27 +376,30 @@ function preprocessToCanvases(file, { maxDim = 2200, scaleUp = 2 } = {}) {
         return c;
       };
 
-      resolve({
-        full: { base, contrast, bin, inv },
-        crops: {
-          top: {
-            base: crop(base, 0, 0.38),
-            contrast: crop(contrast, 0, 0.38),
-            bin: crop(bin, 0, 0.38),
-            inv: crop(inv, 0, 0.38),
-          },
-          bottom: {
-            base: crop(base, 0.55, 1),
-            contrast: crop(contrast, 0.55, 1),
-            bin: crop(bin, 0.55, 1),
-            inv: crop(inv, 0.55, 1),
-          },
+    return {
+      full: { base, contrast, bin, inv },
+      crops: {
+        top: {
+          base: crop(base, 0, 0.38),
+          contrast: crop(contrast, 0, 0.38),
+          bin: crop(bin, 0, 0.38),
+          inv: crop(inv, 0, 0.38),
         },
-      });
-    } catch (e) {
-      reject(e);
+        bottom: {
+          base: crop(base, 0.55, 1),
+          contrast: crop(contrast, 0.55, 1),
+          bin: crop(bin, 0.55, 1),
+          inv: crop(inv, 0.55, 1),
+        },
+      },
+    };
+  } finally {
+    try {
+      bmp?.close?.();
+    } catch {
+      // ignore
     }
-  });
+  }
 }
 
 // -------------------- tesseract worker (singleton) --------------------

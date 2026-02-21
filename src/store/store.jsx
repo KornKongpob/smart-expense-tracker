@@ -17,7 +17,6 @@ import {
   normalizeMerchantEntry,
   mergeMerchantEntries,
   learnMerchantMapping,
-  resolveMerchantCanonical,
   normalizeMerchantKey,
 } from "../utils/merchantDictionary";
 

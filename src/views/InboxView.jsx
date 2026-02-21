@@ -86,7 +86,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
   // ✅ Credit card installment validation (Inbox)
   if (wantsInstallment) {
     if (txType !== "expense") throw new Error("ผ่อนชำระใช้ได้เฉพาะรายการรายจ่าย");
-    if (!!item?.splitByCategory) throw new Error("ผ่อนชำระ: กรุณาปิด Split ก่อน");
+    if (item?.splitByCategory) throw new Error("ผ่อนชำระ: กรุณาปิด Split ก่อน");
 
     const acc = accounts.find((a) => String(a?.id || "") === String(item?.accountId || "")) || null;
     if (!acc || !isCreditAccount(acc)) throw new Error("ผ่อนชำระ: ต้องเลือกบัญชีเป็นบัตรเครดิต");
@@ -1829,7 +1829,7 @@ export default function InboxView({ showAlert, showConfirm }) {
     navigate,
     startNewTransaction,
     bulkUpsertTransactions,
-    addInboxItems,
+    addInboxItems: _addInboxItems,
     updateInboxItem,
     removeInboxItems,
     clearApprovedInbox,

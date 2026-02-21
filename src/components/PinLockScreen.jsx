@@ -61,10 +61,14 @@ export default function PinLockScreen({
     if (input.length !== PIN_LEN) return;
     const ok = String(input) === String(savedPin || "");
     if (ok) {
-      setError("");
-      vibrate(20);
-      window.setTimeout(() => onUnlocked?.(), 120);
-      return;
+      // Avoid calling setState synchronously inside effects (React Compiler / hooks lint rule).
+      // Use a micro task delay so React can flush this effect without cascading renders.
+      const t = window.setTimeout(() => {
+        setError("");
+        vibrate(20);
+        window.setTimeout(() => onUnlocked?.(), 120);
+      }, 0);
+      return () => window.clearTimeout(t);
     }
 
     setError("PIN ไม่ถูกต้อง");

@@ -8,7 +8,6 @@ import { signedReceiptTxSatang } from "../utils/receiptAdjustments";
 import AccountPill from "./AccountPill";
 
 // ---------- small helpers ----------
-const digitsOnly = (s) => String(s || "").replace(/[^\d]/g, "");
 
 function safeDateLabel(d) {
   try {
@@ -18,14 +17,6 @@ function safeDateLabel(d) {
   }
 }
 
-
-function accountHint(acc) {
-  if (!acc) return "";
-  const d =
-    String(acc?.digits || "").trim() ||
-    digitsOnly(acc?.accountNumber || acc?.number || "").slice(-4);
-  return d ? `•••• ${d}` : "";
-}
 
 export default function TransactionCard({ tx, category, accountName, onClick }) {
   const store = useAppStore();
@@ -122,10 +113,6 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     return norm.length ? norm : null;
   }, [tx?.receiptLines, isTransfer, isSplitGroup]);
 
-  const groupNote = String(tx?.note || "").trim();
-  const groupLabel = String(tx?.splitLabel || "").trim();
-  const showGroupNote = isSplitGroup && groupNote && groupLabel && groupNote !== groupLabel;
-
   // หา pair ของ transfer (2 legs) เพื่อแสดงครั้งเดียว + แสดง from → to
   const transferPair = useMemo(() => {
     if (!isTransfer) return null;
@@ -173,7 +160,6 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
 
   // ชื่อ/ไอคอน/สีแสดงผล
   let title = category?.name || "รายการ";
-  let subtitle = `${accountName || "—"} • ${safeDateLabel(tx?.date)}`;
 
   // UI-friendly subtitle (chips) — computed later based on transfer/non-transfer
   let subtitleNode = null;
@@ -197,11 +183,8 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     const fromAcc = accounts.find((a) => String(a.id) === String(outTx?.accountId)) || null;
     const toAcc = accounts.find((a) => String(a.id) === String(inTx?.accountId)) || null;
 
-    const fromName = fromAcc?.name || accountName || "บัญชีต้นทาง";
-    const toName = toAcc?.name || "บัญชีปลายทาง";
-
-    const fromHint = accountHint(fromAcc);
-    const toHint = accountHint(toAcc);
+    // Note: actual rendering uses AccountPill (name + hint). Keep these derived values
+    // out of the component state to avoid unused-vars + duplicate computation.
 
     // Detect credit card payment:
     // - flag/field
@@ -221,10 +204,6 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
         ? `ชำระบัตรเครดิต • ${toAcc.name}`
         : "ชำระบัตรเครดิต"
       : "โอนเงิน";
-
-    subtitle = `${fromName}${fromHint ? ` (${fromHint})` : ""} → ${toName}${toHint ? ` (${toHint})` : ""} • ${safeDateLabel(
-      outTx?.date || tx?.date
-    )}`;
 
     transferMeta = {
       fromAcc,
@@ -251,7 +230,6 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
 
     const label = String(tx?.splitLabel || "").trim();
     title = label || `แยก (${(splitLines || []).length})`;
-    subtitle = `${accountName || "—"} • ${safeDateLabel(tx?.date)}`;
 
     leadingIcon = Layers;
     leadingIsLucide = true;

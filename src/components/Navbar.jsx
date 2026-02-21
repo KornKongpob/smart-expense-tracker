@@ -3,11 +3,8 @@ import React from "react";
 import { Plus, Home, Activity, CreditCard, MoreHorizontal } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 
-export default function Navbar() {
-  const { state, actions } = useAppStore();
-  const currentView = state?.ui?.view || "dashboard";
-
-  const Item = ({ active, icon, label, onClick }) => (
+function NavItem({ active, icon, label, onClick }) {
+  return (
     <button
       onClick={onClick}
       type="button"
@@ -24,6 +21,11 @@ export default function Navbar() {
       <span className="text-[10px] mt-1 font-extrabold">{label}</span>
     </button>
   );
+}
+
+export default function Navbar() {
+  const { state, actions } = useAppStore();
+  const currentView = state?.ui?.view || "dashboard";
 
   return (
     /**
@@ -65,14 +67,14 @@ export default function Navbar() {
           <div className="absolute inset-0 bg-gradient-to-b from-white/95 via-white/85 to-white/75" />
 
           <div className="relative px-3 py-2 flex items-end justify-between">
-            <Item
+            <NavItem
               active={currentView === "dashboard"}
               onClick={() => actions.navigate("dashboard")}
               icon={<Home size={22} />}
               label="หน้าแรก"
             />
 
-            <Item
+            <NavItem
               active={currentView === "stats"}
               onClick={() => actions.navigate("stats")}
               icon={<Activity size={22} />}
@@ -105,14 +107,14 @@ export default function Navbar() {
               </button>
             </div>
 
-            <Item
+            <NavItem
               active={currentView === "accounts"}
               onClick={() => actions.navigate("accounts")}
               icon={<CreditCard size={22} />}
               label="บัญชี"
             />
 
-            <Item
+            <NavItem
               active={currentView === "more"}
               onClick={() => actions.navigate("more")}
               icon={<MoreHorizontal size={22} />}

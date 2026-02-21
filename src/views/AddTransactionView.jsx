@@ -3,8 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   bestMatchAccountCandidate,
   bestMatchAccountId,
-  getAccountDigitCandidates,
-  matchFromToAccounts,
   isCreditAccount,
 } from "../utils/accountMatch";
 import {
@@ -123,7 +121,7 @@ const isValidRefKey = (key) => {
 const normalizeRefKey = (ref) => {
   const s0 = String(ref || "").trim();
   if (!s0) return "";
-  const compact = s0.replace(/[\s\u200b\-_\.]/g, "");
+  const compact = s0.replace(/[\s\u200b\-_.]/g, "");
   const alnum = compact.replace(/[^A-Za-z0-9]/g, "");
   const base = (alnum || compact).toUpperCase();
   return isValidRefKey(base) ? base : "";
@@ -364,7 +362,7 @@ function fixBuddhistYearISO(isoLike) {
   const raw = String(isoLike || "").trim();
   if (!raw) return "";
   const s = normalizeThaiDigits(raw);
-  const m = s.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  const m = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
   if (!m) return raw.slice(0, 10);
   let y = Number(m[1]);
   const mo = Number(m[2]);
@@ -379,7 +377,7 @@ function parseSlipTimeFromText(text) {
   const t0 = String(text || "").replace(/\u00A0/g, " ").trim();
   if (!t0) return "";
   const t = normalizeThaiDigits(t0);
-  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[\.:](\d{2})(?:[\.:](\d{2}))?/i);
+  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[:.](\d{2})(?:[:.](\d{2}))?/i);
   if (!m) return "";
   const hh = String(m[1]).padStart(2, "0");
   const mm = String(m[2]).padStart(2, "0");
@@ -635,7 +633,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const [ref, setRef] = useState(initialData?.ref || "");
 
   // ===== Slip Hunter meta (optional) =====
-  const [slipMeta, setSlipMeta] = useState(() => {
+  const [slipMeta, _setSlipMeta] = useState(() => {
     // preserve on edit if present
     const prev = initialData && typeof initialData === "object" ? initialData : {};
     const m = prev?.meta && typeof prev.meta === "object" ? prev.meta.slip : null;
@@ -1379,6 +1377,67 @@ const existingRefSet = useMemo(() => {
 
     // Ignore inappropriate category in transfer types
     if (t === "transfer" || t === "credit_payment") next.categoryId = "transfer";
+
+    return next;
+  };
+
+  // Normalize queue item shape when `txType` changes (user edits, automation rules, etc.).
+  // This prevents inconsistent states like:
+  // - transfer items still having split/category fields
+  // - income items keeping receipt groups
+  const normalizeQueueItemType = (item) => {
+    const base = item && typeof item === "object" ? item : {};
+    const raw = String(base.txType || base.type || "expense").toLowerCase().trim();
+    const txType = ["expense", "income", "transfer", "credit_payment"].includes(raw) ? raw : "expense";
+
+    const defaultAcc = accounts?.[0]?.id || "";
+    const next = { ...base, txType };
+
+    if (txType === "transfer" || txType === "credit_payment") {
+      next.categoryId = "transfer";
+      next.splitByCategory = false;
+      next.isInstallment = false;
+      next.items = [];
+      next.groups = [];
+
+      next.fromAccountId = next.fromAccountId || next.accountId || defaultAcc;
+      next.toAccountId = next.toAccountId || defaultAcc;
+      // keep a stable single accountId (used by some UI helpers)
+      next.accountId = next.accountId || next.fromAccountId || defaultAcc;
+
+      // credit_payment hint: prefer toAccount = credit, fromAccount = non-credit
+      if (txType === "credit_payment") {
+        const credit = (accounts || []).find((a) => isCreditAccount(a));
+        const nonCredit = (accounts || []).find((a) => !isCreditAccount(a));
+        const fromAcc = (accounts || []).find((a) => a?.id === next.fromAccountId) || null;
+        const toAcc = (accounts || []).find((a) => a?.id === next.toAccountId) || null;
+
+        const fallbackFrom = nonCredit?.id || defaultAcc;
+        const fallbackTo = credit?.id || next.toAccountId || defaultAcc;
+
+        if (!fromAcc || isCreditAccount(fromAcc)) next.fromAccountId = fallbackFrom;
+        if (!toAcc || !isCreditAccount(toAcc)) next.toAccountId = fallbackTo;
+        next.accountId = next.accountId || next.fromAccountId || fallbackFrom;
+      }
+
+      return next;
+    }
+
+    // expense / income
+    next.accountId = next.accountId || next.fromAccountId || next.toAccountId || defaultAcc;
+
+    if (txType === "income") {
+      // Income doesn't support receipt breakdown / splitting.
+      next.splitByCategory = false;
+      next.isInstallment = false;
+      next.items = [];
+      next.groups = [];
+    }
+
+    // Ensure a safe category to prevent blank UI / invalid saves.
+    if (!next.categoryId || next.categoryId === "transfer") {
+      next.categoryId = ensureCategory(txType === "income" ? "income" : "expense", "other");
+    }
 
     return next;
   };
@@ -2327,7 +2386,9 @@ if (
 
           // ✅ Advanced automation rules: run after scan and auto-fill fields
           try {
-            const bankText = `${fromName || ""} ${toName || ""}`.trim();
+            // NOTE: `fromName/toName` were previously undefined here, which prevented rules from running.
+            // Use matched internal account names (best-effort) as extra context for the rules engine.
+            const bankText = `${matchedFromAcc?.name || ""} ${matchedToAcc?.name || ""}`.trim();
             const autoCtx = {
               text: `${merchant || ""} ${mergedNote || ""} ${bankText} ${evidenceText || ""}`,
               rawText: evidenceText || "",
@@ -2486,7 +2547,14 @@ if (
 
     const createdAt = Date.now();
     const serializable = ready.map((q) => {
-      const { previewUrl, previewUrlSource, batchId, status, error, ...rest } = q || {};
+      const {
+        previewUrl: _previewUrl,
+        previewUrlSource: _previewUrlSource,
+        batchId: _batchId,
+        status: _status,
+        error: _error,
+        ...rest
+      } = q || {};
       const type = rest?.type || rest?.txType || "expense";
       const referenceId = rest?.referenceId || rest?.ref || "";
       const next = {
@@ -2586,7 +2654,14 @@ if (
 
     const createdAt = Date.now();
     const serializable = ready.map((q) => {
-      const { previewUrl, previewUrlSource, batchId: _bid, status, error, ...rest } = q || {};
+      const {
+        previewUrl: _previewUrl,
+        previewUrlSource: _previewUrlSource,
+        batchId: _bid,
+        status: _status,
+        error: _error,
+        ...rest
+      } = q || {};
       const type = rest?.type || rest?.txType || "expense";
       const referenceId = rest?.referenceId || rest?.ref || "";
       const next = {
@@ -2712,7 +2787,14 @@ if (
 
     const createdAt = Date.now();
     const serializable = dups.map((q) => {
-      const { previewUrl, previewUrlSource, batchId, status, error, ...rest } = q || {};
+      const {
+        previewUrl: _previewUrl,
+        previewUrlSource: _previewUrlSource,
+        batchId: _batchId,
+        status: _status,
+        error: _error,
+        ...rest
+      } = q || {};
       const type = rest?.type || rest?.txType || "expense";
       const referenceId = rest?.referenceId || rest?.ref || "";
       const next = {

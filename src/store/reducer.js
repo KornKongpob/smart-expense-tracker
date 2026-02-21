@@ -32,7 +32,6 @@ const ensureCategories = (cats) => {
 const rid = (prefix = "id") => {
   try {
     // modern browsers
-    // eslint-disable-next-line no-undef
     if (typeof crypto !== "undefined" && crypto.randomUUID) return `${prefix}_${crypto.randomUUID()}`;
   } catch {
     // ignore

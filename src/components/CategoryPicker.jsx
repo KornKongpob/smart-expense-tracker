@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { buildCategoryHierarchy, splitSelection, isDeletedCategory, getAncestors } from "../utils/categoryHierarchy";
 
@@ -57,8 +57,12 @@ export default function CategoryPicker({
   // Collapse sub-step after a real selection change (so UI doesn't feel "stuck")
   useEffect(() => {
     if (!twoStep) return;
-    setStage("main");
-    setManualMainId("");
+    // Avoid setState synchronously inside effects (React Compiler / hooks lint rule).
+    const t = setTimeout(() => {
+      setStage("main");
+      setManualMainId("");
+    }, 0);
+    return () => clearTimeout(t);
   }, [twoStep, selectedId]);
 
   const derivedMainId = useMemo(() => {
@@ -82,7 +86,7 @@ export default function CategoryPicker({
     return normalized.slice(0, 10);
   }, [recent, hierarchy, listAll, selectedId]);
 
-  const getBreadcrumb = (id) => {
+  const getBreadcrumb = useCallback((id) => {
     const cid = String(id || "").trim();
     if (!cid) return "";
     const byId = hierarchy?.byId;
@@ -94,9 +98,9 @@ export default function CategoryPicker({
     const chain = [...ancestors].reverse().map((aid) => byId.get(aid)).filter(Boolean);
     chain.push(me);
     return chain.map((c) => String(c?.name || "").trim()).filter(Boolean).join(" › ");
-  };
+  }, [hierarchy]);
 
-  const selectedBreadcrumb = useMemo(() => getBreadcrumb(selectedId), [selectedId, hierarchy]);
+  const selectedBreadcrumb = useMemo(() => getBreadcrumb(selectedId), [selectedId, getBreadcrumb]);
 
   const selectedCat = useMemo(() => {
     const byId = hierarchy?.byId;

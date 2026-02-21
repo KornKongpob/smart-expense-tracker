@@ -51,7 +51,8 @@ function loadImageFromDataUrl(dataUrl) {
 
 // Resize/compress before sending to /api to avoid payload limits & reduce cost.
 // Defaults aim to stay well under common serverless body limits.
-async function fileToOptimizedDataUrl(file, opts = {}) {
+// NOTE: kept for future tweaks; current flow uses `fileToOcrDataUrls`.
+async function _fileToOptimizedDataUrl(file, opts = {}) {
   const {
     // ✅ More conservative (higher quality) defaults for better OCR accuracy.
     // If the image is still too large, we gradually reduce quality to stay under maxBytes.
@@ -482,32 +483,10 @@ async function fileToOcrDataUrls(file, { maxDim = 2800, maxBytes = 3_500_000 } =
   return [full, cropped].filter(Boolean);
 }
 
-async function fileToBestDataUrl(file) {
-  // ✅ Always apply a best-effort OCR-friendly re-render.
-  // Even if the image is already under the body-size limit, the grayscale/contrast
-  // pass significantly improves small Thai fonts on receipts.
-  const original = await fileToDataUrl(file);
-  if (!original || !original.startsWith("data:image/")) return original;
-
-  return fileToOptimizedDataUrl(file, {
-    // Keep more pixels for OCR while staying under common serverless limits.
-    maxDim: 2800,
-    maxBytes: 3_500_000,
-    qualityStart: 0.94,
-    qualityMin: 0.74,
-    qualityStep: 0.05,
-    ocrEnhance: true,
-    sharpen: true,
-    forceProcess: true,
-  });
-}
-
-function dataUrlToBase64(dataUrl) {
-  const s = String(dataUrl || "");
-  const m = s.match(/^data:([^;]+);base64,(.*)$/i);
-  if (!m) return { mimeType: "image/jpeg", base64: "" };
-  return { mimeType: m[1] || "image/jpeg", base64: m[2] || "" };
-}
+// NOTE:
+// fileToBestDataUrl + dataUrlToBase64 were previously used by older endpoints that
+// accepted JSON { base64, mimeType }. The app now uses multipart uploads + multi-view
+// OCR boosters (fileToOcrDataUrls), so these helpers are intentionally removed.
 
 function safeParseAmount(v) {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -518,13 +497,13 @@ function safeParseAmount(v) {
   // remove common noise (currency symbols, spaces, commas, trailing letters like "N")
   let s = s0.replace(/[฿\s,]/g, "");
   // keep digits, '.', and '-' only
-  s = s.replace(/[^0-9.\-]/g, "");
+  s = s.replace(/[^0-9.-]/g, "");
   // if multiple dots, keep the first
   const parts = s.split(".");
   if (parts.length > 2) s = parts[0] + "." + parts.slice(1).join("");
   // if multiple dashes, keep only a leading dash
   const neg = s.startsWith("-");
-  s = s.replace(/\-/g, "");
+  s = s.replace(/-/g, "");
   if (neg) s = "-" + s;
 
   const num = Number(s);
@@ -784,7 +763,7 @@ async function postMultipart(
   }
 }
 
-async function postJson(url, body, { timeoutMs = 45000 } = {}) {
+async function _postJson(url, body, { timeoutMs = 45000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
 

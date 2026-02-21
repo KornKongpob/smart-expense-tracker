@@ -415,11 +415,11 @@ function normalizeScannedDate(v) {
   const head = s.split(/\s+/)[0];
 
   // yyyy-mm-dd / yyyy/mm/dd
-  let m1 = head.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  let m1 = head.match(/^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})$/);
   if (m1) return toISO(m1[1], m1[2], m1[3]);
 
   // dd/mm/yyyy
-  m1 = head.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  m1 = head.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (m1) return toISO(m1[3], m1[2], m1[1]);
 
   // dd MMM yyyy (Thai/English months)
@@ -476,7 +476,7 @@ function normalizeScannedDate(v) {
     december: 12,
   };
 
-  const m2 = s.match(/(\d{1,2})\s*([A-Za-z]{3,9}|[\u0E00-\u0E7F\.]{2,12})\s*(\d{2,4})/);
+  const m2 = s.match(/(\d{1,2})\s*([A-Za-z]{3,9}|[\u0E00-\u0E7F.]{2,12})\s*(\d{2,4})/);
   if (m2) {
     const d = m2[1];
     const token0 = String(m2[2] || "").trim();
@@ -1788,9 +1788,6 @@ ${accountsText}
     !strongTransferSlip &&
     (doc_type === "receipt" || looksLikeReceipt || positiveItemCount < 2) &&
     (positiveItemCount < 2 || needsReviewFlag || (itemsConfFlag != null && itemsConfFlag < 0.75));
-
-  let itemsOnlyPaymentMethod = "";
-  let itemsOnlyAccountId = "";
 
   if (shouldItemsFallback) {
     const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || usedModel || "gpt-5.1");
