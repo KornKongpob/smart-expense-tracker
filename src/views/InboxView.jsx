@@ -3,6 +3,7 @@ import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import AccountChipsPicker from "../components/AccountChipsPicker";
 import CategoryPicker from "../components/CategoryPicker";
+import QuickSuggestions from "../components/QuickSuggestions";
 import {
   Inbox,
   Search,
@@ -542,8 +543,11 @@ function EditorModal({
   item,
   accounts,
   categories,
+  merchants,
   recentExpenseCats,
   recentIncomeCats,
+  recentExpenseAccounts,
+  recentIncomeAccounts,
   onClose,
   onSave,
   showAlert,
@@ -570,6 +574,138 @@ function EditorModal({
     const arr = Array.isArray(accounts) ? accounts : [];
     return arr.filter((a) => !isCreditAccount(a));
   }, [accounts]);
+
+  const accountsByIdLocal = useMemo(() => {
+    const map = new Map();
+    for (const a of Array.isArray(accounts) ? accounts : []) {
+      const id = String(a?.id || "").trim();
+      if (id) map.set(id, a);
+    }
+    return map;
+  }, [accounts]);
+
+  const catsByType = useMemo(() => {
+    const mk = (list) => {
+      const m = new Map();
+      for (const c of Array.isArray(list) ? list : []) {
+        const id = String(c?.id || "").trim();
+        if (id) m.set(id, c);
+      }
+      return m;
+    };
+    return {
+      expense: mk(categories?.expense || []),
+      income: mk(categories?.income || []),
+    };
+  }, [categories]);
+
+  const mdSuggestion = useMemo(() => {
+    if (!draft) return null;
+    const t = String(draft?.type || draft?.txType || "").toLowerCase().trim();
+    if (t !== "expense" && t !== "income") return null;
+    try {
+      return deriveMerchantAutofillPatch(
+        { merchant: draft?.merchant, txType: t, categoryId: "", accountId: "" },
+        Array.isArray(merchants) ? merchants : []
+      );
+    } catch {
+      return null;
+    }
+  }, [draft, merchants]);
+
+  const getAccountVisualLocal = (acc) => {
+    const img = acc?.image || acc?.img || acc?.avatar;
+    if (typeof img === "string" && img.trim()) return { kind: "img", src: img.trim() };
+    const emoji = acc?.icon || acc?.emoji;
+    if (typeof emoji === "string" && emoji.trim()) return { kind: "emoji", value: emoji.trim() };
+    const type = String(acc?.type || "").toLowerCase();
+    if (type.includes("cash")) return { kind: "emoji", value: "💵" };
+    if (type.includes("bank")) return { kind: "emoji", value: "🏦" };
+    if (type.includes("credit")) return { kind: "emoji", value: "💳" };
+    return { kind: "emoji", value: "💼" };
+  };
+
+  const quickAccountItems = useMemo(() => {
+    if (!draft) return [];
+    const t = String(draft?.type || draft?.txType || "").toLowerCase().trim();
+    if (t !== "expense" && t !== "income") return [];
+
+    const cur = String(draft?.accountId || "").trim();
+    const items = [];
+
+    const mdAccId = String(mdSuggestion?.accountId || "").trim();
+    if (mdAccId && mdAccId !== cur) {
+      const acc = accountsByIdLocal.get(mdAccId);
+      if (acc) {
+        items.push({
+          id: mdAccId,
+          label: String(acc?.name || "").trim() || "บัญชี",
+          badge: "ร้านนี้",
+          icon: getAccountVisualLocal(acc),
+        });
+      }
+    }
+
+    const recent = (t === "income" ? recentIncomeAccounts : recentExpenseAccounts) || [];
+    for (const acc of Array.isArray(recent) ? recent : []) {
+      const id = String(acc?.id || "").trim();
+      if (!id || id === cur) continue;
+      if (items.some((x) => String(x?.id || "") === id)) continue;
+      items.push({
+        id,
+        label: String(acc?.name || "").trim() || "บัญชี",
+        badge: "ล่าสุด",
+        icon: getAccountVisualLocal(acc),
+      });
+      if (items.length >= 5) break;
+    }
+
+    return items;
+  }, [draft, mdSuggestion, recentExpenseAccounts, recentIncomeAccounts, accountsByIdLocal]);
+
+  const quickCategoryItems = useMemo(() => {
+    if (!draft) return [];
+    const t = String(draft?.type || draft?.txType || "").toLowerCase().trim();
+    if (t !== "expense" && t !== "income") return [];
+    if (draft?.splitByCategory) return [];
+
+    const byId = catsByType?.[t] || new Map();
+    const cur = String(draft?.categoryId || "").trim();
+    const items = [];
+
+    const mdCatId = String(mdSuggestion?.categoryId || "").trim();
+    if (mdCatId && mdCatId !== cur) {
+      const c = byId.get(mdCatId);
+      if (c) {
+        const pid = String(c?.parentId || "").trim();
+        const parent = pid ? byId.get(pid) : null;
+        items.push({
+          id: mdCatId,
+          label: String(c?.name || "").trim() || "หมวด",
+          badge: parent ? String(parent?.name || "").trim() : "ร้านนี้",
+          icon: { kind: "emoji", value: c?.icon || "🏷️" },
+        });
+      }
+    }
+
+    const recent = (t === "income" ? recentIncomeCats : recentExpenseCats) || [];
+    for (const c of Array.isArray(recent) ? recent : []) {
+      const id = String(c?.id || "").trim();
+      if (!id || id === cur) continue;
+      if (items.some((x) => String(x?.id || "") === id)) continue;
+      const pid = String(c?.parentId || "").trim();
+      const parent = pid ? byId.get(pid) : null;
+      items.push({
+        id,
+        label: String(c?.name || "").trim() || "หมวด",
+        badge: parent ? String(parent?.name || "").trim() : "ล่าสุด",
+        icon: { kind: "emoji", value: c?.icon || "🏷️" },
+      });
+      if (items.length >= 6) break;
+    }
+
+    return items;
+  }, [draft, mdSuggestion, recentExpenseCats, recentIncomeCats, catsByType]);
 
   // ✅ Keep category keys safe (fallback to "other" if unknown)
   const ensureExpenseCategoryId = (key) => {
@@ -1323,6 +1459,27 @@ function EditorModal({
             <>
               <div className="min-w-0">
                 <div className="text-xs font-bold text-gray-900/60 mb-2">บัญชี</div>
+
+                <QuickSuggestions
+                  title="Quick suggestions"
+                  selectedId={draft.accountId}
+                  items={quickAccountItems}
+                  onSelect={(id) => {
+                    const v = String(id || "").trim();
+                    if (!v) return;
+                    setDraft((d) => {
+                      if (!d) return d;
+                      const acc = accounts.find((a) => String(a?.id || "") === String(v || "")) || null;
+                      return {
+                        ...d,
+                        accountId: v,
+                        ...(acc && isCreditAccount(acc) ? {} : { isInstallment: false }),
+                      };
+                    });
+                  }}
+                  className="mb-3"
+                />
+
                 <AccountChipsPicker
                   accounts={accounts}
                   value={draft.accountId}
@@ -1525,12 +1682,24 @@ function EditorModal({
               ) : (
                 <>
                 <div className="min-w-0">
+                  <QuickSuggestions
+                    title="Quick suggestions"
+                    selectedId={draft.categoryId}
+                    items={quickCategoryItems}
+                    onSelect={(id) => {
+                      const v = String(id || "").trim();
+                      if (!v) return;
+                      setDraft((d) => (d ? { ...d, categoryId: v } : d));
+                    }}
+                    className="mb-3"
+                  />
                   <CategoryPicker
                     categories={catList}
                     value={draft.categoryId}
                     onChange={(id) => setDraft((d) => ({ ...d, categoryId: id }))}
                     title="หมวดหมู่"
                     placeholder="ค้นหาหมวดหมู่..."
+                    twoStep
                     recent={txType === "income" ? (recentIncomeCats || []) : (recentExpenseCats || [])}
                     maxListHeightClass="max-h-[32dvh]"
                   />
@@ -1760,6 +1929,26 @@ export default function InboxView({ showAlert, showConfirm }) {
     return out;
   };
 
+  const pickRecentAccounts = (txType) => {
+    const txs = Array.isArray(state.transactions) ? state.transactions : [];
+    const byId = new Map((Array.isArray(accounts) ? accounts : []).map((a) => [String(a?.id || "").trim(), a]));
+    const out = [];
+    const seen = new Set();
+    for (let i = txs.length - 1; i >= 0; i -= 1) {
+      const t = txs[i];
+      if (!t) continue;
+      if (String(t.type || "").toLowerCase() !== String(txType || "").toLowerCase()) continue;
+      const aid = String(t.accountId || "").trim();
+      if (!aid || seen.has(aid)) continue;
+      const acc = byId.get(aid);
+      if (!acc) continue;
+      seen.add(aid);
+      out.push(acc);
+      if (out.length >= 10) break;
+    }
+    return out;
+  };
+
   const recentExpenseCatsForPicker = useMemo(
     () => pickRecentCats("expense", state.categories?.expense || []),
     [state.transactions, state.categories]
@@ -1768,6 +1957,16 @@ export default function InboxView({ showAlert, showConfirm }) {
   const recentIncomeCatsForPicker = useMemo(
     () => pickRecentCats("income", state.categories?.income || []),
     [state.transactions, state.categories]
+  );
+
+  const recentExpenseAccountsForPicker = useMemo(
+    () => pickRecentAccounts("expense"),
+    [state.transactions, accounts]
+  );
+
+  const recentIncomeAccountsForPicker = useMemo(
+    () => pickRecentAccounts("income"),
+    [state.transactions, accounts]
   );
 
   const filtered = useMemo(() => {
@@ -2230,8 +2429,11 @@ export default function InboxView({ showAlert, showConfirm }) {
         item={editingItem}
         accounts={state.accounts || []}
         categories={state.categories || { expense: [], income: [] }}
+        merchants={state.merchants || []}
         recentExpenseCats={recentExpenseCatsForPicker}
         recentIncomeCats={recentIncomeCatsForPicker}
+        recentExpenseAccounts={recentExpenseAccountsForPicker}
+        recentIncomeAccounts={recentIncomeAccountsForPicker}
         showAlert={showAlert}
         onClose={() => setEditingId(null)}
         onSave={(id, patch) => {

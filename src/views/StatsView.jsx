@@ -125,17 +125,32 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
       ? "bg-amber-600/15 border-amber-600/20 text-amber-900"
       : "bg-white/18 border-white/20 text-gray-800";
 
+  // UX rule from user: numbers must stay on ONE line (no wrap) and must never be visually cut.
+  // We solve this by:
+  // 1) giving the number full card width (title/icon are above),
+  // 2) forcing single-line with whitespace-nowrap,
+  // 3) enabling horizontal scroll if the number is still longer than the viewport.
   return (
     <div className="ui-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">{title}</div>
-          <div className="mt-1 text-[22px] leading-tight font-black text-gray-900 truncate tabular-nums">{value}</div>
-          {sub ? <div className="mt-1 text-[11px] font-bold text-gray-800/60 leading-snug">{sub}</div> : null}
         </div>
         <div className={`shrink-0 w-11 h-11 rounded-2xl border flex items-center justify-center ${toneCls}`}>
           {icon}
         </div>
+      </div>
+
+      <div className="mt-2">
+        <div
+          className="text-[clamp(20px,6.5vw,26px)] leading-tight font-black text-gray-900 tabular-nums whitespace-nowrap overflow-x-auto no-scrollbar"
+          role="text"
+          aria-label={String(title || "").trim() ? `${title}: ${value}` : String(value)}
+          title={String(value)}
+        >
+          {value}
+        </div>
+        {sub ? <div className="mt-1 text-[11px] font-bold text-gray-800/60 leading-snug">{sub}</div> : null}
       </div>
     </div>
   );
@@ -551,8 +566,8 @@ export default function StatsView() {
 
       <SummaryMetaCard rangeText={rangeText} countText={countText} discountSaved={totals.discountSaved} />
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      {/* KPI cards (mobile-first: full-width so long numbers don't get cut) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <GlassKpiCard
           tone="income"
           title="รายรับรวม"

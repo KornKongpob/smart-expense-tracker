@@ -35,6 +35,7 @@ import AccountPicker from "../components/AccountPicker";
 import AccountChipsPicker from "../components/AccountChipsPicker";
 import CategorySelect from "../components/CategorySelect";
 import CategoryPicker from "../components/CategoryPicker";
+import QuickSuggestions from "../components/QuickSuggestions";
 import AppHeader from "../components/AppHeader";
 import { scanReceiptOpenAI } from "../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../services/blobStore";
@@ -982,6 +983,84 @@ const existingRefSet = useMemo(() => {
     }
     return out;
   }, [state.transactions, type, catHierarchy, categoryId]);
+
+  // ===== quick suggestions (one-tap): recents across BOTH expense/income (used by Scan Review) =====
+  const catIndexByType = useMemo(() => {
+    const mk = (catsAll) => {
+      const byId = new Map();
+      for (const c of Array.isArray(catsAll) ? catsAll : []) {
+        const id = String(c?.id || "").trim();
+        if (id) byId.set(id, c);
+      }
+      return { byId };
+    };
+    return {
+      expense: mk(expenseCatsAll),
+      income: mk(incomeCatsAll),
+    };
+  }, [expenseCatsAll, incomeCatsAll]);
+
+  const recentCatsByType = useMemo(() => {
+    const txs = Array.isArray(state.transactions) ? state.transactions : [];
+    const pick = (txType) => {
+      const byId = catIndexByType?.[txType]?.byId || new Map();
+      const out = [];
+      const seen = new Set();
+      for (let i = txs.length - 1; i >= 0; i -= 1) {
+        const t = txs[i];
+        if (!t) continue;
+        if (String(t?.type || "").toLowerCase() !== String(txType || "").toLowerCase()) continue;
+        const cid = String(t?.category || "").trim();
+        if (!cid || cid === "transfer" || cid === "mixed") continue;
+        if (seen.has(cid)) continue;
+        const cat = byId.get(cid);
+        if (!cat) continue;
+        if (isTombstoneCategory(cat)) continue;
+        seen.add(cid);
+        out.push(cat);
+        if (out.length >= 8) break;
+      }
+      return out;
+    };
+    return {
+      expense: pick("expense"),
+      income: pick("income"),
+    };
+  }, [state.transactions, catIndexByType]);
+
+  const accountById = useMemo(() => {
+    const m = new Map();
+    for (const a of Array.isArray(accounts) ? accounts : []) {
+      const id = String(a?.id || "").trim();
+      if (id) m.set(id, a);
+    }
+    return m;
+  }, [accounts]);
+
+  const recentAccountsByType = useMemo(() => {
+    const txs = Array.isArray(state.transactions) ? state.transactions : [];
+    const pick = (txType) => {
+      const out = [];
+      const seen = new Set();
+      for (let i = txs.length - 1; i >= 0; i -= 1) {
+        const t = txs[i];
+        if (!t) continue;
+        if (String(t?.type || "").toLowerCase() !== String(txType || "").toLowerCase()) continue;
+        const aid = String(t?.accountId || "").trim();
+        if (!aid || seen.has(aid)) continue;
+        const acc = accountById.get(aid);
+        if (!acc) continue;
+        seen.add(aid);
+        out.push(acc);
+        if (out.length >= 8) break;
+      }
+      return out;
+    };
+    return {
+      expense: pick("expense"),
+      income: pick("income"),
+    };
+  }, [state.transactions, accountById]);
 
   const catSearchResults = useMemo(() => {
     const q = String(catQuery || "").trim().toLowerCase();
@@ -4357,6 +4436,73 @@ const handleClose = () => {
                               <div className="grid grid-cols-1 gap-3">
                                 <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                   <div className="text-xs font-bold text-gray-900/70 mb-2">บัญชี</div>
+
+                                  <QuickSuggestions
+                                    title="Quick suggestions"
+                                    selectedId={q.accountId}
+                                    items={(() => {
+                                      const t = String(q?.txType || q?.type || "").toLowerCase();
+                                      if (t !== "expense" && t !== "income") return [];
+
+                                      const items = [];
+
+                                      // 1) Merchant Memory suggestion (silent auto-rule)
+                                      try {
+                                        const md = deriveMerchantAutofillPatch(
+                                          {
+                                            merchant: q?.merchant,
+                                            txType: t,
+                                            categoryId: String(q?.categoryId || "").trim(),
+                                            accountId: "",
+                                          },
+                                          state?.merchants || []
+                                        );
+                                        const mdAccId = String(md?.accountId || "").trim();
+                                        const mdAcc = mdAccId ? accountById.get(mdAccId) : null;
+                                        if (mdAcc && mdAccId) {
+                                          items.push({
+                                            id: mdAccId,
+                                            label: String(mdAcc?.name || "").trim() || "บัญชี",
+                                            badge: "ร้านนี้",
+                                            icon: getAccountVisual(mdAcc),
+                                          });
+                                        }
+                                      } catch {
+                                        // ignore
+                                      }
+
+                                      // 2) Recent accounts
+                                      const rec = (recentAccountsByType?.[t] || []).slice(0, 8);
+                                      for (const acc of rec) {
+                                        const id = String(acc?.id || "").trim();
+                                        if (!id) continue;
+                                        if (items.some((x) => String(x?.id || "") === id)) continue;
+                                        items.push({
+                                          id,
+                                          label: String(acc?.name || "").trim() || "บัญชี",
+                                          badge: "ล่าสุด",
+                                          icon: getAccountVisual(acc),
+                                        });
+                                        if (items.length >= 5) break;
+                                      }
+
+                                      // Keep bar meaningful (hide if only current selection)
+                                      const cur = String(q?.accountId || "").trim();
+                                      const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
+                                      return pruned.slice(0, 5);
+                                    })()}
+                                    onSelect={(id) => {
+                                      const v = String(id || "").trim();
+                                      if (!v) return;
+                                      const acc = accounts.find((a) => String(a?.id || "") === String(v || "")) || null;
+                                      // auto-disable installment if switched to non-credit
+                                      const patch = { accountId: v };
+                                      if (!isCreditAccount(acc)) patch.isInstallment = false;
+                                      updateQueueItem(q.id, patch);
+                                    }}
+                                    className="mb-3"
+                                  />
+
                                   <AccountChipsPicker
                                     accounts={accounts}
                                     value={q.accountId}
@@ -4479,12 +4625,96 @@ const handleClose = () => {
                                 ) : (
                                   <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                     <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหมู่</div>
+
+                                    <QuickSuggestions
+                                      title="Quick suggestions"
+                                      selectedId={q.categoryId || ""}
+                                      items={(() => {
+                                        const t = String(q?.txType || q?.type || "").toLowerCase();
+                                        if (t !== "expense" && t !== "income") return [];
+                                        const byId = catIndexByType?.[t]?.byId || new Map();
+
+                                        const items = [];
+
+                                        // 1) Merchant Memory suggestion (silent auto-rule)
+                                        try {
+                                          const md = deriveMerchantAutofillPatch(
+                                            {
+                                              merchant: q?.merchant,
+                                              txType: t,
+                                              categoryId: "",
+                                              accountId: "",
+                                            },
+                                            state?.merchants || []
+                                          );
+                                          const mdCatId = String(md?.categoryId || "").trim();
+                                          const mdCat = mdCatId ? byId.get(mdCatId) : null;
+                                          if (mdCat && mdCatId) {
+                                            const pid = String(mdCat?.parentId || "").trim();
+                                            const parent = pid ? byId.get(pid) : null;
+                                            items.push({
+                                              id: mdCatId,
+                                              label: String(mdCat?.name || "").trim() || "หมวด",
+                                              badge: parent ? String(parent?.name || "").trim() : "ร้านนี้",
+                                              icon: { kind: "emoji", value: mdCat?.icon || "🏷️" },
+                                            });
+                                          }
+                                        } catch {
+                                          // ignore
+                                        }
+
+                                        // 2) Suggested from history (existing system)
+                                        const histId = String(q?.suggestedCategoryId || "").trim();
+                                        if (histId && !items.some((x) => String(x?.id || "") === histId)) {
+                                          const c = byId.get(histId);
+                                          if (c && !isTombstoneCategory(c)) {
+                                            const pid = String(c?.parentId || "").trim();
+                                            const parent = pid ? byId.get(pid) : null;
+                                            items.push({
+                                              id: histId,
+                                              label: String(c?.name || "").trim() || "หมวด",
+                                              badge: parent ? String(parent?.name || "").trim() : "ประวัติ",
+                                              icon: { kind: "emoji", value: c?.icon || "🏷️" },
+                                            });
+                                          }
+                                        }
+
+                                        // 3) Recent categories
+                                        const rec = (recentCatsByType?.[t] || []).slice(0, 8);
+                                        for (const c of rec) {
+                                          const id = String(c?.id || "").trim();
+                                          if (!id) continue;
+                                          if (items.some((x) => String(x?.id || "") === id)) continue;
+                                          const pid = String(c?.parentId || "").trim();
+                                          const parent = pid ? byId.get(pid) : null;
+                                          items.push({
+                                            id,
+                                            label: String(c?.name || "").trim() || "หมวด",
+                                            badge: parent ? String(parent?.name || "").trim() : "ล่าสุด",
+                                            icon: { kind: "emoji", value: c?.icon || "🏷️" },
+                                          });
+                                          if (items.length >= 6) break;
+                                        }
+
+                                        const cur = String(q?.categoryId || "").trim();
+                                        const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
+                                        return pruned.slice(0, 6);
+                                      })()}
+                                      onSelect={(id) => {
+                                        const v = String(id || "").trim();
+                                        if (!v) return;
+                                        updateQueueItem(q.id, { categoryId: v });
+                                      }}
+                                      className="mb-3"
+                                    />
+
                                     <CategoryPicker
                                       categories={(q.txType === "income" ? incomeCatsAll : expenseCatsAll)}
                                       value={q.categoryId || ""}
                                       onChange={(id) => updateQueueItem(q.id, { categoryId: id })}
                                       showTitle={false}
-                                      recent={q.txType === type ? recentCatsForPicker : []}
+                                      twoStep
+                                      recent={recentCatsByType?.[String(q.txType || "").toLowerCase()] || []}
                                       maxListHeightClass="max-h-[34dvh]"
                                     />
 
