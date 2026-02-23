@@ -56,7 +56,7 @@ export default function AccountPicker({
   // Desktop popover position (avoid reading refs during render)
   const [panelStyle, setPanelStyle] = useState({ left: 12, top: 80, width: 360 });
 
-  const list = Array.isArray(accounts) ? accounts : [];
+  const list = useMemo(() => (Array.isArray(accounts) ? accounts : []), [accounts]);
   const selected = useMemo(
     () => list.find((a) => String(a?.id || "") === String(value || "")) || null,
     [list, value]

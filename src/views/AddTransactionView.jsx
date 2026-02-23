@@ -1,5 +1,5 @@
 // src/views/AddTransactionView.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bestMatchAccountCandidate,
   bestMatchAccountId,
@@ -27,7 +27,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import AmountField from "../components/AmountField";
 import AccountPicker from "../components/AccountPicker";
 import AccountChipsPicker from "../components/AccountChipsPicker";
@@ -52,7 +52,7 @@ import {
   calcSpentByCategoryInMonth,
   getBudget,
   calcAccountBalance,
-} from "../store/selectors";
+} from "../store/selectors.js";
 import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
 import {
   reconcileReceiptGroups,
@@ -514,8 +514,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const initialData = store.getEditingTransaction();
   const isEditMode = !!initialData?.id;
 
-  const accounts = state.accounts || [];
-  const categories = state.categories || { expense: [], income: [] };
+  const accounts = useMemo(() => state.accounts || [], [state.accounts]);
+  const categories = useMemo(() => state.categories || { expense: [], income: [] }, [state.categories]);
 
   // ===== transfer edit pair =====
   const transferPair = useMemo(() => {
@@ -540,7 +540,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   if (!outTx && !inTx) return null;
   return { outTx, inTx, transferId, group };
-}, [initialData?.id, initialData?.isTransfer, initialData?.transferId, initialData?.type, state.transactions]);
+}, [initialData, state.transactions]);
 
 
   const transferKindForEdit = useMemo(() => {
@@ -601,8 +601,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   useEffect(() => {
     if (!isEditMode) return;
     setType(initialType);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialType]);
+  }, [initialType, isEditMode]);
 
   // NOTE: canonical storage is satang (integer). AmountField expects a THB-major string (e.g., "125.25").
   // So when pre-filling edit forms, convert satang -> THB string.
@@ -617,8 +616,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     if (isSplitMode) return; // split uses splitTotalDigits instead
     const n = transferPair?.outTx?.amount ?? initialData?.amount ?? 0;
     setAmountDigits(n ? formatMoneyInputFromSatang(Math.abs(Number(n))) : "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, initialData?.id]);
+  }, [initialData?.amount, initialData?.id, isEditMode, isSplitMode, transferPair?.outTx?.amount]);
 
   const [categoryId, setCategoryId] = useState(() => {
     if (initialData?.isTransfer) return "transfer";
@@ -668,7 +666,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     if (!gid) return false;
     const childCount = (splitGroupTransactions || []).filter((t) => !t?.isSplitParent).length;
     return childCount >= 2;
-  }, [isEditMode, initialData?.isTransfer, initialData?.splitGroupId, splitGroupTransactions.length]);
+  }, [isEditMode, initialData?.isTransfer, initialData?.splitGroupId, splitGroupTransactions]);
 
   const makeEmptySplitLine = () => ({
     txId: "",
@@ -763,8 +761,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         makeEmptySplitLine(),
       ]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode, initialData?.id, isEditingSplitGroup, type]);
+  }, [initialData?.amount, initialData?.category, initialData?.id, initialData?.note, initialData?.splitLabel, isEditMode, isEditingSplitGroup, splitGroupTransactions, type]);
 
   const splitTotalNumber = useMemo(() => {
     if (!isSplitMode) return 0;
@@ -876,10 +873,10 @@ const existingRefSet = useMemo(() => {
 
   // ✅ Tombstone strategy: hide deleted categories from pickers/suggestions,
   // but keep them in state for historical reports.
-  const expenseCatsAll = categories.expense || [];
-  const incomeCatsAll = categories.income || [];
-  const expenseCats = expenseCatsAll.filter((c) => !isTombstoneCategory(c));
-  const incomeCats = incomeCatsAll.filter((c) => !isTombstoneCategory(c));
+  const expenseCatsAll = useMemo(() => categories.expense || [], [categories]);
+  const incomeCatsAll = useMemo(() => categories.income || [], [categories]);
+  const expenseCats = useMemo(() => expenseCatsAll.filter((c) => !isTombstoneCategory(c)), [expenseCatsAll]);
+  const incomeCats = useMemo(() => incomeCatsAll.filter((c) => !isTombstoneCategory(c)), [incomeCatsAll]);
 
   // ====== category hierarchy (Main -> Sub) ======
   const catsForTypeAll = useMemo(() => (type === "income" ? incomeCatsAll : expenseCatsAll), [type, incomeCatsAll, expenseCatsAll]);
@@ -1227,7 +1224,6 @@ const existingRefSet = useMemo(() => {
       () => {},
       { enableHighAccuracy: true, maximumAge: 60_000, timeout: 7_000 }
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ===== Smart Geolocation: find nearby merchant and suggest autofill =====
@@ -1291,7 +1287,7 @@ const existingRefSet = useMemo(() => {
     createdCatRef.current = { expense: new Map(), income: new Map() };
   };
 
-  const ensureCategory = (typeForCat, scannedCategory) => {
+  const ensureCategory = useCallback((typeForCat, scannedCategory) => {
     const listAll = categories[typeForCat] || [];
     // Only active categories are eligible for matching/suggestion
     const list = (listAll || []).filter((c) => !isTombstoneCategory(c));
@@ -1336,7 +1332,7 @@ const existingRefSet = useMemo(() => {
 
     if (mem && key) mem.set(key, id);
     return id;
-  };
+  }, [addCategory, categories]);
 
   // Apply derived automation patch onto a queue item patch, while keeping fields consistent.
   const applyAutomationToQueuePatch = (basePatch, autoPatch) => {
@@ -1561,7 +1557,7 @@ const existingRefSet = useMemo(() => {
   };
 
   // Remove many queue items at once (used by inbox/duplicate flows)
-  const removeQueueItems = (ids) => {
+  const removeQueueItems = useCallback((ids) => {
     const setIds = new Set(Array.isArray(ids) ? ids.filter(Boolean) : []);
     if (!setIds.size) return;
 
@@ -1584,7 +1580,7 @@ const existingRefSet = useMemo(() => {
     });
 
     if (expandedId && setIds.has(expandedId)) setExpandedId(null);
-  };
+  }, [expandedId]);
 
   // ===== credit card payment helpers (manual/scan) =====
   const creditAccounts = useMemo(() => accounts.filter(isCreditAccount), [accounts]);
@@ -2645,7 +2641,7 @@ if (
   };
 
   // ✅ Auto-send only the just-scanned batch to Inbox (multi-files flow)
-  const sendBatchToInbox = (batchId) => {
+  const sendBatchToInbox = useCallback((batchId) => {
     const ready = (queue || []).filter((q) => q.status === "ready" && q.batchId === batchId);
     if (!ready.length) {
       showAlert?.("ไม่มีรายการที่พร้อมส่งเข้า Inbox");
@@ -2748,7 +2744,7 @@ if (
     navigate("inbox");
     showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
     return true;
-  };
+  }, [addScanInboxItems, ensureCategory, navigate, queue, removeQueueItems, showAlert]);
 
   // ✅ Multi-files auto send: when scan finishes and all files are ready, auto-send that batch to Inbox
   useEffect(() => {
@@ -2775,7 +2771,7 @@ if (
 
     scanAutoSendRef.current = { ...cfg, triggered: true };
     sendBatchToInbox(cfg.batchId);
-  }, [queue, isScanning]);
+  }, [isScanning, queue, sendBatchToInbox, showAlert]);
 
   // Send only *blocked duplicates* to Inbox (used when user chose "บันทึกทันที" but wants to handle duplicates later)
   const sendDuplicateQueueToInbox = () => {

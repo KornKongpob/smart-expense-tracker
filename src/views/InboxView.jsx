@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import AccountChipsPicker from "../components/AccountChipsPicker";
@@ -18,8 +18,8 @@ import {
   FileText
 } from "lucide-react";
 
-import { useAppStore } from "../store/store";
-import { findFuzzyDuplicate } from "../store/selectors";
+import { useAppStore } from "../store/store.jsx";
+import { findFuzzyDuplicate } from "../store/selectors.js";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, toISODate } from "../utils/format";
 import AppHeader from "../components/AppHeader";
@@ -708,14 +708,15 @@ function EditorModal({
   }, [draft, mdSuggestion, recentExpenseCats, recentIncomeCats, catsByType]);
 
   // ✅ Keep category keys safe (fallback to "other" if unknown)
-  const ensureExpenseCategoryId = (key) => {
+  const ensureExpenseCategoryId = useCallback((key) => {
     const k = String(key || "").trim();
     const exp = categories?.expense || [];
     if (k && exp.some((c) => String(c?.id || "") === k)) return k;
     if (exp.some((c) => String(c?.id || "") === "other")) return "other";
     return String(exp?.[0]?.id || "");
-  };
-  const deriveReceiptGroups = (it) => {
+  }, [categories]);
+
+  const deriveReceiptGroups = useCallback((it) => {
     try {
       const docType = String(it?.docType || it?.doc_type || "").toLowerCase().trim();
       const txType = normalizeTxType(it?.type || it?.txType);
@@ -780,7 +781,7 @@ function EditorModal({
     } catch {
       return [];
     }
-  };
+  }, [ensureExpenseCategoryId]);
 
   useEffect(() => {
     if (!open) return;
@@ -890,7 +891,7 @@ function EditorModal({
             childrenIncludedInParent: !!g?.childrenIncludedInParent,
           })),
     });
-  }, [open, item, categories]);
+  }, [open, item, categories, defaultCashAccountId, deriveReceiptGroups, ensureExpenseCategoryId]);
 
   if (!open || !draft) return null;
 
@@ -1840,9 +1841,9 @@ export default function InboxView({ showAlert, showConfirm }) {
   // Inbox approve flow builds transactions from items and needs the full account list
   // (e.g., for installment validation / credit-account checks).
   // A missing `accounts` reference causes a runtime ReferenceError on Approve.
-  const accounts = Array.isArray(state?.accounts) ? state.accounts : [];
+  const accounts = useMemo(() => (Array.isArray(state?.accounts) ? state.accounts : []), [state?.accounts]);
 
-  const inbox = state.inbox || [];
+  const inbox = useMemo(() => state.inbox || [], [state.inbox]);
   const [tab, setTab] = useState("pending");
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -1907,7 +1908,7 @@ export default function InboxView({ showAlert, showConfirm }) {
     });
   }, [activeListBase, state.transactions]);
 
-  const pickRecentCats = (txType, catsList) => {
+  const pickRecentCats = useCallback((txType, catsList) => {
     const txs = Array.isArray(state.transactions) ? state.transactions : [];
     const byId = new Map((Array.isArray(catsList) ? catsList : []).map((c) => [String(c?.id || "").trim(), c]));
     const out = [];
@@ -1927,9 +1928,9 @@ export default function InboxView({ showAlert, showConfirm }) {
       if (out.length >= 10) break;
     }
     return out;
-  };
+  }, [state.transactions]);
 
-  const pickRecentAccounts = (txType) => {
+  const pickRecentAccounts = useCallback((txType) => {
     const txs = Array.isArray(state.transactions) ? state.transactions : [];
     const byId = new Map((Array.isArray(accounts) ? accounts : []).map((a) => [String(a?.id || "").trim(), a]));
     const out = [];
@@ -1947,26 +1948,26 @@ export default function InboxView({ showAlert, showConfirm }) {
       if (out.length >= 10) break;
     }
     return out;
-  };
+  }, [accounts, state.transactions]);
 
   const recentExpenseCatsForPicker = useMemo(
     () => pickRecentCats("expense", state.categories?.expense || []),
-    [state.transactions, state.categories]
+    [pickRecentCats, state.categories?.expense]
   );
 
   const recentIncomeCatsForPicker = useMemo(
     () => pickRecentCats("income", state.categories?.income || []),
-    [state.transactions, state.categories]
+    [pickRecentCats, state.categories?.income]
   );
 
   const recentExpenseAccountsForPicker = useMemo(
     () => pickRecentAccounts("expense"),
-    [state.transactions, accounts]
+    [pickRecentAccounts]
   );
 
   const recentIncomeAccountsForPicker = useMemo(
     () => pickRecentAccounts("income"),
-    [state.transactions, accounts]
+    [pickRecentAccounts]
   );
 
   const filtered = useMemo(() => {

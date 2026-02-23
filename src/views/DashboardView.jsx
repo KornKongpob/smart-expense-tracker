@@ -5,8 +5,8 @@ import TransactionCard from "../components/TransactionCard";
 import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
 import AccountPicker from "../components/AccountPicker";
-import { useAppStore } from "../store/store";
-import { getBudget, toMonthKey } from "../store/selectors";
+import { useAppStore } from "../store/store.jsx";
+import { getBudget, toMonthKey } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { isCreditAccount } from "../utils/accountMatch";
 
