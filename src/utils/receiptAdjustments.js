@@ -10,7 +10,7 @@
 // - For receipt paid-total math: that line should SUBTRACT from the sum.
 // - For account balance math: it should ADD back (reducing the expense).
 
-import { ensureSatangInt } from "./money";
+import { ensureSatangInt } from "./money.js";
 
 function sat(v, fallback = 0) {
   const n = typeof v === "number" ? v : v != null ? Number(v) : NaN;

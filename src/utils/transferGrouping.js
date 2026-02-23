@@ -7,7 +7,7 @@
 // This module is intentionally resilient to older / inconsistent data.
 // It uses multiple strategies to pair legs: transferId, ref, and heuristics (amount/date/type).
 
-import { isCreditAccount } from "./accountMatch";
+import { isCreditAccount } from "./accountMatch.js";
 
 const EPS = 1; // 1 satang
 
