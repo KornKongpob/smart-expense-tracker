@@ -316,7 +316,7 @@ export default function StatsView() {
   const periodLabel = useMemo(() => getPeriodLabel(period), [period]);
   const periodStart = useMemo(() => getPeriodStart(period, now), [period, now]);
 
-  const expenseCats = state.categories?.expense || [];
+  const expenseCats = useMemo(() => state.categories?.expense || [], [state.categories]);
   const expenseCatMap = useMemo(() => {
     const m = new Map();
     for (const c of expenseCats) m.set(c.id, c);
