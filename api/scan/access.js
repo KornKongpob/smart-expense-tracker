@@ -1,9 +1,3 @@
-/**
- * Access control contract:
- * input: { req, res }
- * output: { allowed: boolean, handled: boolean }
- */
-
 function parseEnvList(raw) {
   return String(raw || "")
     .split(",")
@@ -29,20 +23,16 @@ function getBearerToken(req) {
 function hasValidScanToken(req) {
   const expected = String(process.env.SCAN_API_TOKEN || "").trim();
   if (!expected) return false;
-
   const got = getBearerToken(req) || String(req.headers?.["x-scan-token"] || "").trim();
   if (!got) return false;
-
   return constantTimeEqual(got, expected);
 }
 
 function isAllowedOrigin(req) {
   const allowed = parseEnvList(process.env.SCAN_ALLOWED_ORIGINS);
   if (!allowed.length) return { ok: false, origin: "" };
-
   const origin = String(req.headers?.origin || "").trim();
   if (!origin) return { ok: false, origin: "" };
-
   return { ok: allowed.includes(origin), origin };
 }
 
@@ -70,43 +60,35 @@ export function setSecurityHeaders(res) {
   }
 }
 
-export function enforceAccess({ req, res }) {
+export function enforceAccess(req, res) {
   const tokenConfigured = String(process.env.SCAN_API_TOKEN || "").trim().length > 0;
+  const allowedOrigins = parseEnvList(process.env.SCAN_ALLOWED_ORIGINS);
+  const originsConfigured = allowedOrigins.length > 0;
+
   const { ok: originOk, origin } = isAllowedOrigin(req);
-
-  const originsConfigured = parseEnvList(process.env.SCAN_ALLOWED_ORIGINS).length > 0;
-
   const tokenOk = hasValidScanToken(req);
   applyCorsIfAllowed(res, originOk, origin);
 
   if (req.method === "OPTIONS") {
     if (originOk) {
       res.status(204).end();
-      return { allowed: false, handled: true };
+      return false;
     }
     res.status(403).end();
-    return { allowed: false, handled: true };
+    return false;
   }
 
   if (originsConfigured) {
-    if (originOk || tokenOk) return { allowed: true, handled: false };
+    if (originOk || tokenOk) return true;
     res.status(403).json({ ok: false, code: "forbidden", message: "Origin not allowed" });
-    return { allowed: false, handled: true };
+    return false;
   }
 
   if (tokenConfigured) {
-    if (tokenOk) return { allowed: true, handled: false };
+    if (tokenOk) return true;
     res.status(401).json({ ok: false, code: "unauthorized", message: "Missing/invalid token" });
-    return { allowed: false, handled: true };
+    return false;
   }
 
-  return { allowed: true, handled: false };
-}
-
-export function getClientIp(req) {
-  const xf = String(req.headers?.["x-forwarded-for"] || "").trim();
-  if (xf) return xf.split(",")[0].trim();
-  const xr = String(req.headers?.["x-real-ip"] || "").trim();
-  if (xr) return xr;
-  return String(req.socket?.remoteAddress || "").trim() || "unknown";
+  return true;
 }

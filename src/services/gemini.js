@@ -9,6 +9,7 @@
 
 import { scanReceiptOpenAI } from "./scanOpenAI";
 import { normalizeThaiDigits, parseMoneyToSatang } from "../utils/money";
+import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
 
 export const fileToBase64 = (file) => {
   return new Promise((resolve, reject) => {
@@ -48,7 +49,15 @@ export const callGeminiScan = async (base64Data, mimeType) => {
   const payload = {
     base64: String(base64Data || ""),
     mimeType: String(mimeType || "image/jpeg"),
+    type: "image",
   };
+
+  const reqCheck = parseScanRequestPayload(payload);
+  if (!reqCheck.success) {
+    const e = new Error("Invalid scan request payload");
+    e.code = "invalid_scan_request";
+    throw e;
+  }
 
   const res = await fetch(url, {
     method: "POST",
@@ -65,19 +74,28 @@ export const callGeminiScan = async (base64Data, mimeType) => {
   if (!res.ok) {
     const msg = json?.message || `API Error: ${res.status}`;
     const e = new Error(msg);
-    e.code = json?.code || "gemini_api_error";
+    const rawCode = json?.code || "gemini_api_error";
+    e.code = rawCode === "parse_failed" ? SCAN_PARSE_ERROR_CODE : rawCode;
     throw e;
   }
 
   if (!json?.ok) {
     const msg = json?.message || "Gemini scan failed";
     const e = new Error(msg);
-    e.code = json?.code || "gemini_scan_failed";
+    const rawCode = json?.code || "gemini_scan_failed";
+    e.code = rawCode === "parse_failed" ? SCAN_PARSE_ERROR_CODE : rawCode;
     e.data = json;
     throw e;
   }
 
-  return json.data;
+  const normalized = normalizeScanResponse(json.data, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+  if (normalized.errors.length) {
+    const e = new Error("Gemini response parse failed");
+    e.code = SCAN_PARSE_ERROR_CODE;
+    e.data = json;
+    throw e;
+  }
+  return { ...json.data, ...normalized };
 };
 
 // -------------------- Slip Hunter (Thai bank transfer slip parser) --------------------

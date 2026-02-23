@@ -1,5 +1,6 @@
 // api/scan-receipt.js
 import Busboy from "busboy";
+import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
 import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "./scan/access.js";
 import { createRateLimiter } from "./scan/rateLimit.js";
 import { parseScanRequest } from "./scan/requestParse.js";
@@ -1734,7 +1735,7 @@ ${accountsText}
       status: 200,
       body: {
         ok: false,
-        code: "parse_failed",
+        code: SCAN_PARSE_ERROR_CODE,
         message: "Model output is not valid JSON",
         rawText: outputText,
         model: usedModel,
@@ -2154,6 +2155,14 @@ Output JSON schema:
 
   if (!normalized.account_id) normalized.account_id = null;
 
+  const schemaNormalized = normalizeScanResponse(normalized, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+  normalized.merchant = schemaNormalized.merchant;
+  normalized.amount = schemaNormalized.amount;
+  normalized.date = schemaNormalized.date;
+  normalized.items = Array.isArray(normalized.items) && normalized.items.length ? normalized.items : schemaNormalized.items;
+  normalized.confidence = normalized.confidence || (schemaNormalized.confidence != null ? { overall: schemaNormalized.confidence } : null);
+  normalized.errors = schemaNormalized.errors;
+
   return {
     status: 200,
     body: { ok: true, data: normalized, rawText: outputText, model },
@@ -2173,14 +2182,133 @@ export default async function handler(req, res) {
       return;
     }
 
-    const parsedReq = await parseScanRequest(req, {
-      maxUploadBytes: MAX_UPLOAD_BYTES,
-      maxJsonBodyBytes: MAX_JSON_BODY_BYTES,
-      safeJsonParseMaybe,
-    });
-    if (!parsedReq.ok) {
-      const errOut = normalizeErrorResponse(parsedReq);
-      res.status(errOut.status).json(errOut.body);
+    const ct = getContentType(req);
+
+    // 1) multipart/form-data
+    if (ct.includes("multipart/form-data")) {
+      const { files, fields } = await parseMultipart(req, { maxBytes: MAX_UPLOAD_BYTES, maxFiles: 3 });
+      const accounts = (() => {
+        try {
+          const f = fields && typeof fields === 'object' ? fields : {};
+          const raw = f.accounts ?? f.accountsContext ?? '';
+          const parsed = safeJsonParseMaybe(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+      if (!Array.isArray(files) || files.length === 0) {
+        res.status(400).json({ ok: false, code: "missing_file", message: "No file uploaded" });
+        return;
+      }
+
+      // Allow multi-view uploads (2-3 images) to improve OCR on long receipts.
+      // If a PDF is present, we only use the first PDF file.
+      const normalized = files
+        .map((f) => {
+          const mt = assertAllowedInputMime(f?.mimeType || "");
+          if (!mt) return null;
+          const buf = f?.fileBuffer;
+          if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) return null;
+          return {
+            base64: buf.toString("base64"),
+            mimeType: mt,
+            filename: String(f?.filename || "").trim() || (mt === "application/pdf" ? "receipt.pdf" : "receipt.jpg"),
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+
+      if (!normalized.length) {
+        res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
+        return;
+      }
+
+      const pdf = normalized.find((x) => x.mimeType === "application/pdf");
+      const out = pdf
+        ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
+        : await callOpenAI({ images: normalized, accounts });
+      res.status(out.status).json(out.body);
+      return;
+    }
+
+    // 2) JSON: accept { base64, mimeType } OR { imageDataUrl }
+    const body = await readJson(req);
+
+    const accounts = Array.isArray(body?.accounts)
+      ? body.accounts
+      : Array.isArray(body?.accountsContext)
+      ? body.accountsContext
+      : [];
+
+    // Multi-image JSON payload (optional): { images: [dataUrl1, dataUrl2, ...] }
+    // Each image should be a crop/enhancement of the same document.
+    const imagesList = Array.isArray(body?.images)
+      ? body.images
+      : Array.isArray(body?.imageDataUrls)
+      ? body.imageDataUrls
+      : null;
+
+    if (Array.isArray(imagesList) && imagesList.length) {
+      const normalized = imagesList
+        .map((u) => parseDataUrlMaybe(String(u || "").trim()))
+        .filter(Boolean)
+        .map((p, idx) => {
+          const mt = assertAllowedInputMime(p?.mimeType || "");
+          if (!mt) return null;
+          const b64 = String(p?.base64 || "").trim();
+          if (!b64) return null;
+          return {
+            base64: b64,
+            mimeType: mt,
+            filename: `receipt-${idx + 1}.${mt === "image/png" ? "png" : mt === "image/webp" ? "webp" : "jpg"}`,
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+
+      if (normalized.length) {
+        const pdf = normalized.find((x) => x.mimeType === "application/pdf");
+        const out = pdf
+          ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
+          : await callOpenAI({ images: normalized, accounts });
+        res.status(out.status).json(out.body);
+        return;
+      }
+    }
+
+    // Prefer imageDataUrl if present
+    const imageDataUrl = String(body?.imageDataUrl || "").trim();
+    const parsedDataUrl = imageDataUrl ? parseDataUrlMaybe(imageDataUrl) : null;
+
+    const base64 = parsedDataUrl?.base64 || body?.base64 || body?.imageBase64 || null;
+    const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
+    const filename = String(body?.filename || body?.fileName || body?.name || "").trim();
+
+    const mt = assertAllowedInputMime(mimeType || "image/jpeg");
+    if (!mt) {
+      res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
+      return;
+    }
+
+    const b64 = typeof base64 === "string" ? base64.trim() : "";
+    const reqCheck = parseScanRequestPayload({ base64: b64, mimeType: mt, type: mt === "application/pdf" ? "pdf" : "image" });
+    if (!reqCheck.success) {
+      res.status(400).json({ ok: false, code: "invalid_scan_request", message: "Provide multipart file, or JSON { base64, mimeType }, or { imageDataUrl }" });
+      return;
+    }
+    const sizeCheck = assertBase64UnderLimit(b64, MAX_UPLOAD_BYTES);
+    if (!sizeCheck.ok) {
+      res.status(413).json({ ok: false, code: "payload_too_large", message: "Upload payload too large" });
+      return;
+    }
+
+    if (!b64) {
+      res.status(400).json({
+        ok: false,
+        code: "missing_base64",
+        message: "Provide multipart file, or JSON { base64, mimeType }, or { imageDataUrl }",
+      });
       return;
     }
 

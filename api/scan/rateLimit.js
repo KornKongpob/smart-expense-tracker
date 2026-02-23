@@ -1,33 +1,37 @@
-import { getClientIp } from "./access.js";
+function getClientIp(req) {
+  const xf = String(req.headers?.["x-forwarded-for"] || "").trim();
+  if (xf) return xf.split(",")[0].trim();
+  const xr = String(req.headers?.["x-real-ip"] || "").trim();
+  if (xr) return xr;
+  return String(req.socket?.remoteAddress || "").trim() || "unknown";
+}
 
-/**
- * Rate-limit contract:
- * input: { req, res }
- * output: { allowed: boolean, handled: boolean }
- */
-export function createRateLimiter({ limitPerMinute = 30, windowMs = 60_000 } = {}) {
-  const bucket = new Map();
-
-  return function enforceRateLimit({ req, res }) {
-    const limit = Number.isFinite(limitPerMinute) && limitPerMinute > 0 ? limitPerMinute : 0;
-    if (!limit) return { allowed: true, handled: false };
+export function createRateLimiter({
+  keyPrefix = "scan",
+  limit = Number(process.env.SCAN_RATE_LIMIT_PER_MINUTE || 30),
+  windowMs = 60_000,
+} = {}) {
+  const store = new Map();
+  return function rateLimit(req, res) {
+    const cap = Number.isFinite(limit) && limit > 0 ? limit : 0;
+    if (!cap) return true;
 
     const ip = getClientIp(req);
-    const key = `scan:${ip}`;
+    const key = `${keyPrefix}:${ip}`;
     const now = Date.now();
 
-    const rec = bucket.get(key);
+    const rec = store.get(key);
     if (!rec || now >= rec.resetAt) {
-      bucket.set(key, { resetAt: now + windowMs, count: 1 });
-      return { allowed: true, handled: false };
+      store.set(key, { resetAt: now + windowMs, count: 1 });
+      return true;
     }
 
     rec.count += 1;
-    if (rec.count <= limit) return { allowed: true, handled: false };
+    if (rec.count <= cap) return true;
 
     const retryAfterSec = Math.max(1, Math.ceil((rec.resetAt - now) / 1000));
     res.setHeader("Retry-After", String(retryAfterSec));
     res.status(429).json({ ok: false, code: "rate_limited", message: "Too many requests" });
-    return { allowed: false, handled: true };
+    return false;
   };
 }

@@ -1,6 +1,13 @@
 // api/gemini-scan.js
 // Server-side Gemini receipt scanner (keeps API key off the client).
 
+import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
+import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "./scan/access.js";
+import { createRateLimiter } from "./scan/rateLimit.js";
+import { parseScanRequest } from "./scan/requestParse.js";
+import { scanWithProvider } from "./scan/providers/index.js";
+import { normalizeErrorResponse } from "./scan/normalize.js";
+
 const IS_PROD = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 const MAX_JSON_BODY_BYTES = Number(process.env.SCAN_MAX_JSON_BODY_BYTES || 2 * 1024 * 1024); // 2MB
 const MAX_IMAGE_BYTES = Number(process.env.SCAN_MAX_IMAGE_BYTES || 8 * 1024 * 1024); // 8MB
@@ -10,8 +17,9 @@ const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 35_000);
 
 const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const _rate = new Map();
+const enforceGeminiRateLimit = createRateLimiter({ keyPrefix: "gemini", limit: RATE_LIMIT_PER_MINUTE, windowMs: RATE_WINDOW_MS });
 
-function setSecurityHeaders(res) {
+function _setSecurityHeaders(res) {
   try {
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.setHeader("Pragma", "no-cache");
@@ -81,7 +89,7 @@ function applyCorsIfAllowed(res, originOk, origin) {
   }
 }
 
-function enforceAccess(req, res) {
+function _enforceAccess(req, res) {
   const tokenConfigured = String(process.env.SCAN_API_TOKEN || "").trim().length > 0;
   const allowedOrigins = parseEnvList(process.env.SCAN_ALLOWED_ORIGINS);
   const originsConfigured = allowedOrigins.length > 0;
@@ -114,7 +122,7 @@ function enforceAccess(req, res) {
   return true;
 }
 
-function enforceRateLimit(req, res) {
+function _enforceRateLimit(req, res) {
   const limit = Number.isFinite(RATE_LIMIT_PER_MINUTE) && RATE_LIMIT_PER_MINUTE > 0 ? RATE_LIMIT_PER_MINUTE : 0;
   if (!limit) return true;
 
@@ -166,7 +174,7 @@ function assertBase64UnderLimit(b64, maxBytes) {
   return { ok: true, bytes };
 }
 
-function parseDataUrlMaybe(dataUrl) {
+function _parseDataUrlMaybe(dataUrl) {
   const s = String(dataUrl || "").trim();
   if (!s.startsWith("data:")) return null;
 
@@ -228,7 +236,7 @@ function readRawBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   });
 }
 
-async function readJson(req) {
+async function _readJson(req) {
   if (req.body && typeof req.body === "object") return req.body;
   const buf = await readRawBody(req);
   const txt = buf.toString("utf-8").trim();
@@ -240,7 +248,7 @@ async function readJson(req) {
   }
 }
 
-async function fetchWithTimeout(url, options, timeoutMs = GEMINI_TIMEOUT_MS) {
+async function _fetchWithTimeout(url, options, timeoutMs = GEMINI_TIMEOUT_MS) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -275,9 +283,9 @@ function safeJsonParseMaybe(text) {
 
 export default async function handler(req, res) {
   try {
-    setSecurityHeaders(res);
-    if (!enforceAccess(req, res)) return;
-    if (!enforceRateLimit(req, res)) return;
+    setSecurityHeadersModule(res);
+    if (!enforceAccessModule(req, res)) return;
+    if (!enforceGeminiRateLimit(req, res)) return;
 
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
@@ -291,18 +299,12 @@ export default async function handler(req, res) {
       return;
     }
 
-    const body = await readJson(req);
-
-    // Accept { base64, mimeType } OR { imageDataUrl }
-    const imageDataUrl = String(body?.imageDataUrl || "").trim();
-    const parsedDataUrl = imageDataUrl ? parseDataUrlMaybe(imageDataUrl) : null;
-
-    const base64 = parsedDataUrl?.base64 || body?.base64 || body?.imageBase64 || "";
-    const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
-
-    const b64 = typeof base64 === "string" ? base64.trim() : "";
-    if (!b64) {
-      res.status(400).json({ ok: false, code: "missing_base64", message: "Provide { base64, mimeType } or { imageDataUrl }" });
+    const parsedReq = await parseScanRequest(req, { maxBytes: MAX_JSON_BODY_BYTES });
+    const b64 = parsedReq.base64;
+    const mimeType = parsedReq.mimeType;
+    const reqCheck = parseScanRequestPayload({ base64: b64, mimeType: mimeType || "image/jpeg", type: "image" });
+    if (!reqCheck.success) {
+      res.status(400).json({ ok: false, code: "invalid_scan_request", message: "Provide { base64, mimeType } or { imageDataUrl }" });
       return;
     }
 
@@ -331,16 +333,11 @@ export default async function handler(req, res) {
       ],
     };
 
-    const r = await fetchWithTimeout(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const json = await r.json().catch(() => null);
-    if (!r.ok) {
+    const provider = await scanWithProvider({ url, payload, timeoutMs: GEMINI_TIMEOUT_MS });
+    const json = provider.json;
+    if (!provider.ok) {
       const msg = json?.error?.message || "Gemini request failed";
-      res.status(r.status).json({ ok: false, code: "gemini_error", message: msg });
+      res.status(provider.status).json({ ok: false, code: "gemini_error", message: msg });
       return;
     }
 
@@ -348,17 +345,24 @@ export default async function handler(req, res) {
     const parsed = safeJsonParseMaybe(text);
 
     if (!parsed) {
-      res.status(200).json({ ok: false, code: "parse_failed", message: "Model output is not valid JSON", rawText: text, model });
+      res.status(200).json({ ok: false, code: SCAN_PARSE_ERROR_CODE, message: "Model output is not valid JSON", rawText: text, model });
       return;
     }
 
-    res.status(200).json({ ok: true, data: parsed, rawText: text, model });
+    const normalized = normalizeScanResponse(parsed, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+    if (normalized.errors.length) {
+      res.status(200).json({ ok: false, code: SCAN_PARSE_ERROR_CODE, message: "Model output does not match scan schema", rawText: text, model });
+      return;
+    }
+
+    res.status(200).json({ ok: true, data: { ...parsed, ...normalized }, rawText: text, model });
   } catch (e) {
     const msg = String(e?.message || e);
     if (msg === "body_too_large") {
       res.status(413).json({ ok: false, code: "body_too_large", message: "Request body too large" });
       return;
     }
-    res.status(500).json({ ok: false, code: "server_error", message: IS_PROD ? "Internal server error" : msg });
+    const err = normalizeErrorResponse({ status: 500, code: "server_error", message: IS_PROD ? "Internal server error" : msg });
+    res.status(err.status).json(err.body);
   }
 }
