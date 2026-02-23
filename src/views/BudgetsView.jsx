@@ -110,7 +110,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
   const [month, setMonth] = useState(() => toMonthKey(new Date())); // "YYYY-MM"
 
-  const catsAll = state.categories?.expense || [];
+  const catsAll = useMemo(() => state.categories?.expense || [], [state.categories]);
   const catsActive = useMemo(() => (catsAll || []).filter((c) => !(c?.deletedAt || c?.isDeleted)), [catsAll]);
   const catsMain = useMemo(
     () =>
@@ -128,7 +128,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
   );
 
   const cats = catsMain;
-  const budgets = state.budgets || [];
+  const budgets = useMemo(() => state.budgets || [], [state.budgets]);
 
   // ✅ Used for "Daily budget" preview (only meaningful for current month)
   const todayISO = toISODate(new Date());

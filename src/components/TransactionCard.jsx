@@ -22,9 +22,9 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
   const store = useAppStore();
   const { state } = store;
 
-  const accounts = state.accounts || [];
-  const allTx = state.transactions || [];
-  const categoriesObj = state.categories || { expense: [], income: [] };
+  const accounts = useMemo(() => state.accounts || [], [state.accounts]);
+  const allTx = useMemo(() => state.transactions || [], [state.transactions]);
+  const categoriesObj = useMemo(() => state.categories || { expense: [], income: [] }, [state.categories]);
   const categoriesById = useMemo(() => {
     const all = [...(categoriesObj?.expense || []), ...(categoriesObj?.income || [])];
     return new Map(all.map((c) => [String(c.id), c]));
@@ -57,7 +57,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
       return (Number(b?.amount) || 0) - (Number(a?.amount) || 0);
     });
     return ordered;
-  }, [isSplitGroup, tx?.splitGroupId, tx?.splitLines, allTx]);
+  }, [allTx, gidForSplit, isSplitGroup, tx?.id, tx?.isSplitParent, tx?.splitLines]);
 
   const receiptLines = useMemo(() => {
     if (isTransfer || isSplitGroup) return null;

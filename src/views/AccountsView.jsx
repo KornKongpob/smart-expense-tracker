@@ -444,7 +444,7 @@ const generateId = () => {
 
 export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const store = useAppStore();
-  const accounts = store.state.accounts || [];
+  const accounts = useMemo(() => store.state.accounts || [], [store.state.accounts]);
   const { addAccount, updateAccount, deleteAccount, adjustAccountBalance } = store;
 
   const [q, setQ] = useState("");
