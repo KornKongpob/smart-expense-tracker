@@ -26,8 +26,8 @@ import {
   CartesianGrid,
 } from "recharts";
 import { formatCurrency, formatDateShort } from "../utils/format";
-import { useAppStore } from "../store/store";
-import { parseDateSafe } from "../store/selectors";
+import { useAppStore } from "../store/store.jsx";
+import { parseDateSafe } from "../store/selectors.js";
 import AppHeader from "../components/AppHeader";
 import AccountPill from "../components/AccountPill";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
@@ -316,7 +316,7 @@ export default function StatsView() {
   const periodLabel = useMemo(() => getPeriodLabel(period), [period]);
   const periodStart = useMemo(() => getPeriodStart(period, now), [period, now]);
 
-  const expenseCats = state.categories?.expense || [];
+  const expenseCats = useMemo(() => state.categories?.expense || [], [state.categories]);
   const expenseCatMap = useMemo(() => {
     const m = new Map();
     for (const c of expenseCats) m.set(c.id, c);

@@ -1,3 +1,7 @@
+/**
+ * Central action type constants for the app store.
+ * All dispatchers and reducers must import ACTIONS from here only.
+ */
 // src/store/actions.js
 /**
  * Action type constants for App Store (Reducer)

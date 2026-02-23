@@ -1,3 +1,7 @@
+/**
+ * Central selectors and derived-data helpers for store consumers.
+ * Views/components should read computed store data via this module only.
+ */
 // src/store/selectors.js
 // Central selectors + safe date helpers
 // ✅ Goal: make date handling stable across timezone (especially for YYYY-MM-DD strings)

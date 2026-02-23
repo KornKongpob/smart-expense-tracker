@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Plus, Trash2, Edit2, X, Check, Search, CornerDownRight } from "lucide-react";
 import AppHeader from "../components/AppHeader";
 import { PRESET_COLORS } from "../constants/presets.jsx";
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 const slugify = (s) =>

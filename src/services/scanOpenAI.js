@@ -4,6 +4,7 @@
 // รองรับได้ทั้ง:
 // - /api/scan  (รับ { imageDataUrl } และตอบ { ok, data, rawText, model })
 // - /api/scan-receipt (รับ { base64, mimeType } และตอบ { ok, data, rawText, model })
+import { normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -636,14 +637,15 @@ function normalizeKeywords(kws) {
 
 function normalizeScanResult({ data, rawText, model, endpointUsed }) {
   const d = data && typeof data === "object" ? data : null;
+  const base = normalizeScanResponse(d, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
 
   const normalized = {
     doc_type: d?.doc_type ?? d?.docType ?? null,
     currency: d?.currency ?? null,
     tx_type: normalizeTxType(d?.tx_type),
-    amount: safeParseAmount(d?.amount),
-    date: safeISODate(d?.date),
-    merchant: d?.merchant ?? null,
+    amount: safeParseAmount(base.amount ?? d?.amount),
+    date: safeISODate(base.date ?? d?.date),
+    merchant: base.merchant ?? d?.merchant ?? null,
     note: d?.note ?? d?.merchant ?? null,
     ref: (d?.ref ?? d?.referenceId ?? d?.reference_id) ?? null,
     category: d?.category ?? null,
@@ -653,7 +655,7 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     from_account: d?.from_account ?? null,
     to_account: d?.to_account ?? null,
     evidence: d?.evidence ?? rawText ?? "",
-    items: normalizeItems(d?.items),
+    items: normalizeItems(base.items?.length ? base.items : d?.items),
     adjustments: normalizeAdjustments(d?.adjustments ?? d?.adjustment_lines ?? d?.adjustments_lines ?? null),
     keywords: normalizeKeywords(d?.keywords),
 
@@ -664,7 +666,10 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     to_account_variants: d?.to_account_variants ?? null,
     account_candidates: Array.isArray(d?.account_candidates) ? d.account_candidates : null,
 
-    confidence: d?.confidence && typeof d.confidence === 'object' ? d.confidence : null,
+    confidence: d?.confidence && typeof d.confidence === 'object'
+      ? d.confidence
+      : (base.confidence != null ? { overall: base.confidence } : null),
+    errors: base.errors,
     flags: d?.flags && typeof d.flags === 'object' ? d.flags : null,
 
     _rawText: rawText ?? "",
@@ -880,7 +885,8 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
     const json = fb.json;
 
     if (!res.ok) {
-      const code = json?.code || json?.error || json?.error?.code || "scan_failed";
+      const rawCode = json?.code || json?.error || json?.error?.code || "scan_failed";
+      const code = rawCode === "parse_failed" ? SCAN_PARSE_ERROR_CODE : rawCode;
       const msg = json?.message || json?.error?.message || code;
       const e = new Error(msg);
       e.code = code;
@@ -916,7 +922,8 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   }
 
   if (!res.ok) {
-    const code = json?.code || json?.error || json?.error?.code || "scan_failed";
+    const rawCode = json?.code || json?.error || json?.error?.code || "scan_failed";
+    const code = rawCode === "parse_failed" ? SCAN_PARSE_ERROR_CODE : rawCode;
     const msg = json?.message || json?.error?.message || code;
     const e = new Error(msg);
     e.code = code;
@@ -925,7 +932,8 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   }
 
   if (!json?.ok) {
-    const code = json?.code || json?.error || json?.error?.code || "scan_failed";
+    const rawCode = json?.code || json?.error || json?.error?.code || "scan_failed";
+    const code = rawCode === "parse_failed" ? SCAN_PARSE_ERROR_CODE : rawCode;
     const msg = json?.message || json?.error?.message || code;
     const e = new Error(msg);
     e.code = code;

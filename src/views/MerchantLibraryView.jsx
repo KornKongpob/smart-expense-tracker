@@ -3,7 +3,7 @@ import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import { ArrowLeft, Plus, Search, Trash2, GitMerge, Edit2, Check, X } from "lucide-react";
 
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
 import { generateId } from "../utils/id";
@@ -38,10 +38,10 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
     mergeMerchants,
   } = useAppStore();
 
-  const merchants = state.merchants || [];
-  const accounts = state.accounts || [];
-  const expenseCats = state?.categories?.expense || [];
-  const incomeCats = state?.categories?.income || [];
+  const merchants = useMemo(() => state.merchants || [], [state.merchants]);
+  const accounts = useMemo(() => state.accounts || [], [state.accounts]);
+  const expenseCats = useMemo(() => state?.categories?.expense || [], [state.categories]);
+  const incomeCats = useMemo(() => state?.categories?.income || [], [state.categories]);
 
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);

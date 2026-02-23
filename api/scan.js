@@ -1,5 +1,11 @@
 // api/scan-receipt.js
 import Busboy from "busboy";
+import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
+import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "./scan/access.js";
+import { createRateLimiter } from "./scan/rateLimit.js";
+import { parseScanRequest } from "./scan/requestParse.js";
+import { scanWithProvider } from "./scan/providers/index.js";
+import { normalizeErrorResponse } from "./scan/normalize.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -31,8 +37,9 @@ const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 35_000);
 const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const ALLOWED_FILE_MIME = new Set(["application/pdf"]);
 const _rate = new Map(); // key -> { resetAt, count }
+const enforceRateLimitModule = createRateLimiter({ limitPerMinute: RATE_LIMIT_PER_MINUTE, windowMs: RATE_WINDOW_MS });
 
-function setSecurityHeaders(res) {
+function _setSecurityHeaders(res) {
   try {
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.setHeader("Pragma", "no-cache");
@@ -106,7 +113,7 @@ function applyCorsIfAllowed(res, originOk, origin) {
   }
 }
 
-function enforceAccess(req, res) {
+function _enforceAccess(req, res) {
   const tokenConfigured = String(process.env.SCAN_API_TOKEN || "").trim().length > 0;
   const { ok: originOk, origin } = isAllowedOrigin(req);
 
@@ -141,7 +148,7 @@ function enforceAccess(req, res) {
   return true; // open by default (no env configured)
 }
 
-function enforceRateLimit(req, res) {
+function _enforceRateLimit(req, res) {
   const limit = Number.isFinite(RATE_LIMIT_PER_MINUTE) && RATE_LIMIT_PER_MINUTE > 0 ? RATE_LIMIT_PER_MINUTE : 0;
   if (!limit) return true;
 
@@ -173,7 +180,7 @@ function normalizeInputMime(mimeType) {
   return m;
 }
 
-function assertAllowedInputMime(mimeType) {
+function _assertAllowedInputMime(mimeType) {
   const mt = normalizeInputMime(mimeType);
   if (!mt) return "";
   if (ALLOWED_IMAGE_MIME.has(mt)) return mt;
@@ -191,7 +198,7 @@ function approxBase64Bytes(b64) {
   return Math.floor((len * 3) / 4);
 }
 
-function assertBase64UnderLimit(b64, maxBytes) {
+function _assertBase64UnderLimit(b64, maxBytes) {
   const bytes = approxBase64Bytes(b64);
   if (!bytes) return { ok: false, bytes: 0 };
   if (bytes > maxBytes) return { ok: false, bytes };
@@ -208,7 +215,7 @@ async function fetchWithTimeout(url, options, timeoutMs = OPENAI_TIMEOUT_MS) {
   }
 }
 
-function getContentType(req) {
+function _getContentType(req) {
   return String(req.headers?.["content-type"] || "").toLowerCase();
 }
 
@@ -256,7 +263,7 @@ function readRawBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   });
 }
 
-async function readJson(req) {
+async function _readJson(req) {
   // In some runtimes (Next), req.body might already be an object
   if (req.body && typeof req.body === "object") return req.body;
 
@@ -270,7 +277,7 @@ async function readJson(req) {
   }
 }
 
-function parseMultipart(req, { maxBytes = 10 * 1024 * 1024, maxFiles = 3 } = {}) {
+function _parseMultipart(req, { maxBytes = 10 * 1024 * 1024, maxFiles = 3 } = {}) {
   return new Promise((resolve, reject) => {
     let done = false;
     const finish = (err, val) => {
@@ -489,7 +496,7 @@ function normalizeScannedDate(v) {
   return null;
 }
 
-function parseDataUrlMaybe(dataUrl) {
+function _parseDataUrlMaybe(dataUrl) {
   const s = String(dataUrl || "").trim();
   if (!s.startsWith("data:")) return null;
 
@@ -1728,7 +1735,7 @@ ${accountsText}
       status: 200,
       body: {
         ok: false,
-        code: "parse_failed",
+        code: SCAN_PARSE_ERROR_CODE,
         message: "Model output is not valid JSON",
         rawText: outputText,
         model: usedModel,
@@ -2148,6 +2155,14 @@ Output JSON schema:
 
   if (!normalized.account_id) normalized.account_id = null;
 
+  const schemaNormalized = normalizeScanResponse(normalized, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+  normalized.merchant = schemaNormalized.merchant;
+  normalized.amount = schemaNormalized.amount;
+  normalized.date = schemaNormalized.date;
+  normalized.items = Array.isArray(normalized.items) && normalized.items.length ? normalized.items : schemaNormalized.items;
+  normalized.confidence = normalized.confidence || (schemaNormalized.confidence != null ? { overall: schemaNormalized.confidence } : null);
+  normalized.errors = schemaNormalized.errors;
+
   return {
     status: 200,
     body: { ok: true, data: normalized, rawText: outputText, model },
@@ -2156,9 +2171,11 @@ Output JSON schema:
 
 export default async function handler(req, res) {
   try {
-    setSecurityHeaders(res);
-    if (!enforceAccess(req, res)) return;
-    if (!enforceRateLimit(req, res)) return;
+    setSecurityHeadersModule(res);
+    const access = enforceAccessModule({ req, res });
+    if (!access.allowed || access.handled) return;
+    const rate = enforceRateLimitModule({ req, res });
+    if (!rate.allowed || rate.handled) return;
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
       res.status(405).json({ ok: false, code: "method_not_allowed", message: "Use POST" });
@@ -2275,6 +2292,11 @@ export default async function handler(req, res) {
     }
 
     const b64 = typeof base64 === "string" ? base64.trim() : "";
+    const reqCheck = parseScanRequestPayload({ base64: b64, mimeType: mt, type: mt === "application/pdf" ? "pdf" : "image" });
+    if (!reqCheck.success) {
+      res.status(400).json({ ok: false, code: "invalid_scan_request", message: "Provide multipart file, or JSON { base64, mimeType }, or { imageDataUrl }" });
+      return;
+    }
     const sizeCheck = assertBase64UnderLimit(b64, MAX_UPLOAD_BYTES);
     if (!sizeCheck.ok) {
       res.status(413).json({ ok: false, code: "payload_too_large", message: "Upload payload too large" });
@@ -2290,8 +2312,13 @@ export default async function handler(req, res) {
       return;
     }
 
-    const out = await callOpenAI({ base64: b64, mimeType: mt, filename, accounts });
-    res.status(out.status).json(out.body);
+    const out = await scanWithProvider({
+      provider: process.env.SCAN_PROVIDER || "openai",
+      payload: parsedReq.payload,
+      scanOpenAI: callOpenAI,
+    });
+    const normalizedOut = normalizeErrorResponse(out);
+    res.status(normalizedOut.status).json(normalizedOut.body);
   } catch (e) {
     const msg = String(e?.message || e);
     if (msg === "file_too_large") {

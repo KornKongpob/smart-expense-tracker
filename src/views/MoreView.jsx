@@ -12,11 +12,11 @@ import {
   Wand2,
   Store,
 } from "lucide-react";
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
 import { downloadBackupJSON } from "../services/storage";
 import { toISODate } from "../utils/format";
-import { parseDateSafe } from "../store/selectors";
+import { parseDateSafe } from "../store/selectors.js";
 
 // Declared at module-scope to satisfy react-hooks/static-components
 function MoreRow({ icon, title, subtitle, badge, onClick, danger }) {

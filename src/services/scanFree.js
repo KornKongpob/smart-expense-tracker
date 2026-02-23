@@ -1,6 +1,7 @@
 // src/services/scanFree.js
 // Client-only OCR (no server, no API key) using Tesseract.js + image preprocessing + multi-pass parsing
 import { createWorker } from "tesseract.js";
+import { normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
 
 // -------------------- text helpers --------------------
 const THAI_DIGITS = {
@@ -526,10 +527,20 @@ export async function scanReceiptFree(file, { onStatus } = {}) {
 
   onStatus?.("");
 
-  return {
+  const normalized = normalizeScanResponse({
     amount: amount ?? null,
     date: date ?? null,
     merchant,
+    items: [],
+    confidence: passes.length ? Math.max(0, Math.min(1, (passes.reduce((s, p) => s + (p.conf || 0), 0) / passes.length) / 100)) : null,
+  }, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+
+  if (normalized.amount == null && !normalized.date && !normalized.merchant) {
+    normalized.errors = [SCAN_PARSE_ERROR_CODE];
+  }
+
+  return {
+    ...normalized,
     category,
     rawText: allText,
   };
