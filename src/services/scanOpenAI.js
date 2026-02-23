@@ -1,9 +1,7 @@
 // src/services/scanOpenAI.js
 // Client-side helper to call receipt scan API
 // Optional env: VITE_SCAN_API_URL (default: /api/scan)
-// รองรับได้ทั้ง:
-// - /api/scan  (รับ { imageDataUrl } และตอบ { ok, data, rawText, model })
-// - /api/scan-receipt (รับ { base64, mimeType } และตอบ { ok, data, rawText, model })
+// OpenAI endpoint only: /api/scan
 import { normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
 
 function fileToDataUrl(file) {
@@ -791,9 +789,6 @@ async function _postJson(url, body, { timeoutMs = 45000 } = {}) {
   }
 }
 
-function isExplicitEndpointProvided(endpoint) {
-  return typeof endpoint === "string" && endpoint.trim().length > 0;
-}
 
 /**
  * scanReceiptOpenAI(file, { endpoint, onStatus })
@@ -802,7 +797,6 @@ function isExplicitEndpointProvided(endpoint) {
  * - "encoding_image"
  * - "preparing_file" (PDF)
  * - "calling_api"
- * - "calling_api_fallback"
  * - "done"
  */
 export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [] } = {}) {
@@ -810,7 +804,6 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   // (We still keep /api/scan working as an alias on the backend.)
   const defaultUrl = import.meta.env.VITE_SCAN_API_URL || "/api/scan";
   const url = (endpoint || defaultUrl || "/api/scan").trim();
-  const explicitEndpoint = isExplicitEndpointProvided(endpoint);
 
   if (!file) {
     const e = new Error("missing_file");
@@ -857,58 +850,6 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
     e.code = "scan_network_error";
     e.cause = err;
     throw e;
-  }
-
-  // If primary endpoint missing and user didn't force endpoint: try fallback /api/scan-receipt
-  if (primary?.res?.status === 404 && !explicitEndpoint) {
-    // fallback uses multipart too
-    if (!imageDataUrl && !isPdf) {
-      const e = new Error("scan_api_not_found");
-      e.code = "scan_api_not_found";
-      throw e;
-    }
-
-    onStatus?.("calling_api_fallback");
-    const fallbackUrl = "/api/scan-receipt";
-
-    let fb;
-    try {
-      fb = await postMultipart(fallbackUrl, multipartPayload);
-    } catch (err) {
-      const e = new Error("scan_network_error");
-      e.code = "scan_network_error";
-      e.cause = err;
-      throw e;
-    }
-
-    const res = fb.res;
-    const json = fb.json;
-
-    if (!res.ok) {
-      const rawCode = json?.code || json?.error || json?.error?.code || "scan_failed";
-      const code = rawCode === "parse_failed" ? SCAN_PARSE_ERROR_CODE : rawCode;
-      const msg = json?.message || json?.error?.message || code;
-      const e = new Error(msg);
-      e.code = code;
-      e.details = { status: res.status, body: json };
-      throw e;
-    }
-
-    if (json?.error) {
-      const e = new Error(json.error);
-      e.code = json.error;
-      e.details = json;
-      throw e;
-    }
-
-    onStatus?.("done");
-
-    return normalizeScanResult({
-      data: json?.data ?? json, // support both {data:...} and plain object
-      rawText: json?.rawText ?? "",
-      model: json?.model ?? "",
-      endpointUsed: fallbackUrl,
-    });
   }
 
   // ---- Handle primary response (/api/scan) ----
