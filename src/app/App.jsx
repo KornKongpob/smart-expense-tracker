@@ -1,6 +1,6 @@
 // src/app/App.jsx
 import { useEffect, useMemo, useState } from "react";
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import Navbar from "../components/Navbar";
 import DashboardView from "../views/DashboardView";
 import AddTransactionView from "../views/AddTransactionView";

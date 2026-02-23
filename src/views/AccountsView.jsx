@@ -1,8 +1,8 @@
 // src/views/AccountsView.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseDigitsList, choosePrimaryDigits } from "../utils/accountMatch";
-import { useAppStore } from "../store/store";
-import { calcAccountBalance } from "../store/selectors";
+import { useAppStore } from "../store/store.jsx";
+import { calcAccountBalance } from "../store/selectors.js";
 import { formatCurrency } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { ACCOUNT_COLORS, ACCOUNT_ICONS, EMOJI_PRESETS } from "../constants/presets.jsx";

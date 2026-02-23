@@ -3,7 +3,7 @@ import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import { ArrowLeft, Plus, Search, Trash2, GitMerge, Edit2, Check, X } from "lucide-react";
 
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
 import { generateId } from "../utils/id";

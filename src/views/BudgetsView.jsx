@@ -2,8 +2,8 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, Bell, Trash2, Check, X, ChevronLeft, Sparkles } from "lucide-react";
 import AppHeader from "../components/AppHeader";
-import { useAppStore } from "../store/store";
-import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors";
+import { useAppStore } from "../store/store.jsx";
+import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";

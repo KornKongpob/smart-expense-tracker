@@ -27,7 +27,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import AmountField from "../components/AmountField";
 import AccountPicker from "../components/AccountPicker";
 import AccountChipsPicker from "../components/AccountChipsPicker";
@@ -52,7 +52,7 @@ import {
   calcSpentByCategoryInMonth,
   getBudget,
   calcAccountBalance,
-} from "../store/selectors";
+} from "../store/selectors.js";
 import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
 import {
   reconcileReceiptGroups,
