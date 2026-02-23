@@ -2171,10 +2171,8 @@ Output JSON schema:
 export default async function handler(req, res) {
   try {
     setSecurityHeadersModule(res);
-    const access = enforceAccessModule({ req, res });
-    if (!access.allowed || access.handled) return;
-    const rate = enforceRateLimitModule({ req, res });
-    if (!rate.allowed || rate.handled) return;
+    if (!enforceAccessModule(req, res)) return;
+    if (!enforceRateLimitModule(req, res)) return;
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
       res.status(405).json({ ok: false, code: "method_not_allowed", message: "Use POST" });
