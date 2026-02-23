@@ -1,5 +1,6 @@
 // api/scan-receipt.js
 import Busboy from "busboy";
+import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -1728,7 +1729,7 @@ ${accountsText}
       status: 200,
       body: {
         ok: false,
-        code: "parse_failed",
+        code: SCAN_PARSE_ERROR_CODE,
         message: "Model output is not valid JSON",
         rawText: outputText,
         model: usedModel,
@@ -2148,6 +2149,14 @@ Output JSON schema:
 
   if (!normalized.account_id) normalized.account_id = null;
 
+  const schemaNormalized = normalizeScanResponse(normalized, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+  normalized.merchant = schemaNormalized.merchant;
+  normalized.amount = schemaNormalized.amount;
+  normalized.date = schemaNormalized.date;
+  normalized.items = Array.isArray(normalized.items) && normalized.items.length ? normalized.items : schemaNormalized.items;
+  normalized.confidence = normalized.confidence || (schemaNormalized.confidence != null ? { overall: schemaNormalized.confidence } : null);
+  normalized.errors = schemaNormalized.errors;
+
   return {
     status: 200,
     body: { ok: true, data: normalized, rawText: outputText, model },
@@ -2275,6 +2284,11 @@ export default async function handler(req, res) {
     }
 
     const b64 = typeof base64 === "string" ? base64.trim() : "";
+    const reqCheck = parseScanRequestPayload({ base64: b64, mimeType: mt, type: mt === "application/pdf" ? "pdf" : "image" });
+    if (!reqCheck.success) {
+      res.status(400).json({ ok: false, code: "invalid_scan_request", message: "Provide multipart file, or JSON { base64, mimeType }, or { imageDataUrl }" });
+      return;
+    }
     const sizeCheck = assertBase64UnderLimit(b64, MAX_UPLOAD_BYTES);
     if (!sizeCheck.ok) {
       res.status(413).json({ ok: false, code: "payload_too_large", message: "Upload payload too large" });

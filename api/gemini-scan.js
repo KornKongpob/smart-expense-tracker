@@ -1,6 +1,8 @@
 // api/gemini-scan.js
 // Server-side Gemini receipt scanner (keeps API key off the client).
 
+import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
+
 const IS_PROD = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 const MAX_JSON_BODY_BYTES = Number(process.env.SCAN_MAX_JSON_BODY_BYTES || 2 * 1024 * 1024); // 2MB
 const MAX_IMAGE_BYTES = Number(process.env.SCAN_MAX_IMAGE_BYTES || 8 * 1024 * 1024); // 8MB
@@ -301,8 +303,9 @@ export default async function handler(req, res) {
     const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
 
     const b64 = typeof base64 === "string" ? base64.trim() : "";
-    if (!b64) {
-      res.status(400).json({ ok: false, code: "missing_base64", message: "Provide { base64, mimeType } or { imageDataUrl }" });
+    const reqCheck = parseScanRequestPayload({ base64: b64, mimeType: mimeType || "image/jpeg", type: "image" });
+    if (!reqCheck.success) {
+      res.status(400).json({ ok: false, code: "invalid_scan_request", message: "Provide { base64, mimeType } or { imageDataUrl }" });
       return;
     }
 
@@ -348,11 +351,17 @@ export default async function handler(req, res) {
     const parsed = safeJsonParseMaybe(text);
 
     if (!parsed) {
-      res.status(200).json({ ok: false, code: "parse_failed", message: "Model output is not valid JSON", rawText: text, model });
+      res.status(200).json({ ok: false, code: SCAN_PARSE_ERROR_CODE, message: "Model output is not valid JSON", rawText: text, model });
       return;
     }
 
-    res.status(200).json({ ok: true, data: parsed, rawText: text, model });
+    const normalized = normalizeScanResponse(parsed, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+    if (normalized.errors.length) {
+      res.status(200).json({ ok: false, code: SCAN_PARSE_ERROR_CODE, message: "Model output does not match scan schema", rawText: text, model });
+      return;
+    }
+
+    res.status(200).json({ ok: true, data: { ...parsed, ...normalized }, rawText: text, model });
   } catch (e) {
     const msg = String(e?.message || e);
     if (msg === "body_too_large") {
