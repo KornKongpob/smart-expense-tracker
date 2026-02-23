@@ -2314,7 +2314,12 @@ export default async function handler(req, res) {
 
     const out = await scanWithProvider({
       provider: process.env.SCAN_PROVIDER || "openai",
-      payload: parsedReq.payload,
+      payload: {
+        base64: b64,
+        mimeType: mt,
+        type: mt === "application/pdf" ? "pdf" : "image",
+        ...(filename ? { fileName: filename } : {}),
+      },
       scanOpenAI: callOpenAI,
     });
     const normalizedOut = normalizeErrorResponse(out);
