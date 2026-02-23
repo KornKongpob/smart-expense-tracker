@@ -1,6 +1,7 @@
 // src/utils/receiptCategorizer.js
 
-import { DEFAULT_CATEGORIES } from "../constants/categories";
+import { DEFAULT_CATEGORIES } from "../constants/categories.js";
+import { parseMoneyToSatang } from "./money.js";
 
 const norm = (s) =>
   String(s || "")
@@ -361,10 +362,9 @@ export function splitReceiptItemsToLines(type, itemsOrPayload, fallbackText = ""
   const targetTotalSatang = Number.isFinite(payload.targetTotalSatang) ? Math.round(payload.targetTotalSatang) : null;
 
   const toSatang = (v) => {
-    if (v == null) return null;
-    const n = typeof v === "string" ? Number(v) : v;
-    if (!Number.isFinite(n)) return null;
-    return Math.round(n * 100);
+    if (v == null || v === "") return null;
+    const sat = parseMoneyToSatang(v);
+    return Number.isFinite(sat) ? sat : null;
   };
 
   const fromSatang = (s) => (Number.isFinite(s) ? (s / 100) : null);
@@ -578,4 +578,3 @@ function pickSubsetClosest(candidates, target) {
   }
   return picked;
 }
-
