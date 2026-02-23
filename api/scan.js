@@ -1,5 +1,10 @@
 // api/scan-receipt.js
 import Busboy from "busboy";
+import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "./scan/access.js";
+import { createRateLimiter } from "./scan/rateLimit.js";
+import { parseScanRequest } from "./scan/requestParse.js";
+import { scanWithProvider } from "./scan/providers/index.js";
+import { normalizeErrorResponse } from "./scan/normalize.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -31,8 +36,9 @@ const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 35_000);
 const ALLOWED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 const ALLOWED_FILE_MIME = new Set(["application/pdf"]);
 const _rate = new Map(); // key -> { resetAt, count }
+const enforceRateLimitModule = createRateLimiter({ limitPerMinute: RATE_LIMIT_PER_MINUTE, windowMs: RATE_WINDOW_MS });
 
-function setSecurityHeaders(res) {
+function _setSecurityHeaders(res) {
   try {
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.setHeader("Pragma", "no-cache");
@@ -106,7 +112,7 @@ function applyCorsIfAllowed(res, originOk, origin) {
   }
 }
 
-function enforceAccess(req, res) {
+function _enforceAccess(req, res) {
   const tokenConfigured = String(process.env.SCAN_API_TOKEN || "").trim().length > 0;
   const { ok: originOk, origin } = isAllowedOrigin(req);
 
@@ -141,7 +147,7 @@ function enforceAccess(req, res) {
   return true; // open by default (no env configured)
 }
 
-function enforceRateLimit(req, res) {
+function _enforceRateLimit(req, res) {
   const limit = Number.isFinite(RATE_LIMIT_PER_MINUTE) && RATE_LIMIT_PER_MINUTE > 0 ? RATE_LIMIT_PER_MINUTE : 0;
   if (!limit) return true;
 
@@ -173,7 +179,7 @@ function normalizeInputMime(mimeType) {
   return m;
 }
 
-function assertAllowedInputMime(mimeType) {
+function _assertAllowedInputMime(mimeType) {
   const mt = normalizeInputMime(mimeType);
   if (!mt) return "";
   if (ALLOWED_IMAGE_MIME.has(mt)) return mt;
@@ -191,7 +197,7 @@ function approxBase64Bytes(b64) {
   return Math.floor((len * 3) / 4);
 }
 
-function assertBase64UnderLimit(b64, maxBytes) {
+function _assertBase64UnderLimit(b64, maxBytes) {
   const bytes = approxBase64Bytes(b64);
   if (!bytes) return { ok: false, bytes: 0 };
   if (bytes > maxBytes) return { ok: false, bytes };
@@ -208,7 +214,7 @@ async function fetchWithTimeout(url, options, timeoutMs = OPENAI_TIMEOUT_MS) {
   }
 }
 
-function getContentType(req) {
+function _getContentType(req) {
   return String(req.headers?.["content-type"] || "").toLowerCase();
 }
 
@@ -256,7 +262,7 @@ function readRawBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   });
 }
 
-async function readJson(req) {
+async function _readJson(req) {
   // In some runtimes (Next), req.body might already be an object
   if (req.body && typeof req.body === "object") return req.body;
 
@@ -270,7 +276,7 @@ async function readJson(req) {
   }
 }
 
-function parseMultipart(req, { maxBytes = 10 * 1024 * 1024, maxFiles = 3 } = {}) {
+function _parseMultipart(req, { maxBytes = 10 * 1024 * 1024, maxFiles = 3 } = {}) {
   return new Promise((resolve, reject) => {
     let done = false;
     const finish = (err, val) => {
@@ -489,7 +495,7 @@ function normalizeScannedDate(v) {
   return null;
 }
 
-function parseDataUrlMaybe(dataUrl) {
+function _parseDataUrlMaybe(dataUrl) {
   const s = String(dataUrl || "").trim();
   if (!s.startsWith("data:")) return null;
 
@@ -2156,142 +2162,35 @@ Output JSON schema:
 
 export default async function handler(req, res) {
   try {
-    setSecurityHeaders(res);
-    if (!enforceAccess(req, res)) return;
-    if (!enforceRateLimit(req, res)) return;
+    setSecurityHeadersModule(res);
+    const access = enforceAccessModule({ req, res });
+    if (!access.allowed || access.handled) return;
+    const rate = enforceRateLimitModule({ req, res });
+    if (!rate.allowed || rate.handled) return;
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
       res.status(405).json({ ok: false, code: "method_not_allowed", message: "Use POST" });
       return;
     }
 
-    const ct = getContentType(req);
-
-    // 1) multipart/form-data
-    if (ct.includes("multipart/form-data")) {
-      const { files, fields } = await parseMultipart(req, { maxBytes: MAX_UPLOAD_BYTES, maxFiles: 3 });
-      const accounts = (() => {
-        try {
-          const f = fields && typeof fields === 'object' ? fields : {};
-          const raw = f.accounts ?? f.accountsContext ?? '';
-          const parsed = safeJsonParseMaybe(raw);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch {
-          return [];
-        }
-      })();
-      if (!Array.isArray(files) || files.length === 0) {
-        res.status(400).json({ ok: false, code: "missing_file", message: "No file uploaded" });
-        return;
-      }
-
-      // Allow multi-view uploads (2-3 images) to improve OCR on long receipts.
-      // If a PDF is present, we only use the first PDF file.
-      const normalized = files
-        .map((f) => {
-          const mt = assertAllowedInputMime(f?.mimeType || "");
-          if (!mt) return null;
-          const buf = f?.fileBuffer;
-          if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) return null;
-          return {
-            base64: buf.toString("base64"),
-            mimeType: mt,
-            filename: String(f?.filename || "").trim() || (mt === "application/pdf" ? "receipt.pdf" : "receipt.jpg"),
-          };
-        })
-        .filter(Boolean)
-        .slice(0, 3);
-
-      if (!normalized.length) {
-        res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
-        return;
-      }
-
-      const pdf = normalized.find((x) => x.mimeType === "application/pdf");
-      const out = pdf
-        ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
-        : await callOpenAI({ images: normalized, accounts });
-      res.status(out.status).json(out.body);
+    const parsedReq = await parseScanRequest(req, {
+      maxUploadBytes: MAX_UPLOAD_BYTES,
+      maxJsonBodyBytes: MAX_JSON_BODY_BYTES,
+      safeJsonParseMaybe,
+    });
+    if (!parsedReq.ok) {
+      const errOut = normalizeErrorResponse(parsedReq);
+      res.status(errOut.status).json(errOut.body);
       return;
     }
 
-    // 2) JSON: accept { base64, mimeType } OR { imageDataUrl }
-    const body = await readJson(req);
-
-    const accounts = Array.isArray(body?.accounts)
-      ? body.accounts
-      : Array.isArray(body?.accountsContext)
-      ? body.accountsContext
-      : [];
-
-    // Multi-image JSON payload (optional): { images: [dataUrl1, dataUrl2, ...] }
-    // Each image should be a crop/enhancement of the same document.
-    const imagesList = Array.isArray(body?.images)
-      ? body.images
-      : Array.isArray(body?.imageDataUrls)
-      ? body.imageDataUrls
-      : null;
-
-    if (Array.isArray(imagesList) && imagesList.length) {
-      const normalized = imagesList
-        .map((u) => parseDataUrlMaybe(String(u || "").trim()))
-        .filter(Boolean)
-        .map((p, idx) => {
-          const mt = assertAllowedInputMime(p?.mimeType || "");
-          if (!mt) return null;
-          const b64 = String(p?.base64 || "").trim();
-          if (!b64) return null;
-          return {
-            base64: b64,
-            mimeType: mt,
-            filename: `receipt-${idx + 1}.${mt === "image/png" ? "png" : mt === "image/webp" ? "webp" : "jpg"}`,
-          };
-        })
-        .filter(Boolean)
-        .slice(0, 3);
-
-      if (normalized.length) {
-        const pdf = normalized.find((x) => x.mimeType === "application/pdf");
-        const out = pdf
-          ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
-          : await callOpenAI({ images: normalized, accounts });
-        res.status(out.status).json(out.body);
-        return;
-      }
-    }
-
-    // Prefer imageDataUrl if present
-    const imageDataUrl = String(body?.imageDataUrl || "").trim();
-    const parsedDataUrl = imageDataUrl ? parseDataUrlMaybe(imageDataUrl) : null;
-
-    const base64 = parsedDataUrl?.base64 || body?.base64 || body?.imageBase64 || null;
-    const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
-    const filename = String(body?.filename || body?.fileName || body?.name || "").trim();
-
-    const mt = assertAllowedInputMime(mimeType || "image/jpeg");
-    if (!mt) {
-      res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
-      return;
-    }
-
-    const b64 = typeof base64 === "string" ? base64.trim() : "";
-    const sizeCheck = assertBase64UnderLimit(b64, MAX_UPLOAD_BYTES);
-    if (!sizeCheck.ok) {
-      res.status(413).json({ ok: false, code: "payload_too_large", message: "Upload payload too large" });
-      return;
-    }
-
-    if (!b64) {
-      res.status(400).json({
-        ok: false,
-        code: "missing_base64",
-        message: "Provide multipart file, or JSON { base64, mimeType }, or { imageDataUrl }",
-      });
-      return;
-    }
-
-    const out = await callOpenAI({ base64: b64, mimeType: mt, filename, accounts });
-    res.status(out.status).json(out.body);
+    const out = await scanWithProvider({
+      provider: process.env.SCAN_PROVIDER || "openai",
+      payload: parsedReq.payload,
+      scanOpenAI: callOpenAI,
+    });
+    const normalizedOut = normalizeErrorResponse(out);
+    res.status(normalizedOut.status).json(normalizedOut.body);
   } catch (e) {
     const msg = String(e?.message || e);
     if (msg === "file_too_large") {
