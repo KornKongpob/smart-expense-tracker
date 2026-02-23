@@ -3,7 +3,6 @@ import Busboy from "busboy";
 import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
 import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "./scan/access.js";
 import { createRateLimiter } from "./scan/rateLimit.js";
-import { parseScanRequest } from "./scan/requestParse.js";
 import { scanWithProvider } from "./scan/providers/index.js";
 import { normalizeErrorResponse } from "./scan/normalize.js";
 
@@ -2182,11 +2181,11 @@ export default async function handler(req, res) {
       return;
     }
 
-    const ct = getContentType(req);
+    const ct = _getContentType(req);
 
     // 1) multipart/form-data
     if (ct.includes("multipart/form-data")) {
-      const { files, fields } = await parseMultipart(req, { maxBytes: MAX_UPLOAD_BYTES, maxFiles: 3 });
+      const { files, fields } = await _parseMultipart(req, { maxBytes: MAX_UPLOAD_BYTES, maxFiles: 3 });
       const accounts = (() => {
         try {
           const f = fields && typeof fields === 'object' ? fields : {};
@@ -2206,7 +2205,7 @@ export default async function handler(req, res) {
       // If a PDF is present, we only use the first PDF file.
       const normalized = files
         .map((f) => {
-          const mt = assertAllowedInputMime(f?.mimeType || "");
+          const mt = _assertAllowedInputMime(f?.mimeType || "");
           if (!mt) return null;
           const buf = f?.fileBuffer;
           if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) return null;
@@ -2233,7 +2232,7 @@ export default async function handler(req, res) {
     }
 
     // 2) JSON: accept { base64, mimeType } OR { imageDataUrl }
-    const body = await readJson(req);
+    const body = await _readJson(req);
 
     const accounts = Array.isArray(body?.accounts)
       ? body.accounts
@@ -2251,10 +2250,10 @@ export default async function handler(req, res) {
 
     if (Array.isArray(imagesList) && imagesList.length) {
       const normalized = imagesList
-        .map((u) => parseDataUrlMaybe(String(u || "").trim()))
+        .map((u) => _parseDataUrlMaybe(String(u || "").trim()))
         .filter(Boolean)
         .map((p, idx) => {
-          const mt = assertAllowedInputMime(p?.mimeType || "");
+          const mt = _assertAllowedInputMime(p?.mimeType || "");
           if (!mt) return null;
           const b64 = String(p?.base64 || "").trim();
           if (!b64) return null;
@@ -2279,13 +2278,13 @@ export default async function handler(req, res) {
 
     // Prefer imageDataUrl if present
     const imageDataUrl = String(body?.imageDataUrl || "").trim();
-    const parsedDataUrl = imageDataUrl ? parseDataUrlMaybe(imageDataUrl) : null;
+    const parsedDataUrl = imageDataUrl ? _parseDataUrlMaybe(imageDataUrl) : null;
 
     const base64 = parsedDataUrl?.base64 || body?.base64 || body?.imageBase64 || null;
     const mimeType = parsedDataUrl?.mimeType || body?.mimeType || "image/jpeg";
     const filename = String(body?.filename || body?.fileName || body?.name || "").trim();
 
-    const mt = assertAllowedInputMime(mimeType || "image/jpeg");
+    const mt = _assertAllowedInputMime(mimeType || "image/jpeg");
     if (!mt) {
       res.status(415).json({ ok: false, code: "unsupported_media_type", message: "Only images (jpeg/png/webp) and PDF are allowed" });
       return;
@@ -2297,7 +2296,7 @@ export default async function handler(req, res) {
       res.status(400).json({ ok: false, code: "invalid_scan_request", message: "Provide multipart file, or JSON { base64, mimeType }, or { imageDataUrl }" });
       return;
     }
-    const sizeCheck = assertBase64UnderLimit(b64, MAX_UPLOAD_BYTES);
+    const sizeCheck = _assertBase64UnderLimit(b64, MAX_UPLOAD_BYTES);
     if (!sizeCheck.ok) {
       res.status(413).json({ ok: false, code: "payload_too_large", message: "Upload payload too large" });
       return;
@@ -2314,7 +2313,12 @@ export default async function handler(req, res) {
 
     const out = await scanWithProvider({
       provider: process.env.SCAN_PROVIDER || "openai",
-      payload: parsedReq.payload,
+      payload: {
+        base64: b64,
+        mimeType: mt,
+        type: mt === "application/pdf" ? "pdf" : "image",
+        ...(filename ? { fileName: filename } : {}),
+      },
       scanOpenAI: callOpenAI,
     });
     const normalizedOut = normalizeErrorResponse(out);
