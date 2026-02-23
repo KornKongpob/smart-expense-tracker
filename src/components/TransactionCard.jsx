@@ -2,7 +2,7 @@
 import React, { useMemo } from "react";
 import { ArrowRightLeft, ChevronRight, CreditCard, Layers } from "lucide-react";
 import { isCreditAccount } from "../utils/accountMatch";
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import { formatCurrency, formatDateShort } from "../utils/format";
 import { signedReceiptTxSatang } from "../utils/receiptAdjustments";
 import AccountPill from "./AccountPill";

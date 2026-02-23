@@ -4,10 +4,10 @@ import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import { ChevronRight, Plus, Trash2, Check, X, Repeat, Pencil, PlayCircle, CalendarClock } from "lucide-react";
 import AppHeader from "../components/AppHeader";
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
-import { parseDateSafe } from "../store/selectors";
+import { parseDateSafe } from "../store/selectors.js";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 function ModalShell({ title, children, onClose }) {

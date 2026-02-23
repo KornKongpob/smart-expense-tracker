@@ -26,8 +26,8 @@ import {
   CartesianGrid,
 } from "recharts";
 import { formatCurrency, formatDateShort } from "../utils/format";
-import { useAppStore } from "../store/store";
-import { parseDateSafe } from "../store/selectors";
+import { useAppStore } from "../store/store.jsx";
+import { parseDateSafe } from "../store/selectors.js";
 import AppHeader from "../components/AppHeader";
 import AccountPill from "../components/AccountPill";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";

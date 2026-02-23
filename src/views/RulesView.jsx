@@ -4,7 +4,7 @@ import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import { ArrowLeft, Plus, Trash2, Edit2, ArrowUp, ArrowDown, X, Check, ToggleLeft, ToggleRight, Wand2 } from "lucide-react";
 import AppHeader from "../components/AppHeader";
-import { useAppStore } from "../store/store";
+import { useAppStore } from "../store/store.jsx";
 import { formatCurrency } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { validateAutomationRule } from "../utils/rulesEngine";

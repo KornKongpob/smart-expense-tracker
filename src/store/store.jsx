@@ -1,3 +1,7 @@
+/**
+ * Store runtime module: Context provider, persistence wiring, and action creators.
+ * This module contains the single reducer/initial-state implementation and exports runtime store APIs.
+ */
 // src/store/store.jsx
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
 

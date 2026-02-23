@@ -18,8 +18,8 @@ import {
   FileText
 } from "lucide-react";
 
-import { useAppStore } from "../store/store";
-import { findFuzzyDuplicate } from "../store/selectors";
+import { useAppStore } from "../store/store.jsx";
+import { findFuzzyDuplicate } from "../store/selectors.js";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, toISODate } from "../utils/format";
 import AppHeader from "../components/AppHeader";
