@@ -4545,6 +4545,55 @@ const handleClose = () => {
                                   <div className="glass-panel border border-white/20 rounded-2xl p-3">
                                     <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหมู่</div>
 
+                                    {(() => {
+                                      const txType = String(q?.txType || q?.type || "").toLowerCase();
+                                      if (txType !== "expense" && txType !== "income") return null;
+                                      const byId = catIndexByType?.[txType]?.byId || new Map();
+                                      const currentId = String(q?.categoryId || "").trim();
+                                      const suggestedId = String(q?.suggestedCategoryId || "").trim();
+                                      const currentCat = currentId ? byId.get(currentId) : null;
+                                      const suggestedCat = suggestedId ? byId.get(suggestedId) : null;
+                                      const hasDiffSuggestion = !!(suggestedId && suggestedId !== currentId && suggestedCat);
+                                      const canUseAiSuggestion = hasDiffSuggestion && !isTombstoneCategory(suggestedCat);
+                                      const isUserConfirmed = !!q?.categoryConfirmedByUser;
+
+                                      return (
+                                        <div className="mb-3 space-y-2">
+                                          <div className="rounded-xl border border-sky-200/70 bg-sky-50/80 px-3 py-2 flex items-center justify-between gap-2">
+                                            <div className="text-[11px] font-bold text-sky-900 min-w-0">
+                                              กำลังใช้หมวด: <span className="font-extrabold">{String(currentCat?.name || "ยังไม่เลือก")}</span>
+                                            </div>
+                                            {hasDiffSuggestion ? (
+                                              <span className="shrink-0 rounded-full border border-violet-300/80 bg-violet-50 px-2 py-0.5 text-[10px] font-extrabold text-violet-800">
+                                                AI แนะนำ: {String(suggestedCat?.name || "-")}
+                                              </span>
+                                            ) : null}
+                                          </div>
+
+                                          {canUseAiSuggestion ? (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateQueueItem(q.id, {
+                                                  categoryId: suggestedId,
+                                                  categoryConfirmedByUser: true,
+                                                })
+                                              }
+                                              className="w-full rounded-xl border border-violet-300/80 bg-violet-50/90 px-3 py-2 text-[11px] font-extrabold text-violet-800 hover:bg-violet-100"
+                                            >
+                                              ใช้ค่าที่ AI แนะนำ
+                                            </button>
+                                          ) : null}
+
+                                          {isUserConfirmed ? (
+                                            <div className="text-[11px] text-emerald-800/90 font-bold">ยืนยันโดยผู้ใช้</div>
+                                          ) : suggestedId ? (
+                                            <div className="text-[11px] text-sky-900/70">ใช้ที่แนะนำได้ทันที หรือเลือกหมวดใหม่</div>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })()}
+
                                     <QuickSuggestions
                                       title="Quick suggestions"
                                       selectedId={q.categoryId || ""}
@@ -4622,24 +4671,27 @@ const handleClose = () => {
                                       onSelect={(id) => {
                                         const v = String(id || "").trim();
                                         if (!v) return;
-                                        updateQueueItem(q.id, { categoryId: v });
+                                        updateQueueItem(q.id, { categoryId: v, categoryConfirmedByUser: true });
                                       }}
                                       className="mb-3"
                                     />
 
+                                    {(() => {
+                                      const txType = String(q?.txType || q?.type || "").toLowerCase();
+                                      const cats = txType === "income" ? incomeCatsAll : txType === "expense" ? expenseCatsAll : [];
+                                      const recents = txType === "income" || txType === "expense" ? (recentCatsByType?.[txType] || []) : [];
+                                      return (
                                     <CategoryPicker
-                                      categories={(q.txType === "income" ? incomeCatsAll : expenseCatsAll)}
+                                      categories={cats}
                                       value={q.categoryId || ""}
-                                      onChange={(id) => updateQueueItem(q.id, { categoryId: id })}
+                                      onChange={(id) => updateQueueItem(q.id, { categoryId: id, categoryConfirmedByUser: true })}
                                       showTitle={false}
                                       twoStep
-                                      recent={recentCatsByType?.[String(q.txType || "").toLowerCase()] || []}
+                                      recent={recents}
                                       maxListHeightClass="max-h-[34dvh]"
                                     />
-
-                                    {q.suggestedCategoryId ? (
-                                      <div className="mt-2 text-[11px] text-sky-900/70">Suggested จากประวัติแล้ว (แก้ได้ตามต้องการ)</div>
-                                    ) : null}
+                                      );
+                                    })()}
                                   </div>
                                 )}
                               </div>
