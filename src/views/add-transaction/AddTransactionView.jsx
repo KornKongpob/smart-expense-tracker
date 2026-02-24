@@ -4661,8 +4661,160 @@ const handleClose = () => {
                                             <div className="text-[10px] text-gray-900/55 mt-1 truncate">{String(g.note || "").trim() ? "" : "—"}</div>
                                           </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="glass-panel border border-white/20 rounded-2xl p-3">
+                                    <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหมู่</div>
+
+                                    {(() => {
+                                      const txType = String(q?.txType || q?.type || "").toLowerCase();
+                                      if (txType !== "expense" && txType !== "income") return null;
+                                      const byId = catIndexByType?.[txType]?.byId || new Map();
+                                      const currentId = String(q?.categoryId || "").trim();
+                                      const suggestedId = String(q?.suggestedCategoryId || "").trim();
+                                      const currentCat = currentId ? byId.get(currentId) : null;
+                                      const suggestedCat = suggestedId ? byId.get(suggestedId) : null;
+                                      const hasDiffSuggestion = !!(suggestedId && suggestedId !== currentId && suggestedCat);
+                                      const canUseAiSuggestion = hasDiffSuggestion && !isTombstoneCategory(suggestedCat);
+                                      const isUserConfirmed = !!q?.categoryConfirmedByUser;
+
+                                      return (
+                                        <div className="mb-3 space-y-2">
+                                          <div className="rounded-xl border border-sky-200/70 bg-sky-50/80 px-3 py-2 flex items-center justify-between gap-2">
+                                            <div className="text-[11px] font-bold text-sky-900 min-w-0">
+                                              กำลังใช้หมวด: <span className="font-extrabold">{String(currentCat?.name || "ยังไม่เลือก")}</span>
+                                            </div>
+                                            {hasDiffSuggestion ? (
+                                              <span className="shrink-0 rounded-full border border-violet-300/80 bg-violet-50 px-2 py-0.5 text-[10px] font-extrabold text-violet-800">
+                                                AI แนะนำ: {String(suggestedCat?.name || "-")}
+                                              </span>
+                                            ) : null}
+                                          </div>
+
+                                          {canUseAiSuggestion ? (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateQueueItem(q.id, {
+                                                  categoryId: suggestedId,
+                                                  categoryConfirmedByUser: true,
+                                                })
+                                              }
+                                              className="w-full rounded-xl border border-violet-300/80 bg-violet-50/90 px-3 py-2 text-[11px] font-extrabold text-violet-800 hover:bg-violet-100"
+                                            >
+                                              ใช้ค่าที่ AI แนะนำ
+                                            </button>
+                                          ) : null}
+
+                                          {isUserConfirmed ? (
+                                            <div className="text-[11px] text-emerald-800/90 font-bold">ยืนยันโดยผู้ใช้</div>
+                                          ) : suggestedId ? (
+                                            <div className="text-[11px] text-sky-900/70">ใช้ที่แนะนำได้ทันที หรือเลือกหมวดใหม่</div>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })()}
+
+                                    <QuickSuggestions
+                                      title="Quick suggestions"
+                                      selectedId={q.categoryId || ""}
+                                      items={(() => {
+                                        const t = String(q?.txType || q?.type || "").toLowerCase();
+                                        if (t !== "expense" && t !== "income") return [];
+                                        const byId = catIndexByType?.[t]?.byId || new Map();
+
+                                        const items = [];
+
+                                        // 1) Merchant Memory suggestion (silent auto-rule)
+                                        try {
+                                          const md = deriveMerchantAutofillPatch(
+                                            {
+                                              merchant: q?.merchant,
+                                              txType: t,
+                                              categoryId: "",
+                                              accountId: "",
+                                            },
+                                            state?.merchants || []
+                                          );
+                                          const mdCatId = String(md?.categoryId || "").trim();
+                                          const mdCat = mdCatId ? byId.get(mdCatId) : null;
+                                          if (mdCat && mdCatId) {
+                                            const pid = String(mdCat?.parentId || "").trim();
+                                            const parent = pid ? byId.get(pid) : null;
+                                            items.push({
+                                              id: mdCatId,
+                                              label: String(mdCat?.name || "").trim() || "หมวด",
+                                              badge: parent ? String(parent?.name || "").trim() : "ร้านนี้",
+                                              icon: { kind: "emoji", value: mdCat?.icon || "🏷️" },
+                                            });
+                                          }
+                                        } catch {
+                                          // ignore
+                                        }
+
+                                        // 2) Suggested from history (existing system)
+                                        const histId = String(q?.suggestedCategoryId || "").trim();
+                                        if (histId && !items.some((x) => String(x?.id || "") === histId)) {
+                                          const c = byId.get(histId);
+                                          if (c && !isTombstoneCategory(c)) {
+                                            const pid = String(c?.parentId || "").trim();
+                                            const parent = pid ? byId.get(pid) : null;
+                                            items.push({
+                                              id: histId,
+                                              label: String(c?.name || "").trim() || "หมวด",
+                                              badge: parent ? String(parent?.name || "").trim() : "ประวัติ",
+                                              icon: { kind: "emoji", value: c?.icon || "🏷️" },
+                                            });
+                                          }
+                                        }
+
+                                        // 3) Recent categories
+                                        const rec = (recentCatsByType?.[t] || []).slice(0, 8);
+                                        for (const c of rec) {
+                                          const id = String(c?.id || "").trim();
+                                          if (!id) continue;
+                                          if (items.some((x) => String(x?.id || "") === id)) continue;
+                                          const pid = String(c?.parentId || "").trim();
+                                          const parent = pid ? byId.get(pid) : null;
+                                          items.push({
+                                            id,
+                                            label: String(c?.name || "").trim() || "หมวด",
+                                            badge: parent ? String(parent?.name || "").trim() : "ล่าสุด",
+                                            icon: { kind: "emoji", value: c?.icon || "🏷️" },
+                                          });
+                                          if (items.length >= 6) break;
+                                        }
+
+                                        const cur = String(q?.categoryId || "").trim();
+                                        const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
+                                        return pruned.slice(0, 6);
+                                      })()}
+                                      onSelect={(id) => {
+                                        const v = String(id || "").trim();
+                                        if (!v) return;
+                                        updateQueueItem(q.id, { categoryId: v, categoryConfirmedByUser: true });
+                                      }}
+                                      className="mb-3"
+                                    />
+
+                                    {(() => {
+                                      const txType = String(q?.txType || q?.type || "").toLowerCase();
+                                      const cats = txType === "income" ? incomeCatsAll : txType === "expense" ? expenseCatsAll : [];
+                                      const recents = txType === "income" || txType === "expense" ? (recentCatsByType?.[txType] || []) : [];
+                                      return (
+                                    <CategoryPicker
+                                      categories={cats}
+                                      value={q.categoryId || ""}
+                                      onChange={(id) => updateQueueItem(q.id, { categoryId: id, categoryConfirmedByUser: true })}
+                                      showTitle={false}
+                                      twoStep
+                                      recent={recents}
+                                      maxListHeightClass="max-h-[34dvh]"
+                                    />
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                               ) : null}
