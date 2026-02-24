@@ -4029,6 +4029,7 @@ const handleClose = () => {
               <div className="space-y-3">
                 {queue.map((q) => {
                   const isOpen = expandedId === q.id;
+                  const canEditQueueItem = q.status === "ready";
                   const badge =
                     q.txType === "credit_payment"
                       ? "ชำระบัตร"
@@ -4120,24 +4121,36 @@ const handleClose = () => {
                         </div>
 
                         <div className="flex flex-col gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedId((v) => (v === q.id ? null : q.id))}
-                            className="w-10 h-10 rounded-full glass-icon-btn text-gray-900 flex items-center justify-center active:scale-95 leading-none disabled:opacity-50"
-                            title="แก้ไข"
-                            disabled={q.status !== "ready"}
-                          >
-                            <Edit2 size={18} />
-                          </button>
+                          <div className="flex flex-col items-center">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedId((v) => (v === q.id ? null : q.id))}
+                              className={`w-11 h-11 rounded-full flex items-center justify-center leading-none transition-colors ${
+                                canEditQueueItem
+                                  ? "glass-icon-btn text-gray-900 active:scale-95"
+                                  : "bg-gray-200 border border-gray-400 text-gray-700 cursor-not-allowed"
+                              }`}
+                              title="แก้ไข"
+                              aria-label="แก้ไขรายการในคิว"
+                              disabled={!canEditQueueItem}
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                            <span className="mt-1 text-[10px] font-bold text-gray-700 sm:hidden">แก้ไข</span>
+                          </div>
 
-                          <button
-                            type="button"
-                            onClick={() => removeQueueItem(q.id)}
-                            className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/15 text-red-700 flex items-center justify-center active:scale-95 leading-none"
-                            title="ลบจากคิว"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                          <div className="flex flex-col items-center">
+                            <button
+                              type="button"
+                              onClick={() => removeQueueItem(q.id)}
+                              className="w-11 h-11 rounded-full bg-red-500/10 border border-red-500/15 text-red-700 flex items-center justify-center active:scale-95 leading-none"
+                              title="ลบจากคิว"
+                              aria-label="ลบรายการจากคิว"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                            <span className="mt-1 text-[10px] font-bold text-red-700 sm:hidden">ลบ</span>
+                          </div>
                         </div>
                       </div>
 
