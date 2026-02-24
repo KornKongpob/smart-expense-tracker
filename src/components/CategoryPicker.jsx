@@ -151,11 +151,17 @@ export default function CategoryPicker({
   }, [hierarchy, activeMainId]);
 
   const isSelected = (id) => String(id || "") === selectedId;
+  const chipBaseClass =
+    "w-full px-3 py-3 rounded-2xl border text-left text-sm font-extrabold transition-all active:scale-[0.99] min-w-0";
+  const chipStateClass = (on, deleted) =>
+    `${on ? "bg-gray-900/90 text-white border-white/10 shadow-sm" : "bg-white/20 text-gray-900 border-white/15 hover:bg-white/10"} ${
+      deleted ? "opacity-70" : ""
+    }`;
 
   return (
-    <div className={`min-w-0 ${className}`.trim()}>
+    <div className={`min-w-0 rounded-3xl border border-white/20 bg-white/10 p-3 md:p-4 ${className}`.trim()}>
       {showTitle ? (
-        <div className="text-xs font-bold text-gray-900/70 mb-2">{title}</div>
+        <div className="text-xs font-bold text-gray-900/70 mb-3">{title}</div>
       ) : null}
 
       {/* Search */}
@@ -243,7 +249,7 @@ export default function CategoryPicker({
           {!twoStep && recentCats.length ? (
             <div className="mt-3">
               <div className="text-[11px] font-extrabold text-gray-900/55 uppercase mb-2">ล่าสุด</div>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {recentCats.map((cat) => {
                   const id = String(cat?.id || "").trim();
                   const deleted = isDeletedCategory(cat) && id !== selectedId;
@@ -253,14 +259,12 @@ export default function CategoryPicker({
                       key={`r-${id}`}
                       type="button"
                       onClick={() => onChange?.(id)}
-                      className={`px-3 py-2 rounded-2xl border text-xs font-extrabold active:scale-95 min-w-0 ${
-                        on ? "bg-gray-900/90 text-white border-white/10" : "bg-white/20 text-gray-900 border-white/15 hover:bg-white/10"
-                      } ${deleted ? "opacity-70" : ""}`}
+                      className={`${chipBaseClass} ${chipStateClass(on, deleted)}`}
                       title={getBreadcrumb(id)}
                     >
-                      <span className="inline-flex items-center gap-2 min-w-0">
-                        <span className="shrink-0">{cat?.icon || "🏷️"}</span>
-                        <span className="truncate max-w-[140px] inline-block">{cat?.name}</span>
+                      <span className="inline-flex items-center gap-2 min-w-0 w-full">
+                        <span className="shrink-0 text-base">{cat?.icon || "🏷️"}</span>
+                        <span className="truncate">{cat?.name}</span>
                       </span>
                     </button>
                   );
@@ -273,8 +277,7 @@ export default function CategoryPicker({
           {!twoStep || stage === "main" ? (
             <div className="mt-4">
               <div className="text-[11px] font-extrabold text-gray-900/55 uppercase mb-2">หมวดหลัก</div>
-              <div className={`flex flex-wrap gap-2 ${maxListHeightClass} overflow-y-auto pr-1 no-scrollbar`}
-              >
+              <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 ${maxListHeightClass} overflow-y-auto pr-1 no-scrollbar`}>
                 {hierarchy.main.map((cat) => {
                   const id = String(cat?.id || "").trim();
                   const on = String(activeMainId) === id;
@@ -303,14 +306,13 @@ export default function CategoryPicker({
                           setStage("main");
                         }
                       }}
-                      className={`px-3 py-2 rounded-2xl border text-xs font-extrabold active:scale-95 min-w-0 ${
-                        on ? "bg-gray-900/90 text-white border-white/10" : "bg-white/20 text-gray-900 border-white/15 hover:bg-white/10"
-                      } ${deleted ? "opacity-70" : ""}`}
+                      className={`${chipBaseClass} ${chipStateClass(on, deleted)}`}
                       title={String(cat?.name || "")}
                     >
-                      <span className="inline-flex items-center gap-2 min-w-0">
-                        <span className="shrink-0">{cat?.icon || "🏷️"}</span>
-                        <span className="truncate max-w-[140px] inline-block">{cat?.name}</span>
+                      <span className="inline-flex items-center gap-2 min-w-0 w-full">
+                        <span className="shrink-0 text-base">{cat?.icon || "🏷️"}</span>
+                        <span className="truncate">{cat?.name}</span>
+                        {twoStep ? <ChevronRight size={15} className={`ml-auto shrink-0 ${on ? "text-white/80" : "text-gray-900/50"}`} /> : null}
                       </span>
                     </button>
                   );
@@ -334,9 +336,7 @@ export default function CategoryPicker({
                       key={`s-${id}`}
                       type="button"
                       onClick={() => onChange?.(id)}
-                      className={`px-3 py-3 rounded-2xl border text-left text-sm font-extrabold active:scale-95 min-w-0 ${
-                        on ? "bg-gray-900/90 text-white border-white/10" : "bg-white/20 text-gray-900 border-white/15 hover:bg-white/10"
-                      } ${deleted ? "opacity-70" : ""}`}
+                      className={`${chipBaseClass} ${chipStateClass(on, deleted)}`}
                       title={getBreadcrumb(id)}
                     >
                       <div className="flex items-center gap-2 min-w-0">
@@ -406,9 +406,7 @@ export default function CategoryPicker({
                         onChange?.(id);
                         setStage("main");
                       }}
-                      className={`px-3 py-3 rounded-2xl border text-left text-sm font-extrabold active:scale-95 min-w-0 ${
-                        on ? "bg-gray-900/90 text-white border-white/10" : "bg-white/20 text-gray-900 border-white/15 hover:bg-white/10"
-                      } ${deleted ? "opacity-70" : ""}`}
+                      className={`${chipBaseClass} ${chipStateClass(on, deleted)}`}
                       title={getBreadcrumb(id)}
                     >
                       <div className="flex items-center gap-2 min-w-0">
