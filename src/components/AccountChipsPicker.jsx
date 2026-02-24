@@ -28,10 +28,31 @@ export default function AccountChipsPicker({
   title = "บัญชีที่ใช้",
   showTitle = true,
   showSelectedText = true,
+  density = "default",
+  mobileSingleRow = false,
   className = "",
 }) {
   const list = Array.isArray(accounts) ? accounts : [];
   const selected = list.find((a) => String(a?.id || "") === String(value || ""));
+  const isCompact = density === "compact";
+
+  const chipsWrapClass = mobileSingleRow
+    ? "flex gap-2 pb-2 overflow-x-auto overscroll-x-contain snap-x snap-mandatory sm:flex-wrap sm:overflow-visible"
+    : isCompact
+      ? "flex flex-wrap gap-2 pb-2"
+      : "flex flex-wrap gap-3 pb-2";
+
+  const chipClass = isCompact
+    ? "flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all active:scale-95 min-w-0 max-w-full"
+    : "flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all active:scale-95 min-w-0 max-w-full";
+
+  const iconWrapClass = isCompact
+    ? "w-6 h-6 rounded-lg overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center"
+    : "w-7 h-7 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center";
+
+  const emojiIconClass = isCompact ? "text-base leading-none" : "text-xl leading-none";
+  const labelClass = isCompact ? "text-xs font-extrabold truncate max-w-[9.5rem]" : "text-sm font-extrabold truncate";
+  const checkSize = isCompact ? 12 : 14;
 
   return (
     <div className={`min-w-0 ${className}`.trim()}>
@@ -39,7 +60,7 @@ export default function AccountChipsPicker({
         <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">{title}</h3>
       ) : null}
 
-      <div className="flex flex-wrap gap-3 pb-2">
+      <div className={chipsWrapClass}>
         {list.map((acc) => {
           const isSelected = String(value || "") === String(acc?.id || "");
           const v = getAccountVisual(acc);
@@ -48,23 +69,23 @@ export default function AccountChipsPicker({
               key={acc.id}
               type="button"
               onClick={() => onChange?.(acc.id)}
-              className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all active:scale-95 min-w-0 max-w-full ${
+              className={`${chipClass} ${mobileSingleRow ? "snap-start shrink-0" : ""} ${
                 isSelected
                   ? "bg-gray-900/90 text-white border-white/10 shadow-lg"
                   : "glass-chip text-gray-900 border border-white/15 hover:bg-white/10"
               }`}
               title={String(acc?.name || "")}
             >
-              <span className="w-7 h-7 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center">
+              <span className={iconWrapClass}>
                 {v.kind === "img" ? (
                   <img src={v.src} alt="acc" className="w-full h-full object-cover" />
                 ) : (
-                  <span className="text-xl leading-none">{v.value}</span>
+                  <span className={emojiIconClass}>{v.value}</span>
                 )}
               </span>
 
-              <span className="text-sm font-extrabold truncate">{acc.name}</span>
-              {isSelected ? <Check size={14} className="ml-1 shrink-0" /> : null}
+              <span className={labelClass}>{acc.name}</span>
+              {isSelected ? <Check size={checkSize} className="ml-1 shrink-0" /> : null}
             </button>
           );
         })}

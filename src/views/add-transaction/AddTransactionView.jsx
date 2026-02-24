@@ -4144,40 +4144,9 @@ const handleClose = () => {
                       {/* Expand */}
                       {isOpen && q.status === "ready" ? (
                         <div className="p-4 border-t border-white/15 bg-white/10">
-                          {/* Type switch */}
-                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-3">
-                            <div className="text-xs font-bold text-gray-900/70 mb-2">ประเภทของรายการ</div>
-                            <div className="flex gap-2">
-                              {[
-                                { id: "expense", label: "Expense" },
-                                { id: "income", label: "Income" },
-                                { id: "transfer", label: "Transfer" },
-                                { id: "credit_payment", label: "ชำระบัตร" },
-                              ].map((t) => (
-                                <button
-                                  key={t.id}
-                                  type="button"
-                                  onClick={() => handleQueueTypeChange(q.id, t.id)}
-                                  className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-95 ${
-                                    q.txType === t.id
-                                      ? "bg-gray-900/90 text-white shadow-sm"
-                                      : "bg-white/20 text-gray-900/70 border border-white/15"
-                                  }`}
-                                  title="เปลี่ยนประเภทได้ หาก AI เลือกผิด"
-                                >
-                                  {t.label}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="text-[11px] text-gray-900/55 mt-2">
-                              - “ชำระบัตร” จะสร้าง 2 legs เหมือน Transfer แต่จัดชนิดเป็นการจ่ายยอดบัตร (กันซ้ำกับรายการรูด) <br />
-                              - เปลี่ยน Transfer → Expense แล้วระบบจะ auto เลือกบัญชีเดี่ยวให้จากเลขบัญชีในสลิป (เลือก match ที่สุด)
-                            </div>
-                          </div>
-
                           {/* Duplicate toggle */}
                           {q.duplicate ? (
-                            <div className="glass-panel border border-amber-500/20 rounded-2xl p-3 mb-3 flex items-center justify-between gap-3">
+                            <div className="glass-panel border border-amber-500/20 rounded-2xl p-3 mb-4 flex items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-sm font-extrabold text-amber-800">พบรายการที่อาจซ้ำ</div>
                                 <div className="text-[12px] text-amber-800/80">
@@ -4215,147 +4184,135 @@ const handleClose = () => {
                             </div>
                           ) : null}
 
-                          {/* Split toggle (expense only, when groups exist) */}
-                          {q.txType === "expense" && hasGroups ? (
-                            <div className="glass-panel border border-emerald-500/20 rounded-2xl p-3 mb-3 flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-sm font-extrabold text-emerald-800">แยกเป็นหลายหมวด</div>
-                                <div className="text-[12px] text-emerald-800/80">
-                                  ระบบจะสร้างหลายรายการตามหมวดจากหลายบรรทัดในบิล
+                          {/* Section: Essentials */}
+                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
+                            <div className="mb-3">
+                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
+                                <Layers size={14} /> Essentials
+                              </div>
+                              <div className="text-[11px] text-gray-900/55">เริ่มจากประเภทก่อน แล้วค่อยยืนยันยอดและวันที่</div>
+                            </div>
+                            <div className="space-y-2">
+                              <div>
+                                <div className="text-xs font-bold text-gray-900/70 mb-2">ประเภทของรายการ</div>
+                                <div className="flex gap-2">
+                                  {[
+                                    { id: "expense", label: "Expense" },
+                                    { id: "income", label: "Income" },
+                                    { id: "transfer", label: "Transfer" },
+                                    { id: "credit_payment", label: "ชำระบัตร" },
+                                  ].map((t) => (
+                                    <button
+                                      key={t.id}
+                                      type="button"
+                                      onClick={() => handleQueueTypeChange(q.id, t.id)}
+                                      className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-95 ${
+                                        q.txType === t.id
+                                          ? "bg-gray-900/90 text-white shadow-sm"
+                                          : "bg-white/20 text-gray-900/70 border border-white/15"
+                                      }`}
+                                      title="เปลี่ยนประเภทได้ หาก AI เลือกผิด"
+                                    >
+                                      {t.label}
+                                    </button>
+                                  ))}
+                                </div>
+                                <details className="mt-2 text-[11px] text-gray-900/55">
+                                  <summary className="cursor-pointer select-none">คำอธิบายประเภทรายการ</summary>
+                                  <div className="mt-1">
+                                    - “ชำระบัตร” จะสร้าง 2 legs เหมือน Transfer แต่จัดชนิดเป็นการจ่ายยอดบัตร (กันซ้ำกับรายการรูด) <br />
+                                    - เปลี่ยน Transfer → Expense แล้วระบบจะ auto เลือกบัญชีเดี่ยวให้จากเลขบัญชีในสลิป (เลือก match ที่สุด)
+                                  </div>
+                                </details>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <div className="text-xs font-bold text-gray-900/70 mb-1">จำนวนเงิน</div>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={q.amount != null ? formatMoneyInputFromSatang(q.amount) : ""}
+                                    onChange={(e) => {
+                                      const cleaned = sanitizeMoneyInput(e.target.value);
+                                      updateQueueItem(q.id, {
+                                        amount: parseMoneyToSatang(cleaned),
+                                        splitByCategory: false,
+                                        amountEdited: true,
+                                      });
+                                    }}
+                                    className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
+                                    placeholder="0.00"
+                                  />
+                                  <div className="text-[11px] text-gray-800/55 mt-1">* แก้ยอดตรงนี้จะปิดโหมดแยกหมวด</div>
+                                </div>
+
+                                <div>
+                                  <div className="text-xs font-bold text-gray-900/70 mb-1">วันที่</div>
+                                  <input
+                                    type="date"
+                                    value={q.date || toISODate(new Date())}
+                                    onChange={(e) => updateQueueItem(q.id, { date: e.target.value })}
+                                    className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
+                                  />
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateQueueItem(q.id, {
-                                    splitByCategory: !q.splitByCategory,
-                                    // split mode is incompatible with installment
-                                    ...(q.splitByCategory ? {} : { isInstallment: false }),
-                                  })
-                                }
-                                className={`w-14 h-8 rounded-full transition-all relative border ${
-                                  q.splitByCategory ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
-                                }`}
-                                title={q.splitByCategory ? "เปิด" : "ปิด"}
-                              >
-                                <span
-                                  className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
-                                    q.splitByCategory ? "left-7" : "left-1"
-                                  }`}
-                                />
-                              </button>
-                            </div>
-                          ) : null}
-
-                          {/* Amount / Date */}
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                              <div className="text-xs font-bold text-gray-900/70 mb-1">จำนวนเงิน</div>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={q.amount != null ? formatMoneyInputFromSatang(q.amount) : ""}
-                                onChange={(e) => {
-                                  const cleaned = sanitizeMoneyInput(e.target.value);
-                                  updateQueueItem(q.id, {
-                                    amount: parseMoneyToSatang(cleaned),
-                                    splitByCategory: false,
-                                    amountEdited: true,
-                                  });
-                                }}
-                                className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
-                                placeholder="0.00"
-                              />
-                              <div className="text-[11px] text-gray-800/55 mt-1">* แก้ยอดตรงนี้จะปิดโหมดแยกหมวด</div>
-                            </div>
-
-                            <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                              <div className="text-xs font-bold text-gray-900/70 mb-1">วันที่</div>
-                              <input
-                                type="date"
-                                value={q.date || toISODate(new Date())}
-                                onChange={(e) => updateQueueItem(q.id, { date: e.target.value })}
-                                className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
-                              />
                             </div>
                           </div>
 
-                          <div className="mt-3 glass-panel border border-white/20 rounded-2xl p-3">
-                            <div className="text-xs font-bold text-gray-900/70 mb-1">โน้ต</div>
-                            <input
-                              value={q.note || ""}
-                              onChange={(e) => updateQueueItem(q.id, { note: e.target.value })}
-                              className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
-                              placeholder="เช่น ร้าน, รายละเอียด"
-                            />
-                          </div>
-
-                          <div className="mt-3 glass-panel border border-white/20 rounded-2xl p-3">
-                            <div className="text-xs font-bold text-gray-900/70 mb-1">Ref (ถ้ามี)</div>
-                            <input
-                              value={q.ref || ""}
-                              onChange={(e) => updateQueueItem(q.id, { ref: e.target.value })}
-                              className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
-                              placeholder="Ref / TRX / เลขที่รายการ"
-                            />
-                          </div>
-
-                          {/* Accounts / Categories */}
-                          <div className="mt-3">
-                            {q.txType === "transfer" || q.txType === "credit_payment" ? (
-                              <div className="grid grid-cols-1 gap-3">
-                                <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                                  <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
-                                    <ArrowRightLeft size={14} /> บัญชีต้นทาง
-                                  </div>
-                                  <AccountPicker
-                                    accounts={q.txType === "credit_payment" ? (nonCreditAccounts.length ? nonCreditAccounts : accounts) : accounts}
-                                    value={q.fromAccountId}
-                                    onChange={(v) => updateQueueItem(q.id, { fromAccountId: v })}
-                                    title="เลือกบัญชีต้นทาง"
-                                    placeholder="เลือกบัญชีต้นทาง"
-                                  />
-                                  {q.txType === "credit_payment" ? (
-                                    <div className="text-[11px] text-gray-900/55 mt-1">
-                                      ชำระบัตร: ต้นทางควรเป็นบัญชีปกติ
+                          {/* Section: Account */}
+                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
+                            <div className="mb-3">
+                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
+                                <CreditCard size={14} /> Account
+                              </div>
+                              <div className="text-[11px] text-gray-900/55">เลือกบัญชีที่เงินออก/เข้าให้ถูกต้องตามประเภทรายการ</div>
+                            </div>
+                            <div className="space-y-2">
+                              {q.txType === "transfer" || q.txType === "credit_payment" ? (
+                                <div className="grid grid-cols-1 gap-3">
+                                  <div>
+                                    <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
+                                      <ArrowRightLeft size={14} /> บัญชีต้นทาง
                                     </div>
-                                  ) : null}
-                                </div>
-
-                                <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                                  <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
-                                    <ArrowRightLeft size={14} /> บัญชีปลายทาง
+                                    <AccountPicker
+                                      accounts={q.txType === "credit_payment" ? (nonCreditAccounts.length ? nonCreditAccounts : accounts) : accounts}
+                                      value={q.fromAccountId}
+                                      onChange={(v) => updateQueueItem(q.id, { fromAccountId: v })}
+                                      title="เลือกบัญชีต้นทาง"
+                                      placeholder="เลือกบัญชีต้นทาง"
+                                    />
                                   </div>
-                                  <AccountPicker
-                                    accounts={q.txType === "credit_payment" ? accounts.filter((a) => isCreditAccount(a)) : accounts}
-                                    value={q.toAccountId}
-                                    onChange={(v) => updateQueueItem(q.id, { toAccountId: v })}
-                                    title="เลือกบัญชีปลายทาง"
-                                    placeholder="เลือกบัญชีปลายทาง"
-                                  />
-
-                                  {q.txType === "credit_payment" ? (
-                                    <div className="mt-2 flex items-center justify-between gap-3">
-                                      <div className="text-[11px] text-gray-900/60 min-w-0 truncate">
-                                        ยอดค้าง: {formatCurrency(creditDebtById.get(q.toAccountId) || 0)}
+                                  <div>
+                                    <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
+                                      <ArrowRightLeft size={14} /> บัญชีปลายทาง
+                                    </div>
+                                    <AccountPicker
+                                      accounts={q.txType === "credit_payment" ? accounts.filter((a) => isCreditAccount(a)) : accounts}
+                                      value={q.toAccountId}
+                                      onChange={(v) => updateQueueItem(q.id, { toAccountId: v })}
+                                      title="เลือกบัญชีปลายทาง"
+                                      placeholder="เลือกบัญชีปลายทาง"
+                                    />
+                                    {q.txType === "credit_payment" ? (
+                                      <div className="mt-2 flex items-center justify-between gap-3">
+                                        <div className="text-[11px] text-gray-900/60 min-w-0 truncate">
+                                          ยอดค้าง: {formatCurrency(creditDebtById.get(q.toAccountId) || 0)}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => applyPayFullForQueue(q.id, q.toAccountId)}
+                                          className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+                                          disabled={(creditDebtById.get(q.toAccountId) || 0) <= 0}
+                                        >
+                                          จ่ายเต็มยอดค้าง
+                                        </button>
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => applyPayFullForQueue(q.id, q.toAccountId)}
-                                        className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
-                                        disabled={(creditDebtById.get(q.toAccountId) || 0) <= 0}
-                                      >
-                                        จ่ายเต็มยอดค้าง
-                                      </button>
-                                    </div>
-                                  ) : null}
+                                    ) : null}
+                                  </div>
                                 </div>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-1 gap-3">
-                                <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                                  <div className="text-xs font-bold text-gray-900/70 mb-2">บัญชี</div>
-
+                              ) : (
+                                <>
                                   <QuickSuggestions
                                     title="Quick suggestions"
                                     selectedId={q.accountId}
@@ -4364,8 +4321,6 @@ const handleClose = () => {
                                       if (t !== "expense" && t !== "income") return [];
 
                                       const items = [];
-
-                                      // 1) Merchant Memory suggestion (silent auto-rule)
                                       try {
                                         const md = deriveMerchantAutofillPatch(
                                           {
@@ -4390,7 +4345,6 @@ const handleClose = () => {
                                         // ignore
                                       }
 
-                                      // 2) Recent accounts
                                       const rec = (recentAccountsByType?.[t] || []).slice(0, 8);
                                       for (const acc of rec) {
                                         const id = String(acc?.id || "").trim();
@@ -4405,7 +4359,6 @@ const handleClose = () => {
                                         if (items.length >= 5) break;
                                       }
 
-                                      // Keep bar meaningful (hide if only current selection)
                                       const cur = String(q?.accountId || "").trim();
                                       const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
                                       return pruned.slice(0, 5);
@@ -4414,7 +4367,6 @@ const handleClose = () => {
                                       const v = String(id || "").trim();
                                       if (!v) return;
                                       const acc = accounts.find((a) => String(a?.id || "") === String(v || "")) || null;
-                                      // auto-disable installment if switched to non-credit
                                       const patch = { accountId: v };
                                       if (!isCreditAccount(acc)) patch.isInstallment = false;
                                       updateQueueItem(q.id, patch);
@@ -4427,115 +4379,273 @@ const handleClose = () => {
                                     value={q.accountId}
                                     onChange={(v) => {
                                       const acc = accounts.find((a) => String(a?.id || "") === String(v || "")) || null;
-                                      // auto-disable installment if switched to non-credit
                                       const patch = { accountId: v };
                                       if (!isCreditAccount(acc)) patch.isInstallment = false;
                                       updateQueueItem(q.id, patch);
                                     }}
                                     showTitle={false}
                                     showSelectedText
+                                    density="compact"
+                                    mobileSingleRow
                                   />
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Section: Category */}
+                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
+                            <div className="mb-3">
+                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
+                                <Sparkles size={14} /> Category
+                              </div>
+                              <div className="text-[11px] text-gray-900/55">ใช้คำแนะนำเร็ว แล้วค่อยยืนยันหมวดหลักให้ตรงรายการ</div>
+                            </div>
+
+                            {q.txType === "expense" || q.txType === "income" ? (
+                              <div className="space-y-2">
+                                <QuickSuggestions
+                                  title="Quick suggestions"
+                                  selectedId={q.categoryId || ""}
+                                  items={(() => {
+                                    const t = String(q?.txType || q?.type || "").toLowerCase();
+                                    if (t !== "expense" && t !== "income") return [];
+                                    const byId = catIndexByType?.[t]?.byId || new Map();
+
+                                    const items = [];
+                                    try {
+                                      const md = deriveMerchantAutofillPatch(
+                                        {
+                                          merchant: q?.merchant,
+                                          txType: t,
+                                          categoryId: "",
+                                          accountId: "",
+                                        },
+                                        state?.merchants || []
+                                      );
+                                      const mdCatId = String(md?.categoryId || "").trim();
+                                      const mdCat = mdCatId ? byId.get(mdCatId) : null;
+                                      if (mdCat && mdCatId) {
+                                        const pid = String(mdCat?.parentId || "").trim();
+                                        const parent = pid ? byId.get(pid) : null;
+                                        items.push({
+                                          id: mdCatId,
+                                          label: String(mdCat?.name || "").trim() || "หมวด",
+                                          badge: parent ? String(parent?.name || "").trim() : "ร้านนี้",
+                                          icon: { kind: "emoji", value: mdCat?.icon || "🏷️" },
+                                        });
+                                      }
+                                    } catch {
+                                      // ignore
+                                    }
+
+                                    const histId = String(q?.suggestedCategoryId || "").trim();
+                                    if (histId && !items.some((x) => String(x?.id || "") === histId)) {
+                                      const c = byId.get(histId);
+                                      if (c && !isTombstoneCategory(c)) {
+                                        const pid = String(c?.parentId || "").trim();
+                                        const parent = pid ? byId.get(pid) : null;
+                                        items.push({
+                                          id: histId,
+                                          label: String(c?.name || "").trim() || "หมวด",
+                                          badge: parent ? String(parent?.name || "").trim() : "ประวัติ",
+                                          icon: { kind: "emoji", value: c?.icon || "🏷️" },
+                                        });
+                                      }
+                                    }
+
+                                    const rec = (recentCatsByType?.[t] || []).slice(0, 8);
+                                    for (const c of rec) {
+                                      const id = String(c?.id || "").trim();
+                                      if (!id) continue;
+                                      if (items.some((x) => String(x?.id || "") === id)) continue;
+                                      const pid = String(c?.parentId || "").trim();
+                                      const parent = pid ? byId.get(pid) : null;
+                                      items.push({
+                                        id,
+                                        label: String(c?.name || "").trim() || "หมวด",
+                                        badge: parent ? String(parent?.name || "").trim() : "ล่าสุด",
+                                        icon: { kind: "emoji", value: c?.icon || "🏷️" },
+                                      });
+                                      if (items.length >= 6) break;
+                                    }
+
+                                    const cur = String(q?.categoryId || "").trim();
+                                    const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
+                                    return pruned.slice(0, 6);
+                                  })()}
+                                  onSelect={(id) => {
+                                    const v = String(id || "").trim();
+                                    if (!v) return;
+                                    updateQueueItem(q.id, { categoryId: v });
+                                  }}
+                                  className="mb-3"
+                                />
+
+                                <CategoryPicker
+                                  categories={(q.txType === "income" ? incomeCatsAll : expenseCatsAll)}
+                                  value={q.categoryId || ""}
+                                  onChange={(id) => updateQueueItem(q.id, { categoryId: id })}
+                                  showTitle={false}
+                                  twoStep
+                                  recent={recentCatsByType?.[String(q.txType || "").toLowerCase()] || []}
+                                  maxListHeightClass="max-h-[34dvh]"
+                                />
+
+                                {q.suggestedCategoryId ? (
+                                  <div className="mt-2 text-[11px] text-sky-900/70">Suggested จากประวัติแล้ว (แก้ได้ตามต้องการ)</div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-gray-900/55">ประเภทนี้ไม่ต้องเลือกหมวด</div>
+                            )}
+                          </div>
+
+                          {/* Section: Advanced options */}
+                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
+                            <div className="mb-3">
+                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
+                                <FileText size={14} /> Advanced options
+                              </div>
+                              <div className="text-[11px] text-gray-900/55">ปรับรายละเอียดเพิ่มเติม เช่นโน้ต อ้างอิง ผ่อนชำระ และ split detail</div>
+                            </div>
+                            <div className="space-y-2">
+                              {q.txType === "expense" && hasGroups ? (
+                                <div className="glass-panel border border-emerald-500/20 rounded-2xl p-3 flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-extrabold text-emerald-800">แยกเป็นหลายหมวด</div>
+                                    <div className="text-[12px] text-emerald-800/80">ระบบจะสร้างหลายรายการตามหมวดจากหลายบรรทัดในบิล</div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateQueueItem(q.id, {
+                                        splitByCategory: !q.splitByCategory,
+                                        ...(q.splitByCategory ? {} : { isInstallment: false }),
+                                      })
+                                    }
+                                    className={`w-14 h-8 rounded-full transition-all relative border ${
+                                      q.splitByCategory ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
+                                    }`}
+                                    title={q.splitByCategory ? "เปิด" : "ปิด"}
+                                  >
+                                    <span
+                                      className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
+                                        q.splitByCategory ? "left-7" : "left-1"
+                                      }`}
+                                    />
+                                  </button>
                                 </div>
+                              ) : null}
 
-                                {/* Credit Card Installment (expense + credit account only) */}
-                                {q.txType === "expense" && !q.splitByCategory && isCreditAccount(accounts.find((a) => a.id === q.accountId)) ? (
-                                  <div className="glass-panel border border-indigo-500/20 rounded-2xl p-3">
-                                    <div className="flex items-center justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <div className="text-sm font-extrabold text-indigo-900">ผ่อนชำระ</div>
-                                        <div className="text-[12px] text-indigo-900/70">
-                                          เปิดแล้วระบบจะสร้างหลายรายการล่วงหน้า (งวดที่ x/y)
-                                        </div>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => updateQueueItem(q.id, { isInstallment: !q.isInstallment })}
-                                        className={`w-14 h-8 rounded-full transition-all relative border ${
-                                          q.isInstallment ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
-                                        }`}
-                                        title={q.isInstallment ? "เปิด" : "ปิด"}
-                                      >
-                                        <span
-                                          className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
-                                            q.isInstallment ? "left-7" : "left-1"
-                                          }`}
-                                        />
-                                      </button>
+                              <div className="glass-panel border border-white/20 rounded-2xl p-3">
+                                <div className="text-xs font-bold text-gray-900/70 mb-1">โน้ต</div>
+                                <input
+                                  value={q.note || ""}
+                                  onChange={(e) => updateQueueItem(q.id, { note: e.target.value })}
+                                  className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
+                                  placeholder="เช่น ร้าน, รายละเอียด"
+                                />
+                              </div>
+
+                              <div className="glass-panel border border-white/20 rounded-2xl p-3">
+                                <div className="text-xs font-bold text-gray-900/70 mb-1">Ref (ถ้ามี)</div>
+                                <input
+                                  value={q.ref || ""}
+                                  onChange={(e) => updateQueueItem(q.id, { ref: e.target.value })}
+                                  className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
+                                  placeholder="Ref / TRX / เลขที่รายการ"
+                                />
+                              </div>
+
+                              {q.txType === "expense" && !q.splitByCategory && isCreditAccount(accounts.find((a) => a.id === q.accountId)) ? (
+                                <div className="glass-panel border border-indigo-500/20 rounded-2xl p-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-extrabold text-indigo-900">ผ่อนชำระ</div>
+                                      <div className="text-[12px] text-indigo-900/70">เปิดแล้วระบบจะสร้างหลายรายการล่วงหน้า (งวดที่ x/y)</div>
                                     </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQueueItem(q.id, { isInstallment: !q.isInstallment })}
+                                      className={`w-14 h-8 rounded-full transition-all relative border ${
+                                        q.isInstallment ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
+                                      }`}
+                                      title={q.isInstallment ? "เปิด" : "ปิด"}
+                                    >
+                                      <span
+                                        className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
+                                          q.isInstallment ? "left-7" : "left-1"
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
 
-                                    {q.isInstallment ? (
-                                      <div className="mt-3 grid grid-cols-2 gap-2 items-end">
-                                        <div>
-                                          <div className="text-[11px] text-gray-900/60 font-bold mb-1">จำนวนงวด (เดือน)</div>
+                                  {q.isInstallment ? (
+                                    <div className="mt-3 grid grid-cols-2 gap-2 items-end">
+                                      <div>
+                                        <div className="text-[11px] text-gray-900/60 font-bold mb-1">จำนวนงวด (เดือน)</div>
+                                        <input
+                                          type="number"
+                                          min={2}
+                                          max={120}
+                                          value={Number(q.installmentMonths || 3)}
+                                          onChange={(e) => {
+                                            const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
+                                            updateQueueItem(q.id, { installmentMonths: n });
+                                          }}
+                                          className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
+                                        />
+                                      </div>
+                                      <div className="text-[11px] text-gray-900/55">ยอดจะถูกหารเป็นงวดเท่า ๆ กัน (เศษสตางค์จะกระจาย)</div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+
+                              {q.txType === "expense" && q.splitByCategory && hasGroups ? (
+                                <div className="glass-panel border border-emerald-500/15 rounded-2xl p-3">
+                                  <div className="text-xs font-bold text-gray-900/70 mb-2">Split detail (ไม่รวมราคา 0)</div>
+                                  <div className="space-y-2">
+                                    {q.groups.map((g, idx) => (
+                                      <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
+                                        <div className="mb-2">
+                                          <div className="text-[11px] text-gray-900/60 font-bold mb-1">รายการ</div>
                                           <input
-                                            type="number"
-                                            min={2}
-                                            max={120}
-                                            value={Number(q.installmentMonths || 3)}
-                                            onChange={(e) => {
-                                              const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
-                                              updateQueueItem(q.id, { installmentMonths: n });
-                                            }}
-                                            className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
+                                            type="text"
+                                            value={g.note || ""}
+                                            onChange={(e) => updateQueueGroup(q.id, idx, { note: e.target.value })}
+                                            className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                                            placeholder="ชื่อสินค้า/บริการ"
                                           />
                                         </div>
-                                        <div className="text-[11px] text-gray-900/55">
-                                          ยอดจะถูกหารเป็นงวดเท่า ๆ กัน (เศษสตางค์จะกระจาย)
-                                        </div>
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ) : null}
+                                        <div className="grid grid-cols-5 gap-2 items-start">
+                                          <div className="col-span-3">
+                                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
+                                            <CategorySelect
+                                              categories={expenseCatsAll}
+                                              value={g.categoryId || ""}
+                                              onChange={(e) => updateQueueGroup(q.id, idx, { categoryId: e.target.value })}
+                                              allowEmpty
+                                              emptyLabel="เลือกหมวด"
+                                              className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                                            />
+                                            <div className="text-[10px] text-gray-900/55 mt-1">tag: <span className="font-bold">{categoryNameFromKey(g.key)}</span></div>
+                                          </div>
 
-                                {/* Split groups editor */}
-                                {q.txType === "expense" && q.splitByCategory && hasGroups ? (
-                                  <div className="glass-panel border border-emerald-500/15 rounded-2xl p-3">
-                                    <div className="text-xs font-bold text-gray-900/70 mb-2">แยกรายการในใบเสร็จ (ไม่รวมราคา 0)</div>
-                                    <div className="space-y-2">
-                                      {q.groups.map((g, idx) => (
-                                        <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
-                                          <div className="mb-2">
-                                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">รายการ</div>
+                                          <div className="col-span-2">
+                                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">ยอด</div>
                                             <input
                                               type="text"
-                                              value={g.note || ""}
-                                              onChange={(e) => updateQueueGroup(q.id, idx, { note: e.target.value })}
+                                              inputMode="decimal"
+                                              value={formatMoneyInputFromSatang(g.amount ?? 0)}
+                                              onChange={(e) => {
+                                                const cleaned = sanitizeMoneyInput(e.target.value);
+                                                updateQueueGroup(q.id, idx, { amount: parseMoneyToSatang(cleaned) });
+                                              }}
                                               className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                                              placeholder="ชื่อสินค้า/บริการ"
                                             />
-                                          </div>
-                                          <div className="grid grid-cols-5 gap-2 items-start">
-                                            <div className="col-span-3">
-                                              <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
-                                              <CategorySelect
-                                                categories={expenseCatsAll}
-                                                value={g.categoryId || ""}
-                                                onChange={(e) => updateQueueGroup(q.id, idx, { categoryId: e.target.value })}
-                                                allowEmpty
-                                                emptyLabel="เลือกหมวด"
-                                                className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                                              />
-                                              <div className="text-[10px] text-gray-900/55 mt-1">
-                                                tag: <span className="font-bold">{categoryNameFromKey(g.key)}</span>
-                                              </div>
-                                            </div>
-
-                                            <div className="col-span-2">
-                                              <div className="text-[11px] text-gray-900/60 font-bold mb-1">ยอด</div>
-                                              <input
-                                                type="text"
-                                                inputMode="decimal"
-                                                value={formatMoneyInputFromSatang(g.amount ?? 0)}
-                                                onChange={(e) => {
-                                                  const cleaned = sanitizeMoneyInput(e.target.value);
-                                                  updateQueueGroup(q.id, idx, { amount: parseMoneyToSatang(cleaned) });
-                                                }}
-                                                className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                                              />
-                                              <div className="text-[10px] text-gray-900/55 mt-1 truncate">
-                                                {String(g.note || "").trim() ? "" : "—"}
-                                              </div>
-                                            </div>
+                                            <div className="text-[10px] text-gray-900/55 mt-1 truncate">{String(g.note || "").trim() ? "" : "—"}</div>
                                           </div>
                                         </div>
                                       ))}
@@ -4693,9 +4803,9 @@ const handleClose = () => {
                                       );
                                     })()}
                                   </div>
-                                )}
-                              </div>
-                            )}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
 
                           {/* Receipt breakdown (save 1 line, show discount/children as receipt) */}
