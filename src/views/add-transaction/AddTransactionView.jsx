@@ -4385,6 +4385,8 @@ const handleClose = () => {
                                     }}
                                     showTitle={false}
                                     showSelectedText
+                                    density="compact"
+                                    mobileSingleRow
                                   />
                                 </>
                               )}
