@@ -1,6 +1,6 @@
 // src/views/DashboardView.jsx
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Calendar, Search, AlertTriangle, FileText, CreditCard, Inbox as InboxIcon } from "lucide-react";
+import { CalendarDays, Calendar, Search, AlertTriangle, FileText, CreditCard, Inbox as InboxIcon, Camera } from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
@@ -339,6 +339,15 @@ useEffect(() => {
         right={
           <div className="flex items-center gap-2">
             <button
+              onClick={() => store.startNewTransaction()}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 text-xs font-extrabold active:scale-95 transition-all"
+              type="button"
+              aria-label="Quick Scan"
+              title="สแกนใบเสร็จ"
+            >
+              <Camera size={14} /> สแกน
+            </button>
+            <button
               onClick={() => navigate("inbox")}
               className="ui-icon-btn text-gray-800 active:scale-95"
               type="button"
@@ -346,15 +355,6 @@ useEffect(() => {
               title="Inbox"
             >
               <InboxIcon size={18} />
-            </button>
-            <button
-              onClick={() => navigate("accounts")}
-              className="ui-icon-btn text-gray-800 active:scale-95"
-              type="button"
-              aria-label="บัญชี"
-              title="บัญชี"
-            >
-              <CreditCard size={18} />
             </button>
           </div>
         }
