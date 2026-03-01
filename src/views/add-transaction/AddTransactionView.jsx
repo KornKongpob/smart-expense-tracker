@@ -34,6 +34,7 @@ import AccountChipsPicker from "../../components/AccountChipsPicker";
 import CategorySelect from "../../components/CategorySelect";
 import CategoryPicker from "../../components/CategoryPicker";
 import QuickSuggestions from "../../components/QuickSuggestions";
+import TagsInput from "../../components/TagsInput";
 import AppHeader from "../../components/AppHeader";
 import { scanReceiptOpenAI } from "../../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../../services/blobStore";
@@ -438,6 +439,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     setNote,
     ref,
     setRef,
+    tags,
+    setTags,
     slipMeta,
     _setSlipMeta,
     currentLocation,
@@ -870,6 +873,23 @@ const existingRefSet = useMemo(() => {
     }
     return m;
   }, [accounts]);
+
+  // ===== All tags from history (for autocomplete) =====
+  const allTagsFromHistory = useMemo(() => {
+    const txs = Array.isArray(state.transactions) ? state.transactions : [];
+    const seen = new Set();
+    const out = [];
+    for (const t of txs) {
+      const arr = Array.isArray(t?.tags) ? t.tags : [];
+      for (const tag of arr) {
+        const nt = String(tag || "").trim().toLowerCase();
+        if (!nt || seen.has(nt)) continue;
+        seen.add(nt);
+        out.push(nt);
+      }
+    }
+    return out;
+  }, [state.transactions]);
 
   const recentAccountsByType = useMemo(() => {
     const txs = Array.isArray(state.transactions) ? state.transactions : [];
@@ -3649,6 +3669,7 @@ const inId =
       accountId,
       date: d,
       note: noteText,
+      tags: tags.length ? tags : null,
       isTransfer: false,
       transferId: null,
       transferKind: null,
@@ -4661,6 +4682,7 @@ const handleClose = () => {
                                             <div className="text-[10px] text-gray-900/55 mt-1 truncate">{String(g.note || "").trim() ? "" : "—"}</div>
                                           </div>
                                         </div>
+                                      </div>
                                       ))}
                                     </div>
                                   </div>
@@ -4816,8 +4838,7 @@ const handleClose = () => {
                                       );
                                     })()}
                                   </div>
-                                </div>
-                              ) : null}
+                              )}
                             </div>
                           </div>
 
@@ -5563,6 +5584,17 @@ const handleClose = () => {
                 onChange={(e) => setRef(e.target.value)}
                 placeholder="Ref / TRX / เลขที่รายการ (ถ้ามี)"
                 className="flex-1 outline-none text-gray-900 bg-transparent font-extrabold"
+              />
+            </div>
+
+            {/* Tags */}
+            <div className="px-4 pb-4">
+              <div className="text-xs font-extrabold text-gray-700/60 mb-2">แท็ก / ป้ายกำกับ</div>
+              <TagsInput
+                value={tags}
+                onChange={setTags}
+                allTags={allTagsFromHistory}
+                placeholder="เช่น เที่ยวญี่ปุ่น, โปรเจค A"
               />
             </div>
           </div>

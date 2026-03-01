@@ -17,6 +17,7 @@ export function useTransactionDraft({ initialData, isEditMode, transferKindForEd
   const [date, setDate] = useState(initialData?.date ? String(initialData.date).slice(0, 10) : toISODate(new Date()));
   const [note, setNote] = useState(initialData?.note || "");
   const [ref, setRef] = useState(initialData?.ref || "");
+  const [tags, setTags] = useState(() => Array.isArray(initialData?.tags) ? initialData.tags : []);
   const [slipMeta, _setSlipMeta] = useState(() => {
     const prev = initialData && typeof initialData === "object" ? initialData : {};
     const m = prev?.meta && typeof prev.meta === "object" ? prev.meta.slip : null;
@@ -51,6 +52,8 @@ export function useTransactionDraft({ initialData, isEditMode, transferKindForEd
     setNote,
     ref,
     setRef,
+    tags,
+    setTags,
     slipMeta,
     _setSlipMeta,
     currentLocation,
