@@ -29,6 +29,7 @@ import { formatCurrency, formatDateShort } from "../utils/format";
 import { useAppStore } from "../store/store.jsx";
 import { parseDateSafe } from "../store/selectors.js";
 import AppHeader from "../components/AppHeader";
+import ModalShell from "../components/ModalShell";
 import AccountPill from "../components/AccountPill";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
@@ -213,30 +214,6 @@ function StatsEmptyState() {
       <Activity size={48} className="mx-auto mb-3 opacity-25 text-gray-600" />
       <p className="font-extrabold text-gray-800">ไม่มีข้อมูลในช่วงเวลานี้</p>
       <p className="text-sm text-gray-800/60 mt-1">ลองเปลี่ยนช่วงเวลา หรือเพิ่มรายการก่อน</p>
-    </div>
-  );
-}
-
-function ModalShell({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[70] flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-md glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <div className="min-w-0">
-            <h3 className="text-lg font-extrabold text-gray-900 truncate">{title}</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-            aria-label="close"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        {children}
-        <div className="h-3 pb-safe" />
-      </div>
     </div>
   );
 }

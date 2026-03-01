@@ -6,6 +6,14 @@ import "./index.css";
 import App from "./app/App.jsx";
 import { AppStoreProvider } from "./store/store.jsx";
 
+// ✅ Initialize dark mode from saved preference
+(function initTheme() {
+  try {
+    const t = localStorage.getItem("app_theme");
+    if (t === "dark") document.documentElement.setAttribute("data-theme", "dark");
+  } catch { /* ignore */ }
+})();
+
 // ✅ Disable browser zoom (per product requirement)
 (function preventZoom() {
   // iOS Safari pinch zoom

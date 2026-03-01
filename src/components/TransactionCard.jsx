@@ -315,6 +315,18 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           {tx?.note ? (
             <div className="mt-1 text-xs text-gray-800/70 whitespace-normal break-words">{String(tx.note)}</div>
           ) : null}
+          {Array.isArray(tx?.tags) && tx.tags.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {tx.tags.map((tag, i) => (
+                <span
+                  key={`${tag}-${i}`}
+                  className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-indigo-600/10 text-indigo-700 border border-indigo-600/10"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
           {/* ✅ Split breakdown (show all + scroll inside card) */}
           {!isTransfer && isSplitGroup && Array.isArray(splitLines) && splitLines.length ? (
             <div

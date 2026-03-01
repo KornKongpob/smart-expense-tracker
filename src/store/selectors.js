@@ -7,6 +7,7 @@
 // ✅ Goal: make date handling stable across timezone (especially for YYYY-MM-DD strings)
 
 import { digitsOnly } from "../utils/accountMatch";
+import { normalizeRefKey } from "../utils/refKey";
 
 export const nonTransfer = (t) => !t?.isTransfer;
 
@@ -83,79 +84,7 @@ export function toMonthKey(input) {
 
 // -----------------------------
 // Receipt scan / duplication helpers
-const BAD_REF_KEYS = new Set(
-  [
-    // generic labels
-    'REF',
-    'REFERENCE',
-    'REFERENCENO',
-    'REFERENCENUMBER',
-    'TRANSACTION',
-    'TRANSACTIONID',
-    'TXID',
-    'PAYMENT',
-    'TRANSFER',
-    'SLIP',
-    'RECEIPT',
-    'INVOICE',
-    'SUCCESS',
-    'APPROVED',
-    'COMPLETED',
-    // common bank/app words that OCR sometimes mislabels as "ref"
-    'PROMPTPAY',
-    'MOBILEBANKING',
-    'MOBILEAPP',
-    // bank abbreviations
-    'SCB',
-    'KBANK',
-    'KPLUS',
-    'KTB',
-    'BBL',
-    'BAY',
-    'TTB',
-    'UOB',
-    'GSB',
-    'BAAC',
-  ].map((x) => String(x).trim().toUpperCase())
-);
-
-function isValidRefKey(key) {
-  const k = String(key || '').trim().toUpperCase();
-  if (!k) return false;
-  if (BAD_REF_KEYS.has(k)) return false;
-
-  // Too short -> usually not a real transaction reference
-  if (k.length < 6) return false;
-
-  const digits = (k.match(/\d/g) || []).length;
-  const letters = (k.match(/[A-Z]/g) || []).length;
-
-  // Most Thai slip references are digit-heavy, or mixed alnum.
-  // Reject pure-letter strings (e.g., "SCB", "PROMPTPAY")
-  if (digits === 0) return false;
-
-  // Too long often means OCR accidentally captured a whole sentence
-  if (k.length > 40) return false;
-
-  // Prefer digit-heavy keys: typical refs are 10–20 digits.
-  if (digits >= 6) return true;
-
-  // Allow mixed alnum, but still require enough digits to avoid matching account labels
-  if (digits >= 4 && letters >= 2) return true;
-
-  return false;
-}
-
-function normalizeRefKey(ref) {
-  const s0 = String(ref || '').trim();
-  if (!s0) return '';
-  // Remove common separators/spaces and compare case-insensitively.
-  // Keep alphanumerics only (Thai slip refs are typically latin+digits).
-  const compact = s0.replace(/[\s\u200b\-_.]/g, '');
-  const alnum = compact.replace(/[^A-Za-z0-9]/g, '');
-  const base = (alnum || compact).toUpperCase();
-  return isValidRefKey(base) ? base : '';
-}
+// BAD_REF_KEYS, isValidRefKey, normalizeRefKey moved to ../utils/refKey.js
 
 const GENERIC_TEXT_TOKENS = new Set(
   [

@@ -1,6 +1,11 @@
 // src/app/App.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../store/store.jsx";
+import { useUndo } from "../utils/useUndo";
+import { checkBudgetAndNotify } from "../utils/budgetNotifications";
+import { formatCurrency, toISODate } from "../utils/format";
+import { getBudget, toMonthKey } from "../store/selectors.js";
+import { sumExpenseForMonth } from "../utils/transaction";
 import Navbar from "../components/Navbar";
 import DashboardView from "../views/DashboardView";
 import AddTransactionView from "../views/AddTransactionView";
@@ -15,6 +20,8 @@ import MerchantLibraryView from "../views/MerchantLibraryView";
 import MoreView from "../views/MoreView";
 import ConfirmationModal from "../components/ConfirmationModal";
 import PinLockScreen from "../components/PinLockScreen.jsx";
+import OnboardingScreen from "../components/OnboardingScreen.jsx";
+import QuickAddSheet from "../components/QuickAddSheet.jsx";
 import { X, CheckCircle2, AlertTriangle } from "lucide-react";
 
 function AlertToast({ message, onClose }) {
@@ -87,6 +94,34 @@ export default function App() {
   const [alert, setAlert] = useState("");
   const [confirm, setConfirm] = useState(null);
 
+  // ---- Undo system ----
+  const handleUndoRestore = useCallback((items) => {
+    if (!items?.length) return;
+    store.bulkUpsertTransactions(items, { navigateToDashboard: false });
+  }, [store]);
+
+  const { undoItem, pushUndo, performUndo, clearUndo } = useUndo({ onRestore: handleUndoRestore });
+
+  const showUndoDelete = useCallback((label, deletedTxs) => {
+    pushUndo(label, deletedTxs);
+  }, [pushUndo]);
+
+  // ---- Budget notifications (check after transactions change) ----
+  useEffect(() => {
+    try {
+      const monthKey = toMonthKey(new Date());
+      const monthSpent = sumExpenseForMonth(state.transactions || [], monthKey);
+      const budget = getBudget(state.budgets || [], monthKey, "__TOTAL__");
+      const limit = Number(budget?.limit || 0);
+      const alertPct = Number(budget?.alertPct || 90);
+      if (limit > 0) {
+        checkBudgetAndNotify({ monthSpent, monthlyLimit: limit, alertPct, monthKey, formatCurrency });
+      }
+    } catch {
+      // ignore
+    }
+  }, [state.transactions, state.budgets]);
+
   const showAlert = (msg) => {
     const m = String(msg || "");
     setAlert(m);
@@ -120,6 +155,16 @@ export default function App() {
 
   const [isUnlocked, setIsUnlocked] = useState(() => !savedPin);
 
+  // ---- Onboarding (must declare hooks before any conditional return) ----
+  const ONBOARDING_KEY = "onboarding_done_v1";
+  const [onboardingDone, setOnboardingDone] = useState(() => {
+    try {
+      return !!localStorage.getItem(ONBOARDING_KEY);
+    } catch {
+      return false;
+    }
+  });
+
   // If PIN is removed in another tab, unlock.
   useEffect(() => {
     const onStorage = () => {
@@ -140,6 +185,31 @@ export default function App() {
         savedPin={savedPin}
         title="ปลดล็อก (PIN)"
         onUnlocked={() => setIsUnlocked(true)}
+      />
+    );
+  }
+
+  // ---- Onboarding: show for first-time users ----
+  const hasTx = (state.transactions || []).length > 0;
+
+  if (!onboardingDone && !hasTx) {
+    return (
+      <OnboardingScreen
+        onComplete={({ monthlyBudget }) => {
+          try {
+            localStorage.setItem(ONBOARDING_KEY, "1");
+          } catch {
+            // ignore
+          }
+          setOnboardingDone(true);
+
+          // If user set a budget, save it
+          if (monthlyBudget > 0 && store.upsertBudget) {
+            const now = new Date();
+            const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+            store.upsertBudget({ month, categoryId: "__TOTAL__", limit: monthlyBudget, alertPct: 90 });
+          }
+        }}
       />
     );
   }
@@ -176,14 +246,47 @@ export default function App() {
 
   const showNavbar = view !== "add"; // FAB view uses custom header
 
+  // ---- Quick Add bottom sheet ----
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+
   return (
     <div className={showNavbar ? "pb-nav" : "pb-safe"}>
       <AlertToast message={alert} onClose={() => setAlert("")} />
       <ConfirmModal confirm={confirm} setConfirm={setConfirm} />
 
-      {renderView()}
+      {/* Undo toast */}
+      {undoItem && (
+        <div className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] z-[90] left-1/2 -translate-x-1/2 w-[min(92vw,420px)] animate-fade-in-up">
+          <div className="ui-toast flex items-center justify-between gap-3">
+            <span className="text-sm font-extrabold text-gray-900 truncate">{undoItem.label}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={performUndo}
+                className="px-3 py-1.5 rounded-xl text-xs font-black text-indigo-700 bg-indigo-600/15 border border-indigo-600/20 active:scale-95 transition-transform"
+              >
+                เลิกทำ
+              </button>
+              <button
+                type="button"
+                onClick={clearUndo}
+                className="p-1.5 rounded-full text-gray-500 hover:text-gray-700"
+                aria-label="dismiss"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {showNavbar ? <Navbar /> : null}
+      <div key={view} className="animate-view-enter">
+        {renderView()}
+      </div>
+
+      {showNavbar ? <Navbar onFabPress={() => setQuickAddOpen(true)} /> : null}
+
+      <QuickAddSheet isOpen={quickAddOpen} onClose={() => setQuickAddOpen(false)} />
     </div>
   );
 }

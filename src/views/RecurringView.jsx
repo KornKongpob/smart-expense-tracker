@@ -4,32 +4,13 @@ import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import { ChevronRight, Plus, Trash2, Check, X, Repeat, Pencil, PlayCircle, CalendarClock } from "lucide-react";
 import AppHeader from "../components/AppHeader";
+import ModalShell from "../components/ModalShell";
 import { useAppStore } from "../store/store.jsx";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { parseDateSafe } from "../store/selectors.js";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
-function ModalShell({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        {children}
-        <div className="h-3 pb-safe" />
-      </div>
-    </div>
-  );
-}
 
 // ---- local helpers (mirror store logic, but view-only) ----
 const safeNum = (v, fallback = 0) => {

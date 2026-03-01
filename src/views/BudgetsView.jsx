@@ -2,11 +2,12 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, Bell, Trash2, Check, X, ChevronLeft, Sparkles } from "lucide-react";
 import AppHeader from "../components/AppHeader";
+import ModalShell from "../components/ModalShell";
 import { useAppStore } from "../store/store.jsx";
 import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
-import { useLockBodyScroll } from "../utils/useLockBodyScroll";
+import { isTransferLike, signedExpenseSatang, sumExpenseForDate, daysInMonthKey } from "../utils/transaction";
 
 const BUDGET_TOTAL_ID = "__TOTAL__"; // overall monthly budget
 const BUDGET_DAILY_ID = "__DAILY__"; // daily budget (for Dashboard)
@@ -25,41 +26,6 @@ function monthKeyToDate(monthKey) {
   return new Date(y, Math.max(0, (mo || 1) - 1), 1);
 }
 
-function daysInMonthKey(monthKey) {
-  const d = monthKeyToDate(monthKey);
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-}
-
-function isTransferLike(t) {
-  if (!t) return false;
-  if (t.isTransfer) return true;
-  const c = String(t.category || "").toLowerCase().trim();
-  if (c === "transfer") return true;
-  if (String(t.transferId || "").trim()) return true;
-  return false;
-}
-
-function signedExpenseSatang(t) {
-  const amt = Number(t?.amount || 0) || 0;
-  if (!(amt > 0)) return 0;
-  const eff = String(t?.adjustmentEffect || "").toLowerCase().trim();
-  return eff === "subtract" ? -Math.abs(amt) : Math.abs(amt);
-}
-
-function sumExpenseForDate(transactions, dateISO) {
-  const d = String(dateISO || "").slice(0, 10);
-  let sum = 0;
-  for (const t of transactions || []) {
-    if (!t) continue;
-    if (isTransferLike(t)) continue;
-    if (t?.isSplitParent) continue;
-    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
-    const td = String(t?.date || "").slice(0, 10);
-    if (td !== d) continue;
-    sum += signedExpenseSatang(t);
-  }
-  return Math.max(0, Math.round(sum));
-}
 
 function dateToMonthKey(d) {
   const y = d.getFullYear();
@@ -78,32 +44,6 @@ function formatMonthLabelTH(monthKey) {
   return new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric" }).format(d);
 }
 
-function ModalShell({ title, children, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center">
-      {/* ✅ Make sure modal always sits above bottom nav */}
-      <div className="w-full sm:max-w-sm glass-card rounded-t-3xl sm:rounded-3xl p-5 max-h-[90dvh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-            aria-label="close"
-            title="ปิด"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {children}
-
-        {/* ✅ Safe bottom space for iOS + easier tapping */}
-        <div className="h-3 pb-safe" />
-      </div>
-    </div>
-  );
-}
 
 export default function BudgetsView({ showAlert, showConfirm }) {
   const { state, navigate, upsertBudget, deleteBudget } = useAppStore();

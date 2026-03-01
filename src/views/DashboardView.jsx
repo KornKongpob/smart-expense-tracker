@@ -6,107 +6,22 @@ import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
 import AccountPicker from "../components/AccountPicker";
 import { useAppStore } from "../store/store.jsx";
-import { getBudget, toMonthKey } from "../store/selectors.js";
+import { getBudget, toMonthKey, calcAccountBalance } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { isCreditAccount } from "../utils/accountMatch";
+import { Landmark } from "lucide-react";
+import {
+  isTransferLike,
+  signedExpenseSatang,
+  sumExpenseForDate,
+  sumExpenseForMonth,
+  daysInMonthKey,
+  compareTxNewestFirst,
+  sumCategoryBudgetsForMonth,
+} from "../utils/transaction";
 
 const BUDGET_TOTAL_ID = "__TOTAL__";
 const BUDGET_DAILY_ID = "__DAILY__";
-
-function daysInMonthKey(monthKey) {
-  const s = String(monthKey || "").trim();
-  const m = s.match(/^(\d{4})-(\d{2})$/);
-  if (!m) return 30;
-  const y = Number(m[1]);
-  const mo = Math.max(1, Math.min(12, Number(m[2]) || 1));
-  return new Date(y, mo, 0).getDate(); // mo is 1-based, day 0 => last day prev month
-}
-
-function isTransferLike(t) {
-  if (!t) return false;
-  if (t.isTransfer) return true;
-  const c = String(t.category || "").toLowerCase().trim();
-  if (c === "transfer") return true;
-  if (String(t.transferId || "").trim()) return true;
-  return false;
-}
-
-function signedExpenseSatang(t) {
-  const amt = Number(t?.amount || 0) || 0;
-  if (!(amt > 0)) return 0;
-  const eff = String(t?.adjustmentEffect || "").toLowerCase().trim();
-  // discount adjustment reduces expense
-  return eff === "subtract" ? -Math.abs(amt) : Math.abs(amt);
-}
-
-function sumExpenseForDate(transactions, dateISO) {
-  const d = String(dateISO || "").slice(0, 10);
-  let sum = 0;
-  for (const t of transactions || []) {
-    if (!t) continue;
-    if (isTransferLike(t)) continue;
-    if (t?.isSplitParent) continue; // prevent double counting
-    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
-    const td = String(t?.date || "").slice(0, 10);
-    if (td !== d) continue;
-    sum += signedExpenseSatang(t);
-  }
-  return Math.max(0, Math.round(sum));
-}
-
-function sumExpenseForMonth(transactions, monthKey) {
-  const mk = String(monthKey || "").slice(0, 7);
-  let sum = 0;
-  for (const t of transactions || []) {
-    if (!t) continue;
-    if (isTransferLike(t)) continue;
-    if (t?.isSplitParent) continue;
-    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
-    const td = String(t?.date || "").slice(0, 7);
-    if (td !== mk) continue;
-    sum += signedExpenseSatang(t);
-  }
-  return Math.max(0, Math.round(sum));
-}
-
-function sumCategoryBudgetsForMonth(budgets, monthKey) {
-  const mk = String(monthKey || "").trim();
-  let sum = 0;
-  for (const b of budgets || []) {
-    if (!b) continue;
-    if (String(b?.month || "").trim() !== mk) continue;
-    const cid = String(b?.categoryId || "").trim();
-    // exclude global budgets
-    if (cid === BUDGET_TOTAL_ID || cid === BUDGET_DAILY_ID) continue;
-    const lim = Number(b?.limit || 0) || 0;
-    if (lim > 0) sum += lim;
-  }
-  return Math.max(0, Math.round(sum));
-}
-
-function getTxDateMs(t) {
-  return t?.date ? new Date(String(t.date).slice(0, 10)).getTime() : 0;
-}
-
-function getTxCreatedAt(t) {
-  return Number(t?.createdAt || t?.updatedAt || 0) || 0;
-}
-
-function compareTxNewestFirst(a, b) {
-  const da = getTxDateMs(a);
-  const db = getTxDateMs(b);
-  if (db !== da) return db - da;
-
-  // Same date: most recently added/updated should be on top
-  const ca = getTxCreatedAt(a);
-  const cb = getTxCreatedAt(b);
-  if (cb !== ca) return cb - ca;
-
-  // Final stable tie-breaker
-  const ia = String(a?.id || "");
-  const ib = String(b?.id || "");
-  return ib.localeCompare(ia);
-}
 
 export default function DashboardView() {
   const store = useAppStore();
@@ -114,13 +29,14 @@ export default function DashboardView() {
 
   const [filterAccount, setFilterAccount] = useState("");
   const [q, setQ] = useState("");
+  const [filterTag, setFilterTag] = useState("");
 const PAGE_SIZE = 40;
 const [limit, setLimit] = useState(PAGE_SIZE);
 
 // Reset paging when filters change
 useEffect(() => {
   setLimit(PAGE_SIZE);
-}, [filterAccount, q]);
+}, [filterAccount, q, filterTag]);
 
 
   // ===== Budget tracking (Daily / Monthly) =====
@@ -168,7 +84,34 @@ useEffect(() => {
     return [...exp, ...inc];
   }, [state.categories]);
 
+  // ===== Net Worth =====
+  const netWorth = useMemo(() => {
+    const accs = state.accounts || [];
+    const txs = state.transactions || [];
+    let total = 0;
+    for (const a of accs) {
+      const bal = calcAccountBalance(accs, txs, a.id);
+      total += bal;
+    }
+    return total;
+  }, [state.accounts, state.transactions]);
+
   const accountName = (id) => state.accounts?.find((a) => a.id === id)?.name || "—";
+
+  // ===== All tags for filter dropdown =====
+  const allTags = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const t of state.transactions || []) {
+      for (const tag of Array.isArray(t?.tags) ? t.tags : []) {
+        const nt = String(tag || "").trim().toLowerCase();
+        if (!nt || seen.has(nt)) continue;
+        seen.add(nt);
+        out.push(nt);
+      }
+    }
+    return out.sort();
+  }, [state.transactions]);
 
   const { items: filtered, hasMore } = useMemo(() => {
     const txsAll = state.transactions || [];
@@ -178,23 +121,21 @@ useEffect(() => {
 
     const accountsById = new Map(accountsArr.map((a) => [a.id, a]));
 
-    const isTransferLike = (t) => {
-      if (!t) return false;
-      if (t.isTransfer) return true;
-      const c = String(t.category || "").toLowerCase().trim();
-      if (c === "transfer") return true;
-      // future-proof: allow other internal tags to still behave as 2-legs
-      if (String(t.transferId || "").trim()) return true;
-      return false;
-    };
-
     const qn = String(q || "").trim().toLowerCase();
 
     const matchQuery = (t) => {
       if (!qn) return true;
       const catName = String(allCats.find((c) => c.id === t.category)?.name || "").toLowerCase();
-      const text = `${t.note || ""} ${t.merchant || ""} ${t.ref || ""} ${catName}`.toLowerCase();
+      const tagsText = Array.isArray(t?.tags) ? t.tags.join(" ") : "";
+      const text = `${t.note || ""} ${t.merchant || ""} ${t.ref || ""} ${catName} ${tagsText}`.toLowerCase();
       return text.includes(qn);
+    };
+
+    const ftag = String(filterTag || "").trim().toLowerCase();
+    const matchTag = (t) => {
+      if (!ftag) return true;
+      const arr = Array.isArray(t?.tags) ? t.tags : [];
+      return arr.some((tag) => String(tag || "").trim().toLowerCase() === ftag);
     };
 
     // 1) filter raw tx list (behaviorเดิม)
@@ -208,6 +149,7 @@ useEffect(() => {
       base = base.filter((t) => !t?.isSplitChild);
     }
     base = base.filter(matchQuery);
+    base = base.filter(matchTag);
 
     // keep ordering (latest date first; same date: latest added first)
     base.sort(compareTxNewestFirst);
@@ -376,7 +318,7 @@ useEffect(() => {
     }
 
     return { items: out, hasMore };
-  }, [state.transactions, state.accounts, state.categories, filterAccount, q, allCats, limit]);
+  }, [state.transactions, state.accounts, state.categories, filterAccount, q, filterTag, allCats, limit]);
 
   const startNewTransaction = () => {
     store.startNewTransaction();
@@ -505,16 +447,41 @@ useEffect(() => {
           </button>
         </div>
 
+        {/* Net Worth */}
+        <div className="ui-card p-4 mb-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-extrabold text-gray-700/70 mb-1 flex items-center gap-2">
+                <Landmark size={14} /> มูลค่าสุทธิ (Net Worth)
+              </div>
+              <div className={`text-xl font-black tabular-nums ${netWorth >= 0 ? "text-gray-900" : "text-red-700"}`}>
+                {formatCurrency(Math.abs(netWorth))}
+              </div>
+              {netWorth < 0 && (
+                <div className="text-[11px] font-bold text-red-600/80 mt-0.5">ติดลบ — หนี้มากกว่าเงินออม</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("accounts")}
+              className="text-xs font-extrabold text-indigo-700 active:scale-95"
+            >
+              ดูบัญชี →
+            </button>
+          </div>
+        </div>
+
         {/* Filters */}
         <div className="ui-card p-4 mb-4">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-black text-gray-900">ค้นหา & กรอง</div>
-            {filterAccount || q ? (
+            {filterAccount || q || filterTag ? (
               <button
                 type="button"
                 onClick={() => {
                   setQ("");
                   setFilterAccount("");
+                  setFilterTag("");
                 }}
                 className="ui-btn ui-btn-secondary !min-h-[40px] px-3 py-2"
               >
@@ -551,9 +518,27 @@ useEffect(() => {
                 />
               </div>
             </div>
+
+            {allTags.length > 0 && (
+              <div>
+                <div className="ui-label">แท็ก</div>
+                <div className="mt-1">
+                  <select
+                    value={filterTag}
+                    onChange={(e) => setFilterTag(e.target.value)}
+                    className="ui-select"
+                  >
+                    <option value="">ทั้งหมด</option>
+                    {allTags.map((tag) => (
+                      <option key={tag} value={tag}>#{tag}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
-          {filterAccount || q ? (
+          {filterAccount || q || filterTag ? (
             <div className="mt-3 ui-help flex items-start gap-2">
               <AlertTriangle size={14} className="shrink-0 mt-[2px]" />
               <div>
@@ -574,28 +559,99 @@ useEffect(() => {
         </div>
 
         {filtered.length ? (
-          <div className="space-y-3">
-            {filtered.map((item) => {
-              const tx = item?.tx || item;
+          <div className="space-y-1">
+            {(() => {
+              const groups = [];
+              let currentDate = "";
+              let currentGroup = null;
 
-              const fallbackCategory =
-                allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
+              for (const item of filtered) {
+                const tx = item?.tx || item;
+                const txDate = String(tx?.date || "").slice(0, 10);
 
-              const category =
-                tx.isTransfer
-                  ? { name: tx.isCardPayment ? "ชำระบัตรเครดิต" : "Transfer", icon: "🔁", color: "#94a3b8" }
-                  : item?.category || fallbackCategory;
+                if (txDate !== currentDate) {
+                  currentDate = txDate;
+                  currentGroup = { date: txDate, items: [] };
+                  groups.push(currentGroup);
+                }
+                currentGroup.items.push(item);
+              }
 
-              return (
-                <TransactionCard
-                  key={tx.id}
-                  tx={tx}
-                  category={category}
-                  accountName={item?.accountName || accountName(tx.accountId)}
-                  onClick={() => startEditTransaction(tx.id)}
-                />
-              );
-            })}
+              return groups.map((group) => {
+                // Calculate daily expense subtotal
+                let dailyExpense = 0;
+                let dailyIncome = 0;
+                for (const item of group.items) {
+                  const tx = item?.tx || item;
+                  if (isTransferLike(tx)) continue;
+                  if (tx?.isSplitParent) continue;
+                  const amt = Number(tx?.amount || 0);
+                  if (String(tx?.type || "").toLowerCase() === "expense") {
+                    dailyExpense += signedExpenseSatang(tx);
+                  } else if (String(tx?.type || "").toLowerCase() === "income") {
+                    dailyIncome += amt;
+                  }
+                }
+
+                // Format date header
+                let dateLabel = group.date;
+                try {
+                  const [y, m, d] = group.date.split("-").map(Number);
+                  const dt = new Date(y, m - 1, d);
+                  const isToday = group.date === todayISO;
+                  const yesterday = new Date();
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  const yISO = toISODate(yesterday);
+                  const isYesterday = group.date === yISO;
+
+                  const dayName = isToday ? "วันนี้" : isYesterday ? "เมื่อวาน" : new Intl.DateTimeFormat("th-TH", { weekday: "short" }).format(dt);
+                  const dateStr = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short" }).format(dt);
+                  dateLabel = `${dayName} ${dateStr}`;
+                } catch {
+                  // ignore
+                }
+
+                return (
+                  <div key={group.date} className="mb-4">
+                    {/* Date header */}
+                    <div className="flex items-center justify-between px-1 py-2">
+                      <div className="text-xs font-extrabold text-gray-700/70">{dateLabel}</div>
+                      <div className="flex items-center gap-3 text-xs font-extrabold tabular-nums">
+                        {dailyIncome > 0 && (
+                          <span className="text-emerald-700">+{formatCurrency(dailyIncome)}</span>
+                        )}
+                        {dailyExpense > 0 && (
+                          <span className="text-red-700">-{formatCurrency(dailyExpense)}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Transaction cards for this date */}
+                    <div className="space-y-2">
+                      {group.items.map((item) => {
+                        const tx = item?.tx || item;
+                        const fallbackCategory =
+                          allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
+                        const category =
+                          tx.isTransfer
+                            ? { name: tx.isCardPayment ? "ชำระบัตรเครดิต" : "Transfer", icon: "🔁", color: "#94a3b8" }
+                            : item?.category || fallbackCategory;
+
+                        return (
+                          <TransactionCard
+                            key={tx.id}
+                            tx={tx}
+                            category={category}
+                            accountName={item?.accountName || accountName(tx.accountId)}
+                            onClick={() => startEditTransaction(tx.id)}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
 
             {hasMore ? (
               <button

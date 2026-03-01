@@ -1,5 +1,6 @@
 // src/views/MoreView.jsx
 import { useMemo, useRef } from "react";
+import { useState as useStateLocal } from "react";
 import {
   Settings,
   Upload,
@@ -11,12 +12,16 @@ import {
   Inbox,
   Wand2,
   Store,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
 import { downloadBackupJSON } from "../services/storage";
 import { toISODate } from "../utils/format";
 import { parseDateSafe } from "../store/selectors.js";
+import { validateBackupImport } from "../schemas/index.js";
+import { transactionsToCsv, downloadCsv } from "../utils/exportCsv";
 
 // Declared at module-scope to satisfy react-hooks/static-components
 function MoreRow({ icon, title, subtitle, badge, onClick, danger }) {
@@ -125,13 +130,19 @@ export default function MoreView({ showAlert, showConfirm }) {
         assumedSatang = true;
       }
 
+      // ✅ Zod schema validation (non-blocking: warn but still allow import)
+      const validation = validateBackupImport(payload);
+      const validationWarn = validation.success
+        ? ""
+        : `\n\n⚠️ พบข้อมูลที่อาจไม่สมบูรณ์: ${String(validation.error || "").slice(0, 200)}`;
+
       const warnText = assumedSatang
         ? "\n\nหมายเหตุ: ไฟล์นี้ไม่มี moneyUnit → ระบบจะตีความเป็น 'satang' เพื่อป้องกันจำนวนเงินเพี้ยน x100"
         : "";
 
       showConfirm?.(
         "นำเข้าข้อมูล (Import)",
-        `การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${warnText}`,
+        `การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${warnText}${validationWarn}`,
         () => {
           importBackup(payload);
           showAlert?.("นำเข้าข้อมูลสำเร็จ");
@@ -235,11 +246,50 @@ export default function MoreView({ showAlert, showConfirm }) {
         <MoreRow icon={<PlayCircle size={20} />} title="Run Recurring Now" subtitle="สร้างรายการที่ถึงรอบทันที" onClick={onRunRecurring} />
       </div>
 
+      {/* Appearance */}
+      <div className="ui-card overflow-hidden rounded-3xl mb-4">
+        {(() => {
+          const THEME_KEY = "app_theme";
+          const getTheme = () => {
+            try { return localStorage.getItem(THEME_KEY) || "light"; } catch { return "light"; }
+          };
+          const [theme, setThemeState] = useStateLocal(getTheme);
+          const setTheme = (t) => {
+            try {
+              localStorage.setItem(THEME_KEY, t);
+              document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "");
+            } catch { /* ignore */ }
+            setThemeState(t);
+          };
+          const isDark = theme === "dark";
+          return (
+            <MoreRow
+              icon={isDark ? <Moon size={20} /> : <Sun size={20} />}
+              title={isDark ? "โหมดมืด (เปิดอยู่)" : "โหมดมืด"}
+              subtitle={isDark ? "แตะเพื่อเปลี่ยนเป็นโหมดสว่าง" : "แตะเพื่อเปลี่ยนเป็นโหมดมืด"}
+              onClick={() => setTheme(isDark ? "light" : "dark")}
+            />
+          );
+        })()}
+      </div>
+
       {/* Data */}
       <div className="ui-card overflow-hidden rounded-3xl mb-4">
         <MoreRow icon={<Upload size={20} />} title="นำเข้าข้อมูล (Import Backup JSON)" subtitle="ทับข้อมูลเดิมทั้งหมดในเครื่องนี้" onClick={onPickImport} />
         <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onImportFile} />
         <MoreRow icon={<Upload size={20} />} title="ส่งออกข้อมูล (Backup JSON)" subtitle="ดาวน์โหลดไฟล์สำรองข้อมูล" onClick={onExport} />
+        <MoreRow
+          icon={<Upload size={20} />}
+          title="ส่งออก CSV"
+          subtitle="ดาวน์โหลดรายการเป็น CSV (เปิดใน Excel ได้)"
+          onClick={() => {
+            const csv = transactionsToCsv(state.transactions || [], { categories: state.categories, accounts: state.accounts });
+            const d = new Date();
+            const fname = `transactions-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.csv`;
+            downloadCsv(csv, fname);
+            showAlert?.("ส่งออก CSV แล้ว");
+          }}
+        />
         <MoreRow icon={<Trash2 size={20} />} title="ล้างข้อมูลทั้งหมด" subtitle="ย้อนกลับไม่ได้" danger onClick={onReset} />
       </div>
 

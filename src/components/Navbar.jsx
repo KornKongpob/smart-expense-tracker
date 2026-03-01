@@ -23,7 +23,7 @@ function NavItem({ active, icon, label, onClick }) {
   );
 }
 
-export default function Navbar() {
+export default function Navbar({ onFabPress }) {
   const { state, actions } = useAppStore();
   const currentView = state?.ui?.view || "dashboard";
 
@@ -84,7 +84,7 @@ export default function Navbar() {
             {/* Center FAB */}
             <div className="w-16 flex items-center justify-center">
               <button
-                onClick={() => actions.startNewTransaction()}
+                onClick={() => onFabPress ? onFabPress() : actions.startNewTransaction()}
                 aria-label="Add transaction"
                 type="button"
                 className="
