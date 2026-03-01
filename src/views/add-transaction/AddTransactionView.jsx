@@ -5534,62 +5534,72 @@ const handleClose = () => {
             </div>
           ) : null}
 
-          {/* Date / Note / Ref */}
-          <div className="glass-card rounded-3xl overflow-hidden mb-6">
-            <div className="flex items-center border-b border-white/15 p-4">
-              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-gray-900/50 mr-3">
-                <Calendar size={20} />
+          {/* Date / Note / Ref — Modern card inputs */}
+          <div className="space-y-3 mb-6">
+            {/* Date */}
+            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
+              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1.5">วันที่</label>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+                  <Calendar size={16} className="text-indigo-600" />
+                </div>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="flex-1 outline-none text-gray-900 bg-transparent font-bold text-sm"
+                />
               </div>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="flex-1 outline-none text-gray-900 bg-transparent font-extrabold"
-              />
             </div>
 
-            <div className="flex items-center border-b border-white/15 p-4">
-              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-gray-900/50 mr-3">
-                <FileText size={20} />
+            {/* Note */}
+            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
+              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1.5">โน้ต</label>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                  <FileText size={16} className="text-amber-600" />
+                </div>
+                <input
+                  type="text"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={
+                    type === "credit_payment"
+                      ? "ธนาคาร/บัตร/รายละเอียด"
+                      : isSplitMode
+                        ? "โน้ตสำหรับทั้งกลุ่ม Split"
+                        : "ชื่อร้าน หรือรายละเอียด"
+                  }
+                  className="flex-1 outline-none text-gray-900 bg-transparent font-bold text-sm placeholder:text-gray-400"
+                />
               </div>
-              <input
-                type="text"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder={
-                  type === "credit_payment"
-                    ? "โน้ต (ธนาคาร/บัตร/รายละเอียด)"
-                    : isSplitMode
-                      ? "โน้ตสำหรับทั้งกลุ่ม Split (optional)"
-                      : "โน้ต (ชื่อร้าน/รายละเอียด)"
-                }
-                className="flex-1 outline-none text-gray-900 bg-transparent font-extrabold"
-              />
+              {nearbySuggestion?.merchant && !isEditMode ? (
+                <div className="mt-2 ml-12 text-[11px] text-indigo-700 font-bold flex items-center gap-1">
+                  📍 {nearbySuggestion.merchant} <span className="text-gray-500 font-normal">~{Math.round(nearbySuggestion.distanceM)} ม.</span>
+                </div>
+              ) : null}
             </div>
 
-            {nearbySuggestion?.merchant && !isEditMode ? (
-              <div className="px-4 pb-3 -mt-2 text-[11px] text-gray-900/70 flex items-center justify-between">
-                <span className="font-extrabold">📍 พบใกล้เคียง: {nearbySuggestion.merchant}</span>
-                <span className="text-gray-900/50">~{Math.round(nearbySuggestion.distanceM)} ม.</span>
+            {/* Ref */}
+            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
+              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1.5">อ้างอิง</label>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center shrink-0">
+                  <Eye size={16} className="text-slate-600" />
+                </div>
+                <input
+                  type="text"
+                  value={ref}
+                  onChange={(e) => setRef(e.target.value)}
+                  placeholder="Ref / TRX / เลขที่รายการ"
+                  className="flex-1 outline-none text-gray-900 bg-transparent font-bold text-sm placeholder:text-gray-400"
+                />
               </div>
-            ) : null}
-
-            <div className="flex items-center p-4">
-              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-gray-900/50 mr-3">
-                <Eye size={20} />
-              </div>
-              <input
-                type="text"
-                value={ref}
-                onChange={(e) => setRef(e.target.value)}
-                placeholder="Ref / TRX / เลขที่รายการ (ถ้ามี)"
-                className="flex-1 outline-none text-gray-900 bg-transparent font-extrabold"
-              />
             </div>
 
             {/* Tags */}
-            <div className="px-4 pb-4">
-              <div className="text-xs font-extrabold text-gray-700/60 mb-2">แท็ก / ป้ายกำกับ</div>
+            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
+              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-2">แท็ก / ป้ายกำกับ</label>
               <TagsInput
                 value={tags}
                 onChange={setTags}
@@ -5599,12 +5609,14 @@ const handleClose = () => {
             </div>
           </div>
 
-          {/* Fixed Save */}
+          {/* Fixed Save — gradient button */}
           <button
             onClick={handleSaveManual}
             disabled={isSaving}
-            className={`fixed left-4 right-4 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] bg-gray-900/90 text-white py-4 rounded-2xl font-extrabold shadow-xl transition-all flex items-center justify-center gap-2 ${
-              isSaving ? "opacity-60 cursor-not-allowed" : "active:scale-95"
+            className={`fixed left-4 right-4 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] py-4 rounded-2xl font-extrabold shadow-xl transition-all flex items-center justify-center gap-2 ${
+              isSaving
+                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                : "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/25 active:scale-[0.98]"
             }`}
             type="button"
           >

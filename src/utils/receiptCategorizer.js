@@ -177,8 +177,49 @@ const EXPENSE_KW = {
   ],
   entertainment: ["netflix", "spotify", "cinema", "movie", "concert", "เกม", "game", "steam", "disney", "prime video"],
 
+  // ✅ Personal care / Beauty
+  personal_care: [
+    "สบู่", "แชมพู", "ครีม", "โลชั่น", "เซรั่ม", "ครีมกันแดด", "sunscreen",
+    "shampoo", "soap", "lotion", "cream", "moisturizer", "deodorant",
+    "แปรงสีฟัน", "ยาสีฟัน", "toothpaste", "toothbrush",
+    "สกินแคร์", "skincare", "makeup", "เครื่องสำอาง",
+  ],
+
+  // ✅ Household items
+  home: [
+    "ผงซักฟอก", "น้ำยาซักผ้า", "น้ำยาล้างจาน", "น้ำยาถูพื้น",
+    "กระดาษทิชชู่", "ทิชชู่", "tissue", "ผ้าอนามัย",
+    "ถุงขยะ", "ไม้กวาด", "หลอดไฟ", "แบตเตอรี่", "battery",
+    "detergent", "cleaner", "wipe", "sponge",
+  ],
+
+  // ✅ Bakery / Dessert (item-level)
+  bakery: [
+    "เค้ก", "cake", "donut", "โดนัท", "ครัวซอง", "croissant",
+    "พาย", "pie", "tart", "ทาร์ต", "มัฟฟิน", "muffin",
+    "บราวนี่", "brownie", "bread", "ขนมปัง",
+  ],
+  dessert: [
+    "ไอศกรีม", "ice cream", "ไอติม", "เยลลี่", "jelly", "พุดดิ้ง",
+    "pudding", "วาฟเฟิล", "waffle", "เครป", "crepe",
+  ],
+
+  // ✅ Electronics
+  electronics: [
+    "สายชาร์จ", "charger", "cable", "adapter", "หูฟัง", "earphone",
+    "earbuds", "airpods", "เคสโทรศัพท์", "phone case", "screen protector",
+    "ฟิล์ม", "flash drive", "usb", "sd card", "power bank",
+  ],
+
+  // ✅ Clothing
+  clothing: [
+    "เสื้อ", "กางเกง", "กระโปรง", "shirt", "pants", "shorts",
+    "jacket", "เสื้อยืด", "t-shirt", "ชุดชั้นใน", "ถุงเท้า", "socks",
+  ],
+
   // ✅ Receipt adjustments
-  discount: ["ส่วนลด", "discount", "coupon", "promo", "promotion", "voucher"],
+  discount: ["ส่วนลด", "discount", "coupon", "promo", "promotion", "voucher", "ลด"],
+  fees: ["ค่าบริการ", "service charge", "ค่าส่ง", "delivery fee", "shipping", "ค่าถุง", "bag fee", "vat", "ภาษี", "tax"],
 };
 
 const INCOME_KW = {
@@ -193,10 +234,21 @@ const ALIAS = {
   "อาหาร": "food",
   "ของกิน": "food",
   "ร้านอาหาร": "food",
+  "ของว่าง": "snacks",
+  "ขนมขบเคี้ยว": "snacks",
+  "เครื่องดื่ม": "drinks",
+  "เบเกอรี่": "bakery",
+  "ของหวาน": "dessert",
   "เดินทาง": "transport",
   "การเดินทาง": "transport",
   "ค่าน้ำมัน": "transport",
   "ช้อปปิ้ง": "shopping",
+  "เสื้อผ้า": "clothing",
+  "อิเล็กทรอนิกส์": "electronics",
+  "ของใช้ในบ้าน": "home",
+  "ดูแลตัวเอง": "personal_care",
+  "สุขภาพ": "health",
+  "ความงาม": "personal_care",
   "ซื้อของ": "shopping",
   "บิล": "bills",
   "ค่าน้ำ": "bills",
