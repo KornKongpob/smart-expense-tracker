@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../store/store.jsx";
 import { useUndo } from "../utils/useUndo";
+import { parseHash, replaceHash } from "../utils/hashRouter";
 import { checkBudgetAndNotify } from "../utils/budgetNotifications";
 import { formatCurrency, toISODate } from "../utils/format";
 import { getBudget, toMonthKey } from "../store/selectors.js";
@@ -89,6 +90,28 @@ export default function App() {
   const { state } = store;
 
   const view = state?.ui?.view || "dashboard";
+
+  // ---- Hash router: sync URL ↔ view ----
+  useEffect(() => {
+    // Set initial hash on mount
+    replaceHash(view);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const { view: hashView } = parseHash(window.location.hash);
+      if (hashView !== (state?.ui?.view || "dashboard")) {
+        store.navigate(hashView);
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [state?.ui?.view, store]);
+
+  // Keep hash in sync when view changes programmatically
+  useEffect(() => {
+    replaceHash(view);
+  }, [view]);
 
   // ---- Global alert / confirm (UI only) ----
   const [alert, setAlert] = useState("");

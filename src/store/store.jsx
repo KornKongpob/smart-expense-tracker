@@ -8,6 +8,7 @@ import React, { createContext, useContext, useEffect, useMemo, useReducer } from
 import { ACTIONS } from "./actions";
 
 import { loadAll, saveAll, clearAll } from "../services/storage";
+import { setHash, getCurrentView } from "../utils/hashRouter";
 import { clearAllBlobs, deleteBlob } from "../services/blobStore";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
 import { ACCOUNT_ICONS } from "../constants/presets.jsx"; // ✅ for iconId validation + future UI usage
@@ -1282,7 +1283,10 @@ export function AppStoreProvider({ children }) {
   }, [state.transactions, state?.ui?.editingId]);
 
   const api = useMemo(() => {
-    const navigate = (view) => dispatch({ type: ACTIONS.NAVIGATE, payload: view });
+    const navigate = (view) => {
+      setHash(view);
+      dispatch({ type: ACTIONS.NAVIGATE, payload: view });
+    };
 
     const startNewTransaction = () => dispatch({ type: ACTIONS.START_NEW_TRANSACTION });
     const startNew = startNewTransaction;

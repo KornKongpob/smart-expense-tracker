@@ -9,7 +9,8 @@ import { useAppStore } from "../store/store.jsx";
 import { getBudget, toMonthKey, calcAccountBalance } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { isCreditAccount } from "../utils/accountMatch";
-import { Landmark } from "lucide-react";
+import { Landmark, Sparkles } from "lucide-react";
+import { generateInsights } from "../utils/aiInsights";
 import {
   isTransferLike,
   signedExpenseSatang,
@@ -97,6 +98,13 @@ useEffect(() => {
   }, [state.accounts, state.transactions]);
 
   const accountName = (id) => state.accounts?.find((a) => a.id === id)?.name || "—";
+
+  // ===== AI Insights =====
+  const insights = useMemo(() => {
+    try {
+      return generateInsights(state.transactions || [], state.categories, { currentMonth });
+    } catch { return []; }
+  }, [state.transactions, state.categories, currentMonth]);
 
   // ===== All tags for filter dropdown =====
   const allTags = useMemo(() => {
@@ -470,6 +478,36 @@ useEffect(() => {
             </button>
           </div>
         </div>
+
+        {/* AI Insights */}
+        {insights.length > 0 && (
+          <div className="mb-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles size={14} className="text-indigo-600" />
+              <span className="text-xs font-extrabold text-gray-700/70 uppercase tracking-wider">Insights</span>
+            </div>
+            <div className="space-y-2">
+              {insights.map((ins, i) => (
+                <div
+                  key={`${ins.type}-${i}`}
+                  className={`ui-card p-3.5 border-l-4 ${
+                    ins.severity === "warning" ? "border-l-amber-500" :
+                    ins.severity === "success" ? "border-l-emerald-500" :
+                    "border-l-indigo-500"
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span className="text-lg shrink-0">{ins.icon}</span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold text-gray-900">{ins.title}</div>
+                      <div className="text-xs text-gray-600 mt-0.5">{ins.body}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="ui-card p-4 mb-4">
