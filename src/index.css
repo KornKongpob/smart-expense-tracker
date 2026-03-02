@@ -7,12 +7,17 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* ===== Brand / UI tokens (light, App Store-ish) ===== */
-  --bg: #f7f7fb;
-  --surface: rgba(255, 255, 255, 0.78);
-  --surface-strong: rgba(255, 255, 255, 0.92);
-  --border: rgba(15, 23, 42, 0.10);
-  --border-strong: rgba(15, 23, 42, 0.14);
+  /* ===== Brand / UI tokens (Bento + Apple-ish + SaaS cards) ===== */
+  /* Apple-style background gray */
+  --bg: #f5f5f7;
+
+  /* Card surfaces (slightly translucent, but more "SaaS" than full glass) */
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-strong: rgba(255, 255, 255, 0.94);
+
+  /* Borders are subtle + crisp */
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.12);
 
   --text: #0f172a;
   --muted: #64748b;
@@ -24,20 +29,26 @@
   --warning: #d97706;
   --danger: #dc2626;
 
-  --shadow-card: 0 14px 40px rgba(0, 0, 0, 0.08);
-  --shadow-card-strong: 0 18px 54px rgba(0, 0, 0, 0.10);
+  /* Softer shadows to match Apple/SaaS dashboards */
+  --shadow-card: 0 12px 34px rgba(0, 0, 0, 0.08);
+  --shadow-card-strong: 0 18px 48px rgba(0, 0, 0, 0.10);
 
-  --radius-card: 1.5rem;      /* 24px */
-  --radius-card-strong: 1.75rem; /* 28px */
+  /* Slightly tighter radii for bento tiles */
+  --radius-card: 1.25rem;      /* 20px */
+  --radius-card-strong: 1.5rem; /* 24px */
   --radius-control: 1rem;     /* 16px */
 
+  /* Bento spacing */
+  --bento-gap: 0.875rem; /* 14px */
+
   /* ===== Backward-compatible glass tokens ===== */
-  --glass-bg: rgba(255, 255, 255, 0.16);
-  --glass-bg-strong: rgba(255, 255, 255, 0.22);
-  --glass-border: rgba(255, 255, 255, 0.28);
-  --glass-border-soft: rgba(255, 255, 255, 0.18);
-  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-  --glass-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.06);
+  /* Keep glass available, but slightly calmer to blend with bento cards */
+  --glass-bg: rgba(255, 255, 255, 0.12);
+  --glass-bg-strong: rgba(255, 255, 255, 0.18);
+  --glass-border: rgba(255, 255, 255, 0.22);
+  --glass-border-soft: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+  --glass-shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.06);
 }
 
 /* ===== Dark Mode ===== */
@@ -186,12 +197,15 @@ body {
   overscroll-behavior-x: none;
   color: var(--text);
 
-  /* Soft glass background (readable first) */
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+
+  /* Bento + Apple-ish background (subtle, readable) */
   background:
-    radial-gradient(1200px 800px at 10% 10%, rgba(99, 102, 241, 0.22), transparent 55%),
-    radial-gradient(900px 700px at 90% 20%, rgba(236, 72, 153, 0.16), transparent 55%),
-    radial-gradient(1000px 700px at 60% 90%, rgba(16, 185, 129, 0.14), transparent 55%),
-    linear-gradient(180deg, #f7f7fb 0%, #eef2ff 40%, #f8fafc 100%);
+    radial-gradient(1000px 700px at 15% 10%, rgba(99, 102, 241, 0.14), transparent 60%),
+    radial-gradient(900px 700px at 85% 0%, rgba(59, 130, 246, 0.10), transparent 55%),
+    radial-gradient(1000px 800px at 55% 100%, rgba(236, 72, 153, 0.08), transparent 60%),
+    linear-gradient(180deg, var(--bg) 0%, #ffffff 58%, #f1f5ff 100%);
   background-attachment: fixed;
 }
 
@@ -232,7 +246,8 @@ body {
 
 /* Space for fixed bottom navbar */
 .pb-nav {
-  padding-bottom: calc(7rem + env(safe-area-inset-bottom));
+  /* Use measured navbar height when available to avoid overlaps on different devices */
+  padding-bottom: var(--app-nav-h, calc(7rem + env(safe-area-inset-bottom)));
 }
 
 /* Hide scrollbars */
@@ -243,6 +258,16 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Accordion / <details> helpers (for Advanced panels) */
+summary::-webkit-details-marker {
+  display: none;
+}
+
+.bento-summary {
+  list-style: none;
+}
+
 
 /* Reduce motion */
 @media (prefers-reduced-motion: reduce) {
@@ -285,6 +310,10 @@ body {
 .ui-page {
   padding-left: 1rem;
   padding-right: 1rem;
+  width: 100%;
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .ui-card {

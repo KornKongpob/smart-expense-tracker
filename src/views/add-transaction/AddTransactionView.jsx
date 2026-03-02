@@ -36,6 +36,8 @@ import CategoryPicker from "../../components/CategoryPicker";
 import QuickSuggestions from "../../components/QuickSuggestions";
 import TagsInput from "../../components/TagsInput";
 import AppHeader from "../../components/AppHeader";
+import BentoGrid from "../../components/bento/BentoGrid";
+import BentoCard from "../../components/bento/BentoCard";
 import { scanReceiptOpenAI } from "../../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../../services/blobStore";
 import { formatCurrency, toISODate } from "../../utils/format";
@@ -70,12 +72,13 @@ import {
 import { buildCategoryHierarchy, splitSelection } from "../../utils/categoryHierarchy";
 import { useTransferFlow } from "./hooks/useTransferFlow";
 import { useTransactionDraft } from "./hooks/useTransactionDraft";
-import { useReceiptFlow } from "./hooks/useReceiptFlow";
+import { useScanQueue } from "./hooks/useScanQueue";
 import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromNote, appendEvidenceToNote, hashString, humanizeScanStatus } from "./helpers/inputHelpers";
 import AmountSection from "./sections/AmountSection";
 import CategorySection from "./sections/CategorySection";
 import TransferSection from "./sections/TransferSection";
 import ReceiptSection from "./sections/ReceiptSection";
+import ScanQueueList from "./scan/ScanQueueList";
 
 // Tombstone category helper (module-scope => safe for hooks deps)
 const isTombstoneCategory = (c) => !!(c?.deletedAt || c?.isDeleted);
@@ -531,6 +534,20 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     }
   }, [type, isSplitMode, selectedManualAccount]);
 
+  // Manual form: Advanced section (collapsed by default)
+  const [manualAdvancedOpen, setManualAdvancedOpen] = useState(() => {
+    if (isEditMode) return true;
+    if (initialAttachmentId) return true;
+    const hasRef = String(ref || "").trim().length > 0;
+    const hasTags = Array.isArray(tags) && tags.length > 0;
+    return hasRef || hasTags;
+  });
+
+  useEffect(() => {
+    // If we have an attachment coming from Inbox/Scan, auto-open Advanced so it is visible.
+    if (initialAttachmentId) setManualAdvancedOpen(true);
+  }, [initialAttachmentId]);
+
   const [splitLines, setSplitLines] = useState(() => {
     if (isEditingSplitGroup && splitGroupTransactions.length) {
       const sorted = [...splitGroupTransactions].filter((t) => !t?.isSplitParent).sort((a, b) => {
@@ -698,7 +715,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     setDropActive,
     dupDecisionOpen,
     setDupDecisionOpen,
-  } = useReceiptFlow();
+    clearQueue: clearScanQueue,
+    removeQueueItem,
+    removeQueueItems,
+  } = useScanQueue();
   const dropZoneRef = useRef(null);
 
   // scan batch
@@ -1124,26 +1144,9 @@ const existingRefSet = useMemo(() => {
     }
   }, [currentLocation, merchantLocationData, entryMode, isEditMode, showAlert, type, isSplitMode, expenseCats, incomeCats]);
 
-  const cleanupQueuePreviews = () => {
-    for (const it of queue) {
-      // Only revoke in-memory previews. Persisted (blobStore) URLs must NOT be revoked here,
-      // otherwise attachments will break later when viewing Inbox/Transactions.
-      if (it?.previewUrlSource === "temp" && it.previewUrl?.startsWith("blob:")) {
-        try {
-          URL.revokeObjectURL(it.previewUrl);
-        } catch {
-          // ignore
-        }
-      }
-    }
-  };
-
   const clearQueue = () => {
-    cleanupQueuePreviews();
-    setQueue([]);
-    setExpandedId(null);
-    setScanStatus("");
-    setDupDecisionOpen(false);
+    // Queue lifecycle (state + preview objectURL cleanup) lives in useScanQueue().
+    clearScanQueue();
     createdCatRef.current = { expense: new Map(), income: new Map() };
   };
 
@@ -1340,6 +1343,19 @@ const existingRefSet = useMemo(() => {
           // ignore
         }
 
+        // Sync amount when receipt groups are updated (bulk updates / auto-categorize).
+        if (Object.prototype.hasOwnProperty.call(patch || {}, "groups")) {
+          try {
+            const groups = Array.isArray(next.groups) ? next.groups : [];
+            const signedSum = groups.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
+            const shouldSyncAmount = !!next.splitByCategory || !next.amountEdited;
+            if (shouldSyncAmount) next.amount = signedSum;
+          } catch {
+            // ignore group sync errors
+          }
+        }
+
+
         // Recalculate duplicate only when user edits key identity fields
         if (next.status === "ready" && affectsDup && !patchHasDup) {
           try {
@@ -1399,47 +1415,6 @@ const existingRefSet = useMemo(() => {
         return { ...x, groups, amount: shouldSyncAmount ? signedSum : x.amount };
       })
     );
-  };
-
-  const removeQueueItem = (id) => {
-    setQueue((prev) => {
-      const it = prev.find((x) => x.id === id);
-      if (it?.previewUrlSource === "temp" && it?.previewUrl?.startsWith("blob:")) {
-        try {
-          URL.revokeObjectURL(it.previewUrl);
-        } catch {
-          // ignore
-        }
-      }
-      return prev.filter((x) => x.id !== id);
-    });
-    if (expandedId === id) setExpandedId(null);
-  };
-
-  // Remove many queue items at once (used by inbox/duplicate flows)
-  const removeQueueItems = (ids) => {
-    const setIds = new Set(Array.isArray(ids) ? ids.filter(Boolean) : []);
-    if (!setIds.size) return;
-
-    setQueue((prev) => {
-      const next = [];
-      for (const it of prev) {
-        if (setIds.has(it.id)) {
-          if (it?.previewUrlSource === "temp" && it?.previewUrl?.startsWith("blob:")) {
-            try {
-              URL.revokeObjectURL(it.previewUrl);
-            } catch {
-              // ignore
-            }
-          }
-          continue;
-        }
-        next.push(it);
-      }
-      return next;
-    });
-
-    if (expandedId && setIds.has(expandedId)) setExpandedId(null);
   };
 
   // ===== credit card payment helpers (manual/scan) =====
@@ -4029,889 +4004,25 @@ const handleClose = () => {
 
           {/* Queue */}
           {queue.length ? (
-            <div className="mb-28">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-extrabold text-gray-900">
-                  Review Queue <span className="text-gray-800/50">({queue.length})</span>
-                </h3>
-
-                <button
-                  type="button"
-                  onClick={createTransactionsFromQueue}
-                  className={`px-4 py-2 rounded-xl font-extrabold text-sm active:scale-95 ${
-                    canCreateFromQueue ? "bg-indigo-600 text-white" : "bg-white/30 text-gray-700/60 border border-white/20"
-                  }`}
-                  disabled={!canCreateFromQueue}
-                >
-                  สร้างรายการ
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {queue.map((q) => {
-                  const isOpen = expandedId === q.id;
-                  const canEditQueueItem = q.status === "ready";
-                  const badge =
-                    q.txType === "credit_payment"
-                      ? "ชำระบัตร"
-                      : q.txType === "transfer"
-                      ? "Transfer"
-                      : q.txType === "income"
-                      ? "Income"
-                      : "Expense";
-
-                  const nonAdjGroupCount = Array.isArray(q.groups) ? q.groups.filter((g) => !isAdjustmentLike(g)).length : 0;
-                  const hasGroups = q.txType === "expense" && nonAdjGroupCount >= 2;
-                  const hasReceiptLines = q.txType === "expense" && Array.isArray(q.groups) && q.groups.length > 0;
-
-                  const dupKind = q?.duplicateInfo?.kind || (q.duplicate ? "fuzzy" : "");
-                  const dupBadgeText =
-                    dupKind === "ref" ? "Duplicate (Ref)" : dupKind === "file" ? "Duplicate (File)" : "Possible duplicate";
-
-                  return (
-                    <div key={q.id} className="glass-card rounded-3xl overflow-hidden">
-                      <div className="p-4 flex gap-3">
-                        <div className="w-14 h-14 rounded-2xl overflow-hidden border border-white/15 bg-white/20 shrink-0">
-                          {q.previewUrl ? (
-                            <a href={q.previewUrl} target="_blank" rel="noreferrer noopener" className="block w-full h-full">
-                              {q.fileKind === "pdf" ? (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <div className="inline-flex flex-col items-center text-gray-900/80">
-                                    <FileText size={16} />
-                                    <span className="text-[10px] font-extrabold mt-1">PDF</span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <img src={q.previewUrl} alt="preview" className="w-full h-full object-cover" />
-                              )}
-                            </a>
-                          ) : null}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-white/30 text-gray-900 border border-white/15">
-                              {badge}
-                            </span>
-
-                            {q.status === "scanning" ? (
-                              <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-500/15 text-indigo-700 border border-indigo-500/20">
-                                Scanning...
-                              </span>
-                            ) : null}
-
-                            {q.status === "error" ? (
-                              <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-red-500/10 text-red-700 border border-red-500/15">
-                                Error
-                              </span>
-                            ) : null}
-
-                            {q.duplicate ? (
-                              <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-amber-500/15 text-amber-800 inline-flex items-center gap-1 border border-amber-500/20">
-                                <AlertTriangle size={12} /> {dupBadgeText}
-                              </span>
-                            ) : null}
-
-                            {q.txType === "expense" && hasGroups ? (
-                              <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-700 border border-emerald-500/20">
-                                Multi-category
-                              </span>
-                            ) : null}
-
-                            {q.suggestedCategoryId ? (
-                              <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-sky-500/15 text-sky-700 border border-sky-500/20">
-                                Suggested
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-2 text-sm font-extrabold text-gray-900 truncate">
-                            {q.amount != null ? formatCurrency(q.amount) : q.status === "error" ? (q.error ? `สแกนไม่สำเร็จ (${q.error})` : "สแกนไม่สำเร็จ") : "กำลังประมวลผล..."}
-                          </div>
-
-                          <div className="mt-1 text-xs text-gray-800/60 truncate">
-                            {q.note || q.fileName}
-                            {q.ref ? <span className="ml-2 text-gray-800/50">• Ref {q.ref}</span> : null}
-                          </div>
-
-                          {q.status === "error" ? <div className="mt-2 text-xs text-red-700 break-words">{q.error}</div> : null}
-
-                          {q.suggestedReason ? (
-                            <div className="mt-1 text-[11px] text-sky-800/70 truncate">{q.suggestedReason}</div>
-                          ) : null}
-                        </div>
-
-                        <div className="flex flex-col gap-2 shrink-0">
-                          <div className="flex flex-col items-center">
-                            <button
-                              type="button"
-                              onClick={() => setExpandedId((v) => (v === q.id ? null : q.id))}
-                              className={`w-11 h-11 rounded-full flex items-center justify-center leading-none transition-colors ${
-                                canEditQueueItem
-                                  ? "glass-icon-btn text-gray-900 active:scale-95"
-                                  : "bg-gray-200 border border-gray-400 text-gray-700 cursor-not-allowed"
-                              }`}
-                              title="แก้ไข"
-                              aria-label="แก้ไขรายการในคิว"
-                              disabled={!canEditQueueItem}
-                            >
-                              <Edit2 size={18} />
-                            </button>
-                            <span className="mt-1 text-[10px] font-bold text-gray-700 sm:hidden">แก้ไข</span>
-                          </div>
-
-                          <div className="flex flex-col items-center">
-                            <button
-                              type="button"
-                              onClick={() => removeQueueItem(q.id)}
-                              className="w-11 h-11 rounded-full bg-red-500/10 border border-red-500/15 text-red-700 flex items-center justify-center active:scale-95 leading-none"
-                              title="ลบจากคิว"
-                              aria-label="ลบรายการจากคิว"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                            <span className="mt-1 text-[10px] font-bold text-red-700 sm:hidden">ลบ</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Expand */}
-                      {isOpen && q.status === "ready" ? (
-                        <div className="p-4 border-t border-white/15 bg-white/10">
-                          {/* Duplicate toggle */}
-                          {q.duplicate ? (
-                            <div className="glass-panel border border-amber-500/20 rounded-2xl p-3 mb-4 flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-sm font-extrabold text-amber-800">พบรายการที่อาจซ้ำ</div>
-                                <div className="text-[12px] text-amber-800/80">
-                                  ระบบจะกันรายการนี้ไว้ก่อนเพื่อป้องกันซ้ำ (คุณสามารถเปิดเพื่อบันทึกซ้ำได้)
-                                </div>
-
-                                {q.duplicateInfo ? (
-                                  <div className="mt-2 text-[11px] text-amber-900/70">
-                                    <div>
-                                      {q.duplicateInfo.kind === 'ref'
-                                        ? 'สาเหตุ: Ref ตรงกัน'
-                                        : q.duplicateInfo.kind === 'file'
-                                        ? 'สาเหตุ: ไฟล์ซ้ำ (เหมือนเดิม)'
-                                        : `ความเหมือน ~${Math.round((q.duplicateInfo.score || 0) * 100)}%`}
-                                    </div>
-                                    {Array.isArray(q.duplicateInfo.reasons) && q.duplicateInfo.reasons.length ? (
-                                      <div className="mt-1 truncate">• {q.duplicateInfo.reasons.join(' • ')}</div>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => updateQueueItem(q.id, { includeDuplicate: !q.includeDuplicate })}
-                                className={`w-14 h-8 rounded-full transition-all relative border ${
-                                  q.includeDuplicate ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
-                                }`}
-                              >
-                                <span
-                                  className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
-                                    q.includeDuplicate ? "left-7" : "left-1"
-                                  }`}
-                                />
-                              </button>
-                            </div>
-                          ) : null}
-
-                          {/* Section: Essentials */}
-                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
-                            <div className="mb-3">
-                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
-                                <Layers size={14} /> Essentials
-                              </div>
-                              <div className="text-[11px] text-gray-900/55">เริ่มจากประเภทก่อน แล้วค่อยยืนยันยอดและวันที่</div>
-                            </div>
-                            <div className="space-y-2">
-                              <div>
-                                <div className="text-xs font-bold text-gray-900/70 mb-2">ประเภทของรายการ</div>
-                                <div className="flex gap-2">
-                                  {[
-                                    { id: "expense", label: "Expense" },
-                                    { id: "income", label: "Income" },
-                                    { id: "transfer", label: "Transfer" },
-                                    { id: "credit_payment", label: "ชำระบัตร" },
-                                  ].map((t) => (
-                                    <button
-                                      key={t.id}
-                                      type="button"
-                                      onClick={() => handleQueueTypeChange(q.id, t.id)}
-                                      className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-95 ${
-                                        q.txType === t.id
-                                          ? "bg-gray-900/90 text-white shadow-sm"
-                                          : "bg-white/20 text-gray-900/70 border border-white/15"
-                                      }`}
-                                      title="เปลี่ยนประเภทได้ หาก AI เลือกผิด"
-                                    >
-                                      {t.label}
-                                    </button>
-                                  ))}
-                                </div>
-                                <details className="mt-2 text-[11px] text-gray-900/55">
-                                  <summary className="cursor-pointer select-none">คำอธิบายประเภทรายการ</summary>
-                                  <div className="mt-1">
-                                    - “ชำระบัตร” จะสร้าง 2 legs เหมือน Transfer แต่จัดชนิดเป็นการจ่ายยอดบัตร (กันซ้ำกับรายการรูด) <br />
-                                    - เปลี่ยน Transfer → Expense แล้วระบบจะ auto เลือกบัญชีเดี่ยวให้จากเลขบัญชีในสลิป (เลือก match ที่สุด)
-                                  </div>
-                                </details>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <div className="text-xs font-bold text-gray-900/70 mb-1">จำนวนเงิน</div>
-                                  <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={q.amount != null ? formatMoneyInputFromSatang(q.amount) : ""}
-                                    onChange={(e) => {
-                                      const cleaned = sanitizeMoneyInput(e.target.value);
-                                      updateQueueItem(q.id, {
-                                        amount: parseMoneyToSatang(cleaned),
-                                        splitByCategory: false,
-                                        amountEdited: true,
-                                      });
-                                    }}
-                                    className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
-                                    placeholder="0.00"
-                                  />
-                                  <div className="text-[11px] text-gray-800/55 mt-1">* แก้ยอดตรงนี้จะปิดโหมดแยกหมวด</div>
-                                </div>
-
-                                <div>
-                                  <div className="text-xs font-bold text-gray-900/70 mb-1">วันที่</div>
-                                  <input
-                                    type="date"
-                                    value={q.date || toISODate(new Date())}
-                                    onChange={(e) => updateQueueItem(q.id, { date: e.target.value })}
-                                    className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Section: Account */}
-                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
-                            <div className="mb-3">
-                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
-                                <CreditCard size={14} /> Account
-                              </div>
-                              <div className="text-[11px] text-gray-900/55">เลือกบัญชีที่เงินออก/เข้าให้ถูกต้องตามประเภทรายการ</div>
-                            </div>
-                            <div className="space-y-2">
-                              {q.txType === "transfer" || q.txType === "credit_payment" ? (
-                                <div className="grid grid-cols-1 gap-3">
-                                  <div>
-                                    <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
-                                      <ArrowRightLeft size={14} /> บัญชีต้นทาง
-                                    </div>
-                                    <AccountPicker
-                                      accounts={q.txType === "credit_payment" ? (nonCreditAccounts.length ? nonCreditAccounts : accounts) : accounts}
-                                      value={q.fromAccountId}
-                                      onChange={(v) => updateQueueItem(q.id, { fromAccountId: v })}
-                                      title="เลือกบัญชีต้นทาง"
-                                      placeholder="เลือกบัญชีต้นทาง"
-                                    />
-                                  </div>
-                                  <div>
-                                    <div className="text-xs font-bold text-gray-900/70 mb-2 flex items-center gap-2">
-                                      <ArrowRightLeft size={14} /> บัญชีปลายทาง
-                                    </div>
-                                    <AccountPicker
-                                      accounts={q.txType === "credit_payment" ? accounts.filter((a) => isCreditAccount(a)) : accounts}
-                                      value={q.toAccountId}
-                                      onChange={(v) => updateQueueItem(q.id, { toAccountId: v })}
-                                      title="เลือกบัญชีปลายทาง"
-                                      placeholder="เลือกบัญชีปลายทาง"
-                                    />
-                                    {q.txType === "credit_payment" ? (
-                                      <div className="mt-2 flex items-center justify-between gap-3">
-                                        <div className="text-[11px] text-gray-900/60 min-w-0 truncate">
-                                          ยอดค้าง: {formatCurrency(creditDebtById.get(q.toAccountId) || 0)}
-                                        </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => applyPayFullForQueue(q.id, q.toAccountId)}
-                                          className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
-                                          disabled={(creditDebtById.get(q.toAccountId) || 0) <= 0}
-                                        >
-                                          จ่ายเต็มยอดค้าง
-                                        </button>
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              ) : (
-                                <>
-                                  <QuickSuggestions
-                                    title="Quick suggestions"
-                                    selectedId={q.accountId}
-                                    items={(() => {
-                                      const t = String(q?.txType || q?.type || "").toLowerCase();
-                                      if (t !== "expense" && t !== "income") return [];
-
-                                      const items = [];
-                                      try {
-                                        const md = deriveMerchantAutofillPatch(
-                                          {
-                                            merchant: q?.merchant,
-                                            txType: t,
-                                            categoryId: String(q?.categoryId || "").trim(),
-                                            accountId: "",
-                                          },
-                                          state?.merchants || []
-                                        );
-                                        const mdAccId = String(md?.accountId || "").trim();
-                                        const mdAcc = mdAccId ? accountById.get(mdAccId) : null;
-                                        if (mdAcc && mdAccId) {
-                                          items.push({
-                                            id: mdAccId,
-                                            label: String(mdAcc?.name || "").trim() || "บัญชี",
-                                            badge: "ร้านนี้",
-                                            icon: getAccountVisual(mdAcc),
-                                          });
-                                        }
-                                      } catch {
-                                        // ignore
-                                      }
-
-                                      const rec = (recentAccountsByType?.[t] || []).slice(0, 8);
-                                      for (const acc of rec) {
-                                        const id = String(acc?.id || "").trim();
-                                        if (!id) continue;
-                                        if (items.some((x) => String(x?.id || "") === id)) continue;
-                                        items.push({
-                                          id,
-                                          label: String(acc?.name || "").trim() || "บัญชี",
-                                          badge: "ล่าสุด",
-                                          icon: getAccountVisual(acc),
-                                        });
-                                        if (items.length >= 5) break;
-                                      }
-
-                                      const cur = String(q?.accountId || "").trim();
-                                      const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
-                                      return pruned.slice(0, 5);
-                                    })()}
-                                    onSelect={(id) => {
-                                      const v = String(id || "").trim();
-                                      if (!v) return;
-                                      const acc = accounts.find((a) => String(a?.id || "") === String(v || "")) || null;
-                                      const patch = { accountId: v };
-                                      if (!isCreditAccount(acc)) patch.isInstallment = false;
-                                      updateQueueItem(q.id, patch);
-                                    }}
-                                    className="mb-3"
-                                  />
-
-                                  <AccountChipsPicker
-                                    accounts={accounts}
-                                    value={q.accountId}
-                                    onChange={(v) => {
-                                      const acc = accounts.find((a) => String(a?.id || "") === String(v || "")) || null;
-                                      const patch = { accountId: v };
-                                      if (!isCreditAccount(acc)) patch.isInstallment = false;
-                                      updateQueueItem(q.id, patch);
-                                    }}
-                                    showTitle={false}
-                                    showSelectedText
-                                    density="compact"
-                                    mobileSingleRow
-                                  />
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Section: Category */}
-                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
-                            <div className="mb-3">
-                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
-                                <Sparkles size={14} /> Category
-                              </div>
-                              <div className="text-[11px] text-gray-900/55">ใช้คำแนะนำเร็ว แล้วค่อยยืนยันหมวดหลักให้ตรงรายการ</div>
-                            </div>
-
-                            {q.txType === "expense" || q.txType === "income" ? (
-                              <div className="space-y-2">
-                                <QuickSuggestions
-                                  title="Quick suggestions"
-                                  selectedId={q.categoryId || ""}
-                                  items={(() => {
-                                    const t = String(q?.txType || q?.type || "").toLowerCase();
-                                    if (t !== "expense" && t !== "income") return [];
-                                    const byId = catIndexByType?.[t]?.byId || new Map();
-
-                                    const items = [];
-                                    try {
-                                      const md = deriveMerchantAutofillPatch(
-                                        {
-                                          merchant: q?.merchant,
-                                          txType: t,
-                                          categoryId: "",
-                                          accountId: "",
-                                        },
-                                        state?.merchants || []
-                                      );
-                                      const mdCatId = String(md?.categoryId || "").trim();
-                                      const mdCat = mdCatId ? byId.get(mdCatId) : null;
-                                      if (mdCat && mdCatId) {
-                                        const pid = String(mdCat?.parentId || "").trim();
-                                        const parent = pid ? byId.get(pid) : null;
-                                        items.push({
-                                          id: mdCatId,
-                                          label: String(mdCat?.name || "").trim() || "หมวด",
-                                          badge: parent ? String(parent?.name || "").trim() : "ร้านนี้",
-                                          icon: { kind: "emoji", value: mdCat?.icon || "🏷️" },
-                                        });
-                                      }
-                                    } catch {
-                                      // ignore
-                                    }
-
-                                    const histId = String(q?.suggestedCategoryId || "").trim();
-                                    if (histId && !items.some((x) => String(x?.id || "") === histId)) {
-                                      const c = byId.get(histId);
-                                      if (c && !isTombstoneCategory(c)) {
-                                        const pid = String(c?.parentId || "").trim();
-                                        const parent = pid ? byId.get(pid) : null;
-                                        items.push({
-                                          id: histId,
-                                          label: String(c?.name || "").trim() || "หมวด",
-                                          badge: parent ? String(parent?.name || "").trim() : "ประวัติ",
-                                          icon: { kind: "emoji", value: c?.icon || "🏷️" },
-                                        });
-                                      }
-                                    }
-
-                                    const rec = (recentCatsByType?.[t] || []).slice(0, 8);
-                                    for (const c of rec) {
-                                      const id = String(c?.id || "").trim();
-                                      if (!id) continue;
-                                      if (items.some((x) => String(x?.id || "") === id)) continue;
-                                      const pid = String(c?.parentId || "").trim();
-                                      const parent = pid ? byId.get(pid) : null;
-                                      items.push({
-                                        id,
-                                        label: String(c?.name || "").trim() || "หมวด",
-                                        badge: parent ? String(parent?.name || "").trim() : "ล่าสุด",
-                                        icon: { kind: "emoji", value: c?.icon || "🏷️" },
-                                      });
-                                      if (items.length >= 6) break;
-                                    }
-
-                                    const cur = String(q?.categoryId || "").trim();
-                                    const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
-                                    return pruned.slice(0, 6);
-                                  })()}
-                                  onSelect={(id) => {
-                                    const v = String(id || "").trim();
-                                    if (!v) return;
-                                    updateQueueItem(q.id, { categoryId: v });
-                                  }}
-                                  className="mb-3"
-                                />
-
-                                <CategoryPicker
-                                  categories={(q.txType === "income" ? incomeCatsAll : expenseCatsAll)}
-                                  value={q.categoryId || ""}
-                                  onChange={(id) => updateQueueItem(q.id, { categoryId: id })}
-                                  showTitle={false}
-                                  twoStep
-                                  recent={recentCatsByType?.[String(q.txType || "").toLowerCase()] || []}
-                                  maxListHeightClass="max-h-[34dvh]"
-                                />
-
-                                {q.suggestedCategoryId ? (
-                                  <div className="mt-2 text-[11px] text-sky-900/70">Suggested จากประวัติแล้ว (แก้ได้ตามต้องการ)</div>
-                                ) : null}
-                              </div>
-                            ) : (
-                              <div className="text-[11px] text-gray-900/55">ประเภทนี้ไม่ต้องเลือกหมวด</div>
-                            )}
-                          </div>
-
-                          {/* Section: Advanced options */}
-                          <div className="glass-panel border border-white/20 rounded-2xl p-3 mb-4">
-                            <div className="mb-3">
-                              <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
-                                <FileText size={14} /> Advanced options
-                              </div>
-                              <div className="text-[11px] text-gray-900/55">ปรับรายละเอียดเพิ่มเติม เช่นโน้ต อ้างอิง ผ่อนชำระ และ split detail</div>
-                            </div>
-                            <div className="space-y-2">
-                              {q.txType === "expense" && hasGroups ? (
-                                <div className="glass-panel border border-emerald-500/20 rounded-2xl p-3 flex items-center justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-extrabold text-emerald-800">แยกเป็นหลายหมวด</div>
-                                    <div className="text-[12px] text-emerald-800/80">ระบบจะสร้างหลายรายการตามหมวดจากหลายบรรทัดในบิล</div>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateQueueItem(q.id, {
-                                        splitByCategory: !q.splitByCategory,
-                                        ...(q.splitByCategory ? {} : { isInstallment: false }),
-                                      })
-                                    }
-                                    className={`w-14 h-8 rounded-full transition-all relative border ${
-                                      q.splitByCategory ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
-                                    }`}
-                                    title={q.splitByCategory ? "เปิด" : "ปิด"}
-                                  >
-                                    <span
-                                      className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
-                                        q.splitByCategory ? "left-7" : "left-1"
-                                      }`}
-                                    />
-                                  </button>
-                                </div>
-                              ) : null}
-
-                              <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                                <div className="text-xs font-bold text-gray-900/70 mb-1">โน้ต</div>
-                                <input
-                                  value={q.note || ""}
-                                  onChange={(e) => updateQueueItem(q.id, { note: e.target.value })}
-                                  className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
-                                  placeholder="เช่น ร้าน, รายละเอียด"
-                                />
-                              </div>
-
-                              <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                                <div className="text-xs font-bold text-gray-900/70 mb-1">Ref (ถ้ามี)</div>
-                                <input
-                                  value={q.ref || ""}
-                                  onChange={(e) => updateQueueItem(q.id, { ref: e.target.value })}
-                                  className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
-                                  placeholder="Ref / TRX / เลขที่รายการ"
-                                />
-                              </div>
-
-                              {q.txType === "expense" && !q.splitByCategory && isCreditAccount(accounts.find((a) => a.id === q.accountId)) ? (
-                                <div className="glass-panel border border-indigo-500/20 rounded-2xl p-3">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <div className="text-sm font-extrabold text-indigo-900">ผ่อนชำระ</div>
-                                      <div className="text-[12px] text-indigo-900/70">เปิดแล้วระบบจะสร้างหลายรายการล่วงหน้า (งวดที่ x/y)</div>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => updateQueueItem(q.id, { isInstallment: !q.isInstallment })}
-                                      className={`w-14 h-8 rounded-full transition-all relative border ${
-                                        q.isInstallment ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
-                                      }`}
-                                      title={q.isInstallment ? "เปิด" : "ปิด"}
-                                    >
-                                      <span
-                                        className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
-                                          q.isInstallment ? "left-7" : "left-1"
-                                        }`}
-                                      />
-                                    </button>
-                                  </div>
-
-                                  {q.isInstallment ? (
-                                    <div className="mt-3 grid grid-cols-2 gap-2 items-end">
-                                      <div>
-                                        <div className="text-[11px] text-gray-900/60 font-bold mb-1">จำนวนงวด (เดือน)</div>
-                                        <input
-                                          type="number"
-                                          min={2}
-                                          max={120}
-                                          value={Number(q.installmentMonths || 3)}
-                                          onChange={(e) => {
-                                            const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
-                                            updateQueueItem(q.id, { installmentMonths: n });
-                                          }}
-                                          className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
-                                        />
-                                      </div>
-                                      <div className="text-[11px] text-gray-900/55">ยอดจะถูกหารเป็นงวดเท่า ๆ กัน (เศษสตางค์จะกระจาย)</div>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-
-                              {q.txType === "expense" && q.splitByCategory && hasGroups ? (
-                                <div className="glass-panel border border-emerald-500/15 rounded-2xl p-3">
-                                  <div className="text-xs font-bold text-gray-900/70 mb-2">Split detail (ไม่รวมราคา 0)</div>
-                                  <div className="space-y-2">
-                                    {q.groups.map((g, idx) => (
-                                      <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
-                                        <div className="mb-2">
-                                          <div className="text-[11px] text-gray-900/60 font-bold mb-1">รายการ</div>
-                                          <input
-                                            type="text"
-                                            value={g.note || ""}
-                                            onChange={(e) => updateQueueGroup(q.id, idx, { note: e.target.value })}
-                                            className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                                            placeholder="ชื่อสินค้า/บริการ"
-                                          />
-                                        </div>
-                                        <div className="grid grid-cols-5 gap-2 items-start">
-                                          <div className="col-span-3">
-                                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
-                                            <CategorySelect
-                                              categories={expenseCatsAll}
-                                              value={g.categoryId || ""}
-                                              onChange={(e) => updateQueueGroup(q.id, idx, { categoryId: e.target.value })}
-                                              allowEmpty
-                                              emptyLabel="เลือกหมวด"
-                                              className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                                            />
-                                            <div className="text-[10px] text-gray-900/55 mt-1">tag: <span className="font-bold">{categoryNameFromKey(g.key)}</span></div>
-                                          </div>
-
-                                          <div className="col-span-2">
-                                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">ยอด</div>
-                                            <input
-                                              type="text"
-                                              inputMode="decimal"
-                                              value={formatMoneyInputFromSatang(g.amount ?? 0)}
-                                              onChange={(e) => {
-                                                const cleaned = sanitizeMoneyInput(e.target.value);
-                                                updateQueueGroup(q.id, idx, { amount: parseMoneyToSatang(cleaned) });
-                                              }}
-                                              className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
-                                            />
-                                            <div className="text-[10px] text-gray-900/55 mt-1 truncate">{String(g.note || "").trim() ? "" : "—"}</div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                                    <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหมู่</div>
-
-                                    {(() => {
-                                      const txType = String(q?.txType || q?.type || "").toLowerCase();
-                                      if (txType !== "expense" && txType !== "income") return null;
-                                      const byId = catIndexByType?.[txType]?.byId || new Map();
-                                      const currentId = String(q?.categoryId || "").trim();
-                                      const suggestedId = String(q?.suggestedCategoryId || "").trim();
-                                      const currentCat = currentId ? byId.get(currentId) : null;
-                                      const suggestedCat = suggestedId ? byId.get(suggestedId) : null;
-                                      const hasDiffSuggestion = !!(suggestedId && suggestedId !== currentId && suggestedCat);
-                                      const canUseAiSuggestion = hasDiffSuggestion && !isTombstoneCategory(suggestedCat);
-                                      const isUserConfirmed = !!q?.categoryConfirmedByUser;
-
-                                      return (
-                                        <div className="mb-3 space-y-2">
-                                          <div className="rounded-xl border border-sky-200/70 bg-sky-50/80 px-3 py-2 flex items-center justify-between gap-2">
-                                            <div className="text-[11px] font-bold text-sky-900 min-w-0">
-                                              กำลังใช้หมวด: <span className="font-extrabold">{String(currentCat?.name || "ยังไม่เลือก")}</span>
-                                            </div>
-                                            {hasDiffSuggestion ? (
-                                              <span className="shrink-0 rounded-full border border-violet-300/80 bg-violet-50 px-2 py-0.5 text-[10px] font-extrabold text-violet-800">
-                                                AI แนะนำ: {String(suggestedCat?.name || "-")}
-                                              </span>
-                                            ) : null}
-                                          </div>
-
-                                          {canUseAiSuggestion ? (
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                updateQueueItem(q.id, {
-                                                  categoryId: suggestedId,
-                                                  categoryConfirmedByUser: true,
-                                                })
-                                              }
-                                              className="w-full rounded-xl border border-violet-300/80 bg-violet-50/90 px-3 py-2 text-[11px] font-extrabold text-violet-800 hover:bg-violet-100"
-                                            >
-                                              ใช้ค่าที่ AI แนะนำ
-                                            </button>
-                                          ) : null}
-
-                                          {isUserConfirmed ? (
-                                            <div className="text-[11px] text-emerald-800/90 font-bold">ยืนยันโดยผู้ใช้</div>
-                                          ) : suggestedId ? (
-                                            <div className="text-[11px] text-sky-900/70">ใช้ที่แนะนำได้ทันที หรือเลือกหมวดใหม่</div>
-                                          ) : null}
-                                        </div>
-                                      );
-                                    })()}
-
-                                    <QuickSuggestions
-                                      title="Quick suggestions"
-                                      selectedId={q.categoryId || ""}
-                                      items={(() => {
-                                        const t = String(q?.txType || q?.type || "").toLowerCase();
-                                        if (t !== "expense" && t !== "income") return [];
-                                        const byId = catIndexByType?.[t]?.byId || new Map();
-
-                                        const items = [];
-
-                                        // 1) Merchant Memory suggestion (silent auto-rule)
-                                        try {
-                                          const md = deriveMerchantAutofillPatch(
-                                            {
-                                              merchant: q?.merchant,
-                                              txType: t,
-                                              categoryId: "",
-                                              accountId: "",
-                                            },
-                                            state?.merchants || []
-                                          );
-                                          const mdCatId = String(md?.categoryId || "").trim();
-                                          const mdCat = mdCatId ? byId.get(mdCatId) : null;
-                                          if (mdCat && mdCatId) {
-                                            const pid = String(mdCat?.parentId || "").trim();
-                                            const parent = pid ? byId.get(pid) : null;
-                                            items.push({
-                                              id: mdCatId,
-                                              label: String(mdCat?.name || "").trim() || "หมวด",
-                                              badge: parent ? String(parent?.name || "").trim() : "ร้านนี้",
-                                              icon: { kind: "emoji", value: mdCat?.icon || "🏷️" },
-                                            });
-                                          }
-                                        } catch {
-                                          // ignore
-                                        }
-
-                                        // 2) Suggested from history (existing system)
-                                        const histId = String(q?.suggestedCategoryId || "").trim();
-                                        if (histId && !items.some((x) => String(x?.id || "") === histId)) {
-                                          const c = byId.get(histId);
-                                          if (c && !isTombstoneCategory(c)) {
-                                            const pid = String(c?.parentId || "").trim();
-                                            const parent = pid ? byId.get(pid) : null;
-                                            items.push({
-                                              id: histId,
-                                              label: String(c?.name || "").trim() || "หมวด",
-                                              badge: parent ? String(parent?.name || "").trim() : "ประวัติ",
-                                              icon: { kind: "emoji", value: c?.icon || "🏷️" },
-                                            });
-                                          }
-                                        }
-
-                                        // 3) Recent categories
-                                        const rec = (recentCatsByType?.[t] || []).slice(0, 8);
-                                        for (const c of rec) {
-                                          const id = String(c?.id || "").trim();
-                                          if (!id) continue;
-                                          if (items.some((x) => String(x?.id || "") === id)) continue;
-                                          const pid = String(c?.parentId || "").trim();
-                                          const parent = pid ? byId.get(pid) : null;
-                                          items.push({
-                                            id,
-                                            label: String(c?.name || "").trim() || "หมวด",
-                                            badge: parent ? String(parent?.name || "").trim() : "ล่าสุด",
-                                            icon: { kind: "emoji", value: c?.icon || "🏷️" },
-                                          });
-                                          if (items.length >= 6) break;
-                                        }
-
-                                        const cur = String(q?.categoryId || "").trim();
-                                        const pruned = items.filter((x) => String(x?.id || "").trim() && String(x?.id || "").trim() !== cur);
-                                        return pruned.slice(0, 6);
-                                      })()}
-                                      onSelect={(id) => {
-                                        const v = String(id || "").trim();
-                                        if (!v) return;
-                                        updateQueueItem(q.id, { categoryId: v, categoryConfirmedByUser: true });
-                                      }}
-                                      className="mb-3"
-                                    />
-
-                                    {(() => {
-                                      const txType = String(q?.txType || q?.type || "").toLowerCase();
-                                      const cats = txType === "income" ? incomeCatsAll : txType === "expense" ? expenseCatsAll : [];
-                                      const recents = txType === "income" || txType === "expense" ? (recentCatsByType?.[txType] || []) : [];
-                                      return (
-                                    <CategoryPicker
-                                      categories={cats}
-                                      value={q.categoryId || ""}
-                                      onChange={(id) => updateQueueItem(q.id, { categoryId: id, categoryConfirmedByUser: true })}
-                                      showTitle={false}
-                                      twoStep
-                                      recent={recents}
-                                      maxListHeightClass="max-h-[34dvh]"
-                                    />
-                                      );
-                                    })()}
-                                  </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Receipt breakdown (save 1 line, show discount/children as receipt) */}
-                          {q.txType === "expense" && !q.splitByCategory && hasReceiptLines ? (
-                            <div className="mt-3 glass-panel border border-white/20 rounded-2xl p-3">
-                              <div className="text-xs font-bold text-gray-900/70 mb-2">ใบเสร็จ (รายละเอียด)</div>
-                              <div className="space-y-2">
-                                {(q.groups || []).filter((g) => Number(g?.amount || 0) > 0).map((g, idx) => {
-                                  const isAdj = isAdjustmentLike(g);
-                                  const effect = String(g?.adjustmentEffect || "").toLowerCase().trim();
-                                  const sign = isAdj ? (effect === "subtract" ? "-" : "+") : "";
-                                  const cat = expenseCatsAll.find((c) => String(c.id) === String(g?.categoryId)) || null;
-                                  const title = String(g?.note || "").trim() || cat?.name || "—";
-                                  const subtitle = cat && title !== cat.name ? cat.name : isAdj ? (effect === "subtract" ? "ส่วนลด" : "ค่าธรรมเนียม") : "";
-                                  return (
-                                    <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">{title}</div>
-                                          {subtitle ? (
-                                            <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{subtitle}</div>
-                                          ) : null}
-
-                                          {Array.isArray(g?.children) && g.children.length ? (
-                                            <div className="mt-2 space-y-1 pl-3 border-l border-white/15">
-                                              {g.children.map((c, cidx) => (
-                                                <div key={cidx} className="text-[11px] text-gray-900/70 break-words whitespace-normal">
-                                                  • {String(c?.name || "").trim() || "—"}{" "}
-                                                  {Number(c?.amount || 0) > 0 ? (
-                                                    <span className="text-gray-900/55">({formatCurrency(c.amount)})</span>
-                                                  ) : null}
-                                                </div>
-                                              ))}
-                                            </div>
-                                          ) : null}
-                                        </div>
-
-                                        <div className={`shrink-0 text-xs font-black ${isAdj ? "text-gray-900/70" : "text-gray-900"}`}>
-                                          {sign}{formatCurrency(Number(g?.amount) || 0)}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {q.evidence ? (
-                            <div className="mt-3 text-[11px] text-gray-900/60">
-                              <span className="font-bold">Evidence:</span> {q.evidence}
-                            </div>
-                          ) : null}
-
-                          {Array.isArray(q.items) && q.items.length ? (
-                            <div className="mt-3 text-[11px] text-gray-900/55">
-                              <span className="font-bold">Items:</span>{" "}
-                              {q.items
-                                .slice(0, 6)
-                                .map((it) => String(it?.name || it?.title || it?.desc || "").trim())
-                                .filter(Boolean)
-                                .join(" • ")}
-                              {q.items.length > 6 ? " • ..." : ""}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <ScanQueueList
+              queue={queue}
+              expandedId={expandedId}
+              setExpandedId={setExpandedId}
+              canCreateFromQueue={canCreateFromQueue}
+              onCreateTransactions={createTransactionsFromQueue}
+              onRemoveItem={removeQueueItem}
+              onUpdateItem={updateQueueItem}
+              onUpdateGroup={updateQueueGroup}
+              onTypeChange={handleQueueTypeChange}
+              accounts={accounts}
+              nonCreditAccounts={nonCreditAccounts}
+              expenseCatsAll={expenseCatsAll}
+              incomeCatsAll={incomeCatsAll}
+              recentCatsByType={recentCatsByType}
+              recentAccountsByType={recentAccountsByType}
+              catIndexByType={catIndexByType}
+              merchants={state.merchants}
+            />
           ) : (
             <div className="text-center py-14 glass-card rounded-3xl border border-white/15">
               <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 text-gray-500">
@@ -4928,142 +4039,197 @@ const handleClose = () => {
       {/* ===== MANUAL MODE (or EDIT MODE) ===== */}
       {entryMode === "manual" || isEditMode ? (
         <>
-          {/* Type switch */}
-          <div className="glass-panel border border-white/20 p-1.5 rounded-2xl flex mb-5">
-            {[
-              { id: "expense", label: "รายจ่าย" },
-              { id: "income", label: "รายรับ" },
-              { id: "transfer", label: "Transfer" },
-              { id: "credit_payment", label: "ชำระบัตร" },
-            ].map((t) => (
-              <button
-                key={t.id}
-                onClick={() => {
-                  if (t.id === "credit_payment" && !creditAccounts.length) {
-                    showAlert?.("ยังไม่มีบัญชีประเภทบัตรเครดิตในระบบ (เพิ่มบัญชีบัตรก่อน)");
-                    return;
-                  }
-                  if (t.id === type) return;
-                  setType(t.id);
-                  if (t.id === "transfer" || t.id === "credit_payment") {
-                    setCategoryId("transfer");
-                    setIsSplitMode(false);
-                    return;
-                  }
+          <BentoGrid className="mb-28">
+            {/* Essentials */}
+            <BentoCard
+              title="รายละเอียดหลัก"
+              subtitle="ประเภท • จำนวนเงิน • วันที่ • ร้าน/โน้ต"
+              icon={<FileText size={18} className="text-gray-900" />}
+              className="md:col-span-12"
+            >
+              {/* Type segmented */}
+              <div className="bg-black/5 border border-black/5 p-1.5 rounded-2xl flex">
+                {[
+                  { id: "expense", label: "รายจ่าย" },
+                  { id: "income", label: "รายรับ" },
+                  { id: "transfer", label: "Transfer" },
+                  { id: "credit_payment", label: "ชำระบัตร" },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      if (t.id === "credit_payment" && !creditAccounts.length) {
+                        showAlert?.("ยังไม่มีบัญชีประเภทบัตรเครดิตในระบบ (เพิ่มบัญชีบัตรก่อน)");
+                        return;
+                      }
+                      if (t.id === type) return;
+                      setType(t.id);
+                      if (t.id === "transfer" || t.id === "credit_payment") {
+                        setCategoryId("transfer");
+                        setIsSplitMode(false);
+                        return;
+                      }
 
-                  // ✅ Prevent cross-type category corruption: reset to a sane default for the new type
-                  const nextCats = t.id === "income" ? incomeCats : expenseCats;
-                  const fallbackCatId = String(nextCats?.[0]?.id || "").trim();
-                  if (fallbackCatId) setCategoryId(fallbackCatId);
-                }}
-                className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
-                  type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
-                }`}
-                type="button"
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Amount */}
-          <AmountSection>
-          <AmountField
-            value={isSplitMode ? splitTotalDigits : amountDigits}
-            onChange={(v) => {
-              if (isSplitMode) return;
-              setAmountDigits(v);
-            }}
-            variant={type === "credit_payment" ? "transfer" : type}
-            label={isSplitMode ? "ยอดรวม (Split)" : "จำนวนเงิน"}
-            helper={isSplitMode ? "Split: ยอดรวมจะคำนวณจากรายการย่อยด้านล่าง" : budgetHint}
-            disabled={isSplitMode}
-          />
-          </AmountSection>
-
-          {/* Accounts */}
-          <TransferSection>
-          {type === "transfer" ? (
-            <div className="glass-card rounded-3xl p-5 mb-6">
-              <div className="text-xs font-bold text-gray-900/60 uppercase mb-3 flex items-center gap-2">
-                <ArrowRightLeft size={14} /> Transfer Accounts
+                      // ✅ Prevent cross-type category corruption: reset to a sane default for the new type
+                      const nextCats = t.id === "income" ? incomeCats : expenseCats;
+                      const fallbackCatId = String(nextCats?.[0]?.id || "").trim();
+                      if (fallbackCatId) setCategoryId(fallbackCatId);
+                    }}
+                    className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
+                      type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/40"
+                    }`}
+                    type="button"
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </div>
 
-              <div className="space-y-3">
+              {/* Amount */}
+              <div className="mt-4">
+                <AmountField
+                  value={isSplitMode ? splitTotalDigits : amountDigits}
+                  onChange={(v) => {
+                    if (isSplitMode) return;
+                    setAmountDigits(v);
+                  }}
+                  variant={type === "credit_payment" ? "transfer" : type}
+                  label={isSplitMode ? "ยอดรวม (Split)" : "จำนวนเงิน"}
+                  helper={isSplitMode ? "Split: ยอดรวมจะคำนวณจากรายการย่อยด้านล่าง" : budgetHint}
+                  disabled={isSplitMode}
+                />
+              </div>
+
+              {/* Date + Note */}
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีต้นทาง</div>
-                  <AccountPicker
-                    accounts={accounts}
-                    value={fromAccountId}
-                    onChange={setFromAccountId}
-                    title="เลือกบัญชีต้นทาง"
-                    placeholder="เลือกบัญชีต้นทาง"
-                  />
+                  <div className="ui-label mb-1">วันที่</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-600/10 border border-indigo-600/15 flex items-center justify-center shrink-0">
+                      <Calendar size={16} className="text-indigo-700" />
+                    </div>
+                    <input
+                      type="date"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className="ui-input flex-1"
+                    />
+                  </div>
                 </div>
 
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีปลายทาง</div>
-                  <AccountPicker
-                    accounts={accounts}
-                    value={toAccountId}
-                    onChange={setToAccountId}
-                    title="เลือกบัญชีปลายทาง"
-                    placeholder="เลือกบัญชีปลายทาง"
-                  />
+                  <div className="ui-label mb-1">ร้าน / โน้ต</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-600/10 border border-amber-600/15 flex items-center justify-center shrink-0">
+                      <FileText size={16} className="text-amber-700" />
+                    </div>
+                    <input
+                      type="text"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder={
+                        type === "credit_payment"
+                          ? "ธนาคาร/บัตร/รายละเอียด"
+                          : isSplitMode
+                            ? "โน้ตสำหรับทั้งกลุ่ม Split"
+                            : "ชื่อร้าน หรือรายละเอียด"
+                      }
+                      className="ui-input flex-1"
+                    />
+                  </div>
+                  {nearbySuggestion?.merchant && !isEditMode ? (
+                    <div className="mt-2 ml-12 text-[11px] text-indigo-700 font-bold flex items-center gap-1">
+                      📍 {nearbySuggestion.merchant}{" "}
+                      <span className="text-gray-500 font-normal">~{Math.round(nearbySuggestion.distanceM)} ม.</span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
+            </BentoCard>
 
-              <div className="mt-3 text-[12px] text-gray-900/60">
-                Transfer จะไม่ถูกนับเป็นรายรับ/รายจ่ายในสถิติ (เพื่อให้ยอดสุทธิไม่เพี้ยน)
-              </div>
-            </div>
-          ) : type === "credit_payment" ? (
-            <div className="glass-card rounded-3xl p-5 mb-6">
-              <div className="text-xs font-bold text-gray-900/60 uppercase mb-3 flex items-center gap-2">
-                <CreditCard size={14} /> Credit Card Payment
-              </div>
-
-              <div className="glass-panel border border-indigo-500/15 rounded-2xl p-4 mb-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+            {/* Accounts */}
+            <BentoCard
+              title={type === "transfer" ? "Transfer accounts" : type === "credit_payment" ? "ชำระบัตรเครดิต" : "บัญชีที่ใช้"}
+              subtitle={
+                type === "transfer"
+                  ? "เงินย้ายระหว่างบัญชี (ไม่กระทบรายรับ/รายจ่าย)"
+                  : type === "credit_payment"
+                    ? "ตัดยอดจากบัญชีจ่าย → ไปยังบัญชีบัตรเครดิต"
+                    : "เลือกบัญชีที่ใช้จ่าย/รับเงิน"
+              }
+              icon={
+                type === "transfer" ? (
+                  <ArrowRightLeft size={18} className="text-gray-900" />
+                ) : type === "credit_payment" ? (
+                  <CreditCard size={18} className="text-gray-900" />
+                ) : (
+                  <CreditCard size={18} className="text-gray-900" />
+                )
+              }
+              className="md:col-span-12"
+            >
+              {type === "transfer" ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <div className="ui-label mb-1">บัญชีต้นทาง</div>
+                    <AccountPicker
+                      accounts={accounts}
+                      value={fromAccountId}
+                      onChange={setFromAccountId}
+                      title="เลือกบัญชีต้นทาง"
+                      placeholder="เลือกบัญชีต้นทาง"
+                    />
+                  </div>
+                  <div>
+                    <div className="ui-label mb-1">บัญชีปลายทาง</div>
+                    <AccountPicker
+                      accounts={accounts}
+                      value={toAccountId}
+                      onChange={setToAccountId}
+                      title="เลือกบัญชีปลายทาง"
+                      placeholder="เลือกบัญชีปลายทาง"
+                    />
+                  </div>
+                </div>
+              ) : type === "credit_payment" ? (
+                <div className="space-y-3">
+                  <div className="rounded-2xl bg-indigo-600/10 border border-indigo-600/15 p-4">
                     <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
                       <CreditCard size={16} className="text-indigo-700" /> ชำระบัตรเครดิต
                     </div>
                     <div className="text-[12px] text-gray-900/60 mt-1">
-                      ระบบจะสร้าง 2 legs (เงินออกจากบัญชีจ่าย + เงินเข้าไปลดหนี้บัตร) แต่เป็น “ชำระบัตร” ไม่ใช่ “รายจ่าย”
-                      เพื่อกันซ้ำกับรายการรูดที่คุณบันทึกอยู่แล้ว
+                      ระบบจะสร้าง 2 legs (เงินออกจากบัญชีจ่าย + เงินเข้าไปลดหนี้บัตร) และจัดเป็น “ชำระบัตร” (ไม่ใช่รายจ่าย) เพื่อกันซ้ำกับรายการรูด
                     </div>
-                  </div>
-                  {selectedToAcc && isCreditAccount(selectedToAcc) ? (
-                    <div className="text-right shrink-0">
-                      <div className="text-[11px] text-gray-900/55">ยอดค้างชำระ</div>
-                      <div className="text-sm font-extrabold text-gray-900">{formatCurrency(creditDebt)}</div>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 gap-3">
-                  <div>
-                    <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัญชีที่จ่าย</div>
-                    <AccountPicker
-                      accounts={nonCreditAccounts.length ? nonCreditAccounts : accounts}
-                      value={fromAccountId}
-                      onChange={setFromAccountId}
-                      title="เลือกบัญชีที่จ่าย"
-                      placeholder="เลือกบัญชีที่จ่าย"
-                    />
-                    <div className="text-[11px] text-gray-900/55 mt-1">แนะนำ: ใช้บัญชีธนาคาร/เงินสด (ไม่ใช่บัตร)</div>
+                    {selectedToAcc && isCreditAccount(selectedToAcc) ? (
+                      <div className="mt-3 text-sm font-extrabold text-gray-900">
+                        ยอดค้างชำระ: <span className="tabular-nums">{formatCurrency(creditDebt)}</span>
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div>
-                    <div className="text-xs font-extrabold text-gray-900/70 mb-2">บัตรเครดิตที่ต้องการชำระ</div>
-                    <AccountPicker
-                      accounts={accounts.filter((a) => isCreditAccount(a))}
-                      value={toAccountId}
-                      onChange={setToAccountId}
-                      title="เลือกบัตรเครดิต"
-                      placeholder="เลือกบัตรเครดิต"
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <div className="ui-label mb-1">บัญชีที่จ่าย</div>
+                      <AccountPicker
+                        accounts={nonCreditAccounts.length ? nonCreditAccounts : accounts}
+                        value={fromAccountId}
+                        onChange={setFromAccountId}
+                        title="เลือกบัญชีที่จ่าย"
+                        placeholder="เลือกบัญชีที่จ่าย"
+                      />
+                      <div className="text-[11px] text-gray-900/55 mt-1">แนะนำ: ใช้บัญชีธนาคาร/เงินสด (ไม่ใช่บัตร)</div>
+                    </div>
+
+                    <div>
+                      <div className="ui-label mb-1">บัตรเครดิต</div>
+                      <AccountPicker
+                        accounts={accounts.filter((a) => isCreditAccount(a))}
+                        value={toAccountId}
+                        onChange={setToAccountId}
+                        title="เลือกบัตรเครดิต"
+                        placeholder="เลือกบัตรเครดิต"
+                      />
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between gap-3">
@@ -5075,128 +4241,44 @@ const handleClose = () => {
                     <button
                       type="button"
                       onClick={applyPayFull}
-                      className="shrink-0 px-3 py-2 rounded-xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+                      className="ui-btn ui-btn-secondary shrink-0"
                       disabled={!selectedToAcc || !isCreditAccount(selectedToAcc) || creditDebt <= 0}
                     >
                       จ่ายเต็มยอดค้าง
                     </button>
                   </div>
                 </div>
-              </div>
-
-              <div className="mt-3 text-[12px] text-gray-900/60">
-                ชำระบัตรจะถูกจัดเป็นหมวด transfer ภายในระบบ แต่ติดป้ายชนิดเป็น credit_payment เพื่อให้หน้า Recent แสดง “ครั้งเดียว”
-              </div>
-            </div>
-          ) : (
-            <div className="mb-6">
-              <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">บัญชีที่ใช้</h3>
-
-              {/* ✅ wrap เพื่อกันการเลื่อนซ้าย/ขวาทั้งหน้า */}
-              <div className="flex flex-wrap gap-3 pb-2">
-                {accounts.map((acc) => {
-                  const isSelected = accountId === acc.id;
-                  const v = getAccountVisual(acc);
-                  return (
-                    <button
-                      key={acc.id}
-                      onClick={() => setAccountId(acc.id)}
-                      className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all active:scale-95 ${
-                        isSelected
-                          ? "bg-gray-900/90 text-white border-white/10 shadow-lg"
-                          : "glass-chip text-gray-900 border border-white/15 hover:bg-white/10"
-                      }`}
-                      type="button"
-                    >
-                      <span className="w-7 h-7 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center">
-                        {v.kind === "img" ? (
-                          <img src={v.src} alt="acc" className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-xl leading-none">{v.value}</span>
-                        )}
-                      </span>
-
-                      <span className="text-sm font-extrabold">{acc.name}</span>
-                      {isSelected ? <Check size={14} className="ml-1" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {accounts.find((a) => a.id === accountId)?.name ? (
-                <div className="text-xs text-gray-900/55 ml-1">
-                  เลือกบัญชี:{" "}
-                  <span className="font-extrabold text-gray-900">{accounts.find((a) => a.id === accountId)?.name}</span>
-                </div>
-              ) : null}
-            </div>
-          )}
-          </TransferSection>
-
-          {/* Credit Card Installment (Manual) */}
-          {!isEditMode && type === "expense" && !isSplitMode && isCreditAccount(selectedManualAccount) ? (
-            <div className="glass-card rounded-3xl p-5 mb-6 border border-indigo-500/15">
-              <div className="flex items-start justify-between gap-4">
+              ) : (
                 <div className="min-w-0">
-                  <div className="text-xs font-bold text-indigo-900/70 uppercase flex items-center gap-2">
-                    <CreditCard size={14} /> ผ่อนชำระ
-                  </div>
-                  <div className="text-[11px] text-indigo-900/60 mt-1 break-words">
-                    ถ้าเปิด ระบบจะสร้างรายการล่วงหน้าตามจำนวนงวด และใส่ Note ว่า (งวดที่ x/y)
-                  </div>
+                  <AccountChipsPicker
+                    accounts={accounts}
+                    value={accountId}
+                    onChange={setAccountId}
+                    showTitle={false}
+                    showSelectedText={false}
+                    mobileSingleRow
+                  />
+                  {accounts.find((a) => String(a?.id || "") === String(accountId || ""))?.name ? (
+                    <div className="mt-2 text-xs text-gray-900/55">
+                      เลือกบัญชี: <span className="font-extrabold text-gray-900">{accounts.find((a) => String(a?.id || "") === String(accountId || ""))?.name}</span>
+                    </div>
+                  ) : null}
                 </div>
+              )}
+            </BentoCard>
 
-                <button
-                  type="button"
-                  onClick={() => setIsInstallment((v) => !v)}
-                  className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
-                    isInstallment
-                      ? "bg-gray-900/90 text-white border-white/10 shadow-sm"
-                      : "glass-chip text-gray-900 border-white/15 hover:bg-white/10"
-                  }`}
-                >
-                  {isInstallment ? "ON" : "OFF"}
-                </button>
-              </div>
-
-              {isInstallment ? (
-                <div className="mt-4 grid grid-cols-2 gap-3 items-end">
-                  <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                    <div className="text-xs font-bold text-gray-900/70 mb-1">จำนวนงวด (เดือน)</div>
-                    <input
-                      type="number"
-                      min={2}
-                      max={120}
-                      value={installmentMonths}
-                      onChange={(e) => {
-                        const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
-                        setInstallmentMonths(n);
-                      }}
-                      className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
-                    />
-                    <div className="text-[11px] text-gray-900/55 mt-1">เศษสตางค์จะกระจายอัตโนมัติ</div>
-                  </div>
-
-                  <div className="text-[12px] text-gray-900/60">
-                    * โหมดผ่อนจะปิดอัตโนมัติถ้าเปลี่ยนเป็น Split หรือเลือกบัญชีที่ไม่ใช่บัตรเครดิต
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          <CategorySection>
-          {/* Split + Categories */}
-          {type !== "transfer" && type !== "credit_payment" ? (
-            <>
-              <div className="glass-card rounded-3xl p-5 mb-6 border border-white/20">
+            {/* Category / Split */}
+            {type !== "transfer" && type !== "credit_payment" ? (
+              <BentoCard
+                title="หมวดหมู่"
+                subtitle="เลือกหมวด หรือเปิด Split เพื่อแยกหลายหมวด"
+                icon={<Layers size={18} className="text-gray-900" />}
+                className="md:col-span-12"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-gray-900/60 uppercase flex items-center gap-2">
-                      <Layers size={14} /> Split Transactions
-                    </div>
-                    <div className="text-[11px] text-gray-900/55 mt-1 break-words">
-                      แยกรายการเป็นหลายหมวด แต่ยังคงเก็บเป็น “transactions จริง” เพื่อให้รายงาน/สถิติ/งบ ทำงานถูกต้องทันที
+                    <div className="text-[12px] text-gray-900/60">
+                      Split จะบันทึกเป็นหลาย transactions (เพื่อให้งบ/สถิติ/Export ถูกต้อง) แต่หน้า Recent แสดงเป็น 1 การ์ด
                     </div>
                   </div>
 
@@ -5206,76 +4288,73 @@ const handleClose = () => {
                     className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
                       isSplitMode
                         ? "bg-emerald-600/90 text-white border-emerald-500/20 shadow-sm"
-                        : "glass-chip text-gray-900 border-white/15 hover:bg-white/10"
+                        : "bg-white/70 text-gray-900 border-slate-900/10 hover:bg-white"
                     }`}
                   >
-                    {isSplitMode ? "ON" : "OFF"}
+                    {isSplitMode ? "SPLIT ON" : "SPLIT OFF"}
                   </button>
                 </div>
 
                 {isSplitMode ? (
                   <div className="mt-4 space-y-3">
-                    <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                      <div className="text-xs font-bold text-gray-900/70 mb-1">Split label (optional)</div>
+                    <div className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
+                      <div className="ui-label mb-1">Split label (optional)</div>
                       <input
                         value={splitLabel}
                         onChange={(e) => setSplitLabel(e.target.value)}
-                        className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
+                        className="ui-input"
                         placeholder='เช่น "Lotus receipt"'
                       />
                     </div>
 
                     <div className="space-y-2">
                       {splitLines.map((l, idx) => (
-                        <div key={`${l.txId || "new"}-${idx}`} className="rounded-2xl bg-white/10 border border-white/15 p-3">
+                        <div key={`${l.txId || "new"}-${idx}`} className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
                           <div className="flex items-center justify-between gap-3">
                             <div className="text-[11px] text-gray-900/65 font-extrabold">
-                              Line {idx + 1}
-                              <span className="font-bold">/{splitLines.length}</span>
+                              Line {idx + 1} <span className="font-bold">/{splitLines.length}</span>
                             </div>
                             <button
                               type="button"
                               onClick={() => removeSplitLine(idx)}
-                              className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/15 flex items-center justify-center text-red-700 active:scale-95"
+                              className="w-9 h-9 rounded-2xl bg-red-500/10 border border-red-500/15 flex items-center justify-center text-red-700 active:scale-95"
                               aria-label="remove split line"
                             >
                               <Trash2 size={14} />
                             </button>
                           </div>
 
-                          <div className="grid grid-cols-5 gap-2 items-start mt-2">
-                            <div className="col-span-3">
-                              <div className="text-[11px] text-gray-900/60 font-bold mb-1">หมวด</div>
+                          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-start mt-2">
+                            <div className="md:col-span-3">
+                              <div className="ui-label mb-1">หมวด</div>
                               <CategorySelect
-                                // Pass full list (including tombstones) so CategorySelect can
-                                // show the currently selected deleted category in edit mode.
-                                categories={(type === "income" ? incomeCatsAll : expenseCatsAll)}
+                                categories={type === "income" ? incomeCatsAll : expenseCatsAll}
                                 value={l.categoryId || ""}
                                 onChange={(e) => updateSplitLine(idx, { categoryId: e.target.value })}
                                 allowEmpty
                                 emptyLabel="เลือกหมวด"
-                                className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                                className="ui-select"
                               />
                             </div>
 
-                            <div className="col-span-2">
-                              <div className="text-[11px] text-gray-900/60 font-bold mb-1">ยอด</div>
+                            <div className="md:col-span-2">
+                              <div className="ui-label mb-1">ยอด</div>
                               <input
                                 value={l.amountDigits || ""}
                                 onChange={(e) => updateSplitLine(idx, { amountDigits: sanitizeMoneyInput(e.target.value) })}
                                 inputMode="decimal"
-                                className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                                className="ui-input"
                                 placeholder="0.00"
                               />
                             </div>
                           </div>
 
                           <div className="mt-2">
-                            <div className="text-[11px] text-gray-900/60 font-bold mb-1">Note (optional)</div>
+                            <div className="ui-label mb-1">Note (optional)</div>
                             <input
                               value={l.lineNote || ""}
                               onChange={(e) => updateSplitLine(idx, { lineNote: e.target.value })}
-                              className="w-full glass-input rounded-xl px-3 py-2 bg-white/30 outline-none focus:border-gray-900 text-xs font-extrabold text-gray-900"
+                              className="ui-input"
                               placeholder="รายละเอียดเฉพาะบรรทัด (ถ้ามี)"
                             />
                           </div>
@@ -5287,7 +4366,7 @@ const handleClose = () => {
                       <button
                         type="button"
                         onClick={addSplitLine}
-                        className="px-4 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95 flex items-center gap-2"
+                        className="ui-btn ui-btn-secondary"
                       >
                         <Plus size={14} /> เพิ่มบรรทัด
                       </button>
@@ -5296,366 +4375,193 @@ const handleClose = () => {
                         รวม: <span className="text-gray-900">{formatCurrency(splitTotalNumber)}</span>
                       </div>
                     </div>
-
-                    <div className="text-[11px] text-gray-900/55">
-                      * Split จะบันทึกเป็นหลาย transactions (เพื่อให้ Export/งบ/สถิติ ถูกต้อง) แต่ในหน้า Recent จะแสดงเป็น 1 การ์ด
-                    </div>
                   </div>
-                ) : null}
-              </div>
-
-              {!isSplitMode ? (
-                <div className="glass-card rounded-3xl p-5 mb-6 border border-white/20">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-gray-900/60 uppercase">หมวดหมู่</div>
-                      <div className="text-[11px] text-gray-900/55 mt-1">
-                        เลือกหมวดหลักก่อน แล้วเลือกหมวดย่อย (ถ้ามี) • ใช้ค้นหาเพื่อเลือกได้เร็วขึ้น
-                      </div>
-                    </div>
-                    {categoryId ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCategoryId("");
-                          setCatQuery("");
-                        }}
-                        className="shrink-0 px-3 py-2 rounded-2xl text-[11px] font-extrabold glass-chip border-white/15 text-gray-900/80 hover:text-gray-900 active:scale-95"
-                      >
-                        ล้าง
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {/* Search */}
+                ) : (
                   <div className="mt-4">
-                    <div className="glass-panel rounded-2xl px-3 py-2 flex items-center gap-2">
-                      <Search size={16} className="text-gray-900/55" />
-                      <input
-                        value={catQuery}
-                        onChange={(e) => setCatQuery(e.target.value)}
-                        className="flex-1 bg-transparent outline-none text-sm font-extrabold text-gray-900"
-                        placeholder="ค้นหาหมวดหมู่ เช่น อาหาร, กาแฟ, น้ำมัน"
-                      />
-                      {catQuery ? (
+                    <CategoryPicker
+                      categories={type === "income" ? incomeCatsAll : expenseCatsAll}
+                      value={categoryId}
+                      onChange={setCategoryId}
+                      recent={recentCatsForPicker}
+                      showTitle={false}
+                      twoStep
+                      className="border-0 bg-transparent p-0"
+                    />
+                  </div>
+                )}
+              </BentoCard>
+            ) : null}
+
+            {/* Advanced */}
+            <div className="md:col-span-12">
+              <details
+                open={manualAdvancedOpen}
+                onToggle={(e) => setManualAdvancedOpen(e.currentTarget.open)}
+                className="ui-card p-4"
+              >
+                <summary className="bento-summary cursor-pointer select-none flex items-center justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-2xl bg-white/70 border border-slate-900/10 flex items-center justify-center shrink-0">
+                      <Sparkles size={18} className="text-gray-900" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-black text-gray-900">Advanced options</div>
+                      <div className="mt-0.5 text-[12px] font-bold text-gray-800/60">อ้างอิง • แท็ก • ไฟล์แนบ • ผ่อนชำระ</div>
+                    </div>
+                  </div>
+
+                  <ChevronRight
+                    size={18}
+                    className={`text-gray-900/45 transition-transform ${manualAdvancedOpen ? "rotate-90" : ""}`}
+                    aria-hidden="true"
+                  />
+                </summary>
+
+                <div className="mt-4 space-y-4">
+                  {/* Attachment preview (from scan / inbox) */}
+                  {initialAttachmentId ? (
+                    <div className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
+                      <div className="ui-label mb-2">ไฟล์แนบ</div>
+                      {attachmentUrl ? (
+                        <a
+                          href={attachmentUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="block rounded-2xl overflow-hidden border border-slate-900/10 bg-white/50"
+                        >
+                          {String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
+                            <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center">
+                              <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
+                                <FileText size={18} /> เปิดไฟล์ PDF
+                              </div>
+                            </div>
+                          ) : (
+                            <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
+                          )}
+                        </a>
+                      ) : (
+                        <div className="text-sm text-gray-900/60">กำลังโหลดไฟล์…</div>
+                      )}
+                      <div className="mt-2 text-[11px] text-gray-900/50">ไฟล์แนบถูกเก็บแบบถาวรในเครื่อง (IndexedDB)</div>
+                    </div>
+                  ) : null}
+
+                  {/* Installment (Manual) */}
+                  {!isEditMode && type === "expense" && !isSplitMode && isCreditAccount(selectedManualAccount) ? (
+                    <div className="rounded-2xl bg-indigo-600/10 border border-indigo-600/15 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-indigo-900/70 uppercase flex items-center gap-2">
+                            <CreditCard size={14} /> ผ่อนชำระ
+                          </div>
+                          <div className="text-[11px] text-indigo-900/60 mt-1 break-words">
+                            ถ้าเปิด ระบบจะสร้างรายการล่วงหน้าตามจำนวนงวด และใส่ Note ว่า (งวดที่ x/y)
+                          </div>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => setCatQuery("")}
-                          className="w-8 h-8 rounded-xl glass-chip border-white/15 flex items-center justify-center text-gray-900/70 active:scale-95"
-                          aria-label="clear category search"
+                          onClick={() => setIsInstallment((v) => !v)}
+                          className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
+                            isInstallment
+                              ? "bg-gray-900/90 text-white border-white/10 shadow-sm"
+                              : "bg-white/70 text-gray-900 border-indigo-600/15 hover:bg-white"
+                          }`}
                         >
-                          <X size={14} />
+                          {isInstallment ? "ON" : "OFF"}
                         </button>
+                      </div>
+
+                      {isInstallment ? (
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                          <div className="rounded-2xl bg-white/60 border border-indigo-600/15 p-3">
+                            <div className="ui-label mb-1">จำนวนงวด (เดือน)</div>
+                            <input
+                              type="number"
+                              min={2}
+                              max={120}
+                              value={installmentMonths}
+                              onChange={(e) => {
+                                const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
+                                setInstallmentMonths(n);
+                              }}
+                              className="ui-input"
+                            />
+                            <div className="text-[11px] text-gray-900/55 mt-1">เศษสตางค์จะกระจายอัตโนมัติ</div>
+                          </div>
+
+                          <div className="text-[12px] text-indigo-900/60">
+                            * โหมดผ่อนจะปิดอัตโนมัติถ้าเปลี่ยนเป็น Split หรือเลือกบัญชีที่ไม่ใช่บัตรเครดิต
+                          </div>
+                        </div>
                       ) : null}
                     </div>
+                  ) : null}
 
-                    {/* Selected breadcrumb */}
-                    <div className="mt-2 text-[11px] font-extrabold text-gray-900/70 flex items-center gap-2">
-                      <div className="px-3 py-2 rounded-2xl bg-white/10 border border-white/15 inline-flex items-center gap-2">
-                        <span className="text-gray-900/55">เลือกแล้ว:</span>
-                        <span className="text-gray-900">
-                          {selectedCatBreadcrumb || "(ยังไม่เลือก)"}
-                        </span>
-                      </div>
-                    </div>
+                  {/* Ref */}
+                  <div>
+                    <div className="ui-label mb-1">อ้างอิง</div>
+                    <input
+                      type="text"
+                      value={ref}
+                      onChange={(e) => setRef(e.target.value)}
+                      placeholder="Ref / TRX / เลขที่รายการ"
+                      className="ui-input"
+                    />
                   </div>
 
-                  {/* Search results */}
-                  {catQuery.trim() ? (
-                    <div className="mt-4">
-                      <div className="text-[11px] font-extrabold text-gray-900/60 uppercase mb-2">ผลการค้นหา</div>
-                      <div className="max-h-[46dvh] overflow-auto pr-1 space-y-2">
-                        {catSearchResults.length ? (
-                          catSearchResults.map(({ cat, breadcrumb }) => (
-                            <button
-                              key={cat.id}
-                              type="button"
-                              onClick={() => {
-                                setCategoryId(cat.id);
-                                setCatQuery("");
-                              }}
-                              className={`w-full flex items-center justify-between gap-3 px-3 py-3 rounded-2xl border transition-all active:scale-95 ${
-                                String(categoryId || "") === String(cat.id)
-                                  ? "glass-card border-white/20 ring-2 ring-gray-900/70"
-                                  : "glass-chip border-white/15 hover:bg-white/10"
-                              } ${isTombstoneCategory(cat) ? "opacity-70" : ""}`}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div
-                                  className="w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0"
-                                  style={{ backgroundColor: `${String(cat.color || "#999")}20` }}
-                                >
-                                  {cat.icon}
-                                </div>
-                                <div className="min-w-0 text-left">
-                                  <div className="text-sm font-extrabold text-gray-900 truncate">
-                                    {cat.name}{isTombstoneCategory(cat) ? " (Deleted)" : ""}
-                                  </div>
-                                  <div className="text-[11px] text-gray-900/55 truncate">{breadcrumb}</div>
-                                </div>
-                              </div>
-
-                              <ChevronRight size={16} className="text-gray-900/50 shrink-0" />
-                            </button>
-                          ))
-                        ) : (
-                          <div className="text-sm text-gray-900/55 px-3 py-4">ไม่พบหมวดที่ตรงกับคำค้นหา</div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {/* Recent */}
-                      {recentCatsForPicker.length ? (
-                        <div className="mt-4">
-                          <div className="text-[11px] font-extrabold text-gray-900/60 uppercase mb-2">ล่าสุด</div>
-                          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                            {recentCatsForPicker.map((cat) => (
-                              <button
-                                key={cat.id}
-                                type="button"
-                                onClick={() => setCategoryId(cat.id)}
-                                className={`shrink-0 px-3 py-2 rounded-2xl border transition-all active:scale-95 inline-flex items-center gap-2 ${
-                                  String(categoryId || "") === String(cat.id)
-                                    ? "glass-card border-white/20 ring-2 ring-gray-900/70"
-                                    : "glass-chip border-white/15 hover:bg-white/10"
-                                }`}
-                              >
-                                <span className="text-base">{cat.icon}</span>
-                                <span className="text-xs font-extrabold text-gray-900/90 whitespace-nowrap">{cat.name}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {/* Main categories */}
-                      <div className="mt-4">
-                        <div className="flex items-center justify-between gap-3 mb-2">
-                          <div className="text-[11px] font-extrabold text-gray-900/60 uppercase">หมวดหลัก</div>
-                          <div className="text-[11px] text-gray-900/45">เลื่อนซ้าย/ขวา</div>
-                        </div>
-                        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                          {catHierarchy.main.map((cat) => (
-                            <button
-                              key={cat.id}
-                              type="button"
-                              onClick={() => setCategoryId(cat.id)}
-                              className={`shrink-0 px-3 py-2 rounded-2xl border transition-all active:scale-95 inline-flex items-center gap-2 ${
-                                selectedMainId === cat.id
-                                  ? "glass-card border-white/20 ring-2 ring-gray-900/70"
-                                  : "glass-chip border-white/15 hover:bg-white/10"
-                              } ${isTombstoneCategory(cat) ? "opacity-70" : ""}`}
-                            >
-                              <span
-                                className="w-3 h-3 rounded-full"
-                                style={{ backgroundColor: String(cat.color || "#999") }}
-                                aria-hidden="true"
-                              />
-                              <span className="text-base">{cat.icon}</span>
-                              <span className="text-xs font-extrabold text-gray-900/90 whitespace-nowrap">{cat.name}</span>
-                              {isTombstoneCategory(cat) ? <span className="text-[10px] font-extrabold text-red-700/70">(Deleted)</span> : null}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Sub categories */}
-                      {selectedMainId && subCatsForMain.length ? (
-                        <div className="mt-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="text-[11px] font-extrabold text-gray-900/60 uppercase">หมวดย่อย (ถ้าต้องการ)</div>
-                            {categoryId !== selectedMainId ? (
-                              <button
-                                type="button"
-                                onClick={() => setCategoryId(selectedMainId)}
-                                className="text-[11px] font-extrabold text-gray-900/70 hover:text-gray-900"
-                              >
-                                ใช้หมวดหลักนี้
-                              </button>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {subCatsForMain.map((cat) => (
-                              <button
-                                key={cat.id}
-                                type="button"
-                                onClick={() => setCategoryId(cat.id)}
-                                className={`px-3 py-2 rounded-2xl border transition-all active:scale-95 inline-flex items-center gap-2 ${
-                                  String(categoryId || "") === String(cat.id)
-                                    ? "glass-card border-white/20 ring-2 ring-gray-900/70"
-                                    : "glass-chip border-white/15 hover:bg-white/10"
-                                } ${isTombstoneCategory(cat) ? "opacity-70" : ""}`}
-                              >
-                                <span className="text-base">{cat.icon}</span>
-                                <span className="text-xs font-extrabold text-gray-900/90">{cat.name}</span>
-                                {isTombstoneCategory(cat) ? <span className="text-[10px] font-extrabold text-red-700/70">(Deleted)</span> : null}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </>
-                  )}
+                  {/* Tags */}
+                  <div>
+                    <div className="ui-label mb-2">แท็ก / ป้ายกำกับ</div>
+                    <TagsInput value={tags} onChange={setTags} allTags={allTagsFromHistory} placeholder="เช่น เที่ยวญี่ปุ่น, โปรเจค A" />
+                  </div>
                 </div>
-              ) : null}
-            </>
-          ) : null}
-          </CategorySection>
-
-          {/* Attachment preview (from scan / inbox) */}
-          {initialAttachmentId ? (
-            <div className="glass-card rounded-3xl p-4 mb-4 border border-white/20">
-              <div className="text-xs font-bold text-gray-900/55 mb-3 uppercase">ไฟล์แนบ</div>
-              {attachmentUrl ? (
-                <a
-                  href={attachmentUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
-                >
-                  {String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
-                    <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center bg-white/10">
-                      <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
-                        <FileText size={18} />
-                        เปิดไฟล์ PDF
-                      </div>
-                    </div>
-                  ) : (
-                    <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
-                  )}
-                </a>
-              ) : (
-                <div className="text-sm text-gray-900/60">กำลังโหลดไฟล์…</div>
-              )}
-              <div className="mt-2 text-[11px] text-gray-900/50">
-                ไฟล์แนบถูกเก็บแบบถาวรในเครื่อง (IndexedDB)
-              </div>
+              </details>
             </div>
-          ) : null}
+          </BentoGrid>
 
-          {/* Date / Note / Ref — Modern card inputs */}
-          <div className="space-y-3 mb-6">
-            {/* Date */}
-            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
-              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1.5">วันที่</label>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                  <Calendar size={16} className="text-indigo-600" />
-                </div>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="flex-1 outline-none text-gray-900 bg-transparent font-bold text-sm"
-                />
-              </div>
-            </div>
-
-            {/* Note */}
-            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
-              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1.5">โน้ต</label>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
-                  <FileText size={16} className="text-amber-600" />
-                </div>
-                <input
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder={
-                    type === "credit_payment"
-                      ? "ธนาคาร/บัตร/รายละเอียด"
-                      : isSplitMode
-                        ? "โน้ตสำหรับทั้งกลุ่ม Split"
-                        : "ชื่อร้าน หรือรายละเอียด"
-                  }
-                  className="flex-1 outline-none text-gray-900 bg-transparent font-bold text-sm placeholder:text-gray-400"
-                />
-              </div>
-              {nearbySuggestion?.merchant && !isEditMode ? (
-                <div className="mt-2 ml-12 text-[11px] text-indigo-700 font-bold flex items-center gap-1">
-                  📍 {nearbySuggestion.merchant} <span className="text-gray-500 font-normal">~{Math.round(nearbySuggestion.distanceM)} ม.</span>
-                </div>
-              ) : null}
-            </div>
-
-            {/* Ref */}
-            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
-              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-1.5">อ้างอิง</label>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center shrink-0">
-                  <Eye size={16} className="text-slate-600" />
-                </div>
-                <input
-                  type="text"
-                  value={ref}
-                  onChange={(e) => setRef(e.target.value)}
-                  placeholder="Ref / TRX / เลขที่รายการ"
-                  className="flex-1 outline-none text-gray-900 bg-transparent font-bold text-sm placeholder:text-gray-400"
-                />
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div className="rounded-2xl bg-white/80 border border-gray-200 p-3.5">
-              <label className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider block mb-2">แท็ก / ป้ายกำกับ</label>
-              <TagsInput
-                value={tags}
-                onChange={setTags}
-                allTags={allTagsFromHistory}
-                placeholder="เช่น เที่ยวญี่ปุ่น, โปรเจค A"
-              />
+          {/* Sticky action bar */}
+          <div className="fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-40">
+            <div className="ui-card-strong p-2 rounded-3xl shadow-[0_28px_70px_-50px_rgba(0,0,0,0.65)]">
+              <button
+                onClick={handleSaveManual}
+                disabled={isSaving}
+                className={`ui-btn ui-btn-primary w-full py-4 rounded-2xl ${isSaving ? "opacity-70" : ""}`}
+                type="button"
+              >
+                {isEditMode ? <Edit2 size={18} /> : <Plus size={18} />}
+                {isSaving ? "กำลังบันทึก…" : isEditMode ? "บันทึกการแก้ไข" : "บันทึกรายการ"}
+              </button>
             </div>
           </div>
-
-          {/* Fixed Save — gradient button */}
-          <button
-            onClick={handleSaveManual}
-            disabled={isSaving}
-            className={`fixed left-4 right-4 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] py-4 rounded-2xl font-extrabold shadow-xl transition-all flex items-center justify-center gap-2 ${
-              isSaving
-                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                : "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/25 active:scale-[0.98]"
-            }`}
-            type="button"
-          >
-            {isEditMode ? <Edit2 size={18} /> : <Plus size={18} />}
-            {isSaving ? "กำลังบันทึก…" : isEditMode ? "บันทึกการแก้ไข" : "บันทึกรายการ"}
-          </button>
         </>
       ) : null}
 
       {/* Fixed actions (scan mode) */}
       {!isEditMode && entryMode === "scan" && queue.length ? (
-        <div className="fixed left-4 right-4 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] grid grid-cols-2 gap-2">
-          <button
-            onClick={sendQueueToInbox}
-            className={`py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
-              canSendToInbox
-                ? "bg-gray-900/90 text-white"
-                : "bg-white/30 text-gray-700/60 border border-white/20"
-            }`}
-            type="button"
-            disabled={!canSendToInbox}
-          >
-            <Inbox size={18} />
-            ส่งไป Inbox
-          </button>
+        <div className="fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-40">
+          <div className="ui-card-strong p-2 rounded-3xl shadow-[0_28px_70px_-50px_rgba(0,0,0,0.65)]">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={sendQueueToInbox}
+                className={`ui-btn w-full ${canSendToInbox ? "ui-btn-secondary" : "ui-btn-secondary opacity-60"}`}
+                type="button"
+                disabled={!canSendToInbox}
+              >
+                <Inbox size={18} />
+                ส่งไป Inbox
+              </button>
 
-          <button
-            onClick={handlePostScanSaveNow}
-            className={`py-4 rounded-2xl font-extrabold shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
-              canCreateFromQueue
-                ? "bg-indigo-600 text-white shadow-indigo-200"
-                : "bg-white/30 text-gray-700/60 border border-white/20"
-            }`}
-            type="button"
-            disabled={!canCreateFromQueue}
-          >
-            <Check size={18} />
-            บันทึกทันที
-          </button>
+              <button
+                onClick={handlePostScanSaveNow}
+                className={`ui-btn w-full ${canCreateFromQueue ? "ui-btn-primary" : "ui-btn-primary opacity-60"}`}
+                type="button"
+                disabled={!canCreateFromQueue}
+              >
+                <Check size={18} />
+                บันทึกทันที
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 

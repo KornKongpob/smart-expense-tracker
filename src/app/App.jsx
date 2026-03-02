@@ -91,6 +91,46 @@ export default function App() {
 
   const view = state?.ui?.view || "dashboard";
 
+  // ---- Keyboard (mobile) guard ----
+  // Hide bottom navbar while the on-screen keyboard is open (prevents overlap with inputs),
+  // and expose the keyboard inset as a CSS variable for fixed buttons.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    // Default
+    try {
+      document.documentElement.style.setProperty("--keyboard-inset", "0px");
+    } catch {
+      // ignore
+    }
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      const inset = Math.max(0, (window.innerHeight || 0) - (vv.height || 0));
+      try {
+        document.documentElement.style.setProperty("--keyboard-inset", `${inset}px`);
+      } catch {
+        // ignore
+      }
+      // threshold: keyboard usually takes > 200px on phones, but keep it conservative
+      setKeyboardOpen(inset > 120);
+    };
+
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    window.addEventListener("orientationchange", update);
+
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
+
   // ---- Hash router: sync URL ↔ view ----
   useEffect(() => {
     // Set initial hash on mount
@@ -267,13 +307,14 @@ export default function App() {
     }
   };
 
-  const showNavbar = view !== "add"; // FAB view uses custom header
+  const reserveNavSpace = view !== "add";
+  const showNavbar = reserveNavSpace && !keyboardOpen; // hide while keyboard is open
 
   // ---- Quick Add bottom sheet ----
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   return (
-    <div className={showNavbar ? "pb-nav" : "pb-safe"}>
+    <div className={reserveNavSpace ? "pb-nav" : "pb-safe"}>
       <AlertToast message={alert} onClose={() => setAlert("")} />
       <ConfirmModal confirm={confirm} setConfirm={setConfirm} />
 

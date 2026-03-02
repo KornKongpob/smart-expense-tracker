@@ -1,8 +1,23 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export function useTransactionDraft({ initialData, isEditMode, transferKindForEdit, transferPair, accounts, toISODate, normalizeLatLng }) {
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan");
-  const [scanUploadKind, setScanUploadKind] = useState("receipt");
+  
+  // One-shot entry mode override (e.g., from Inbox/Quick Add)
+  useEffect(() => {
+    if (isEditMode) return;
+    try {
+      const forced = String(sessionStorage.getItem("add.entryMode.force") || "").trim();
+      if (forced) {
+        setEntryMode(forced);
+        sessionStorage.removeItem("add.entryMode.force");
+      }
+    } catch {
+      // ignore
+    }
+  }, [isEditMode]);
+
+const [scanUploadKind, setScanUploadKind] = useState("receipt");
 
   const initialType = useMemo(() => {
     if (initialData?.isTransfer) return transferKindForEdit === "credit_payment" ? "credit_payment" : "transfer";

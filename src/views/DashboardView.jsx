@@ -5,6 +5,7 @@ import TransactionCard from "../components/TransactionCard";
 import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
 import AccountPicker from "../components/AccountPicker";
+import BentoGrid from "../components/bento/BentoGrid";
 import { useAppStore } from "../store/store.jsx";
 import { getBudget, toMonthKey, calcAccountBalance } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
@@ -23,6 +24,12 @@ import {
 
 const BUDGET_TOTAL_ID = "__TOTAL__";
 const BUDGET_DAILY_ID = "__DAILY__";
+// ✅ Safe createdAt accessor (prevents crash when rendering transfer/split groups)
+const getTxCreatedAt = (t) => {
+  const n = Number(t?.createdAt || t?.updatedAt || 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
 
 export default function DashboardView() {
   const store = useAppStore();
@@ -370,11 +377,11 @@ useEffect(() => {
 
       <main className="ui-page pt-4 pb-6">
         {/* Budget status (tap to edit in Budget page) */}
-        <div className="grid grid-cols-2 gap-3 mb-5">
+        <BentoGrid className="mb-5">
           <button
             type="button"
             onClick={() => navigate("budgets")}
-            className="ui-card p-4 text-left active:scale-[0.99] transition-transform focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300/40"
+            className="ui-card p-4 text-left active:scale-[0.99] transition-transform focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300/40 md:col-span-6"
           >
             <div className="text-xs font-extrabold text-gray-700/70 mb-2 flex items-center gap-2">
               <CalendarDays size={14} /> วันนี้
@@ -415,7 +422,7 @@ useEffect(() => {
           <button
             type="button"
             onClick={() => navigate("budgets")}
-            className="ui-card p-4 text-left active:scale-[0.99] transition-transform focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300/40"
+            className="ui-card p-4 text-left active:scale-[0.99] transition-transform focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300/40 md:col-span-6"
           >
             <div className="text-xs font-extrabold text-gray-700/70 mb-2 flex items-center gap-2">
               <Calendar size={14} /> เดือนนี้
@@ -453,7 +460,7 @@ useEffect(() => {
               </div>
             ) : null}
           </button>
-        </div>
+        </BentoGrid>
 
         {/* Net Worth */}
         <div className="ui-card p-4 mb-5">

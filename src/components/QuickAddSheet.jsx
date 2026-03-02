@@ -118,11 +118,23 @@ export default function QuickAddSheet({ isOpen, onClose }) {
   };
 
   const handleOpenFull = () => {
+    // Force manual form when user asks for "รายละเอียดเพิ่ม"
+    try {
+      sessionStorage.setItem("add.entryMode.force", "manual");
+    } catch {
+      // ignore
+    }
     onClose();
     setTimeout(() => store.startNewTransaction(), 150);
   };
 
   const handleQuickScan = () => {
+    // Force scan mode when launching from Quick Add
+    try {
+      sessionStorage.setItem("add.entryMode.force", "scan");
+    } catch {
+      // ignore
+    }
     onClose();
     setTimeout(() => {
       store.startNewTransaction();

@@ -15,7 +15,8 @@ import {
   X,
   Edit2,
   Layers,
-  FileText
+  FileText,
+  Sparkles
 } from "lucide-react";
 
 import { useAppStore } from "../store/store.jsx";
@@ -23,6 +24,7 @@ import { findFuzzyDuplicate } from "../store/selectors.js";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, toISODate } from "../utils/format";
 import AppHeader from "../components/AppHeader";
+import InboxItemReviewModal from "./inbox/InboxItemReviewModal";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { expandTransactionToInstallments } from "../utils/installments";
 import { useBlobInfo } from "../utils/useBlobInfo";
@@ -32,7 +34,7 @@ import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
-import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../utils/receiptCategorizer";
+import { splitReceiptItemsToLines, sanitizeCategoryKey, inferCategoryKeyFromText } from "../utils/receiptCategorizer";
 import {
   reconcileReceiptGroups,
   signedReceiptGroupSatang,
@@ -2025,7 +2027,106 @@ export default function InboxView({ showAlert, showConfirm }) {
     );
   };
 
-  const approveIds = (ids) => {
+    const selectDuplicatesOnly = () => {
+    setSelectedIds(new Set(filtered.filter((x) => !!x?.duplicate).map((x) => x.id)));
+  };
+
+  const autoCategorizeIds = (ids) => {
+    const list = Array.isArray(ids) ? ids : [];
+    if (!list.length) return;
+
+    const cats = state.categories || { expense: [], income: [] };
+    const expenseIds = new Set((cats.expense || []).map((c) => String(c?.id || "").trim()).filter(Boolean));
+    const incomeIds = new Set((cats.income || []).map((c) => String(c?.id || "").trim()).filter(Boolean));
+    const merchantsList = state.merchants || [];
+
+    let updated = 0;
+
+    for (const rawId of list) {
+      const id = String(rawId || "");
+      const it = (inbox || []).find((x) => String(x?.id || "") === id) || null;
+      if (!it) continue;
+
+      const t = normalizeTxType(it?.type || it?.txType);
+      if (t !== "expense" && t !== "income") continue;
+
+      const setIds = t === "income" ? incomeIds : expenseIds;
+
+      const patch = {};
+
+      // 1) Merchant dictionary suggestion (fill blanks)
+      try {
+        const md = deriveMerchantAutofillPatch(
+          {
+            merchant: it?.merchant || it?.note || "",
+            txType: t,
+            categoryId: it?.categoryId || "",
+            accountId: it?.accountId || "",
+          },
+          merchantsList
+        );
+        const mdCatId = String(md?.categoryId || "").trim();
+        const mdAccId = String(md?.accountId || "").trim();
+
+        if (mdCatId && !String(it?.categoryId || "").trim() && setIds.has(mdCatId)) patch.categoryId = mdCatId;
+        if (mdAccId && !String(it?.accountId || "").trim()) patch.accountId = mdAccId;
+      } catch {
+        // ignore
+      }
+
+      // 2) Split groups (expense)
+      if (t === "expense" && it?.splitByCategory && Array.isArray(it?.groups) && it.groups.length) {
+        const parent = String(it?.categoryId || patch.categoryId || "").trim();
+        const nextGroups = it.groups.map((g) => {
+          const curCat = String(g?.categoryId || g?.category || "").trim();
+          if (curCat) return g;
+
+          // Adjustments: discount/fees
+          if (isAdjustmentLike(g)) {
+            const eff = String(g?.adjustmentEffect || "").toLowerCase().trim();
+            const at = String(g?.adjustmentType || "").toLowerCase().trim();
+            const wantsDiscount = at === "discount" || eff === "subtract";
+            const desired = wantsDiscount
+              ? expenseIds.has("discount")
+                ? "discount"
+                : expenseIds.has("fees")
+                ? "fees"
+                : "discount"
+              : expenseIds.has("fees")
+              ? "fees"
+              : expenseIds.has("discount")
+              ? "discount"
+              : "fees";
+            return { ...g, categoryId: desired };
+          }
+
+          const text = String(g?.note || g?.name || g?.title || "").trim();
+          const sug = String(inferCategoryKeyFromText("expense", text) || "").trim();
+          if (sug && setIds.has(sug)) return { ...g, categoryId: sug };
+          if (parent) return { ...g, categoryId: parent };
+          return g;
+        });
+
+        patch.groups = nextGroups;
+      } else {
+        // 3) Non-split category suggestion (fill blanks)
+        const curCat = String(it?.categoryId || "").trim();
+        if (!curCat) {
+          const text = String(it?.merchant || it?.note || "").trim();
+          const sug = String(inferCategoryKeyFromText(t, text) || "").trim();
+          if (sug && setIds.has(sug)) patch.categoryId = sug;
+        }
+      }
+
+      if (Object.keys(patch).length) {
+        updateInboxItem(id, patch);
+        updated += 1;
+      }
+    }
+
+    showAlert?.(updated ? `Auto-categorize: อัปเดต ${updated} รายการ` : "Auto-categorize: ไม่มีรายการที่ต้องอัปเดต");
+  };
+const approveIds = (ids) => {
     const list = Array.isArray(ids) ? ids : [];
     if (!list.length) return;
 
@@ -2127,7 +2228,14 @@ export default function InboxView({ showAlert, showConfirm }) {
         right={
           <button
             type="button"
-            onClick={() => startNewTransaction?.() ?? navigate("add")}
+            onClick={() => {
+              try {
+                sessionStorage.setItem("add.entryMode.force", "scan");
+              } catch {
+                // ignore
+              }
+              startNewTransaction?.() ?? navigate("add");
+            }}
             className="ui-btn ui-btn-secondary active:scale-[0.99]"
           >
             <Check size={18} />
@@ -2240,6 +2348,55 @@ export default function InboxView({ showAlert, showConfirm }) {
                 <Trash2 size={16} />
                 Delete selected
               </button>
+
+              <button
+                type="button"
+                onClick={() => autoCategorizeIds(Array.from(selectedIds))}
+                className={`px-3 py-2 rounded-2xl font-extrabold active:scale-95 inline-flex items-center gap-2 ${
+                  selectedCount
+                    ? "bg-emerald-600 text-white shadow-emerald-200"
+                    : "bg-white/20 text-gray-700/50 border border-white/20"
+                }`}
+                disabled={!selectedCount}
+                title="จัดหมวดหมู่อัตโนมัติ (เติมเฉพาะที่ว่าง)"
+              >
+                <Sparkles size={16} />
+                Auto-categorize
+              </button>
+
+              <button
+                type="button"
+                onClick={selectDuplicatesOnly}
+                className="px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95 inline-flex items-center gap-2"
+                disabled={!filtered.length}
+                title="เลือกเฉพาะรายการที่ระบบมองว่าอาจซ้ำ"
+              >
+                <AlertTriangle size={16} />
+                Select duplicates
+              </button>
+
+              <button
+                type="button"
+                onClick={() => approveIds(filtered.map((x) => x.id))}
+                className="px-3 py-2 rounded-2xl bg-indigo-600 text-white shadow-indigo-200 font-extrabold active:scale-95 inline-flex items-center gap-2"
+                disabled={!filtered.length}
+                title="Approve ทุกรายการที่แสดง (ตาม filter/search)"
+              >
+                <Check size={16} />
+                Approve all shown
+              </button>
+
+              <button
+                type="button"
+                onClick={() => deleteIds(filtered.map((x) => x.id))}
+                className="px-3 py-2 rounded-2xl bg-red-600 text-white shadow-red-200 font-extrabold active:scale-95 inline-flex items-center gap-2"
+                disabled={!filtered.length}
+                title="ลบทุกรายการที่แสดง (ตาม filter/search)"
+              >
+                <Trash2 size={16} />
+                Delete all shown
+              </button>
+
             </div>
           </div>
         </div>
@@ -2425,11 +2582,11 @@ export default function InboxView({ showAlert, showConfirm }) {
         </div>
       )}
 
-      <EditorModal
-        open={!!editingId}
+      <InboxItemReviewModal
+        isOpen={!!editingId}
         item={editingItem}
         accounts={state.accounts || []}
-        categories={state.categories || { expense: [], income: [] }}
+        categoriesByType={state.categories || { expense: [], income: [] }}
         merchants={state.merchants || []}
         recentExpenseCats={recentExpenseCatsForPicker}
         recentIncomeCats={recentIncomeCatsForPicker}
