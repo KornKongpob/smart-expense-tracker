@@ -109,6 +109,11 @@ export default function TransactionReviewModal({
 
   const [step, setStep] = useState(0);
 
+  const onUpdateItemRef = useRef(onUpdateItem);
+  useEffect(() => {
+    onUpdateItemRef.current = onUpdateItem;
+  }, [onUpdateItem]);
+
   // When opening: default to Split step for multi-item receipts
   useEffect(() => {
     if (!isOpen) return;
@@ -120,14 +125,14 @@ export default function TransactionReviewModal({
   useEffect(() => {
     if (!isOpen) return;
     if (txType !== "expense") {
-      if (q?.isInstallment) onUpdateItem?.(qid, { isInstallment: false });
+      if (q?.isInstallment) onUpdateItemRef.current?.(qid, { isInstallment: false });
       return;
     }
     const acc = (Array.isArray(accounts) ? accounts : []).find((a) => String(a?.id || "") === String(q?.accountId || ""));
     if (!isCreditAccount(acc) && q?.isInstallment) {
-      onUpdateItem?.(qid, { isInstallment: false });
+      onUpdateItemRef.current?.(qid, { isInstallment: false });
     }
-  }, [isOpen, txType, q?.accountId, q?.isInstallment, accounts, onUpdateItem, qid]);
+  }, [isOpen, txType, q?.accountId, q?.isInstallment, accounts, qid]);
 
   const steps = useMemo(() => {
     return [
@@ -148,6 +153,7 @@ export default function TransactionReviewModal({
   const doneFn = onDone || onClose;
 
   const stepContent = useMemo(() => {
+    if (!isOpen) return null;
     const merchantsList = Array.isArray(merchants) ? merchants : [];
 
     // ------------- STEP: Essentials -------------
@@ -228,7 +234,7 @@ export default function TransactionReviewModal({
                     value={q?.amount != null ? formatMoneyInputFromSatang(Math.abs(Number(q.amount) || 0)) : ""}
                     onChange={(e) => {
                       const cleaned = sanitizeMoneyInput(e.target.value);
-                      onUpdateItem?.(qid, {
+                      onUpdateItemRef.current?.(qid, {
                         amount: parseMoneyToSatang(cleaned),
                         splitByCategory: false,
                         amountEdited: true,
@@ -244,7 +250,7 @@ export default function TransactionReviewModal({
                   <input
                     type="date"
                     value={q?.date || toISODate(new Date())}
-                    onChange={(e) => onUpdateItem?.(qid, { date: e.target.value })}
+                    onChange={(e) => onUpdateItemRef.current?.(qid, { date: e.target.value })}
                     className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
                   />
                 </div>
@@ -281,7 +287,7 @@ export default function TransactionReviewModal({
                       : accounts
                   }
                   value={q?.fromAccountId}
-                  onChange={(v) => onUpdateItem?.(qid, { fromAccountId: v })}
+                  onChange={(v) => onUpdateItemRef.current?.(qid, { fromAccountId: v })}
                   placeholder="เลือกบัญชี"
                 />
               </div>
@@ -293,7 +299,7 @@ export default function TransactionReviewModal({
                 <AccountPicker
                   accounts={accounts}
                   value={q?.toAccountId}
-                  onChange={(v) => onUpdateItem?.(qid, { toAccountId: v })}
+                  onChange={(v) => onUpdateItemRef.current?.(qid, { toAccountId: v })}
                   placeholder="เลือกบัญชี"
                 />
               </div>
@@ -379,7 +385,7 @@ export default function TransactionReviewModal({
                   const acc = (Array.isArray(accounts) ? accounts : []).find((a) => String(a?.id || "") === v) || null;
                   const patch = { accountId: v };
                   if (!isCreditAccount(acc)) patch.isInstallment = false;
-                  onUpdateItem?.(qid, patch);
+                  onUpdateItemRef.current?.(qid, patch);
                 }}
                 className="mb-3"
               />
@@ -392,7 +398,7 @@ export default function TransactionReviewModal({
                     (Array.isArray(accounts) ? accounts : []).find((a) => String(a?.id || "") === String(v || "")) || null;
                   const patch = { accountId: v };
                   if (!isCreditAccount(acc)) patch.isInstallment = false;
-                  onUpdateItem?.(qid, patch);
+                  onUpdateItemRef.current?.(qid, patch);
                 }}
                 showTitle={false}
                 showSelectedText
@@ -439,7 +445,7 @@ export default function TransactionReviewModal({
               parentCategoryId=""
               onChangeParentCategory={null}
               onChangeGroup={(idx, patch) => onUpdateGroup?.(qid, idx, patch)}
-              onChangeGroups={(nextGroups) => onUpdateItem?.(qid, { groups: nextGroups })}
+              onChangeGroups={(nextGroups) => onUpdateItemRef.current?.(qid, { groups: nextGroups })}
               targetTotalSatang={q?.amount}
             />
           </div>
@@ -534,7 +540,7 @@ export default function TransactionReviewModal({
             onSelect={(id) => {
               const v = String(id || "").trim();
               if (!v) return;
-              onUpdateItem?.(qid, { categoryId: v, categoryConfirmedByUser: true });
+              onUpdateItemRef.current?.(qid, { categoryId: v, categoryConfirmedByUser: true });
             }}
             className="mb-3"
           />
@@ -543,7 +549,7 @@ export default function TransactionReviewModal({
           <CategoryPicker
             categories={primaryCats}
             value={q?.categoryId || ""}
-            onChange={(id) => onUpdateItem?.(qid, { categoryId: id, categoryConfirmedByUser: true })}
+            onChange={(id) => onUpdateItemRef.current?.(qid, { categoryId: id, categoryConfirmedByUser: true })}
             showTitle={false}
             twoStep
             recent={recentCats}
@@ -575,7 +581,7 @@ export default function TransactionReviewModal({
                 <input
                   type="text"
                   value={q?.merchant || ""}
-                  onChange={(e) => onUpdateItem?.(qid, { merchant: e.target.value })}
+                  onChange={(e) => onUpdateItemRef.current?.(qid, { merchant: e.target.value })}
                   className="w-full ui-input"
                   placeholder="เช่น 7-11, Starbucks"
                 />
@@ -586,7 +592,7 @@ export default function TransactionReviewModal({
                 <textarea
                   rows={3}
                   value={q?.note || ""}
-                  onChange={(e) => onUpdateItem?.(qid, { note: e.target.value })}
+                  onChange={(e) => onUpdateItemRef.current?.(qid, { note: e.target.value })}
                   className="w-full ui-input"
                   placeholder="เช่น รายละเอียดเพิ่มเติม"
                 />
@@ -597,7 +603,7 @@ export default function TransactionReviewModal({
                 <input
                   type="text"
                   value={q?.referenceId || q?.ref || ""}
-                  onChange={(e) => onUpdateItem?.(qid, { ref: e.target.value, referenceId: e.target.value })}
+                  onChange={(e) => onUpdateItemRef.current?.(qid, { ref: e.target.value, referenceId: e.target.value })}
                   className="w-full ui-input"
                   placeholder="(ถ้ามี)"
                 />
@@ -612,7 +618,7 @@ export default function TransactionReviewModal({
                     </div>
                     <button
                       type="button"
-                      onClick={() => onUpdateItem?.(qid, { isInstallment: !q?.isInstallment })}
+                      onClick={() => onUpdateItemRef.current?.(qid, { isInstallment: !q?.isInstallment })}
                       className={`w-14 h-8 rounded-full transition-all relative border ${
                         q?.isInstallment ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
                       }`}
@@ -631,7 +637,7 @@ export default function TransactionReviewModal({
                       <div className="text-[11px] font-extrabold text-gray-900/70 mb-1">จำนวนงวด</div>
                       <select
                         value={String(q?.installmentMonths || 3)}
-                        onChange={(e) => onUpdateItem?.(qid, { installmentMonths: Number(e.target.value) || 3 })}
+                        onChange={(e) => onUpdateItemRef.current?.(qid, { installmentMonths: Number(e.target.value) || 3 })}
                         className="ui-select w-full"
                       >
                         {[3, 4, 5, 6, 8, 10, 12].map((m) => (

@@ -182,9 +182,9 @@ export default function ScanQueueList({
                 isOpen={isOpen && q.status === "ready"}
                 q={q}
                 onClose={() => setExpandedId(null)}
-                onUpdateItem={(id, patch) => onUpdateItem?.(id, patch)}
-                onUpdateGroup={(id, idx, patch) => onUpdateGroup?.(id, idx, patch)}
-                onTypeChange={(id, nextType) => onTypeChange?.(id, nextType)}
+                onUpdateItem={onUpdateItem}
+                onUpdateGroup={onUpdateGroup}
+                onTypeChange={onTypeChange}
                 accounts={accounts}
                 nonCreditAccounts={nonCreditAccounts}
                 expenseCatsAll={expenseCatsAll}

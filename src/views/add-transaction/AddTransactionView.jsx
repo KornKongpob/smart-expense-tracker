@@ -1301,7 +1301,7 @@ const existingRefSet = useMemo(() => {
     return next;
   };
 
-  const updateQueueItem = (id, patch) => {
+  const updateQueueItem = useCallback((id, patch) => {
     setQueue((prev) => {
       const pool = [
         ...(state.transactions || []),
@@ -1399,9 +1399,9 @@ const existingRefSet = useMemo(() => {
         return next;
       });
     });
-  };
+  }, [state.transactions, setQueue, accounts, isCreditAccount, ensureCategory]);
 
-  const updateQueueGroup = (qid, gidx, patch) => {
+  const updateQueueGroup = useCallback((qid, gidx, patch) => {
     setQueue((prev) =>
       prev.map((x) => {
         if (x.id !== qid) return x;
@@ -1415,7 +1415,7 @@ const existingRefSet = useMemo(() => {
         return { ...x, groups, amount: shouldSyncAmount ? signedSum : x.amount };
       })
     );
-  };
+  }, [setQueue]);
 
   // ===== credit card payment helpers (manual/scan) =====
   const creditAccounts = useMemo(() => accounts.filter(isCreditAccount), [accounts]);
@@ -1481,7 +1481,7 @@ const existingRefSet = useMemo(() => {
 
   // ✅ เปลี่ยนประเภทใน Queue (หลัง scan)
   // ✅ รองรับ credit_payment
-  const handleQueueTypeChange = (qid, nextType) => {
+  const handleQueueTypeChange = useCallback((qid, nextType) => {
     setQueue((prev) =>
       prev.map((x) => {
         if (x.id !== qid) return x;
@@ -1577,7 +1577,7 @@ const existingRefSet = useMemo(() => {
         };
       })
     );
-  };
+  }, [setQueue, accounts, nonCreditAccounts, creditAccounts, categoryMemory, expenseCats, incomeCats, ensureCategory]);
 
   const handlePickFiles = () => {
     fileInputRef.current?.click();
