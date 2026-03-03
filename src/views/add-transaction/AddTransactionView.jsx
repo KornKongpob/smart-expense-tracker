@@ -737,8 +737,9 @@ const existingRefSet = useMemo(() => {
   // but keep them in state for historical reports.
   const expenseCatsAll = categories.expense || [];
   const incomeCatsAll = categories.income || [];
-  const expenseCats = expenseCatsAll.filter((c) => !isTombstoneCategory(c));
-  const incomeCats = incomeCatsAll.filter((c) => !isTombstoneCategory(c));
+  
+  const expenseCats = useMemo(() => expenseCatsAll.filter((c) => !isTombstoneCategory(c)), [expenseCatsAll]);
+  const incomeCats = useMemo(() => incomeCatsAll.filter((c) => !isTombstoneCategory(c)), [incomeCatsAll]);
 
   // ====== category hierarchy (Main -> Sub) ======
   const catsForTypeAll = useMemo(() => (type === "income" ? incomeCatsAll : expenseCatsAll), [type, incomeCatsAll, expenseCatsAll]);
@@ -1577,15 +1578,15 @@ const existingRefSet = useMemo(() => {
           suggestedCategoryId: suggested || "",
           suggestedReason: suggested
             ? merchant
-              ? `จำจากร้านเดิม: ${merchant}`
+              ? `เคยใช้กับ ${merchant}`
               : toDigits || fromDigits
-              ? `จำจากเลขเดิม: ${String(toDigits || fromDigits).slice(-6)}`
-              : "จำจากประวัติ"
+              ? `เคยใช้กับเลขนี้`
+              : "เคยใช้บัญชีนี้"
             : "",
         };
       })
     );
-  }, [setQueue, accounts, nonCreditAccounts, creditAccounts, categoryMemory, expenseCats, incomeCats, ensureCategory]);
+  }, [accounts, nonCreditAccounts, creditAccounts, categoryMemory, expenseCats, incomeCats, ensureCategory, setQueue]);
 
   const handlePickFiles = () => {
     fileInputRef.current?.click();
