@@ -236,27 +236,16 @@ export default function SplitDetailsEditor({
         ) : null}
 
         {/* Bulk tools */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 mt-3 no-scrollbar">
           <button
             type="button"
             onClick={onAutoCategorize}
-            className="px-3 py-2 rounded-xl text-[11px] font-extrabold bg-white/20 border border-white/15 text-gray-900/80 active:scale-95 inline-flex items-center gap-2"
-            title="จัดหมวดหมู่ให้อัตโนมัติจากข้อความในบรรทัด"
+            className="px-3 py-2 rounded-xl text-[11px] font-extrabold bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 active:scale-95 inline-flex items-center gap-2"
+            title="ใช้ AI/Rules เดาหมวดให้ทุกบรรทัด"
           >
             <Wand2 size={14} />
-            Auto
+            Auto Suggest
           </button>
-
-          {safeId(parentCategoryId) ? (
-            <button
-              type="button"
-              onClick={onApplyParentToBlanks}
-              className="px-3 py-2 rounded-xl text-[11px] font-extrabold bg-white/20 border border-white/15 text-gray-900/80 active:scale-95"
-              title="เติมหมวดหลักให้บรรทัดที่ยังว่าง"
-            >
-              เติมหมวดหลักให้บรรทัดว่าง
-            </button>
-          ) : null}
 
           <button
             type="button"
@@ -300,14 +289,15 @@ export default function SplitDetailsEditor({
             : "bg-emerald-500/15 text-emerald-700 border-emerald-500/20";
 
           const name = String(g?.note || g?.name || "").trim() || "(ไม่มีชื่อรายการ)";
-          const effectiveCategoryId = safeId(g?.categoryId) || safeId(parentCategoryId);
+          const effectiveCategoryId = safeId(g?.categoryId);
 
           const suggestedId = !isAdj ? suggestCategoryId(g) : resolveAdjustmentCategoryId(g, categoryIds);
           const suggestedCat = suggestedId ? catById.get(suggestedId) : null;
-          const parentCat = safeId(parentCategoryId) ? catById.get(safeId(parentCategoryId)) : null;
+
+          const isCategoryMissing = !effectiveCategoryId;
 
           return (
-            <div key={`${qid || "q"}-${idx}`} className="glass-panel border border-white/20 rounded-2xl p-3">
+            <div key={`${qid || "q"}-${idx}`} className={`glass-panel border rounded-2xl p-3 ${isCategoryMissing ? "border-red-400/50 bg-red-50/30" : "border-white/20"}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-extrabold border ${badgeColor}`}>
@@ -335,12 +325,16 @@ export default function SplitDetailsEditor({
               </div>
 
               <div className="mt-3">
-                <div className="text-[11px] font-extrabold text-gray-900/70 mb-1">หมวดหมู่</div>
+                <div className="text-[11px] font-extrabold mb-1 flex items-center justify-between">
+                  <span className={isCategoryMissing ? "text-red-600" : "text-gray-900/70"}>
+                    {isCategoryMissing ? "⚠️ ต้องเลือกหมวดหมู่" : "หมวดหมู่"}
+                  </span>
+                </div>
                 <CategorySelect
                   categories={categories}
                   value={effectiveCategoryId}
                   onChange={(e) => onChangeGroup?.(idx, { categoryId: safeId(e?.target?.value) })}
-                  className="ui-select w-full"
+                  className={`ui-select w-full ${isCategoryMissing ? "border-red-300 bg-red-50/50" : ""}`}
                 />
 
                 {/* Per-line quick chips */}

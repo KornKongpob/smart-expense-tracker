@@ -30,13 +30,13 @@ export default function ModalShell({
 
   return (
     <div
-      className={`fixed inset-0 bg-black/50 z-[${zIndex}] flex items-end sm:items-center justify-center`}
+      className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center animate-fade-in-up"
       style={{ zIndex }}
     >
       <div
-        className={`w-full ${maxWidth} glass-card rounded-t-3xl sm:rounded-3xl p-5 ${maxHeight} overflow-y-auto`}
+        className={`w-full ${maxWidth} glass-card rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 ${maxHeight} overflow-y-auto overflow-x-hidden relative flex flex-col`}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 shrink-0">
           <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
           <button
             type="button"
@@ -49,10 +49,12 @@ export default function ModalShell({
           </button>
         </div>
 
-        {children}
+        <div className="flex-1 min-h-0 flex flex-col min-w-0">
+          {children}
+        </div>
 
         {/* ✅ Safe bottom space for iOS + easier tapping */}
-        <div className="h-3 pb-safe" />
+        <div className="h-3 pb-safe shrink-0" />
       </div>
     </div>
   );

@@ -420,66 +420,28 @@ export default function TransactionReviewModal({
 
       // Multi-item receipt (expense)
       if (hasGroups) {
+        // Enforce splitByCategory for multi-item (handled automatically in the store/flow, but we show UI for it here)
         return (
           <div className="space-y-3">
             <div className="glass-panel border border-white/20 rounded-2xl p-3">
               <div className="text-xs font-bold text-gray-900/70 flex items-center gap-2">
-                <Sparkles size={14} /> Category / Split
+                <Sparkles size={14} /> Multi-item Receipt
               </div>
               <div className="text-[11px] text-gray-900/55 mt-1">
-                ใบเสร็จหลายรายการ: แนะนำให้เปิด Split details เพื่อเลือกหมวดตามบรรทัด
+                ใบเสร็จนี้มีหลายรายการ ระบบจะให้เลือกหมวดหมู่แยกตามรายบรรทัด (Split details)
               </div>
-
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <div className="text-[12px] font-extrabold text-gray-900/70">แยกหมวดตามรายการ</div>
-                <button
-                  type="button"
-                  onClick={() => onUpdateItem?.(qid, { splitByCategory: !q?.splitByCategory })}
-                  className={`w-14 h-8 rounded-full transition-all relative border ${
-                    q?.splitByCategory ? "bg-gray-900/90 border-white/20" : "bg-white/20 border-white/20"
-                  }`}
-                  aria-label="toggle split details"
-                >
-                  <span
-                    className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-all ${
-                      q?.splitByCategory ? "left-7" : "left-1"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {!q?.splitByCategory ? (
-                <div className="mt-3 text-[12px] text-gray-900/60">
-                  ปิด Split details อยู่ — หากต้องการบันทึกเป็นรายการเดียว ให้เลือกหมวดหลักด้านล่าง
-                </div>
-              ) : null}
             </div>
 
-            {q?.splitByCategory ? (
-              <SplitDetailsEditor
-                qid={qid}
-                groups={q?.groups || []}
-                categories={expenseCatsAll}
-                parentCategoryId={q?.categoryId || ""}
-                onChangeParentCategory={(id) => onUpdateItem?.(qid, { categoryId: id })}
-                onChangeGroup={(idx, patch) => onUpdateGroup?.(qid, idx, patch)}
-                onChangeGroups={(nextGroups) => onUpdateItem?.(qid, { groups: nextGroups })}
-                targetTotalSatang={q?.amount}
-              />
-            ) : (
-              <div className="glass-panel border border-white/20 rounded-2xl p-3">
-                <div className="text-xs font-bold text-gray-900/70 mb-2">หมวดหลัก</div>
-                <CategoryPicker
-                  categories={expenseCatsAll}
-                  value={q?.categoryId || ""}
-                  onChange={(id) => onUpdateItem?.(qid, { categoryId: id, categoryConfirmedByUser: true })}
-                  showTitle={false}
-                  twoStep
-                  recent={recentCats}
-                  maxListHeightClass="max-h-[40dvh]"
-                />
-              </div>
-            )}
+            <SplitDetailsEditor
+              qid={qid}
+              groups={q?.groups || []}
+              categories={expenseCatsAll}
+              parentCategoryId=""
+              onChangeParentCategory={null}
+              onChangeGroup={(idx, patch) => onUpdateGroup?.(qid, idx, patch)}
+              onChangeGroups={(nextGroups) => onUpdateItem?.(qid, { groups: nextGroups })}
+              targetTotalSatang={q?.amount}
+            />
           </div>
         );
       }
@@ -882,8 +844,8 @@ export default function TransactionReviewModal({
       ) : null}
 
       {/* Stepper header */}
-      <div className="mb-4">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className="mb-4 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 pb-1">
           {steps.map((s, idx) => (
             <StepPill
               key={s.key}
@@ -899,17 +861,17 @@ export default function TransactionReviewModal({
       </div>
 
       {/* Body */}
-      <div className="pb-20">{stepContent}</div>
+      <div className="flex-1 overflow-y-auto pb-6">{stepContent}</div>
 
       {/* Sticky footer */}
-      <div className="sticky bottom-0 -mx-6 px-6 pt-3 pb-4 bg-[rgba(255,255,255,0.08)] backdrop-blur-2xl border-t border-white/10">
+      <div className="shrink-0 -mx-6 px-6 pt-3 bg-white/5 backdrop-blur-3xl border-t border-gray-200/20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] pb-[calc(1rem+env(safe-area-inset-bottom))]">
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"
             disabled={!canGoBack}
             onClick={() => setStep((s) => Math.max(0, s - 1))}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-extrabold transition-all active:scale-95 border ${
-              canGoBack ? "bg-white/20 border-white/15 text-gray-900" : "bg-white/10 border-white/10 text-gray-900/40"
+            className={`flex items-center gap-2 px-3 py-3 rounded-xl text-sm font-extrabold transition-all active:scale-95 border ${
+              canGoBack ? "bg-white border-gray-200 text-gray-800" : "bg-white/50 border-gray-100 text-gray-400"
             }`}
           >
             <ChevronLeft size={16} /> ย้อนกลับ
@@ -918,10 +880,22 @@ export default function TransactionReviewModal({
           <button
             type="button"
             onClick={() => {
-              if (canGoNext) setStep((s) => Math.min(steps.length - 1, s + 1));
-              else doneFn?.();
+              if (canGoNext) {
+                setStep((s) => Math.min(steps.length - 1, s + 1));
+              } else {
+                // Validation for multi-item receipt before Done
+                if (hasGroups) {
+                  const missingIdx = (q?.groups || []).findIndex(g => !String(g?.categoryId || "").trim());
+                  if (missingIdx !== -1) {
+                    alert("กรุณาเลือกหมวดหมู่ให้ครบทุกบรรทัดในหน้า Split ก่อนบันทึก");
+                    setStep(2); // Jump back to Split step
+                    return;
+                  }
+                }
+                doneFn?.();
+              }
             }}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-extrabold bg-indigo-600 text-white active:scale-95"
+            className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25 active:scale-95"
           >
             {canGoNext ? (
               <>
