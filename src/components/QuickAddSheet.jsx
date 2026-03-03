@@ -169,7 +169,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
 
         <div className="overflow-y-auto flex-1 no-scrollbar pb-2">
           {/* Type toggle — pill style */}
-          <div className="flex gap-1.5 p-1 rounded-2xl bg-gray-100 mb-5">
+          <div className="flex gap-1.5 p-1 rounded-2xl bg-gray-100 mb-4">
             {[
               { key: "expense", label: "รายจ่าย", color: "bg-rose-500 text-white shadow-sm" },
               { key: "income", label: "รายรับ", color: "bg-emerald-500 text-white shadow-sm" },
@@ -188,7 +188,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           </div>
 
           {/* Amount — large display */}
-          <div className="mb-5">
+          <div className="mb-4">
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-gray-400">฿</span>
               <input
@@ -202,6 +202,28 @@ export default function QuickAddSheet({ isOpen, onClose }) {
               />
             </div>
           </div>
+
+          {/* Account */}
+          {accounts.length > 1 && (
+            <div className="mb-4">
+              <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                {accounts.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setAccountId(a.id)}
+                    className={`shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-2xl border text-xs font-extrabold transition-all active:scale-95 ${
+                      accountId === a.id
+                        ? "bg-indigo-600/10 border-indigo-500/30 text-indigo-800 shadow-sm"
+                        : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="text-base">{a.icon || "💳"}</span> {a.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Note */}
           <div className="mb-5">
@@ -255,11 +277,11 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           )}
 
           {/* Main categories */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-2">
+          <div className="mb-2">
+            <div className="flex items-center justify-between mb-3">
               <div className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
                 {mainCatId && selectedMain && !searchQuery ? (
-                  <button type="button" onClick={() => { setMainCatId(""); setSubCatId(""); }} className="flex items-center gap-1 text-indigo-600 active:scale-95">
+                  <button type="button" onClick={() => { setMainCatId(""); setSubCatId(""); }} className="flex items-center gap-1 text-indigo-600 active:scale-95 px-2 py-1 bg-indigo-50 rounded-lg">
                     ← เลือกหมวดหลัก
                   </button>
                 ) : (
@@ -267,14 +289,14 @@ export default function QuickAddSheet({ isOpen, onClose }) {
                 )}
               </div>
               {!mainCatId && (
-                <div className="relative w-32 sm:w-40">
-                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <div className="relative w-[160px] sm:w-[200px]">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="ค้นหา..."
-                    className="w-full pl-7 pr-2 py-1.5 rounded-xl bg-gray-100 border-none text-[11px] font-bold text-gray-900 outline-none focus:ring-2 focus:ring-indigo-400/20"
+                    placeholder="ค้นหาหมวดหมู่..."
+                    className="w-full pl-8 pr-3 py-2 rounded-xl bg-gray-100 border border-transparent text-xs font-bold text-gray-900 outline-none focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/10 transition-all"
                   />
                 </div>
               )}
@@ -378,29 +400,6 @@ export default function QuickAddSheet({ isOpen, onClose }) {
               </div>
             )}
           </div>
-
-          {/* Account */}
-          {accounts.length > 1 && (
-            <div className="mb-2">
-              <div className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider mb-2">บัญชี</div>
-              <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                {accounts.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => setAccountId(a.id)}
-                    className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-2xl border text-xs font-extrabold transition-all active:scale-95 ${
-                      accountId === a.id
-                        ? "bg-indigo-600/10 border-indigo-500/20 text-indigo-800 shadow-sm"
-                        : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                    }`}
-                  >
-                    <span className="text-base">{a.icon || "💳"}</span> {a.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Actions */}
