@@ -1301,19 +1301,63 @@ const existingRefSet = useMemo(() => {
     return next;
   };
 
+  // ✅ Async Debounced Duplicate Check
+  // Prevents the UI from freezing while typing by running findFuzzyDuplicate outside of the synchronous state updater.
+  useEffect(() => {
+    const itemsToCheck = queue.filter(q => q._needsDupCheck);
+    if (!itemsToCheck.length) return;
+
+    const timer = setTimeout(() => {
+      setQueue(prev => {
+        let changed = false;
+        // Build the pool once for all checks in this batch
+        const pool = [
+          ...(state.transactions || []),
+          ...prev.filter(p => p.status === "ready").map(p => ({
+            ...p,
+            type: p.txType,
+            isTransfer: p.txType === "transfer" || p.txType === "credit_payment",
+          }))
+        ];
+
+        const nextQueue = prev.map(q => {
+          if (!q._needsDupCheck) return q;
+
+          changed = true;
+          try {
+            const f = findFuzzyDuplicate(pool.filter(p => p.id !== q.id), {
+              ...q,
+              type: q.txType,
+              isTransfer: q.txType === "transfer" || q.txType === "credit_payment",
+              ref: q.ref || q.referenceId,
+              referenceId: q.ref || q.referenceId,
+            });
+
+            const isDup = !!f?.isDuplicate;
+            const reasons = Array.isArray(f?.reasons) ? f.reasons : [];
+            const kind = reasons.includes('ref exact match') ? 'ref' : reasons.includes('file exact match') ? 'file' : 'fuzzy';
+
+            return {
+              ...q,
+              _needsDupCheck: false,
+              duplicate: isDup,
+              duplicateInfo: isDup ? { kind, matchId: f?.matchId || null, score: f?.score || 0, reasons } : null,
+              includeDuplicate: isDup ? (q.duplicate ? !!q.includeDuplicate : false) : true
+            };
+          } catch {
+            return { ...q, _needsDupCheck: false };
+          }
+        });
+
+        return changed ? nextQueue : prev;
+      });
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [queue, state.transactions, setQueue]);
+
   const updateQueueItem = useCallback((id, patch) => {
     setQueue((prev) => {
-      const pool = [
-        ...(state.transactions || []),
-        ...prev
-          .filter((q) => q?.status === "ready" && q?.id !== id)
-          .map((q) => ({
-            ...q,
-            type: q.txType,
-            isTransfer: q.txType === "transfer" || q.txType === "credit_payment",
-          })),
-      ];
-
       const affectsDup =
         patch &&
         ["amount", "date", "merchant", "note", "ref", "accountId", "fromAccountId", "toAccountId", "txType", "fileHash", "fromDigits", "toDigits", "dateWasDefault"].some(
@@ -1355,51 +1399,15 @@ const existingRefSet = useMemo(() => {
           }
         }
 
-
-        // Recalculate duplicate only when user edits key identity fields
+        // Defer heavy fuzzy matching to the debounced effect
         if (next.status === "ready" && affectsDup && !patchHasDup) {
-          try {
-            const f = findFuzzyDuplicate(pool, {
-              ...next,
-              type: next.txType,
-              isTransfer: next.txType === "transfer" || next.txType === "credit_payment",
-              ref: next.ref || next.referenceId,
-              referenceId: next.ref || next.referenceId,
-            });
-
-            const isDup = !!f?.isDuplicate;
-            const reasons = Array.isArray(f?.reasons) ? f.reasons : [];
-            const kind = reasons.includes('ref exact match')
-              ? 'ref'
-              : reasons.includes('file exact match')
-              ? 'file'
-              : 'fuzzy';
-
-            next.duplicate = isDup;
-            next.duplicateInfo = isDup
-              ? {
-                  kind,
-                  matchId: f?.matchId || null,
-                  score: f?.score || 0,
-                  reasons,
-                }
-              : null;
-
-            // If it newly becomes duplicate, default to blocking; otherwise keep user's choice.
-            if (isDup) {
-              next.includeDuplicate = x.duplicate ? !!x.includeDuplicate : false;
-            } else {
-              next.includeDuplicate = true;
-            }
-          } catch {
-            // ignore duplicate recalc errors
-          }
+          next._needsDupCheck = true;
         }
 
         return next;
       });
     });
-  }, [state.transactions, setQueue, accounts, isCreditAccount, ensureCategory]);
+  }, [accounts, ensureCategory]);
 
   const updateQueueGroup = useCallback((qid, gidx, patch) => {
     setQueue((prev) =>
