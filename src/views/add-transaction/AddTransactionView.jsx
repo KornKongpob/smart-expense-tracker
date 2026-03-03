@@ -1150,7 +1150,7 @@ const existingRefSet = useMemo(() => {
     createdCatRef.current = { expense: new Map(), income: new Map() };
   };
 
-  const ensureCategory = (typeForCat, scannedCategory) => {
+  const ensureCategory = useCallback((typeForCat, scannedCategory) => {
     const listAll = categories[typeForCat] || [];
     // Only active categories are eligible for matching/suggestion
     const list = (listAll || []).filter((c) => !isTombstoneCategory(c));
@@ -1195,7 +1195,7 @@ const existingRefSet = useMemo(() => {
 
     if (mem && key) mem.set(key, id);
     return id;
-  };
+  }, [categories, addCategory]);
 
   // Apply derived automation patch onto a queue item patch, while keeping fields consistent.
   const applyAutomationToQueuePatch = (basePatch, autoPatch) => {
