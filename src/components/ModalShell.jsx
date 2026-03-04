@@ -1,7 +1,10 @@
 // src/components/ModalShell.jsx
 // Shared modal shell component used across BudgetsView, RecurringView, RulesView, CategoriesView, StatsView.
 // Centralizes the glass-card bottom-sheet pattern to eliminate duplication.
+// Uses createPortal to render at <body> level so CSS transforms on parent views
+// (e.g. animate-view-enter) don't trap the fixed-position modal in a stacking context.
 
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
@@ -14,6 +17,7 @@ import { useLockBodyScroll } from "../utils/useLockBodyScroll";
  * @param {string}   [maxWidth] - Tailwind max-width class. Default "sm:max-w-md"
  * @param {number}   [zIndex]   - z-index level. Default 60
  * @param {string}   [maxHeight]- Tailwind max-height. Default "max-h-[90dvh]"
+ * @param {boolean}  [noScroll] - If true, children wrapper won't scroll (for modals managing own scroll)
  */
 export default function ModalShell({
   title,
@@ -29,7 +33,7 @@ export default function ModalShell({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center animate-fade-in-up"
       style={{ zIndex }}
@@ -56,6 +60,7 @@ export default function ModalShell({
 
         {noScroll ? null : <div className="h-3 pb-safe shrink-0" />}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
