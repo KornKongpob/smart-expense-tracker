@@ -1,10 +1,10 @@
 // api/scan-receipt.js
 import Busboy from "busboy";
 import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
-import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "./scan/access.js";
-import { createRateLimiter } from "./scan/rateLimit.js";
-import { scanWithProvider } from "./scan/providers/index.js";
-import { normalizeErrorResponse } from "./scan/normalize.js";
+import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "../lib/scan/access.js";
+import { createRateLimiter } from "../lib/scan/rateLimit.js";
+import { scanWithProvider } from "../lib/scan/providers/index.js";
+import { normalizeErrorResponse } from "../lib/scan/normalize.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 

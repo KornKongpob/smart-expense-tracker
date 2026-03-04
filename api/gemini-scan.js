@@ -2,11 +2,11 @@
 // Server-side Gemini receipt scanner (keeps API key off the client).
 
 import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
-import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "./scan/access.js";
-import { createRateLimiter } from "./scan/rateLimit.js";
-import { parseScanRequest } from "./scan/requestParse.js";
-import { scanWithProvider } from "./scan/providers/index.js";
-import { normalizeErrorResponse } from "./scan/normalize.js";
+import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "../lib/scan/access.js";
+import { createRateLimiter } from "../lib/scan/rateLimit.js";
+import { parseScanRequest } from "../lib/scan/requestParse.js";
+import { scanWithProvider } from "../lib/scan/providers/index.js";
+import { normalizeErrorResponse } from "../lib/scan/normalize.js";
 
 const IS_PROD = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 const MAX_JSON_BODY_BYTES = Number(process.env.SCAN_MAX_JSON_BODY_BYTES || 2 * 1024 * 1024); // 2MB
