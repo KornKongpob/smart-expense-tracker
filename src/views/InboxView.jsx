@@ -25,16 +25,15 @@ import { generateId, generateTransferId, generateSplitGroupId } from "../utils/i
 import { formatCurrency, toISODate } from "../utils/format";
 import AppHeader from "../components/AppHeader";
 import InboxItemReviewModal from "./inbox/InboxItemReviewModal";
-import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
+import { parseMoneyToSatang } from "../utils/money";
 import { expandTransactionToInstallments } from "../utils/installments";
 import { useBlobInfo } from "../utils/useBlobInfo";
 import { isCreditAccount } from "../utils/accountMatch";
-import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
-import { splitReceiptItemsToLines, sanitizeCategoryKey, inferCategoryKeyFromText } from "../utils/receiptCategorizer";
+import { inferCategoryKeyFromText } from "../utils/receiptCategorizer";
 import {
   reconcileReceiptGroups,
   signedReceiptGroupSatang,

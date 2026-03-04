@@ -148,23 +148,6 @@ export default function SplitDetailsEditor({
     bulkApply(updates);
   };
 
-  const onApplyParentToBlanks = () => {
-    const pid = safeId(parentCategoryId);
-    if (!pid) return;
-
-    const updates = [];
-    for (let idx = 0; idx < list.length; idx++) {
-      const g = list[idx];
-      if (!g) continue;
-
-      const isAdj = isAdjustmentLike(g);
-      if (isAdj) continue; // don't force parent on adjustments
-      if (!safeId(g?.categoryId)) updates.push({ idx, patch: { categoryId: pid } });
-    }
-
-    bulkApply(updates);
-  };
-
   const onClearCategories = () => {
     const updates = [];
     for (let idx = 0; idx < list.length; idx++) {
@@ -350,14 +333,14 @@ export default function SplitDetailsEditor({
                     </button>
                   ) : null}
 
-                  {parentCat && safeId(parentCategoryId) !== effectiveCategoryId ? (
+                  {parentCategoryId && safeId(parentCategoryId) !== effectiveCategoryId ? (
                     <button
                       type="button"
                       onClick={() => onChangeGroup?.(idx, { categoryId: safeId(parentCategoryId) })}
                       className="px-2 py-1 rounded-full text-[10px] font-extrabold bg-white/15 text-gray-900/70 border border-white/15 active:scale-95"
                       title="ใช้หมวดหลัก"
                     >
-                      หมวดหลัก: {parentCat.icon || "🏷️"} {parentCat.name}
+                      หมวดหลัก: {catById.get(safeId(parentCategoryId))?.icon || "🏷️"} {catById.get(safeId(parentCategoryId))?.name || "ตามหมวดหลัก"}
                     </button>
                   ) : null}
                 </div>

@@ -8,7 +8,7 @@ import React, { createContext, useContext, useEffect, useMemo, useReducer } from
 import { ACTIONS } from "./actions";
 
 import { loadAll, saveAll, clearAll } from "../services/storage";
-import { setHash, getCurrentView } from "../utils/hashRouter";
+import { setHash } from "../utils/hashRouter";
 import { clearAllBlobs, deleteBlob } from "../services/blobStore";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
 import { ACCOUNT_ICONS } from "../constants/presets.jsx"; // ✅ for iconId validation + future UI usage

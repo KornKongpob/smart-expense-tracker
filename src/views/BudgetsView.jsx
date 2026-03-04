@@ -7,7 +7,8 @@ import { useAppStore } from "../store/store.jsx";
 import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
-import { isTransferLike, signedExpenseSatang, sumExpenseForDate, daysInMonthKey } from "../utils/transaction";
+import { sumExpenseForDate, daysInMonthKey } from "../utils/transaction";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 const BUDGET_TOTAL_ID = "__TOTAL__"; // overall monthly budget
 const BUDGET_DAILY_ID = "__DAILY__"; // daily budget (for Dashboard)

@@ -61,6 +61,20 @@ export default function MoreView({ showAlert, showConfirm }) {
   const { state, navigate, exportBackup, importBackup, resetAll, runRecurringNow } = useAppStore();
   const fileRef = useRef(null);
 
+  // Theme state (moved to top-level to comply with React hooks rules)
+  const THEME_KEY = "app_theme";
+  const [theme, setThemeState] = useStateLocal(() => {
+    try { return localStorage.getItem(THEME_KEY) || "light"; } catch { return "light"; }
+  });
+  const setTheme = (t) => {
+    try {
+      localStorage.setItem(THEME_KEY, t);
+      document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "");
+    } catch { /* ignore */ }
+    setThemeState(t);
+  };
+  const isDark = theme === "dark";
+
   const merchantCount = Array.isArray(state?.merchants) ? state.merchants.length : 0;
 
   const inboxList = useMemo(() => {
@@ -248,29 +262,12 @@ export default function MoreView({ showAlert, showConfirm }) {
 
       {/* Appearance */}
       <div className="ui-card overflow-hidden rounded-3xl mb-4">
-        {(() => {
-          const THEME_KEY = "app_theme";
-          const getTheme = () => {
-            try { return localStorage.getItem(THEME_KEY) || "light"; } catch { return "light"; }
-          };
-          const [theme, setThemeState] = useStateLocal(getTheme);
-          const setTheme = (t) => {
-            try {
-              localStorage.setItem(THEME_KEY, t);
-              document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "");
-            } catch { /* ignore */ }
-            setThemeState(t);
-          };
-          const isDark = theme === "dark";
-          return (
-            <MoreRow
-              icon={isDark ? <Moon size={20} /> : <Sun size={20} />}
-              title={isDark ? "โหมดมืด (เปิดอยู่)" : "โหมดมืด"}
-              subtitle={isDark ? "แตะเพื่อเปลี่ยนเป็นโหมดสว่าง" : "แตะเพื่อเปลี่ยนเป็นโหมดมืด"}
-              onClick={() => setTheme(isDark ? "light" : "dark")}
-            />
-          );
-        })()}
+        <MoreRow
+          icon={isDark ? <Moon size={20} /> : <Sun size={20} />}
+          title={isDark ? "โหมดมืด (เปิดอยู่)" : "โหมดมืด"}
+          subtitle={isDark ? "แตะเพื่อเปลี่ยนเป็นโหมดสว่าง" : "แตะเพื่อเปลี่ยนเป็นโหมดมืด"}
+          onClick={() => setTheme(isDark ? "light" : "dark")}
+        />
       </div>
 
       {/* Data */}

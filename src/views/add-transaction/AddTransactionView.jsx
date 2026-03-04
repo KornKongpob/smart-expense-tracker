@@ -69,7 +69,7 @@ import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
 } from "../../utils/merchantDictionary";
-import { buildCategoryHierarchy, splitSelection } from "../../utils/categoryHierarchy";
+import { buildCategoryHierarchy } from "../../utils/categoryHierarchy";
 import { useTransferFlow } from "./hooks/useTransferFlow";
 import { useTransactionDraft } from "./hooks/useTransactionDraft";
 import { useScanQueue } from "./hooks/useScanQueue";
@@ -86,22 +86,6 @@ const isTombstoneCategory = (c) => !!(c?.deletedAt || c?.isDeleted);
 
 function isPositiveNumber(n) {
   return typeof n === "number" && Number.isFinite(n) && n > 0;
-}
-
-// ===== image helpers =====
-function isImageSrc(v) {
-  const s = String(v || "").trim();
-  return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://");
-}
-
-function getAccountVisual(acc) {
-  if (!acc) return { kind: "emoji", value: "💳" };
-  const img = acc.image && isImageSrc(acc.image) ? acc.image : null;
-  if (img) return { kind: "img", src: img };
-
-  const icon = String(acc.icon || "").trim();
-  if (isImageSrc(icon)) return { kind: "img", src: icon };
-  return { kind: "emoji", value: icon || "💳" };
 }
 
 // (Account dropdown UI is now shared: src/components/AccountPicker.jsx)
@@ -403,8 +387,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const initialData = store.getEditingTransaction();
   const isEditMode = !!initialData?.id;
 
-  const accounts = state.accounts || [];
-  const categories = state.categories || { expense: [], income: [] };
+  const accounts = useMemo(() => state.accounts || [], [state.accounts]);
+  const categories = useMemo(() => state.categories || { expense: [], income: [] }, [state.categories]);
 
   const {
     transferPair,
@@ -735,8 +719,8 @@ const existingRefSet = useMemo(() => {
 
   // ✅ Tombstone strategy: hide deleted categories from pickers/suggestions,
   // but keep them in state for historical reports.
-  const expenseCatsAll = categories.expense || [];
-  const incomeCatsAll = categories.income || [];
+  const expenseCatsAll = useMemo(() => categories.expense || [], [categories.expense]);
+  const incomeCatsAll = useMemo(() => categories.income || [], [categories.income]);
   
   const expenseCats = useMemo(() => expenseCatsAll.filter((c) => !isTombstoneCategory(c)), [expenseCatsAll]);
   const incomeCats = useMemo(() => incomeCatsAll.filter((c) => !isTombstoneCategory(c)), [incomeCatsAll]);

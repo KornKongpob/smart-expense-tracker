@@ -7,7 +7,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { X, Check, ChevronRight, ChevronDown, Camera, FileText, Search } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../utils/money";
-import { formatCurrency, toISODate } from "../utils/format";
+import { toISODate } from "../utils/format";
 import { generateId } from "../utils/id";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 

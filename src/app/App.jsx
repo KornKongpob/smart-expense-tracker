@@ -4,7 +4,7 @@ import { useAppStore } from "../store/store.jsx";
 import { useUndo } from "../utils/useUndo";
 import { parseHash, replaceHash } from "../utils/hashRouter";
 import { checkBudgetAndNotify } from "../utils/budgetNotifications";
-import { formatCurrency, toISODate } from "../utils/format";
+import { formatCurrency } from "../utils/format";
 import { getBudget, toMonthKey } from "../store/selectors.js";
 import { sumExpenseForMonth } from "../utils/transaction";
 import Navbar from "../components/Navbar";
@@ -95,6 +95,7 @@ export default function App() {
   // Hide bottom navbar while the on-screen keyboard is open (prevents overlap with inputs),
   // and expose the keyboard inset as a CSS variable for fixed buttons.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   useEffect(() => {
     // Default
@@ -163,11 +164,7 @@ export default function App() {
     store.bulkUpsertTransactions(items, { navigateToDashboard: false });
   }, [store]);
 
-  const { undoItem, pushUndo, performUndo, clearUndo } = useUndo({ onRestore: handleUndoRestore });
-
-  const showUndoDelete = useCallback((label, deletedTxs) => {
-    pushUndo(label, deletedTxs);
-  }, [pushUndo]);
+  const { undoItem, performUndo, clearUndo } = useUndo({ onRestore: handleUndoRestore });
 
   // ---- Budget notifications (check after transactions change) ----
   useEffect(() => {
@@ -309,9 +306,6 @@ export default function App() {
 
   const reserveNavSpace = view !== "add";
   const showNavbar = reserveNavSpace && !keyboardOpen; // hide while keyboard is open
-
-  // ---- Quick Add bottom sheet ----
-  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   return (
     <div className={reserveNavSpace ? "pb-nav" : "pb-safe"}>

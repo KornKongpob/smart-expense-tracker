@@ -796,6 +796,9 @@ export default function TransactionReviewModal({
     catIndexByType,
     merchants,
     doneLabel,
+    isOpen,
+    hasReceiptLines,
+    nonCreditAccounts,
   ]);
 
   if (!isOpen || !q) return null;
