@@ -34,7 +34,7 @@ export default function ModalShell({
       style={{ zIndex }}
     >
       <div
-        className={`w-full ${maxWidth} glass-card rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 ${maxHeight} overflow-y-auto overflow-x-hidden relative flex flex-col`}
+        className={`w-full ${maxWidth} glass-card rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 ${maxHeight} overflow-hidden relative flex flex-col`}
       >
         <div className="flex items-center justify-between mb-4 shrink-0">
           <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
@@ -49,7 +49,7 @@ export default function ModalShell({
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 flex flex-col min-w-0">
+        <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-y-auto">
           {children}
         </div>
 

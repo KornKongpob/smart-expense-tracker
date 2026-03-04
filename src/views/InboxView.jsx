@@ -934,7 +934,7 @@ const approveIds = (ids) => {
   const statusLine = tab === "pending" ? `${pendingCount} pending` : `${approved.length} approved`;
 
   return (
-    <div className="min-h-dvh min-w-0 overflow-x-hidden">
+    <div className="min-h-dvh min-w-0 overflow-x-hidden pb-24">
       <AppHeader
         title="Inbox"
         subtitle={statusLine}

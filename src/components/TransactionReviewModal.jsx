@@ -870,7 +870,7 @@ export default function TransactionReviewModal({
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto pb-6">{stepContent}</div>
+      <div className="flex-1 min-h-0 overflow-y-auto pb-6">{stepContent}</div>
 
       {/* Sticky footer */}
       <div className="shrink-0 -mx-6 px-6 pt-3 bg-white/5 backdrop-blur-3xl border-t border-gray-200/20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] pb-[calc(1rem+env(safe-area-inset-bottom))]">
