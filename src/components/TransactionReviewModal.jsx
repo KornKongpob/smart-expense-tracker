@@ -808,7 +808,7 @@ export default function TransactionReviewModal({
     dupKind === "ref" ? "Duplicate (Ref)" : dupKind === "file" ? "Duplicate (File)" : "Possible duplicate";
 
   return (
-    <ModalShell title={title} onClose={onClose} isOpen={isOpen} maxWidth="sm:max-w-lg" maxHeight="max-h-[92dvh]">
+    <ModalShell title={title} onClose={onClose} isOpen={isOpen} maxWidth="sm:max-w-lg" maxHeight="max-h-[92dvh]" noScroll>
       {/* Duplicate toggle */}
       {q?.duplicate ? (
         <div className="glass-panel border border-amber-500/20 rounded-2xl p-3 mb-4 flex items-center justify-between gap-3">
