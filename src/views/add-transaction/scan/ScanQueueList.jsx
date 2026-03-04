@@ -29,6 +29,8 @@ export default function ScanQueueList({
 
   if (!list.length) return null;
 
+  const expandedItem = expandedId ? list.find((q) => q.id === expandedId && q.status === "ready") : null;
+
   return (
     <div className="mb-28">
       <div className="flex items-center justify-between mb-3">
@@ -50,7 +52,6 @@ export default function ScanQueueList({
 
       <div className="space-y-3">
         {list.map((q) => {
-          const isOpen = expandedId === q.id;
           const canEditQueueItem = q.status === "ready";
           const badge =
             q.txType === "credit_payment"
@@ -177,27 +178,28 @@ export default function ScanQueueList({
                   </div>
                 </div>
               </div>
-
-              <ScanItemReviewModal
-                isOpen={isOpen && q.status === "ready"}
-                q={q}
-                onClose={() => setExpandedId(null)}
-                onUpdateItem={onUpdateItem}
-                onUpdateGroup={onUpdateGroup}
-                onTypeChange={onTypeChange}
-                accounts={accounts}
-                nonCreditAccounts={nonCreditAccounts}
-                expenseCatsAll={expenseCatsAll}
-                incomeCatsAll={incomeCatsAll}
-                recentCatsByType={recentCatsByType}
-                recentAccountsByType={recentAccountsByType}
-                catIndexByType={catIndexByType}
-                merchants={merchants}
-              />
             </div>
           );
         })}
       </div>
+
+      {/* Render modal OUTSIDE the card divs so overflow-hidden / glass effects don't clip it */}
+      <ScanItemReviewModal
+        isOpen={!!expandedItem}
+        q={expandedItem}
+        onClose={() => setExpandedId(null)}
+        onUpdateItem={onUpdateItem}
+        onUpdateGroup={onUpdateGroup}
+        onTypeChange={onTypeChange}
+        accounts={accounts}
+        nonCreditAccounts={nonCreditAccounts}
+        expenseCatsAll={expenseCatsAll}
+        incomeCatsAll={incomeCatsAll}
+        recentCatsByType={recentCatsByType}
+        recentAccountsByType={recentAccountsByType}
+        catIndexByType={catIndexByType}
+        merchants={merchants}
+      />
     </div>
   );
 }
