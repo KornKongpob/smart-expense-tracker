@@ -791,31 +791,8 @@ const existingRefSet = useMemo(() => {
   }, [catsForTypeActive, catsForTypeAll, categoryId]);
 
   const catHierarchy = useMemo(() => buildCategoryHierarchy(catsForTypePicker), [catsForTypePicker]);
-  const { mainId: selectedMainId } = useMemo(() => splitSelection(categoryId, catHierarchy), [categoryId, catHierarchy]);
-  const subCatsForMain = useMemo(
-    () => (selectedMainId ? catHierarchy.childrenByParent.get(selectedMainId) || [] : []),
-    [catHierarchy, selectedMainId]
-  );
 
-  // ====== category picker UX state ======
-  const [catQuery, setCatQuery] = useState("");
 
-  // Reset search when switching tx type to keep UI predictable
-  useEffect(() => {
-    setCatQuery("");
-  }, [type]);
-
-  const selectedCatBreadcrumb = useMemo(() => {
-    const id = String(categoryId || "").trim();
-    if (!id) return "";
-    const { mainId, subId } = splitSelection(id, catHierarchy);
-    const main = mainId ? catHierarchy.byId.get(mainId) : null;
-    const sub = subId ? catHierarchy.byId.get(subId) : null;
-    const mainName = main?.name ? String(main.name) : "";
-    const subName = sub?.name ? String(sub.name) : "";
-    if (mainName && subName) return `${mainName} › ${subName}`;
-    return mainName || subName || "";
-  }, [categoryId, catHierarchy]);
 
   const recentCatsForPicker = useMemo(() => {
     const txType = type === "income" ? "income" : type === "expense" ? "expense" : "";
@@ -937,46 +914,6 @@ const existingRefSet = useMemo(() => {
     };
   }, [state.transactions, accountById]);
 
-  const catSearchResults = useMemo(() => {
-    const q = String(catQuery || "").trim().toLowerCase();
-    if (!q) return [];
-    const idNow = String(categoryId || "").trim();
-
-    const all = Array.from(catHierarchy.byId.values());
-    const matches = all
-      .filter((c) => {
-        if (!c) return false;
-        const id = String(c?.id || "").trim();
-        if (!id) return false;
-        // Hide deleted categories from search by default
-        if (isTombstoneCategory(c) && id !== idNow) return false;
-        const name = String(c?.name || "").toLowerCase();
-        return name.includes(q);
-      })
-      .map((c) => {
-        const { mainId, subId } = splitSelection(c.id, catHierarchy);
-        const main = mainId ? catHierarchy.byId.get(mainId) : null;
-        const sub = subId ? catHierarchy.byId.get(subId) : null;
-        const breadcrumb = sub ? `${main?.name || ""} › ${sub?.name || ""}` : (main?.name || sub?.name || "");
-        const isSub = !!subId;
-        return {
-          cat: c,
-          breadcrumb,
-          mainName: String(main?.name || ""),
-          isSub,
-        };
-      });
-
-    // sort for readability
-    matches.sort((a, b) => {
-      if (a.isSub !== b.isSub) return a.isSub ? 1 : -1;
-      const aKey = `${a.mainName}|${a.breadcrumb}`;
-      const bKey = `${b.mainName}|${b.breadcrumb}`;
-      return aKey.localeCompare(bKey, "th");
-    });
-
-    return matches.slice(0, 30);
-  }, [catQuery, categoryId, catHierarchy]);
 
   // ✅ กันการสร้าง category ซ้ำใน "batch scan" เดียวกัน
   const createdCatRef = useRef({ expense: new Map(), income: new Map() });
@@ -1482,11 +1419,6 @@ const existingRefSet = useMemo(() => {
     });
   };
 
-  const applyPayFullForQueue = (qid, toAccId) => {
-    const debt = creditDebtById.get(toAccId) || 0;
-    if (!debt || debt <= 0) return;
-    updateQueueItem(qid, { amount: Math.round(debt), splitByCategory: false });
-  };
 
   // ✅ เปลี่ยนประเภทใน Queue (หลัง scan)
   // ✅ รองรับ credit_payment
