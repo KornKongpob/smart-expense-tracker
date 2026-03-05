@@ -1,5 +1,6 @@
 // src/views/AddTransactionView.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   bestMatchAccountCandidate,
   bestMatchAccountId,
@@ -4491,7 +4492,7 @@ const handleClose = () => {
       ) : null}
 
       {/* Duplicate decision modal (บันทึกทันที) */}
-      {dupDecisionOpen ? (
+      {dupDecisionOpen ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <button
             type="button"
@@ -4540,7 +4541,8 @@ const handleClose = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
       </main>
 

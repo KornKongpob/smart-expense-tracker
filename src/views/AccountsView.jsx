@@ -1,5 +1,6 @@
 // src/views/AccountsView.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { parseDigitsList, choosePrimaryDigits } from "../utils/accountMatch";
 import { useAppStore } from "../store/store.jsx";
 import { calcAccountBalance } from "../store/selectors.js";
@@ -1069,7 +1070,7 @@ const create = () => {
 
 {/* Create Modal */}
 
-      {openCreate ? (
+      {openCreate ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
           <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
             <div className="flex items-start justify-between gap-3">
@@ -1353,12 +1354,13 @@ const create = () => {
             {/* Safe-area spacer (iOS home indicator) */}
             <div className="h-3 pb-safe" />
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
 
       
 {/* ✅ Opening balance confirmation (create) */}
-{openCreateAdjustConfirm && pendingCreateAdjust && pendingCreateAccount ? (
+{openCreateAdjustConfirm && pendingCreateAdjust && pendingCreateAccount ? createPortal(
   <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
     <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl overflow-x-hidden">
       <div className="text-lg font-black text-gray-900">ยอดตั้งต้นในบัญชี</div>
@@ -1439,11 +1441,12 @@ const create = () => {
       {/* Safe-area spacer (iOS home indicator) */}
       <div className="h-3 pb-safe" />
     </div>
-  </div>
+  </div>,
+  document.body
 ) : null}
 
 {/* Edit Modal */}
-      {openEdit ? (
+      {openEdit ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
           <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
             <div className="flex items-start justify-between gap-3">
@@ -1782,11 +1785,12 @@ const create = () => {
             {/* Safe-area spacer (iOS home indicator) */}
             <div className="h-3 pb-safe" />
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
 
       {/* ✅ Adjust balance confirmation */}
-      {openAdjustConfirm && pendingAdjust ? (
+      {openAdjustConfirm && pendingAdjust ? createPortal(
         <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center bg-black/35 p-3">
           <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl">
             <div className="text-lg font-black text-gray-900">ปรับยอดบัญชี</div>
@@ -1859,7 +1863,8 @@ const create = () => {
             {/* Safe-area spacer (iOS home indicator) */}
             <div className="h-3 pb-safe" />
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
 
       {/* Bottom helper */}
