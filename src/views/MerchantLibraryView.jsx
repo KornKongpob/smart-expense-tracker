@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import CategorySelect from "../components/CategorySelect";
 import AccountPicker from "../components/AccountPicker";
 import { ArrowLeft, Plus, Search, Trash2, GitMerge, Edit2, Check, X } from "lucide-react";
@@ -12,14 +13,15 @@ import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 function Modal({ open, children, onClose }) {
   useLockBodyScroll(open);
   if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <button type="button" className="absolute inset-0 bg-black/40" onClick={onClose} aria-label="Close" />
       <div className="relative w-full max-w-md glass-card rounded-3xl p-5 border border-white/20 max-h-[90dvh] overflow-y-auto overflow-x-hidden overscroll-contain">
         {children}
         <div className="h-3 pb-safe" />
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

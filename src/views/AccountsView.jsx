@@ -1070,7 +1070,7 @@ const create = () => {
 {/* Create Modal */}
 
       {openCreate ? (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
           <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1359,7 +1359,7 @@ const create = () => {
       
 {/* ✅ Opening balance confirmation (create) */}
 {openCreateAdjustConfirm && pendingCreateAdjust && pendingCreateAccount ? (
-  <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
+  <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
     <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl overflow-x-hidden">
       <div className="text-lg font-black text-gray-900">ยอดตั้งต้นในบัญชี</div>
       <div className="text-xs text-gray-800/70 font-bold mt-2 leading-relaxed">
@@ -1444,7 +1444,7 @@ const create = () => {
 
 {/* Edit Modal */}
       {openEdit ? (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
           <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1787,7 +1787,7 @@ const create = () => {
 
       {/* ✅ Adjust balance confirmation */}
       {openAdjustConfirm && pendingAdjust ? (
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/35 p-3">
+        <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center bg-black/35 p-3">
           <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl">
             <div className="text-lg font-black text-gray-900">ปรับยอดบัญชี</div>
             <div className="text-xs text-gray-800/70 font-bold mt-2 leading-relaxed">
