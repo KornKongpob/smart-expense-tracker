@@ -250,6 +250,11 @@ body {
   padding-bottom: var(--app-nav-h, calc(7rem + env(safe-area-inset-bottom)));
 }
 
+/* Hide Navbar when a modal/overlay is open (set by useLockBodyScroll) */
+body[data-modal-open="true"] .app-navbar {
+  display: none !important;
+}
+
 /* Hide scrollbars */
 .no-scrollbar::-webkit-scrollbar {
   display: none;

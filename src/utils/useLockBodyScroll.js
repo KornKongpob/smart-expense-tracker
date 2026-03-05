@@ -47,6 +47,7 @@ export function useLockBodyScroll(locked) {
       body.style.right = "0";
       body.style.width = "100%";
       if (sw > 0) body.style.paddingRight = `${sw}px`;
+      body.setAttribute("data-modal-open", "true");
     }
 
     return () => {
@@ -61,6 +62,7 @@ export function useLockBodyScroll(locked) {
         body.style.right = savedStyles.right;
         body.style.width = savedStyles.width;
         body.style.paddingRight = savedStyles.paddingRight;
+        body.removeAttribute("data-modal-open");
         savedStyles = null;
         window.scrollTo(0, savedScrollY);
       }

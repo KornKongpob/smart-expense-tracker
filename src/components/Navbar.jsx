@@ -37,7 +37,7 @@ export default function Navbar({ onFabPress }) {
      * - modal หลายหน้าของคุณใช้ z-[60] / z-[100] / z-[110] แล้ว
      * - Navbar อยู่ z-[40] เพื่อไม่ชน modal
      */
-    <div className="fixed inset-x-0 bottom-0 z-[40] px-4 pb-safe pointer-events-none">
+    <div className="app-navbar fixed inset-x-0 bottom-0 z-[40] px-4 pb-safe pointer-events-none">
       {/*
         ✅ Bottom scrim: ช่วย “ปิด” คอนเทนต์ด้านหลังที่โผล่ทะลุผ่าน glass navbar
         - ทำให้มองแล้วไม่แปลกตาเวลามี list/การ์ดอยู่ด้านล่าง
