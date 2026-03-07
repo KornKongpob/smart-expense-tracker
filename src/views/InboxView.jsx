@@ -29,6 +29,7 @@ import { parseMoneyToSatang } from "../utils/money";
 import { expandTransactionToInstallments } from "../utils/installments";
 import { useBlobInfo } from "../utils/useBlobInfo";
 import { isCreditAccount } from "../utils/accountMatch";
+import { duplicateStateFromMatch, toDuplicateComparable } from "../utils/duplicateDetection";
 import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
@@ -600,28 +601,46 @@ export default function InboxView({ showAlert, showConfirm }) {
 
   const activeListBase = tab === "pending" ? pending : approved;
 
+  const prepareInboxItemForApproval = useCallback((item) => {
+    const canon = resolveMerchantCanonical(item?.merchant || item?.note, state?.merchants || []);
+    let nextItem = canon ? { ...item, merchant: canon } : { ...item };
+
+    const paymentMethod = String(nextItem?.paymentMethod || nextItem?.payment_method || "cash").toLowerCase().trim() || "cash";
+    if ((!nextItem?.accountId || !String(nextItem.accountId).trim()) && paymentMethod === "cash" && defaultCashAccountId) {
+      nextItem = { ...nextItem, accountId: defaultCashAccountId, paymentMethod };
+    }
+
+    return nextItem;
+  }, [defaultCashAccountId, state?.merchants]);
+
+  const buildPendingDuplicatePool = useCallback(({ excludeIds = [], extraItems = [] } = {}) => {
+    const excluded = new Set((excludeIds || []).map((id) => String(id || "")).filter(Boolean));
+    return [
+      ...(state.transactions || []),
+      ...(pending || []).filter((it) => !excluded.has(String(it?.id || ""))).map(toDuplicateComparable),
+      ...(extraItems || []).map(toDuplicateComparable),
+    ];
+  }, [pending, state.transactions]);
+
+  const getInboxDuplicateMatch = useCallback((item, options = {}) => {
+    try {
+      const pool = buildPendingDuplicatePool({
+        excludeIds: [item?.id, ...(options.excludeIds || [])],
+        extraItems: options.extraItems,
+      });
+      return findFuzzyDuplicate(pool, toDuplicateComparable(item));
+    } catch {
+      return null;
+    }
+  }, [buildPendingDuplicatePool]);
+
   // ✅ Ensure Inbox warning can show even for older items (compute fuzzy duplicate for display)
   const activeList = useMemo(() => {
-    const txs = state.transactions || [];
     return (activeListBase || []).map((it) => {
       if (!it) return it;
-      if (it.duplicate) return it;
-      const f = findFuzzyDuplicate(txs, it);
-      if (f?.isDuplicate) {
-        return {
-          ...it,
-          duplicate: true,
-          duplicateInfo: {
-            kind: (Array.isArray(f?.reasons) && f.reasons.includes('ref exact match')) ? 'ref' : (Array.isArray(f?.reasons) && f.reasons.includes('file exact match')) ? 'file' : 'fuzzy',
-            matchId: f.matchId || null,
-            score: f.score || 0,
-            reasons: f.reasons || [],
-          },
-        };
-      }
-      return it;
+      return { ...it, ...duplicateStateFromMatch(getInboxDuplicateMatch(it)) };
     });
-  }, [activeListBase, state.transactions]);
+  }, [activeListBase, getInboxDuplicateMatch]);
 
   const pickRecentCats = useCallback((txType, catsList) => {
     const txs = Array.isArray(state.transactions) ? state.transactions : [];
@@ -839,37 +858,26 @@ export default function InboxView({ showAlert, showConfirm }) {
 
     showAlert?.(updated ? `Auto-categorize: อัปเดต ${updated} รายการ` : "Auto-categorize: ไม่มีรายการที่ต้องอัปเดต");
   };
-const approveIds = (ids) => {
+  const approveIds = (ids) => {
     const list = Array.isArray(ids) ? ids : [];
     if (!list.length) return;
 
     const items = pending.filter((x) => list.includes(x.id));
     if (!items.length) return;
 
-    const dupCount = items.reduce((n, it) => {
-      if (it?.duplicate) return n + 1;
-      try {
-        const f = findFuzzyDuplicate(state.transactions || [], it);
-        return f?.isDuplicate ? n + 1 : n;
-      } catch {
-        return n;
-      }
+    const preparedItems = items.map(prepareInboxItemForApproval);
+    const dupCount = preparedItems.reduce((n, it) => {
+      const otherSelected = preparedItems.filter((candidate) => String(candidate?.id || "") !== String(it?.id || ""));
+      const match = getInboxDuplicateMatch(it, { excludeIds: list, extraItems: otherSelected });
+      return duplicateStateFromMatch(match).duplicate || !!it?.duplicate ? n + 1 : n;
     }, 0);
 
     const doApprove = () => {
       try {
         const allTxs = [];
-        const normalizedItems = [];
-        for (const it of items) {
-          const canon = resolveMerchantCanonical(it?.merchant || it?.note, state?.merchants || []);
-          let nextIt = canon ? { ...it, merchant: canon } : it;
+        for (const nextIt of preparedItems) {
 
           // ✅ Default payment_method cash → default cash account (prevents approval errors)
-          const pm = String(nextIt?.paymentMethod || nextIt?.payment_method || "cash").toLowerCase().trim() || "cash";
-          if ((!nextIt?.accountId || !String(nextIt.accountId).trim()) && pm === "cash" && defaultCashAccountId) {
-            nextIt = { ...nextIt, accountId: defaultCashAccountId, paymentMethod: pm };
-          }
-          normalizedItems.push(nextIt);
           const txs = buildTransactionsFromInboxItem(nextIt, { accounts });
           allTxs.push(...txs);
         }
@@ -1348,16 +1356,13 @@ const approveIds = (ids) => {
 
           // ✅ Re-evaluate possible duplicate after editing (amount/date/merchant/ref/digits changes)
           try {
-            const f = findFuzzyDuplicate(state.transactions || [], nextItem);
-            const dup = !!f?.isDuplicate;
+            const dupState = duplicateStateFromMatch(getInboxDuplicateMatch(nextItem));
             patch = {
               ...patch,
-              duplicate: dup,
-              duplicateInfo: dup
-                ? { kind: (Array.isArray(f?.reasons) && f.reasons.includes('ref exact match')) ? 'ref' : (Array.isArray(f?.reasons) && f.reasons.includes('file exact match')) ? 'file' : 'fuzzy', matchId: f.matchId || null, score: f.score || 0, reasons: f.reasons || [] }
-                : null,
+              duplicate: dupState.duplicate,
+              duplicateInfo: dupState.duplicateInfo,
             };
-            nextItem = { ...nextItem, duplicate: dup, duplicateInfo: patch.duplicateInfo };
+            nextItem = { ...nextItem, ...dupState };
           } catch {
             // ignore
           }

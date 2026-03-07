@@ -17,6 +17,7 @@ import { parseDigitsList as parseDigitsListUtil, choosePrimaryDigits } from "../
 import { calcAccountBalance, parseDateSafe } from "./selectors";
 import { toISODate } from "../utils/format";
 import { parseMoneyToSatang, ensureSatangInt } from "../utils/money";
+import { advanceRecurringDate, getRecurringAnchorDay } from "../utils/recurring";
 import {
   normalizeMerchants,
   normalizeMerchantEntry,
@@ -493,7 +494,7 @@ function normalizeTransaction(raw) {
   const amount = safeSatang(t.amount, 0);
   const date = t?.date ? String(t.date).slice(0, 10) : toISODate(new Date());
   // Prefer explicit createdAt/updatedAt, else fall back to date (midnight) for stable sorting
-  const dateMs = date ? new Date(date).getTime() : 0;
+  const dateMs = date ? parseDateSafe(date).getTime() : 0;
   const createdAt = Number(t.createdAt || t.addedAt || t.updatedAt || dateMs || Date.now());
   const updatedAt = Number(t.updatedAt || createdAt);
   const location = normalizeLocation(t.location);
@@ -639,30 +640,15 @@ function migrateScanInboxToInbox(scanInbox) {
 // NOTE: we still allow users to run multiple times; UI will warn when truncated.
 const MAX_RECURRING_CREATE_PER_RUN = 200;
 
-function addDaysLocal(dateObj, n) {
-  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-  d.setDate(d.getDate() + n);
-  return d;
-}
-
-function addMonthsLocal(dateObj, n) {
-  return new Date(dateObj.getFullYear(), dateObj.getMonth() + n, dateObj.getDate());
-}
-
-function advanceRecurringDate(dateObj, frequency, interval) {
-  const itv = clampInt(interval, 1, 120, 1);
-  if (frequency === "weekly") return addDaysLocal(dateObj, 7 * itv);
-  return addMonthsLocal(dateObj, itv); // monthly default
-}
-
 function generateDueTransactionsForRecurring(r, todayISO) {
   if (!r?.enabled) return { txs: [], nextRecurring: r };
 
   const today = parseDateSafe(todayISO);
   const start = parseDateSafe(r.startDate || todayISO);
+  const anchorDay = getRecurringAnchorDay(r);
 
   let nextDue = r.lastGenerated
-    ? advanceRecurringDate(parseDateSafe(r.lastGenerated), r.frequency, r.interval)
+    ? advanceRecurringDate(parseDateSafe(r.lastGenerated), r.frequency, r.interval, anchorDay)
     : start;
 
   if (nextDue.getTime() > today.getTime()) return { txs: [], nextRecurring: r };
@@ -701,7 +687,7 @@ function generateDueTransactionsForRecurring(r, todayISO) {
     });
 
     lastGenDate = nextDue;
-    nextDue = advanceRecurringDate(nextDue, r.frequency, r.interval);
+    nextDue = advanceRecurringDate(nextDue, r.frequency, r.interval, anchorDay);
   }
 
   // If we didn't hit cap but there is still something due (edge-case), keep nextDueISO
@@ -852,13 +838,28 @@ export function reducer(state, action) {
         String(r?.accountId || "") === String(id) ? { ...r, accountId: fallbackAccountId } : r
       );
 
+      const replaceInboxAccount = (currentId, counterpartId) => {
+        if (String(currentId || "") !== String(id)) return String(currentId || "");
+        if (!fallbackAccountId) return "";
+        return String(counterpartId || "") === fallbackAccountId ? "" : fallbackAccountId;
+      };
+
       const patchInboxAccount = (it) => {
         if (!it) return it;
         const next = { ...it };
+        const txType = String(next.type || next.txType || "").toLowerCase().trim();
+
+        if (txType === "transfer" || txType === "credit_payment") {
+          next.fromAccountId = replaceInboxAccount(next.fromAccountId, next.toAccountId);
+          next.toAccountId = replaceInboxAccount(next.toAccountId, next.fromAccountId);
+          if (String(next.accountId || "") === String(id)) {
+            next.accountId = String(next.fromAccountId || next.toAccountId || "");
+          }
+          return normalizeInboxItem(next);
+        }
+
         if (String(next.accountId || "") === String(id)) next.accountId = fallbackAccountId;
-        if (String(next.fromAccountId || "") === String(id)) next.fromAccountId = fallbackAccountId;
-        if (String(next.toAccountId || "") === String(id)) next.toAccountId = fallbackAccountId;
-        return next;
+        return normalizeInboxItem(next);
       };
       const inbox = (state.inbox || []).map(patchInboxAccount);
 

@@ -19,7 +19,7 @@ import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
 import { downloadBackupJSON } from "../services/storage";
 import { toISODate } from "../utils/format";
-import { parseDateSafe } from "../store/selectors.js";
+import { isRecurringDue } from "../utils/recurring";
 import { validateBackupImport } from "../schemas/index.js";
 import { transactionsToCsv, downloadCsv } from "../utils/exportCsv";
 
@@ -192,16 +192,11 @@ export default function MoreView({ showAlert, showConfirm }) {
     if (!list.length) return "";
 
     const todayISO = toISODate(new Date());
-    const today = parseDateSafe(todayISO).getTime();
 
     let dueish = 0;
     for (const r of list) {
       if (r?.enabled === false) continue;
-
-      const last = r?.lastGenerated ? parseDateSafe(r.lastGenerated).getTime() : 0;
-      const start = r?.startDate ? parseDateSafe(r.startDate).getTime() : 0;
-
-      if ((!r?.lastGenerated && start && start <= today) || (r?.lastGenerated && last <= today)) dueish += 1;
+      if (isRecurringDue(r, todayISO)) dueish += 1;
     }
 
     if (!dueish) return "ยังไม่พบรายการที่น่าจะถึงรอบในวันนี้";

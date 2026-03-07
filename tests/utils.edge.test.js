@@ -14,6 +14,8 @@ import {
   signedReceiptGroupSatang,
 } from '../src/utils/receiptAdjustments.js';
 import { splitReceiptItemsToLines } from '../src/utils/receiptCategorizer.js';
+import { getNextRecurringDueISO, advanceRecurringDate } from '../src/utils/recurring.js';
+import { duplicateStateFromMatch, toDuplicateComparable } from '../src/utils/duplicateDetection.js';
 
 test('money: negative/zero/excess decimals are sanitized and parsed safely', () => {
   assert.equal(sanitizeMoneyInput('-฿ 1,234.5678'), '-1234.56');
@@ -96,4 +98,46 @@ test('receiptCategorizer: split lines parse mixed Thai/Arabic number strings', (
   assert.equal(discount.receiptLineType, 'adjustment');
   assert.equal(discount.adjustmentEffect, 'subtract');
   assert.equal(discount.amount, 0.5);
+});
+
+test('recurring: monthly rollover clamps to end of month without losing anchor day', () => {
+  const febDue = advanceRecurringDate(new Date(2026, 0, 31), 'monthly', 1, 31);
+  assert.equal(febDue.getFullYear(), 2026);
+  assert.equal(febDue.getMonth(), 1);
+  assert.equal(febDue.getDate(), 28);
+
+  const nextDue = getNextRecurringDueISO(
+    {
+      startDate: '2026-01-31',
+      lastGenerated: '2026-02-28',
+      frequency: 'monthly',
+      interval: 1,
+    },
+    '2026-03-07',
+  );
+
+  assert.equal(nextDue, '2026-03-31');
+});
+
+test('duplicate helpers: normalize comparable entries and duplicate reasons consistently', () => {
+  const comparable = toDuplicateComparable({
+    id: 'q-1',
+    txType: 'credit_payment',
+    referenceId: 'REF-001',
+  });
+
+  assert.equal(comparable.type, 'credit_payment');
+  assert.equal(comparable.referenceId, 'REF-001');
+  assert.equal(comparable.isTransfer, true);
+
+  const dupState = duplicateStateFromMatch({
+    isDuplicate: true,
+    matchId: 'tx-1',
+    score: 1,
+    reasons: ['ref exact match'],
+  });
+
+  assert.equal(dupState.duplicate, true);
+  assert.equal(dupState.duplicateInfo.kind, 'ref');
+  assert.equal(dupState.duplicateInfo.matchId, 'tx-1');
 });

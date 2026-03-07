@@ -8,7 +8,7 @@ import ModalShell from "../components/ModalShell";
 import { useAppStore } from "../store/store.jsx";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
-import { parseDateSafe } from "../store/selectors.js";
+import { getNextRecurringDueDate, getNextRecurringDueISO, isRecurringDue } from "../utils/recurring";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 
@@ -23,30 +23,6 @@ const clampInt = (v, min, max, fallback) => {
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
 };
-
-function addDaysLocal(dateObj, n) {
-  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-  d.setDate(d.getDate() + n);
-  return d;
-}
-
-function addMonthsLocal(dateObj, n) {
-  return new Date(dateObj.getFullYear(), dateObj.getMonth() + n, dateObj.getDate());
-}
-
-function advanceRecurringDate(dateObj, frequency, interval) {
-  const itv = clampInt(interval, 1, 120, 1);
-  if (frequency === "weekly") return addDaysLocal(dateObj, 7 * itv);
-  return addMonthsLocal(dateObj, itv); // monthly default
-}
-
-function getNextDueISO(r, todayISO) {
-  const start = parseDateSafe(r?.startDate || todayISO);
-
-  const base = r?.lastGenerated ? advanceRecurringDate(parseDateSafe(r.lastGenerated), r.frequency, r.interval) : start;
-  // return as local YYYY-MM-DD
-  return toISODate(base);
-}
 
 export default function RecurringView({ showAlert, showConfirm }) {
   const { state, navigate, upsertRecurring, deleteRecurring, runRecurringNow } = useAppStore();
@@ -81,10 +57,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
     let due = 0;
     for (const r of recurring || []) {
       if (r?.enabled === false) continue;
-      const nextDueISO = getNextDueISO(r, todayISO);
-      const nextDue = parseDateSafe(nextDueISO).getTime();
-      const today = parseDateSafe(todayISO).getTime();
-      if (nextDue <= today) due += 1;
+      if (isRecurringDue(r, todayISO)) due += 1;
     }
 
     return { total: (recurring || []).length, enabled, due };
@@ -237,8 +210,8 @@ export default function RecurringView({ showAlert, showConfirm }) {
               const ae = a?.enabled !== false;
               const be = b?.enabled !== false;
               if (ae !== be) return ae ? -1 : 1;
-              const an = parseDateSafe(getNextDueISO(a, todayISO)).getTime();
-              const bn = parseDateSafe(getNextDueISO(b, todayISO)).getTime();
+              const an = getNextRecurringDueDate(a, todayISO).getTime();
+              const bn = getNextRecurringDueDate(b, todayISO).getTime();
               return an - bn;
             })
             .map((r) => {
@@ -251,10 +224,8 @@ export default function RecurringView({ showAlert, showConfirm }) {
                 };
               const acc = accounts.find((a) => a.id === r.accountId);
 
-              const nextDueISO = getNextDueISO(r, todayISO);
-              const nextDue = parseDateSafe(nextDueISO).getTime();
-              const today = parseDateSafe(todayISO).getTime();
-              const isDue = r.enabled !== false && nextDue <= today;
+              const nextDueISO = getNextRecurringDueISO(r, todayISO);
+              const isDue = r.enabled !== false && isRecurringDue(r, todayISO);
 
               return (
                 <div key={r.id} className="ui-card p-4">
@@ -447,7 +418,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             <div className="text-sm text-gray-900 mt-1">
               รอบถัดไป:{" "}
               <span className="font-extrabold">
-                {getNextDueISO(
+                {getNextRecurringDueISO(
                   {
                     startDate,
                     lastGenerated: editingId ? (recurring || []).find((x) => x?.id === editingId)?.lastGenerated : null,

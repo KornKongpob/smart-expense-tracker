@@ -1,5 +1,5 @@
 // src/app/App.jsx
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store/store.jsx";
 import { useUndo } from "../utils/useUndo";
 import { parseHash, replaceHash } from "../utils/hashRouter";
@@ -90,6 +90,9 @@ export default function App() {
   const { state } = store;
 
   const view = state?.ui?.view || "dashboard";
+  const initialHash = typeof window === "undefined" ? "" : window.location.hash;
+  const initialHashRef = useRef(initialHash);
+  const skipInitialHashSyncRef = useRef(!!initialHash);
 
   // ---- Keyboard (mobile) guard ----
   // Hide bottom navbar while the on-screen keyboard is open (prevents overlap with inputs),
@@ -134,7 +137,14 @@ export default function App() {
 
   // ---- Hash router: sync URL ↔ view ----
   useEffect(() => {
-    // Set initial hash on mount
+    const initialHash = initialHashRef.current;
+    if (initialHash) {
+      const { view: hashView } = parseHash(initialHash);
+      if (hashView !== view) {
+        store.navigate(hashView);
+        return;
+      }
+    }
     replaceHash(view);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -151,6 +161,11 @@ export default function App() {
 
   // Keep hash in sync when view changes programmatically
   useEffect(() => {
+    if (skipInitialHashSyncRef.current) {
+      skipInitialHashSyncRef.current = false;
+      const { view: hashView } = parseHash(initialHashRef.current);
+      if (hashView !== view) return;
+    }
     replaceHash(view);
   }, [view]);
 

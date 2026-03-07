@@ -74,6 +74,7 @@ import { buildCategoryHierarchy } from "../../utils/categoryHierarchy";
 import { useTransferFlow } from "./hooks/useTransferFlow";
 import { useTransactionDraft } from "./hooks/useTransactionDraft";
 import { useScanQueue } from "./hooks/useScanQueue";
+import { duplicateStateFromMatch, toDuplicateComparable } from "../../utils/duplicateDetection";
 import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromNote, appendEvidenceToNote, hashString, humanizeScanStatus } from "./helpers/inputHelpers";
 import AmountSection from "./sections/AmountSection";
 import CategorySection from "./sections/CategorySection";
@@ -1234,13 +1235,13 @@ const existingRefSet = useMemo(() => {
       setQueue(prev => {
         let changed = false;
         // Build the pool once for all checks in this batch
+        const pendingInboxItems = (state.inbox || [])
+          .filter((item) => String(item?.status || "pending").toLowerCase() !== "approved")
+          .map(toDuplicateComparable);
         const pool = [
           ...(state.transactions || []),
-          ...prev.filter(p => p.status === "ready").map(p => ({
-            ...p,
-            type: p.txType,
-            isTransfer: p.txType === "transfer" || p.txType === "credit_payment",
-          }))
+          ...pendingInboxItems,
+          ...prev.filter(p => p.status === "ready").map(toDuplicateComparable),
         ];
 
         const nextQueue = prev.map(q => {
@@ -1248,24 +1249,14 @@ const existingRefSet = useMemo(() => {
 
           changed = true;
           try {
-            const f = findFuzzyDuplicate(pool.filter(p => p.id !== q.id), {
-              ...q,
-              type: q.txType,
-              isTransfer: q.txType === "transfer" || q.txType === "credit_payment",
-              ref: q.ref || q.referenceId,
-              referenceId: q.ref || q.referenceId,
-            });
-
-            const isDup = !!f?.isDuplicate;
-            const reasons = Array.isArray(f?.reasons) ? f.reasons : [];
-            const kind = reasons.includes('ref exact match') ? 'ref' : reasons.includes('file exact match') ? 'file' : 'fuzzy';
+            const f = findFuzzyDuplicate(pool.filter(p => p.id !== q.id), toDuplicateComparable(q));
+            const dupState = duplicateStateFromMatch(f);
 
             return {
               ...q,
               _needsDupCheck: false,
-              duplicate: isDup,
-              duplicateInfo: isDup ? { kind, matchId: f?.matchId || null, score: f?.score || 0, reasons } : null,
-              includeDuplicate: isDup ? (q.duplicate ? !!q.includeDuplicate : false) : true
+              ...dupState,
+              includeDuplicate: dupState.duplicate ? (q.duplicate ? !!q.includeDuplicate : false) : true
             };
           } catch {
             return { ...q, _needsDupCheck: false };
@@ -1277,7 +1268,7 @@ const existingRefSet = useMemo(() => {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [queue, state.transactions, setQueue]);
+  }, [queue, state.transactions, state.inbox, setQueue]);
 
   const updateQueueItem = useCallback((id, patch) => {
     setQueue((prev) => {

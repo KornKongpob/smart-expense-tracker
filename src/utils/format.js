@@ -1,6 +1,6 @@
 // src/utils/format.js
 
-import { ensureSatangInt, satangToBahtNumber } from "./money";
+import { ensureSatangInt, satangToBahtNumber } from "./money.js";
 
 /**
  * ✅ Formatting utilities (Currency + Dates)

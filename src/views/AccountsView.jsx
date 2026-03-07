@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { parseDigitsList, choosePrimaryDigits } from "../utils/accountMatch";
 import { useAppStore } from "../store/store.jsx";
 import { calcAccountBalance } from "../store/selectors.js";
-import { formatCurrency } from "../utils/format";
+import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { ACCOUNT_COLORS, ACCOUNT_ICONS, EMOJI_PRESETS } from "../constants/presets.jsx";
 import {
@@ -1391,7 +1391,7 @@ const create = () => {
               amount: Math.abs(desired),
               category: "adjust_balance",
               accountId: pendingCreateAccount.id,
-              date: new Date().toISOString().slice(0, 10),
+              date: toISODate(new Date()),
               note: "ยอดตั้งต้น",
               isTransfer: false,
               meta: { kind: "opening_balance" },

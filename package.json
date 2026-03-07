@@ -8,8 +8,8 @@
     "build": "node ./node_modules/vite/dist/node/cli.js build",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
     "preview": "node ./node_modules/vite/dist/node/cli.js preview",
-    "test": "NODE_OPTIONS=--experimental-specifier-resolution=node node --test tests/utils.edge.test.js",
-    "test:coverage": "NODE_OPTIONS=--experimental-specifier-resolution=node node --test --experimental-test-coverage tests/utils.edge.test.js"
+    "test": "node --experimental-specifier-resolution=node --test tests/utils.edge.test.js",
+    "test:coverage": "node --experimental-specifier-resolution=node --test --experimental-test-coverage tests/utils.edge.test.js"
   },
   "dependencies": {
     "busboy": "^1.6.0",

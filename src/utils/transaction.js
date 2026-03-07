@@ -2,6 +2,8 @@
 // Centralized transaction helpers used across views.
 // Eliminates duplicated isTransferLike / signedExpenseSatang / sumExpense* / compareTx* / daysInMonthKey.
 
+import { parseDateSafe } from "./format";
+
 /**
  * Check if a transaction looks like a transfer (2-leg or credit payment).
  * Re-exports from transferGrouping for backward compatibility,
@@ -82,7 +84,7 @@ export function daysInMonthKey(monthKey) {
  * Get date as milliseconds for sorting (from YYYY-MM-DD string).
  */
 function getTxDateMs(t) {
-  return t?.date ? new Date(String(t.date).slice(0, 10)).getTime() : 0;
+  return t?.date ? parseDateSafe(String(t.date).slice(0, 10)).getTime() : 0;
 }
 
 /**
