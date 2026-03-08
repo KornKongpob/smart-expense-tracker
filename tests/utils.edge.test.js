@@ -181,3 +181,34 @@ test('scan postprocess: detects 7-Eleven style receipt screenshots and pulls rec
   assert.equal(extractLikelyAmountFromScanText(text, { docType: 'receipt' }), 49);
   assert.equal(extractMerchantFromScanText(text, { docType: 'receipt' }), 'สาขา 7-Eleven โรงอาหารกลาง มธ.');
 });
+
+test('scan postprocess: picks single-item receipt total instead of member phone noise', () => {
+  const text = `
+    ใบเสร็จรับเงิน
+    สาขา Test Mart
+    รายการสินค้า
+    กาแฟเย็น 49.00
+    All Member 0-2826-7777
+  `;
+
+  assert.equal(detectScanTextDocType(text), 'receipt');
+  assert.equal(extractLikelyAmountFromScanText(text, { docType: 'receipt' }), 49);
+});
+
+test('scan postprocess: reads transfer amount when amount label and value are on separate lines', () => {
+  const text = `
+    พร้อมเพย์
+    โอนเงินสำเร็จ
+    จาก
+    123-4-56789-0
+    ไปยัง
+    ร้านค้าทดสอบ
+    จำนวนเงิน
+    430.00 บาท
+    ค่าธรรมเนียม 0.00 บาท
+    รหัสอ้างอิง 20260308123456
+  `;
+
+  assert.equal(detectScanTextDocType(text), 'transfer_slip');
+  assert.equal(extractLikelyAmountFromScanText(text, { docType: 'transfer_slip' }), 430);
+});

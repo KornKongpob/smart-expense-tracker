@@ -108,11 +108,28 @@ export default function TransactionReviewModal({
   const hasReceiptLines = txType === "expense" && Array.isArray(q?.groups) && q.groups.length > 0;
 
   const [step, setStep] = useState(0);
+  const [amountInput, setAmountInput] = useState("");
+  const [amountInputFocused, setAmountInputFocused] = useState(false);
 
   const onUpdateItemRef = useRef(onUpdateItem);
   useEffect(() => {
     onUpdateItemRef.current = onUpdateItem;
   }, [onUpdateItem]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setAmountInput("");
+      setAmountInputFocused(false);
+      return;
+    }
+
+    if (amountInputFocused) return;
+    const nextAmount =
+      q?.amount != null
+        ? formatMoneyInputFromSatang(Math.abs(Number(q.amount) || 0), { emptyIfZero: true })
+        : "";
+    setAmountInput(nextAmount);
+  }, [isOpen, qid, q?.amount, amountInputFocused]);
 
   // When opening: default to Split step for multi-item receipts
   useEffect(() => {
@@ -148,7 +165,10 @@ export default function TransactionReviewModal({
   const canGoNext = step < steps.length - 1;
 
   const primaryCats = txType === "income" ? incomeCatsAll : expenseCatsAll;
-  const recentCats = txType === "income" || txType === "expense" ? recentCatsByType?.[txType] || [] : [];
+  const recentCats = useMemo(
+    () => (txType === "income" || txType === "expense" ? recentCatsByType?.[txType] || [] : []),
+    [recentCatsByType, txType]
+  );
 
   const doneFn = onDone || onClose;
 
@@ -231,14 +251,22 @@ export default function TransactionReviewModal({
                   <input
                     type="text"
                     inputMode="decimal"
-                    value={q?.amount != null ? formatMoneyInputFromSatang(Math.abs(Number(q.amount) || 0)) : ""}
+                    value={amountInput}
                     onChange={(e) => {
                       const cleaned = sanitizeMoneyInput(e.target.value);
+                      setAmountInput(cleaned);
                       onUpdateItemRef.current?.(qid, {
                         amount: parseMoneyToSatang(cleaned),
                         splitByCategory: false,
                         amountEdited: true,
                       });
+                    }}
+                    onFocus={() => setAmountInputFocused(true)}
+                    onBlur={() => {
+                      setAmountInputFocused(false);
+                      const cleaned = sanitizeMoneyInput(amountInput);
+                      const satang = parseMoneyToSatang(cleaned);
+                      setAmountInput(formatMoneyInputFromSatang(Math.abs(satang || 0), { emptyIfZero: true }));
                     }}
                     className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
                     placeholder="0.00"
@@ -782,10 +810,8 @@ export default function TransactionReviewModal({
     qid,
     txType,
     hasGroups,
-    nonAdjGroupCount,
     accounts,
     onTypeChange,
-    onUpdateItem,
     onUpdateGroup,
     expenseCatsAll,
     incomeCatsAll,
@@ -799,6 +825,7 @@ export default function TransactionReviewModal({
     isOpen,
     hasReceiptLines,
     nonCreditAccounts,
+    amountInput,
   ]);
 
   if (!isOpen || !q) return null;

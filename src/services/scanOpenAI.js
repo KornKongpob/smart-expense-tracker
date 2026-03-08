@@ -635,6 +635,27 @@ function normalizeAdjustments(adjustments) {
     .filter(Boolean)
     .slice(0, 20);
 }
+
+function deriveAmountFromNormalizedLines(items, adjustments) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeAdjustments = Array.isArray(adjustments) ? adjustments : [];
+
+  const itemsSum = safeItems.reduce((sum, item) => {
+    const total = safeParseAmount(item?.total ?? item?.lineTotal ?? item?.line_total ?? item?.amount ?? item?.price);
+    return sum + (Number.isFinite(total) ? total : 0);
+  }, 0);
+
+  const adjustmentsSigned = safeAdjustments.reduce((sum, adjustment) => {
+    const amount = safeParseAmount(adjustment?.amount ?? adjustment?.value ?? adjustment?.total);
+    if (!Number.isFinite(amount)) return sum;
+    const effect = String(adjustment?.effect || "").toLowerCase().trim();
+    return sum + (effect === "subtract" ? -amount : amount);
+  }, 0);
+
+  const total = itemsSum + adjustmentsSigned;
+  return total > 0 ? total : null;
+}
+
 function normalizeKeywords(kws) {
   if (!Array.isArray(kws)) return [];
   const out = [];
@@ -656,8 +677,15 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     `${String(d?.evidence ?? "")}\n${String(rawText ?? "")}\n${String(d?.merchant ?? "")}\n${String(d?.note ?? "")}`,
   );
   const inferredDocType = d?.doc_type ?? d?.docType ?? detectScanTextDocType(textContext) ?? null;
+  const normalizedItems = normalizeItems(base.items?.length ? base.items : d?.items);
+  const normalizedAdjustments = normalizeAdjustments(d?.adjustments ?? d?.adjustment_lines ?? d?.adjustments_lines ?? null);
   const parsedAmount = safeParseAmount(base.amount ?? d?.amount);
-  const fallbackAmount = parsedAmount ?? extractLikelyAmountFromScanText(textContext, { docType: inferredDocType });
+  const textAmount = extractLikelyAmountFromScanText(textContext, { docType: inferredDocType });
+  const itemsAmount = deriveAmountFromNormalizedLines(normalizedItems, normalizedAdjustments);
+  const fallbackAmount =
+    (Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : null) ??
+    textAmount ??
+    itemsAmount;
   const inferredMerchant = base.merchant ?? d?.merchant ?? extractMerchantFromScanText(textContext, { docType: inferredDocType }) ?? null;
   const noteValue = d?.note != null && String(d.note).trim() ? d.note : inferredMerchant;
 
@@ -677,8 +705,8 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
     from_account: d?.from_account ?? null,
     to_account: d?.to_account ?? null,
     evidence: d?.evidence ?? rawText ?? "",
-    items: normalizeItems(base.items?.length ? base.items : d?.items),
-    adjustments: normalizeAdjustments(d?.adjustments ?? d?.adjustment_lines ?? d?.adjustments_lines ?? null),
+    items: normalizedItems,
+    adjustments: normalizedAdjustments,
     keywords: normalizeKeywords(d?.keywords),
 
     // ✅ new fields (safe additions)

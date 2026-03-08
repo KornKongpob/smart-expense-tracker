@@ -37,6 +37,17 @@ function hasAny(text, keys) {
   return keys.some((key) => t.includes(String(key || "").toLowerCase()));
 }
 
+function isAmountNoiseLine(line, { hasAmountKey = false } = {}) {
+  if (!line) return true;
+  if (hasAmountKey) return false;
+
+  return (
+    /(?:โทร|tel|phone|all member|member|service center|call center|facebook|line official|www\.|http)/i.test(line) ||
+    /(?:บัญชี|account|เลขบัญชี|a\/c|acc|card|เลขบัตร|promptpay id|merchant id|biller id|receiver|sender|จาก|ไปยัง)/i.test(line) ||
+    /(?:ref|reference|transaction|trx|tid#|r#|เลขที่รายการ|รหัสอ้างอิง|receipt no)/i.test(line)
+  );
+}
+
 function isLikelyNoiseLine(line) {
   return (
     !line ||
@@ -196,7 +207,8 @@ export function extractLikelyAmountFromScanText(text, { docType = null } = {}) {
   if (!normalized) return null;
 
   const directPatterns = [
-    /(?:จำนวนเงิน|amount|ยอด(?:รวม|สุทธิ)?|รวม(?:สุทธิ|ทั้งสิ้น)?|grand total|net total|total paid|total|paid)\s*[:：]?\s*([0-9][0-9,\s]*(?:\.\d{2})?)/i,
+    /(?:จำนวนเงิน|amount|ยอด(?:รวม|สุทธิ)?|รวม(?:สุทธิ|ทั้งสิ้น)?|grand total|net total|total paid|total|paid)\s*[:：]?\s*(?:฿|บาท|thb|baht)?\s*([0-9][0-9,\s]*(?:\.\d{1,2})?)/i,
+    /(?:จำนวนเงิน|amount|ยอด(?:รวม|สุทธิ)?|รวม(?:สุทธิ|ทั้งสิ้น)?|grand total|net total|total paid|total|paid)[^\d\n]{0,24}\n\s*(?:฿|บาท|thb|baht)?\s*([0-9][0-9,\s]*(?:\.\d{1,2})?)/i,
     /([0-9][0-9,\s]*(?:\.\d{2})?)\s*(?:บาท|฿|thb)\b/i,
   ];
 
@@ -214,9 +226,11 @@ export function extractLikelyAmountFromScanText(text, { docType = null } = {}) {
   const moneyKeys = ["฿", "บาท", "thb", "baht"];
   const ignoreKeys = ["vat", "tax", "change", "เงินทอน", "qty", "ชิ้น", "จำนวน", "tid#", "r#", "ref", "reference"];
   const lines = splitLines(normalized);
+  const decimalCandidateCount = (normalized.match(/\b\d[\d,\s]*\.\d{1,2}\b/g) || []).length;
   const candidates = [];
 
-  for (const line of lines) {
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const line = lines[idx];
     const low = line.toLowerCase();
     const nums = line.match(/\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?/g);
     if (!nums) continue;
@@ -225,22 +239,43 @@ export function extractLikelyAmountFromScanText(text, { docType = null } = {}) {
     const hasMoney = moneyKeys.some((key) => low.includes(key));
     const hasIgnore = ignoreKeys.some((key) => low.includes(String(key).toLowerCase()));
     const isDateLike = /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(line) || /\b\d{1,2}:\d{2}\b/.test(line);
+    const looksLikeNoise = isAmountNoiseLine(line, { hasAmountKey });
+
+    if (hasAmountKey) {
+      const nearby = [line, lines[idx + 1] || "", lines[idx + 2] || ""].join(" ");
+      const nearbyNums = nearby.match(/\d{1,3}(?:[,\s]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g) || [];
+      const nearbyBest = nearbyNums
+        .map((token) => parseAmountToken(token))
+        .filter((value) => value != null)
+        .sort((a, b) => b - a)[0];
+      if (nearbyBest != null) return nearbyBest;
+    }
 
     for (const token of nums) {
       const value = parseAmountToken(token);
       if (value == null) continue;
 
       const plain = String(token).replace(/[,\s]/g, "");
+      const hasDecimal = /\.\d{1,2}\b/.test(plain);
+      if (looksLikeNoise && !hasAmountKey && !hasMoney) continue;
       if (!hasAmountKey && !hasMoney && /^\d{6,}$/.test(plain)) continue;
+      if (!hasAmountKey && !hasMoney && !hasDecimal && plain.length >= 4) continue;
+      if (!hasAmountKey && !hasMoney && /^(?:0\d{8,10}|\d{9,11})$/.test(plain)) continue;
       if (isDateLike && !hasAmountKey) continue;
 
       let score = 0;
-      if (hasAmountKey) score += 70;
-      if (hasMoney) score += 18;
-      if (hasIgnore) score -= 28;
-      if (/\.\d{2}\b/.test(token)) score += 8;
+      if (hasAmountKey) score += 80;
+      if (hasMoney) score += 22;
+      if (hasIgnore && !hasAmountKey) score -= 32;
+      if (hasDecimal) score += 12;
       if (/[A-Za-zก-๙]/.test(line) && /\d/.test(line)) score += 4;
       if (/^\s*(?:จำนวนเงิน|ยอด(?:รวม|สุทธิ)?|รวม(?:สุทธิ|ทั้งสิ้น)?|total|amount)/i.test(line)) score += 10;
+      if (looksLikeNoise) score -= 28;
+      if ((docType === "transfer_slip" || docType === "bill_payment") && hasAmountKey) score += 14;
+      if (docType === "receipt" && idx >= Math.floor(lines.length * 0.5)) score += 6;
+      if (decimalCandidateCount > 0 && decimalCandidateCount <= 3 && hasDecimal) score += 10;
+      if (!hasAmountKey && !hasMoney && !hasDecimal) score -= 6;
+      if (!hasAmountKey && !hasMoney && value > 5000) score -= 10;
       score += Math.log10(value + 1) * 7;
 
       candidates.push({ value, score });

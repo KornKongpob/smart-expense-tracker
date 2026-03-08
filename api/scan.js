@@ -1769,7 +1769,7 @@ ${accountsText}
   const merchantFallback = extractMerchantFromScanText(rawScanText, { docType: textDocType });
 
   const parsedAmount = typeof parsed.amount === "number" ? parsed.amount : parsed.amount != null ? Number(parsed.amount) : null;
-  const amount = Number.isFinite(parsedAmount) ? parsedAmount : amountFallback;
+  let amount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : amountFallback;
 
   const merchantRaw = parsed?.merchant != null ? String(parsed.merchant).trim() : "";
   const merchant = merchantRaw || merchantFallback || null;
@@ -1977,7 +1977,7 @@ Output JSON schema:
           .filter((it) => it.name && Number.isFinite(it.total) && it.total > 0)
           .slice(0, 40);
 
-        if (cleaned.length >= 2) {
+        if (cleaned.length >= 1) {
           items = cleaned;
 
           const cleanedAdj = normalizeAdjustments(extractedAdjustments);
@@ -2000,6 +2000,17 @@ Output JSON schema:
     } catch {
       // ignore fallback errors
     }
+  }
+
+  if (!(Number.isFinite(amount) && amount > 0) && doc_type !== "transfer_slip" && doc_type !== "bill_payment") {
+    const itemsSum = (items || []).reduce((sum, it) => sum + (safeNumber(it?.total) || 0), 0);
+    const adjustmentsSigned = (adjustments || []).reduce((sum, adj) => {
+      const value = safeNumber(adj?.amount) || 0;
+      const effect = String(adj?.effect || "").toLowerCase().trim();
+      return sum + (effect === "subtract" ? -value : value);
+    }, 0);
+    const derivedTotal = itemsSum + adjustmentsSigned;
+    if (derivedTotal > 0) amount = derivedTotal;
   }
 
   let category =
