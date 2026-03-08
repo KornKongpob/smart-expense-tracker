@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 
 import ModalShell from "../../components/ModalShell";
 import { cn } from "../../utils/cn";
@@ -27,6 +27,14 @@ function getSelectionPath(id, hierarchy) {
     .map((item) => String(item?.name || "").trim())
     .filter(Boolean)
     .join(" > ");
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ");
 }
 
 function PickerRow({ category, active, caption, onClick }) {
@@ -110,6 +118,7 @@ export default function CategoryCardPicker({
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState("main");
   const [focusedMainId, setFocusedMainId] = useState("");
+  const [query, setQuery] = useState("");
 
   const list = useMemo(() => {
     const base = Array.isArray(categories) ? categories.filter(Boolean) : [];
@@ -137,16 +146,48 @@ export default function CategoryCardPicker({
     return hierarchy.childrenByParent.get(activeMainId) || [];
   }, [hierarchy, activeMainId]);
 
+  const searchResults = useMemo(() => {
+    const q = normalizeText(query);
+    if (!q) return [];
+
+    const out = [];
+    for (const category of list) {
+      const id = String(category?.id || "").trim();
+      if (!id) continue;
+
+      const name = normalizeText(category?.name);
+      const path = getSelectionPath(id, hierarchy);
+      const haystack = `${name} ${normalizeText(path)}`.trim();
+      if (!haystack.includes(q)) continue;
+
+      const childCount = (hierarchy.childrenByParent.get(id) || []).length;
+      const isMain = !(hierarchy.parentById.get(id) || "");
+      out.push({
+        id,
+        category,
+        path,
+        isMain,
+        childCount,
+        rank: haystack.indexOf(q),
+      });
+    }
+
+    out.sort((a, b) => (a.rank - b.rank) || a.path.localeCompare(b.path, "th"));
+    return out.slice(0, 30);
+  }, [query, list, hierarchy]);
+
   const openPicker = (nextStep) => {
     const derivedMainId = String(selection.mainId || "").trim();
     setFocusedMainId(derivedMainId);
     setStep(nextStep);
+    setQuery("");
     setIsOpen(true);
   };
 
   const closePicker = () => {
     setIsOpen(false);
     setStep("main");
+    setQuery("");
   };
 
   const handlePickMain = (mainId) => {
@@ -173,6 +214,13 @@ export default function CategoryCardPicker({
 
   const handlePickSub = (subId) => {
     onChange?.(String(subId || "").trim());
+    closePicker();
+  };
+
+  const handlePickSearchResult = (id) => {
+    const cid = String(id || "").trim();
+    if (!cid) return;
+    onChange?.(cid);
     closePicker();
   };
 
@@ -221,7 +269,53 @@ export default function CategoryCardPicker({
         maxWidth="sm:max-w-md"
         maxHeight="max-h-[88dvh]"
       >
-        {step === "main" ? (
+        <div className="space-y-3">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-900/45" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="ค้นหาหมวดหลักหรือหมวดรอง"
+              className="ui-input w-full pl-10 pr-10"
+            />
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl bg-white/70 border border-slate-900/8 text-gray-900/55 flex items-center justify-center active:scale-95"
+                aria-label="clear search"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+
+          {query ? (
+            <div className="space-y-2">
+              <div className="text-[11px] font-extrabold text-gray-900/55 uppercase tracking-wide">
+                ผลการค้นหา
+              </div>
+              {searchResults.length ? (
+                searchResults.map((item) => (
+                  <PickerRow
+                    key={item.id}
+                    category={item.category}
+                    active={selectedId === item.id}
+                    caption={
+                      item.path ||
+                      (item.isMain && item.childCount ? `${item.childCount} หมวดย่อย` : item.isMain ? "หมวดหลัก" : "หมวดย่อย")
+                    }
+                    onClick={() => handlePickSearchResult(item.id)}
+                  />
+                ))
+              ) : (
+                <div className="rounded-2xl bg-white/55 border border-slate-900/8 px-4 py-5 text-sm font-extrabold text-gray-900/55">
+                  ไม่พบหมวดที่ตรงกับคำค้น
+                </div>
+              )}
+            </div>
+          ) : step === "main" ? (
           <div className="space-y-2">
             {hierarchy.main.map((category) => {
               const id = String(category?.id || "").trim();
@@ -280,6 +374,7 @@ export default function CategoryCardPicker({
             </div>
           </div>
         )}
+        </div>
       </ModalShell>
     </>
   );
