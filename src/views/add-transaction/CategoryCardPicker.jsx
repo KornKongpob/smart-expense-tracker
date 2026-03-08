@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Check, ChevronLeft } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 
+import ModalShell from "../../components/ModalShell";
 import { cn } from "../../utils/cn";
 import {
   buildCategoryHierarchy,
@@ -28,42 +29,70 @@ function getSelectionPath(id, hierarchy) {
     .join(" > ");
 }
 
-function CategoryCard({ category, active, onClick, caption }) {
+function PickerRow({ category, active, caption, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full min-w-0 rounded-3xl border p-4 text-left transition-all active:scale-[0.99]",
+        "w-full rounded-2xl border px-4 py-3 text-left transition-all active:scale-[0.99]",
         active
-          ? "bg-gray-900/92 text-white border-white/10 shadow-[0_18px_42px_rgba(0,0,0,0.14)]"
-          : "bg-white/55 text-gray-900 border-white/30 hover:bg-white/75"
+          ? "bg-gray-900/90 text-white border-white/12 shadow-sm"
+          : "bg-white/60 text-gray-900 border-slate-900/8 hover:bg-white"
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex items-center gap-3">
           <div
             className={cn(
-              "w-11 h-11 rounded-2xl border flex items-center justify-center text-xl",
-              active ? "bg-white/12 border-white/12" : "bg-white/65 border-slate-900/8"
+              "w-10 h-10 rounded-2xl border flex items-center justify-center text-xl shrink-0",
+              active ? "bg-white/12 border-white/12" : "bg-white border-slate-900/8"
             )}
             aria-hidden="true"
           >
             {category?.icon || "🏷️"}
           </div>
-          <div className="mt-3 text-sm font-black tracking-tight truncate">{category?.name || "หมวด"}</div>
-          {caption ? (
-            <div className={cn("mt-1 text-[11px] font-bold truncate", active ? "text-white/70" : "text-gray-900/55")}>
-              {caption}
-            </div>
-          ) : null}
+
+          <div className="min-w-0">
+            <div className="text-sm font-black truncate">{category?.name || "หมวด"}</div>
+            {caption ? (
+              <div className={cn("text-[11px] font-bold truncate mt-0.5", active ? "text-white/70" : "text-gray-900/55")}>
+                {caption}
+              </div>
+            ) : null}
+          </div>
         </div>
 
-        {active ? (
-          <span className="w-8 h-8 rounded-full bg-white/14 flex items-center justify-center shrink-0">
-            <Check size={15} />
-          </span>
-        ) : null}
+        {active ? <Check size={16} className="shrink-0" /> : <ChevronRight size={16} className="shrink-0 opacity-45" />}
+      </div>
+    </button>
+  );
+}
+
+function FieldCard({ label, value, icon, onClick, compact = false }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "w-full rounded-3xl border text-left transition-all active:scale-[0.99]",
+        compact ? "p-3" : "p-4",
+        "bg-white/55 border-white/30 hover:bg-white/75"
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex items-center gap-3">
+          <div className={cn("rounded-2xl border flex items-center justify-center shrink-0 bg-white border-slate-900/8", compact ? "w-10 h-10 text-lg" : "w-11 h-11 text-xl")}>
+            {icon || "🏷️"}
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-extrabold text-gray-900/55 uppercase tracking-wide">{label}</div>
+            <div className={cn("mt-1 font-black text-gray-900 truncate", compact ? "text-sm" : "text-base")}>
+              {value || "ยังไม่ได้เลือก"}
+            </div>
+          </div>
+        </div>
+        <ChevronRight size={18} className="shrink-0 text-gray-900/40" />
       </div>
     </button>
   );
@@ -73,10 +102,14 @@ export default function CategoryCardPicker({
   categories = [],
   value = "",
   onChange,
-  title = "หมวดหมู่",
+  title = "เลือกหมวดหมู่",
   helper = "เลือกหมวดหลักก่อน แล้วค่อยเลือกหมวดหมู่รอง",
+  compact = false,
 }) {
   const selectedId = String(value || "").trim();
+  const [isOpen, setIsOpen] = useState(false);
+  const [step, setStep] = useState("main");
+  const [focusedMainId, setFocusedMainId] = useState("");
 
   const list = useMemo(() => {
     const base = Array.isArray(categories) ? categories.filter(Boolean) : [];
@@ -95,30 +128,26 @@ export default function CategoryCardPicker({
 
   const hierarchy = useMemo(() => buildCategoryHierarchy(list), [list]);
   const selection = useMemo(() => splitSelection(selectedId, hierarchy), [selectedId, hierarchy]);
-
-  const [focusedMainId, setFocusedMainId] = useState(String(selection.mainId || "").trim());
-  const [stage, setStage] = useState("main");
-
-  useEffect(() => {
-    const nextMainId = String(selection.mainId || "").trim();
-    if (!nextMainId) {
-      setFocusedMainId("");
-      setStage("main");
-      return;
-    }
-
-    const children = hierarchy.childrenByParent.get(nextMainId) || [];
-    setFocusedMainId(nextMainId);
-    setStage(children.length ? "sub" : "main");
-  }, [selection.mainId, selection.subId, hierarchy]);
-
   const activeMainId = String(focusedMainId || selection.mainId || "").trim();
   const selectedPath = useMemo(() => getSelectionPath(selectedId, hierarchy), [selectedId, hierarchy]);
   const selectedMain = activeMainId ? hierarchy.byId.get(activeMainId) || null : null;
+  const selectedSub = selectedId && selectedId !== activeMainId ? hierarchy.byId.get(selectedId) || null : null;
   const subcategories = useMemo(() => {
     if (!activeMainId) return [];
     return hierarchy.childrenByParent.get(activeMainId) || [];
   }, [hierarchy, activeMainId]);
+
+  const openPicker = (nextStep) => {
+    const derivedMainId = String(selection.mainId || "").trim();
+    setFocusedMainId(derivedMainId);
+    setStep(nextStep);
+    setIsOpen(true);
+  };
+
+  const closePicker = () => {
+    setIsOpen(false);
+    setStep("main");
+  };
 
   const handlePickMain = (mainId) => {
     const nextMainId = String(mainId || "").trim();
@@ -128,108 +157,130 @@ export default function CategoryCardPicker({
     setFocusedMainId(nextMainId);
 
     if (children.length) {
-      setStage("sub");
+      setStep("sub");
       return;
     }
 
     onChange?.(nextMainId);
-    setStage("main");
+    closePicker();
   };
 
   const handleUseMain = () => {
     if (!activeMainId) return;
     onChange?.(activeMainId);
+    closePicker();
   };
 
+  const handlePickSub = (subId) => {
+    onChange?.(String(subId || "").trim());
+    closePicker();
+  };
+
+  const mainValue = selection.mainId ? hierarchy.byId.get(selection.mainId)?.name || "" : "";
+  const subValue = selection.subId ? hierarchy.byId.get(selection.subId)?.name || "" : "";
+  const hasSubcategories = !!(selection.mainId && (hierarchy.childrenByParent.get(selection.mainId) || []).length);
+
   return (
-    <div className="space-y-4">
-      <div className="rounded-3xl bg-white/45 border border-white/25 p-4">
-        <div className="text-sm font-black text-gray-900">{title}</div>
-        <div className="mt-1 text-[12px] font-bold text-gray-900/55">{helper}</div>
-        {selectedPath ? (
-          <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-gray-900/6 border border-slate-900/8 px-3 py-2 text-xs font-extrabold text-gray-900">
-            เลือกแล้ว: {selectedPath}
+    <>
+      <div className={cn("space-y-3", compact && "space-y-2")}>
+        {!compact ? (
+          <div className="rounded-3xl bg-white/45 border border-white/25 p-4">
+            <div className="text-sm font-black text-gray-900">{title}</div>
+            <div className="mt-1 text-[12px] font-bold text-gray-900/55">{helper}</div>
+            {selectedPath ? (
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-gray-900/6 border border-slate-900/8 px-3 py-2 text-xs font-extrabold text-gray-900">
+                เลือกแล้ว: {selectedPath}
+              </div>
+            ) : null}
           </div>
+        ) : null}
+
+        <FieldCard
+          label="หมวดหลัก"
+          value={mainValue}
+          icon={selection.mainId ? hierarchy.byId.get(selection.mainId)?.icon : "🏷️"}
+          onClick={() => openPicker("main")}
+          compact={compact}
+        />
+
+        {hasSubcategories ? (
+          <FieldCard
+            label="หมวดรอง"
+            value={subValue || "ใช้หมวดหลักนี้"}
+            icon={selectedSub?.icon || selectedMain?.icon || "🏷️"}
+            onClick={() => openPicker("sub")}
+            compact={compact}
+          />
         ) : null}
       </div>
 
-      {stage === "main" ? (
-        <div className="space-y-3">
-          <div className="text-[11px] font-extrabold text-gray-900/55 uppercase tracking-wide">หมวดหลัก</div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <ModalShell
+        title={step === "main" ? "เลือกหมวดหลัก" : selectedMain ? `เลือกหมวดรองใน ${selectedMain.name}` : "เลือกหมวดรอง"}
+        isOpen={isOpen}
+        onClose={closePicker}
+        maxWidth="sm:max-w-md"
+        maxHeight="max-h-[88dvh]"
+      >
+        {step === "main" ? (
+          <div className="space-y-2">
             {hierarchy.main.map((category) => {
               const id = String(category?.id || "").trim();
-              const isActive = String(selection.mainId || "") === id || activeMainId === id;
               const childCount = (hierarchy.childrenByParent.get(id) || []).length;
-              const caption = childCount ? `${childCount} หมวดย่อย` : "เลือกได้ทันที";
-
               return (
-                <CategoryCard
+                <PickerRow
                   key={id}
                   category={category}
-                  active={isActive && !selection.subId}
-                  caption={caption}
+                  active={selection.mainId === id && !selection.subId}
+                  caption={childCount ? `${childCount} หมวดย่อย` : "เลือกได้ทันที"}
                   onClick={() => handlePickMain(id)}
                 />
               );
             })}
           </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
+        ) : (
+          <div className="space-y-3">
             <button
               type="button"
-              onClick={() => setStage("main")}
+              onClick={() => setStep("main")}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/55 border border-white/25 text-sm font-extrabold text-gray-900 active:scale-95"
             >
               <ChevronLeft size={16} />
-              เปลี่ยนหมวดหลัก
+              กลับไปหมวดหลัก
             </button>
 
-            <div className="text-right min-w-0">
-              <div className="text-[11px] font-extrabold text-gray-900/55 uppercase tracking-wide">หมวดหลักที่เลือก</div>
-              <div className="text-sm font-black text-gray-900 truncate">{selectedMain?.name || "-"}</div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={handleUseMain}
               className={cn(
-                "w-full min-w-0 rounded-3xl border p-4 text-left transition-all active:scale-[0.99]",
+                "w-full rounded-2xl border px-4 py-3 text-left transition-all active:scale-[0.99]",
                 selectedId === activeMainId
-                  ? "bg-gray-900/92 text-white border-white/10 shadow-[0_18px_42px_rgba(0,0,0,0.14)]"
-                  : "bg-white/55 text-gray-900 border-white/30 hover:bg-white/75"
+                  ? "bg-gray-900/90 text-white border-white/12 shadow-sm"
+                  : "bg-white/60 text-gray-900 border-slate-900/8 hover:bg-white"
               )}
             >
               <div className="text-sm font-black">ใช้หมวดหลักนี้</div>
-              <div className={cn("mt-1 text-[12px] font-bold", selectedId === activeMainId ? "text-white/70" : "text-gray-900/55")}>
-                {selectedMain?.icon || "🏷️"} {selectedMain?.name || "หมวดหลัก"}
+              <div className={cn("mt-1 text-[11px] font-bold", selectedId === activeMainId ? "text-white/70" : "text-gray-900/55")}>
+                {selectedMain?.icon || "🏷️"} {selectedMain?.name || "-"}
               </div>
             </button>
-          </div>
 
-          <div>
-            <div className="text-[11px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-3">หมวดรอง</div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="space-y-2">
               {subcategories.map((category) => {
                 const id = String(category?.id || "").trim();
                 return (
-                  <CategoryCard
+                  <PickerRow
                     key={id}
                     category={category}
                     active={selectedId === id}
                     caption={selectedMain?.name || "หมวดย่อย"}
-                    onClick={() => onChange?.(id)}
+                    onClick={() => handlePickSub(id)}
                   />
                 );
               })}
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </ModalShell>
+    </>
   );
 }

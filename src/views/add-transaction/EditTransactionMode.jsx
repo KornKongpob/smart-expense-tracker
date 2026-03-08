@@ -15,7 +15,6 @@ import {
 import AmountField from "../../components/AmountField";
 import AccountPicker from "../../components/AccountPicker";
 import AccountChipsPicker from "../../components/AccountChipsPicker";
-import CategorySelect from "../../components/CategorySelect";
 import TagsInput from "../../components/TagsInput";
 import { isCreditAccount } from "../../utils/accountMatch";
 import { cn } from "../../utils/cn";
@@ -661,13 +660,11 @@ export default function EditTransactionMode(props) {
                           <div className="px-4 pb-4 pt-1 border-t border-slate-900/8 space-y-3">
                             <div>
                               <div className="ui-label mb-1">หมวด</div>
-                              <CategorySelect
+                              <CategoryCardPicker
                                 categories={categorySource}
                                 value={line.categoryId || ""}
-                                onChange={(e) => updateSplitLine(index, { categoryId: e.target.value })}
-                                allowEmpty
-                                emptyLabel="เลือกหมวด"
-                                className="ui-select"
+                                onChange={(id) => updateSplitLine(index, { categoryId: id })}
+                                compact
                               />
                             </div>
 
