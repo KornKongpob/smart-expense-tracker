@@ -5,6 +5,12 @@ import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurity
 import { createRateLimiter } from "../lib/scan/rateLimit.js";
 import { scanWithProvider } from "../lib/scan/providers/index.js";
 import { normalizeErrorResponse } from "../lib/scan/normalize.js";
+import {
+  detectScanTextDocType,
+  extractLikelyAmountFromScanText,
+  extractMerchantFromScanText,
+  normalizeScanText,
+} from "../src/utils/scanPostprocess.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -1757,9 +1763,16 @@ ${accountsText}
     rawText: outputText,
   });
 
-  const amount = typeof parsed.amount === "number" ? parsed.amount : parsed.amount != null ? Number(parsed.amount) : null;
+  const rawScanText = normalizeScanText(`${String(parsed?.evidence || "")}\n${String(outputText || "")}`);
+  const textDocType = detectScanTextDocType(rawScanText);
+  const amountFallback = extractLikelyAmountFromScanText(rawScanText, { docType: textDocType });
+  const merchantFallback = extractMerchantFromScanText(rawScanText, { docType: textDocType });
 
-  const merchant = parsed?.merchant != null ? String(parsed.merchant) : null;
+  const parsedAmount = typeof parsed.amount === "number" ? parsed.amount : parsed.amount != null ? Number(parsed.amount) : null;
+  const amount = Number.isFinite(parsedAmount) ? parsedAmount : amountFallback;
+
+  const merchantRaw = parsed?.merchant != null ? String(parsed.merchant).trim() : "";
+  const merchant = merchantRaw || merchantFallback || null;
   const note = parsed?.note != null ? String(parsed.note) : merchant != null ? String(merchant) : null;
 
   let items = normalizeItems(parsed?.items ?? parsed?.line_items ?? parsed?.lines ?? null);
@@ -1773,7 +1786,8 @@ ${accountsText}
 
   // If model didn't provide doc_type, infer lightly from refined tx_type and presence of line items
   if (!doc_type) {
-    if (refined.tx_type === "transfer") doc_type = "transfer_slip";
+    if (textDocType) doc_type = textDocType;
+    else if (refined.tx_type === "transfer") doc_type = "transfer_slip";
     else if (Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) > 0)) doc_type = "receipt";
     else doc_type = "unknown";
   }
@@ -1782,12 +1796,13 @@ ${accountsText}
   // This endpoint focuses on receipts; a targeted line-item pass is noticeably more reliable
   // for 7-Eleven style layouts (qty column + price on the right), especially on mobile screenshots.
   const positiveItemCount = items.filter((it) => (safeNumber(it?.total) || 0) > 0).length;
-  const combinedTextForHeuristics = `${String(evidence0 || "")}\n${String(outputText || "")}`;
-  const looksLikeReceipt = /รายการสินค้า|ยอดสุทธิ|รวม\s*สุทธิ|สาขา|7\s*-?\s*eleven|all\s*member/i.test(combinedTextForHeuristics);
+  const combinedTextForHeuristics = normalizeScanText(`${String(evidence0 || "")}\n${String(outputText || "")}`);
+  const looksLikeReceipt =
+    textDocType === "receipt" ||
+    /รายการสินค้า|รายการสั่งซื้อ|ยอดสุทธิ|รวม\s*สุทธิ|สาขา|7\s*-?\s*eleven|7delivery|all\s*member/i.test(combinedTextForHeuristics);
+  const looksLikeTransferSlip = textDocType === "transfer_slip" || textDocType === "bill_payment";
   const strongTransferSlip =
-    (doc_type === "transfer_slip" || doc_type === "bill_payment") &&
-    refined.tx_type === "transfer" &&
-    !!(parsed?.from_account || parsed?.to_account) &&
+    (doc_type === "transfer_slip" || doc_type === "bill_payment" || looksLikeTransferSlip) &&
     !looksLikeReceipt;
 
   const shouldItemsFallback =

@@ -16,6 +16,11 @@ import {
 import { splitReceiptItemsToLines } from '../src/utils/receiptCategorizer.js';
 import { getNextRecurringDueISO, advanceRecurringDate } from '../src/utils/recurring.js';
 import { duplicateStateFromMatch, toDuplicateComparable } from '../src/utils/duplicateDetection.js';
+import {
+  detectScanTextDocType,
+  extractLikelyAmountFromScanText,
+  extractMerchantFromScanText,
+} from '../src/utils/scanPostprocess.js';
 
 test('money: negative/zero/excess decimals are sanitized and parsed safely', () => {
   assert.equal(sanitizeMoneyInput('-฿ 1,234.5678'), '-1234.56');
@@ -140,4 +145,39 @@ test('duplicate helpers: normalize comparable entries and duplicate reasons cons
   assert.equal(dupState.duplicate, true);
   assert.equal(dupState.duplicateInfo.kind, 'ref');
   assert.equal(dupState.duplicateInfo.matchId, 'tx-1');
+});
+
+test('scan postprocess: detects transfer slip and extracts amount from Thai payment slip text', () => {
+  const text = `
+    SCB
+    จ่ายเงินสำเร็จ
+    08 มี.ค. 2569 - 14:21
+    รหัสอ้างอิง: 12627021530cf8
+    จาก
+    VISA TEERAWUT SUEBSON
+    ไปยัง
+    you pa
+    จำนวนเงิน 65.00
+  `;
+
+  assert.equal(detectScanTextDocType(text), 'transfer_slip');
+  assert.equal(extractLikelyAmountFromScanText(text, { docType: 'transfer_slip' }), 65);
+  assert.equal(extractMerchantFromScanText(text, { docType: 'transfer_slip' }), 'you pa');
+});
+
+test('scan postprocess: detects 7-Eleven style receipt screenshots and pulls receipt total', () => {
+  const text = `
+    รายการสั่งซื้อที่ร้านและ 7Delivery
+    08/03/69 | 14:14
+    เลขที่ใบเสร็จ 18604
+    สาขา 7-Eleven โรงอาหารกลาง มธ.
+    รายการสินค้า
+    Hสตาร์บัคส์ดับเบิ้ลมัชชีอ 49.00
+    ยอดสุทธิ 49.00
+    All Member 0-2826-7777
+  `;
+
+  assert.equal(detectScanTextDocType(text), 'receipt');
+  assert.equal(extractLikelyAmountFromScanText(text, { docType: 'receipt' }), 49);
+  assert.equal(extractMerchantFromScanText(text, { docType: 'receipt' }), 'สาขา 7-Eleven โรงอาหารกลาง มธ.');
 });

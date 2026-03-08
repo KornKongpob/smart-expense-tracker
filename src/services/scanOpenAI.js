@@ -3,6 +3,12 @@
 // Optional env: VITE_SCAN_API_URL (default: /api/scan)
 // OpenAI endpoint only: /api/scan
 import { normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
+import {
+  detectScanTextDocType,
+  extractLikelyAmountFromScanText,
+  extractMerchantFromScanText,
+  normalizeScanText,
+} from "../utils/scanPostprocess";
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -442,7 +448,7 @@ async function imageCropToOptimizedDataUrl(
 /**
  * Build OCR-friendly multi-views for receipts/slips.
  * Returns 1-2 images normally.
- * For long receipts, returns 2 images (top + bottom tiles).
+ * For tall screenshots/receipts, returns 3 images (full + focused bands).
  */
 async function fileToOcrDataUrls(file, { maxDim = 2800, maxBytes = 3_500_000 } = {}) {
   const original = await fileToDataUrl(file);
@@ -457,26 +463,36 @@ async function fileToOcrDataUrls(file, { maxDim = 2800, maxBytes = 3_500_000 } =
   const tight = findContentBox(img) || { sx: 0, sy: 0, sw: w0, sh: h0 };
   const aspect = h0 / w0;
   const isLongReceipt = aspect > 2.15 && h0 > 2200;
+  const isTightMeaningful =
+    tight && (tight.sw < w0 * 0.92 || tight.sh < h0 * 0.92) && tight.sw > w0 * 0.45 && tight.sh > h0 * 0.45;
+  const base = isTightMeaningful ? tight : { sx: 0, sy: 0, sw: w0, sh: h0 };
+  const bandCrop = (startRatio, endRatio) => ({
+    sx: base.sx,
+    sy: clamp(base.sy + Math.round(base.sh * startRatio), 0, h0 - 1),
+    sw: base.sw,
+    sh: Math.max(1, Math.round(base.sh * (endRatio - startRatio))),
+  });
 
   if (isLongReceipt) {
-    const base = tight;
-    const top = { sx: base.sx, sy: base.sy, sw: base.sw, sh: Math.round(base.sh * 0.64) };
-    const bottom = {
-      sx: base.sx,
-      sy: clamp(base.sy + Math.round(base.sh * 0.36), 0, h0 - 1),
-      sw: base.sw,
-      sh: Math.round(base.sh * 0.64),
-    };
-    const [d1, d2] = await Promise.all([
-      imageCropToOptimizedDataUrl(img, top, { maxDim, maxBytes }),
-      imageCropToOptimizedDataUrl(img, bottom, { maxDim, maxBytes }),
+    const [d1, d2, d3] = await Promise.all([
+      imageCropToOptimizedDataUrl(img, bandCrop(0, 0.42), { maxDim, maxBytes }),
+      imageCropToOptimizedDataUrl(img, bandCrop(0.28, 0.78), { maxDim, maxBytes }),
+      imageCropToOptimizedDataUrl(img, bandCrop(0.58, 1), { maxDim, maxBytes }),
     ]);
-    return [d1, d2].filter(Boolean);
+    return [d1, d2, d3].filter(Boolean);
+  }
+
+  const isTallScreenshot = aspect > 1.45 && h0 > 1500;
+  if (isTallScreenshot) {
+    const [full, middle, bottom] = await Promise.all([
+      imageCropToOptimizedDataUrl(img, base, { maxDim, maxBytes }),
+      imageCropToOptimizedDataUrl(img, bandCrop(0.2, 0.74), { maxDim, maxBytes }),
+      imageCropToOptimizedDataUrl(img, bandCrop(0.52, 1), { maxDim, maxBytes }),
+    ]);
+    return [full, middle, bottom].filter(Boolean);
   }
 
   const full = await imageCropToOptimizedDataUrl(img, { sx: 0, sy: 0, sw: w0, sh: h0 }, { maxDim, maxBytes });
-  const isTightMeaningful =
-    tight && (tight.sw < w0 * 0.92 || tight.sh < h0 * 0.92) && tight.sw > w0 * 0.45 && tight.sh > h0 * 0.45;
   if (!isTightMeaningful) return [full];
   const cropped = await imageCropToOptimizedDataUrl(img, tight, { maxDim, maxBytes });
   return [full, cropped].filter(Boolean);
@@ -636,15 +652,23 @@ function normalizeKeywords(kws) {
 function normalizeScanResult({ data, rawText, model, endpointUsed }) {
   const d = data && typeof data === "object" ? data : null;
   const base = normalizeScanResponse(d, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
+  const textContext = normalizeScanText(
+    `${String(d?.evidence ?? "")}\n${String(rawText ?? "")}\n${String(d?.merchant ?? "")}\n${String(d?.note ?? "")}`,
+  );
+  const inferredDocType = d?.doc_type ?? d?.docType ?? detectScanTextDocType(textContext) ?? null;
+  const parsedAmount = safeParseAmount(base.amount ?? d?.amount);
+  const fallbackAmount = parsedAmount ?? extractLikelyAmountFromScanText(textContext, { docType: inferredDocType });
+  const inferredMerchant = base.merchant ?? d?.merchant ?? extractMerchantFromScanText(textContext, { docType: inferredDocType }) ?? null;
+  const noteValue = d?.note != null && String(d.note).trim() ? d.note : inferredMerchant;
 
   const normalized = {
-    doc_type: d?.doc_type ?? d?.docType ?? null,
+    doc_type: inferredDocType,
     currency: d?.currency ?? null,
     tx_type: normalizeTxType(d?.tx_type),
-    amount: safeParseAmount(base.amount ?? d?.amount),
+    amount: safeParseAmount(fallbackAmount),
     date: safeISODate(base.date ?? d?.date),
-    merchant: base.merchant ?? d?.merchant ?? null,
-    note: d?.note ?? d?.merchant ?? null,
+    merchant: inferredMerchant,
+    note: noteValue ?? null,
     ref: (d?.ref ?? d?.referenceId ?? d?.reference_id) ?? null,
     category: d?.category ?? null,
     category_key: d?.category_key ?? d?.category ?? null,
@@ -846,8 +870,9 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   try {
     primary = await postMultipart(url, multipartPayload);
   } catch (err) {
-    const e = new Error("scan_network_error");
-    e.code = "scan_network_error";
+    const isAbort = err?.name === "AbortError";
+    const e = new Error(isAbort ? "scan_timeout" : "scan_network_error");
+    e.code = isAbort ? "scan_timeout" : "scan_network_error";
     e.cause = err;
     throw e;
   }
