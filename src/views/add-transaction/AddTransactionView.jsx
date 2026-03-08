@@ -4002,7 +4002,6 @@ const handleClose = () => {
           expenseCatsAll={expenseCatsAll}
           incomeCatsAll={incomeCatsAll}
           categoryPickerOptions={catsForTypePicker}
-          recentCatsForPicker={recentCatsForPicker}
           splitLines={splitLines}
           splitLabel={splitLabel}
           setSplitLabel={setSplitLabel}

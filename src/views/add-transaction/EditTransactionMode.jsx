@@ -15,14 +15,13 @@ import {
 import AmountField from "../../components/AmountField";
 import AccountPicker from "../../components/AccountPicker";
 import AccountChipsPicker from "../../components/AccountChipsPicker";
-import CategoryPicker from "../../components/CategoryPicker";
 import CategorySelect from "../../components/CategorySelect";
-import QuickSuggestions from "../../components/QuickSuggestions";
 import TagsInput from "../../components/TagsInput";
 import { isCreditAccount } from "../../utils/accountMatch";
 import { cn } from "../../utils/cn";
 import { formatCurrency } from "../../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../../utils/money";
+import CategoryCardPicker from "./CategoryCardPicker";
 
 function SectionTab({ active, icon, label, onClick, badge }) {
   const IconComponent = icon;
@@ -119,19 +118,6 @@ function getTypeMeta(type) {
   return { label: "รายจ่าย", tone: "amber" };
 }
 
-function buildQuickCategoryItems(list, allById) {
-  return (Array.isArray(list) ? list : []).slice(0, 6).map((cat) => {
-    const id = String(cat?.id || "").trim();
-    const parent = String(cat?.parentId || "").trim() ? allById.get(String(cat.parentId).trim()) : null;
-    return {
-      id,
-      label: String(cat?.name || "").trim() || "หมวด",
-      badge: parent ? String(parent?.name || "").trim() : "ล่าสุด",
-      icon: { kind: "emoji", value: cat?.icon || "🏷️" },
-    };
-  });
-}
-
 export default function EditTransactionMode(props) {
   const {
     initialData,
@@ -166,7 +152,6 @@ export default function EditTransactionMode(props) {
     expenseCatsAll,
     incomeCatsAll,
     categoryPickerOptions,
-    recentCatsForPicker,
     splitLines,
     splitLabel,
     setSplitLabel,
@@ -264,11 +249,6 @@ export default function EditTransactionMode(props) {
       setExpandedSplitIndex(Math.max(0, splitLines.length - 1));
     }
   }, [expandedSplitIndex, splitLines.length]);
-
-  const quickCategoryItems = useMemo(
-    () => buildQuickCategoryItems(recentCatsForPicker, categoryById),
-    [recentCatsForPicker, categoryById]
-  );
 
   const headerTitle = useMemo(() => {
     const raw = String(note || initialData?.merchant || "").trim();
@@ -736,21 +716,12 @@ export default function EditTransactionMode(props) {
               </div>
             ) : (
               <div className="space-y-4">
-                <QuickSuggestions
-                  title="หมวดที่ใช้ล่าสุด"
-                  items={quickCategoryItems}
-                  selectedId={categoryId || ""}
-                  onSelect={(id) => setCategoryId?.(id)}
-                />
-
-                <CategoryPicker
+                <CategoryCardPicker
                   categories={categoryPickerOptions}
                   value={categoryId}
                   onChange={setCategoryId}
-                  recent={recentCatsForPicker}
-                  showTitle={false}
-                  twoStep
-                  className="border-0 bg-transparent p-0"
+                  title="เลือกหมวดหมู่"
+                  helper="แสดงเป็นการ์ดเหมือนหน้า Quick Scan: เลือกหมวดหลักก่อน แล้วค่อยเลือกหมวดย่อย"
                 />
               </div>
             )}
