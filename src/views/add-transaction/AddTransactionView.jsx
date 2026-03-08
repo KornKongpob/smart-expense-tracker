@@ -13,7 +13,6 @@ import {
   FileText,
   Camera,
   Loader,
-  Eye,
   Edit2,
   Plus,
   Check,
@@ -24,7 +23,6 @@ import {
   CreditCard,
   Inbox,
   Layers,
-  Search,
   ChevronRight,
 } from "lucide-react";
 
@@ -34,7 +32,6 @@ import AccountPicker from "../../components/AccountPicker";
 import AccountChipsPicker from "../../components/AccountChipsPicker";
 import CategorySelect from "../../components/CategorySelect";
 import CategoryPicker from "../../components/CategoryPicker";
-import QuickSuggestions from "../../components/QuickSuggestions";
 import TagsInput from "../../components/TagsInput";
 import AppHeader from "../../components/AppHeader";
 import BentoGrid from "../../components/bento/BentoGrid";
@@ -74,11 +71,9 @@ import { buildCategoryHierarchy } from "../../utils/categoryHierarchy";
 import { useTransferFlow } from "./hooks/useTransferFlow";
 import { useTransactionDraft } from "./hooks/useTransactionDraft";
 import { useScanQueue } from "./hooks/useScanQueue";
+import EditTransactionMode from "./EditTransactionMode";
 import { duplicateStateFromMatch, toDuplicateComparable } from "../../utils/duplicateDetection";
 import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromNote, appendEvidenceToNote, hashString, humanizeScanStatus } from "./helpers/inputHelpers";
-import AmountSection from "./sections/AmountSection";
-import CategorySection from "./sections/CategorySection";
-import TransferSection from "./sections/TransferSection";
 import ReceiptSection from "./sections/ReceiptSection";
 import ScanQueueList from "./scan/ScanQueueList";
 
@@ -1394,6 +1389,25 @@ const existingRefSet = useMemo(() => {
       return `ชำระบัตรเครดิต • ${selectedToAcc.name || "Credit Card"}`;
     });
   };
+
+  const handleManualTypeChange = useCallback((nextType) => {
+    if (nextType === "credit_payment" && !creditAccounts.length) {
+      showAlert?.("ยังไม่มีบัญชีประเภทบัตรเครดิตในระบบ (เพิ่มบัญชีบัตรก่อน)");
+      return;
+    }
+    if (nextType === type) return;
+
+    setType(nextType);
+    if (nextType === "transfer" || nextType === "credit_payment") {
+      setCategoryId("transfer");
+      setIsSplitMode(false);
+      return;
+    }
+
+    const nextCats = nextType === "income" ? incomeCats : expenseCats;
+    const fallbackCatId = String(nextCats?.[0]?.id || "").trim();
+    if (fallbackCatId) setCategoryId(fallbackCatId);
+  }, [creditAccounts.length, expenseCats, incomeCats, setCategoryId, setIsSplitMode, showAlert, type, setType]);
 
 
   // ✅ เปลี่ยนประเภทใน Queue (หลัง scan)
@@ -3953,8 +3967,61 @@ const handleClose = () => {
       ) : null}
       </ReceiptSection>
 
-      {/* ===== MANUAL MODE (or EDIT MODE) ===== */}
-      {entryMode === "manual" || isEditMode ? (
+      {/* ===== EDIT MODE / MANUAL MODE ===== */}
+      {isEditMode ? (
+        <EditTransactionMode
+          initialData={initialData}
+          type={type}
+          onSelectType={handleManualTypeChange}
+          amountDigits={amountDigits}
+          setAmountDigits={setAmountDigits}
+          amountNumber={amountNumber}
+          splitTotalDigits={splitTotalDigits}
+          splitTotalNumber={splitTotalNumber}
+          isSplitMode={isSplitMode}
+          toggleSplitMode={toggleSplitMode}
+          budgetHint={budgetHint}
+          date={date}
+          setDate={setDate}
+          note={note}
+          setNote={setNote}
+          accountId={accountId}
+          setAccountId={setAccountId}
+          accounts={accounts}
+          fromAccountId={fromAccountId}
+          setFromAccountId={setFromAccountId}
+          toAccountId={toAccountId}
+          setToAccountId={setToAccountId}
+          nonCreditAccounts={nonCreditAccounts}
+          creditAccounts={creditAccounts}
+          selectedToAcc={selectedToAcc}
+          creditDebt={creditDebt}
+          applyPayFull={applyPayFull}
+          categoryId={categoryId}
+          setCategoryId={setCategoryId}
+          expenseCatsAll={expenseCatsAll}
+          incomeCatsAll={incomeCatsAll}
+          categoryPickerOptions={catsForTypePicker}
+          recentCatsForPicker={recentCatsForPicker}
+          splitLines={splitLines}
+          splitLabel={splitLabel}
+          setSplitLabel={setSplitLabel}
+          updateSplitLine={updateSplitLine}
+          addSplitLine={addSplitLine}
+          removeSplitLine={removeSplitLine}
+          refValue={ref}
+          setRef={setRef}
+          tags={tags}
+          setTags={setTags}
+          allTagsFromHistory={allTagsFromHistory}
+          initialAttachmentId={initialAttachmentId}
+          attachmentUrl={attachmentUrl}
+          attachmentMimeType={attachmentMimeType}
+          isSaving={isSaving}
+          onSave={handleSaveManual}
+          onDelete={handleDelete}
+        />
+      ) : entryMode === "manual" ? (
         <>
           <BentoGrid className="mb-28">
             {/* Essentials */}
@@ -3974,24 +4041,7 @@ const handleClose = () => {
                 ].map((t) => (
                   <button
                     key={t.id}
-                    onClick={() => {
-                      if (t.id === "credit_payment" && !creditAccounts.length) {
-                        showAlert?.("ยังไม่มีบัญชีประเภทบัตรเครดิตในระบบ (เพิ่มบัญชีบัตรก่อน)");
-                        return;
-                      }
-                      if (t.id === type) return;
-                      setType(t.id);
-                      if (t.id === "transfer" || t.id === "credit_payment") {
-                        setCategoryId("transfer");
-                        setIsSplitMode(false);
-                        return;
-                      }
-
-                      // ✅ Prevent cross-type category corruption: reset to a sane default for the new type
-                      const nextCats = t.id === "income" ? incomeCats : expenseCats;
-                      const fallbackCatId = String(nextCats?.[0]?.id || "").trim();
-                      if (fallbackCatId) setCategoryId(fallbackCatId);
-                    }}
+                    onClick={() => handleManualTypeChange(t.id)}
                     className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
                       type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/40"
                     }`}
