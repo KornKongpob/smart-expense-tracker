@@ -13,7 +13,7 @@ export default function TagsInput({ value = [], onChange, allTags = [], placehol
   const [input, setInput] = useState("");
   const inputRef = useRef(null);
 
-  const tags = Array.isArray(value) ? value : [];
+  const tags = useMemo(() => (Array.isArray(value) ? value : []), [value]);
 
   const suggestions = useMemo(() => {
     const q = normalizeTag(input);

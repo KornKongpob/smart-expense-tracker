@@ -176,11 +176,50 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-6 view-flow">
+
+      <div className="view-hero">
+        <div className="view-hero-content">
+          <div>
+            <div className="view-eyebrow">Merchant memory</div>
+            <div className="view-hero-title">รวมร้านค้าและ preference ที่ระบบจะจำให้โดยอัตโนมัติ</div>
+            <div className="view-hero-copy">
+              ตรวจสอบ alias ของร้าน ดู mapping ฝั่งรายรับหรือรายจ่าย และจัดการ merge ร้านที่ซ้ำกันเพื่อให้การ auto-fill แม่นขึ้น
+            </div>
+          </div>
+
+          <div className="view-hero-grid">
+            <div className="view-metric">
+              <div className="view-metric-label">ร้านที่พบ</div>
+              <div className="view-metric-value">{merchants.length}</div>
+              <div className="view-metric-hint">จำนวน canonical merchant ที่บันทึกใน library</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">ผลลัพธ์ปัจจุบัน</div>
+              <div className="view-metric-value">{filtered.length}</div>
+              <div className="view-metric-hint">จำนวนร้านที่ตรงกับคำค้นหาปัจจุบัน</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">คำค้นหา</div>
+              <div className="view-metric-value">{q ? "Active" : "All"}</div>
+              <div className="view-metric-hint">{q ? `กำลังกรองด้วย “${q}”` : "แสดงร้านทั้งหมดในระบบ"}</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Workflow</div>
+              <div className="view-metric-value">Scan → Inbox</div>
+              <div className="view-metric-hint">ระบบเรียนรู้ merchant หลัง save scan หรือ approve ใน inbox</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="mt-4">
         <div className="relative">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-900/50" />
+
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}

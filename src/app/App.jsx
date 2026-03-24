@@ -7,6 +7,7 @@ import { checkBudgetAndNotify } from "../utils/budgetNotifications";
 import { formatCurrency } from "../utils/format";
 import { getBudget, toMonthKey } from "../store/selectors.js";
 import { sumExpenseForMonth } from "../utils/transaction";
+import { STORAGE_SAVE_ERROR_EVENT } from "../services/storage";
 import Navbar from "../components/Navbar";
 import DashboardView from "../views/DashboardView";
 import AddTransactionView from "../views/AddTransactionView";
@@ -197,14 +198,27 @@ export default function App() {
     }
   }, [state.transactions, state.budgets]);
 
-  const showAlert = (msg) => {
+  const showAlert = useCallback((msg) => {
     const m = String(msg || "");
     setAlert(m);
     if (m) {
       window.clearTimeout(window.__toastTimer);
       window.__toastTimer = window.setTimeout(() => setAlert(""), 2400);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const onStorageSaveError = (event) => {
+      const detail = event?.detail && typeof event.detail === "object" ? event.detail : {};
+      const approxBytes = Math.max(0, Number(detail?.approxBytes) || 0);
+      const approxMb = approxBytes ? ` (~${(approxBytes / (1024 * 1024)).toFixed(1)} MB)` : "";
+      const quotaText = String(detail?.errorName || "") === "QuotaExceededError" ? " พื้นที่จัดเก็บอาจเต็ม" : "";
+      showAlert(`บันทึกข้อมูลไม่สำเร็จ${quotaText}${approxMb} — แนะนำให้ Export Backup และลบไฟล์แนบหรือข้อมูลที่ไม่จำเป็น`);
+    };
+
+    window.addEventListener(STORAGE_SAVE_ERROR_EVENT, onStorageSaveError);
+    return () => window.removeEventListener(STORAGE_SAVE_ERROR_EVENT, onStorageSaveError);
+  }, [showAlert]);
 
   const showConfirm = (title, message, onConfirm, isDestructive = false, opts = {}) => {
     setConfirm({

@@ -21,6 +21,54 @@ import {
   extractLikelyAmountFromScanText,
   extractMerchantFromScanText,
 } from '../src/utils/scanPostprocess.js';
+import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
+import { parseScanRequest, assertAllowedInputMime, assertBase64UnderLimit } from '../lib/scan/requestParse.js';
+import {
+  extractResponsesOutputText,
+  findFirstParsedObject,
+  normalizeScannedDate,
+  safeNumber,
+} from '../lib/scan/resultHelpers.js';
+import { filterAllowedUploads, isPdfFile } from '../src/views/add-transaction/helpers/fileUploadHelpers.js';
+import {
+  applyAutomationToQueuePatch,
+  buildQueueTypeChangeItem,
+  normalizeQueueItemType,
+} from '../src/views/add-transaction/helpers/queueTypeHelpers.js';
+
+function installBrowserGlobals(t, { getItem = () => null, setItem = () => {}, removeItem = () => {} } = {}) {
+  const prevWindow = globalThis.window;
+  const prevDocument = globalThis.document;
+  const prevCustomEvent = globalThis.CustomEvent;
+  const dispatched = [];
+
+  globalThis.document = {};
+  globalThis.window = {
+    localStorage: { getItem, setItem, removeItem },
+    dispatchEvent: (event) => {
+      dispatched.push(event);
+      return true;
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    clearTimeout,
+    setTimeout,
+  };
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  };
+
+  t.after(() => {
+    globalThis.window = prevWindow;
+    globalThis.document = prevDocument;
+    globalThis.CustomEvent = prevCustomEvent;
+  });
+
+  return { dispatched };
+}
 
 test('money: negative/zero/excess decimals are sanitized and parsed safely', () => {
   assert.equal(sanitizeMoneyInput('-฿ 1,234.5678'), '-1234.56');
@@ -211,4 +259,198 @@ test('scan postprocess: reads transfer amount when amount label and value are on
 
   assert.equal(detectScanTextDocType(text), 'transfer_slip');
   assert.equal(extractLikelyAmountFromScanText(text, { docType: 'transfer_slip' }), 430);
+});
+
+test('storage: loadAll defaults missing moneyUnit to satang and preserves explicit baht', (t) => {
+  let raw = JSON.stringify({ data: { transactions: [] } });
+  installBrowserGlobals(t, {
+    getItem: () => raw,
+  });
+
+  const fallbackState = loadAll();
+  assert.equal(fallbackState.moneyUnit, 'satang');
+
+  raw = JSON.stringify({ data: { moneyUnit: 'baht', transactions: [] } });
+  const explicitState = loadAll();
+  assert.equal(explicitState.moneyUnit, 'baht');
+});
+
+test('storage: saveAll emits a storage failure event when serialization fails', (t) => {
+  const writes = [];
+  const { dispatched } = installBrowserGlobals(t, {
+    setItem: (...args) => writes.push(args),
+  });
+
+  const cyclicTx = { id: 'tx-cyclic' };
+  cyclicTx.self = cyclicTx;
+
+  saveAll({
+    moneyUnit: 'satang',
+    transactions: [cyclicTx],
+    accounts: [],
+    categories: { expense: [], income: [] },
+    budgets: [],
+    recurring: [],
+    rules: [],
+    merchants: [],
+    inbox: [],
+    scanInbox: [],
+    ui: { view: 'dashboard', editingId: null },
+  });
+
+  assert.equal(writes.length, 0);
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0]?.type, STORAGE_SAVE_ERROR_EVENT);
+  assert.equal(dispatched[0]?.detail?.message, 'serialize_failed');
+});
+
+test('scan request parse: normalizes data-url mime aliases and filename fields', async () => {
+  const parsed = await parseScanRequest(
+    {
+      body: {
+        imageDataUrl: 'data:image/jpg;base64,QUJDRA==',
+        fileName: 'receipt.jpg',
+      },
+    },
+    { maxBytes: 1024 },
+  );
+
+  assert.equal(parsed.base64, 'QUJDRA==');
+  assert.equal(parsed.mimeType, 'image/jpeg');
+  assert.equal(parsed.filename, 'receipt.jpg');
+});
+
+test('scan request parse: enforces allowed mime types and base64 byte limits', () => {
+  assert.equal(assertAllowedInputMime('image/jpg'), 'image/jpeg');
+  assert.equal(assertAllowedInputMime('application/x-pdf'), 'application/pdf');
+  assert.equal(assertAllowedInputMime('application/pdf', { allowPdf: false }), '');
+  assert.deepEqual(assertBase64UnderLimit('QUJDRA==', 4), { ok: true, bytes: 4 });
+  assert.deepEqual(assertBase64UnderLimit('QUJDRA==', 3), { ok: false, bytes: 4 });
+});
+
+test('queue type helpers: normalizeQueueItemType fixes credit payment account roles and clears split-only fields', () => {
+  const accounts = [
+    { id: 'bank-1', type: 'bank', digits: '1234' },
+    { id: 'card-1', type: 'credit', digits: '5678' },
+  ];
+
+  const normalized = normalizeQueueItemType(
+    {
+      txType: 'credit_payment',
+      accountId: 'card-1',
+      fromAccountId: 'card-1',
+      toAccountId: 'bank-1',
+      categoryId: 'food',
+      splitByCategory: true,
+      isInstallment: true,
+      items: [{ id: 'i1' }],
+      groups: [{ id: 'g1' }],
+    },
+    { accounts },
+  );
+
+  assert.equal(normalized.txType, 'credit_payment');
+  assert.equal(normalized.categoryId, 'transfer');
+  assert.equal(normalized.splitByCategory, false);
+  assert.equal(normalized.isInstallment, false);
+  assert.deepEqual(normalized.items, []);
+  assert.deepEqual(normalized.groups, []);
+  assert.equal(normalized.fromAccountId, 'bank-1');
+  assert.equal(normalized.toAccountId, 'card-1');
+});
+
+test('queue type helpers: buildQueueTypeChangeItem preserves expense groups and prefers suggested category plus matched account', () => {
+  const accounts = [
+    { id: 'wallet', type: 'cash', digits: '1234' },
+    { id: 'bank-2', type: 'bank', digits: '9876' },
+    { id: 'card-1', type: 'credit', digits: '5678' },
+  ];
+
+  const changed = buildQueueTypeChangeItem(
+    {
+      txType: 'income',
+      note: 'ร้าน A',
+      fromDigits: '9876',
+      toDigits: '',
+      categoryId: 'transfer',
+      groups: [{ id: 'g1', amount: 5000 }],
+    },
+    'expense',
+    {
+      accounts,
+      ensureCategoryId: () => 'other',
+      suggestCategoryId: () => 'food',
+    },
+  );
+
+  assert.equal(changed.txType, 'expense');
+  assert.equal(changed.categoryId, 'food');
+  assert.equal(changed.accountId, 'bank-2');
+  assert.deepEqual(changed.groups, [{ id: 'g1', amount: 5000 }]);
+  assert.equal(changed.suggestedCategoryId, 'food');
+  assert.equal(changed.suggestedReason, 'เคยใช้กับ ร้าน A');
+});
+
+test('queue type helpers: applyAutomationToQueuePatch keeps transfer-like patches structurally safe', () => {
+  const accounts = [
+    { id: 'bank-1', type: 'bank', digits: '1234' },
+    { id: 'card-1', type: 'credit', digits: '5678' },
+  ];
+
+  const transferPatch = applyAutomationToQueuePatch(
+    { txType: 'expense', accountId: 'bank-1', groups: [{ id: 'g1' }], categoryId: 'food' },
+    { txType: 'transfer' },
+    { accounts, ensureCategoryId: () => 'other' },
+  );
+
+  assert.equal(transferPatch.txType, 'transfer');
+  assert.equal(transferPatch.categoryId, 'transfer');
+  assert.equal(transferPatch.splitByCategory, false);
+  assert.deepEqual(transferPatch.groups, []);
+  assert.equal(transferPatch.fromAccountId, 'bank-1');
+
+  const incomePatch = applyAutomationToQueuePatch(
+    { txType: 'expense', accountId: 'bank-1', categoryId: 'transfer', groups: [{ id: 'g1' }] },
+    { txType: 'income' },
+    { accounts, ensureCategoryId: () => 'salary' },
+  );
+
+  assert.equal(incomePatch.txType, 'income');
+  assert.equal(incomePatch.categoryId, 'salary');
+  assert.equal(incomePatch.splitByCategory, false);
+  assert.deepEqual(incomePatch.groups, []);
+});
+
+test('file upload helpers: keep only supported image/pdf files', () => {
+  const files = [
+    { type: 'image/png', name: 'photo.png' },
+    { type: 'text/plain', name: 'notes.txt' },
+    { type: '', name: 'receipt.PDF' },
+  ];
+
+  const allowed = filterAllowedUploads(files);
+
+  assert.equal(isPdfFile(files[2]), true);
+  assert.equal(allowed.length, 2);
+  assert.deepEqual(allowed.map((f) => f.name), ['photo.png', 'receipt.PDF']);
+});
+
+test('scan result helpers: normalize Thai BE dates and parse response text/object safely', () => {
+  assert.equal(normalizeScannedDate('20 ก.ย. 2567'), '2024-09-20');
+  assert.equal(safeNumber('฿1,234.50'), 1234.5);
+
+  const resp = {
+    output: [
+      {
+        content: [
+          { text: 'line 1' },
+          { parsed: { amount: 2500, merchant: 'Cafe' } },
+          { text: 'line 2' },
+        ],
+      },
+    ],
+  };
+
+  assert.equal(extractResponsesOutputText(resp), 'line 1\nline 2');
+  assert.deepEqual(findFirstParsedObject(resp), { amount: 2500, merchant: 'Cafe' });
 });

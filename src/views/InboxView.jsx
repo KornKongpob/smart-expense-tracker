@@ -965,7 +965,46 @@ export default function InboxView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6 min-w-0">
+      <main className="ui-page pt-4 pb-6 min-w-0 view-flow">
+
+      <div className="view-hero">
+        <div className="view-hero-content">
+          <div>
+            <div className="view-eyebrow">Inbox review</div>
+            <div className="view-hero-title">รวมรายการรอตรวจสอบ อนุมัติ และจัดหมวดไว้ในที่เดียว</div>
+            <div className="view-hero-copy">
+              ตรวจสอบรายการสแกนที่เข้ามาใหม่ เลือกอนุมัติแบบทีละรายการหรือเป็นชุด แล้วติดตามรายการที่ approve ไปแล้วได้จากหน้าเดียวกัน
+            </div>
+          </div>
+
+          <div className="view-hero-grid">
+            <div className="view-metric">
+              <div className="view-metric-label">Pending</div>
+              <div className="view-metric-value">{pendingCount}</div>
+              <div className="view-metric-hint">รายการที่ยังรอ review หรือ approve</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Approved</div>
+              <div className="view-metric-value">{approved.length}</div>
+              <div className="view-metric-hint">ประวัติรายการที่ส่งเข้า transactions แล้ว</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Selected</div>
+              <div className="view-metric-value">{selectedCount}</div>
+              <div className="view-metric-hint">จำนวนรายการที่เลือกไว้สำหรับ bulk action</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Search</div>
+              <div className="view-metric-value">{query ? "Active" : "All"}</div>
+              <div className="view-metric-hint">{query ? `กำลังค้นหาด้วย “${query}”` : "ยังไม่ได้กรองด้วยข้อความค้นหา"}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
         {/* Tabs + actions */}
       <div className="mt-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">

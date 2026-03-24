@@ -21,7 +21,7 @@ export function useTransferFlow({ initialData, stateTransactions, accounts, isEd
     const transferId = tid || String(outTx?.transferId || inTx?.transferId || "").trim() || null;
     if (!outTx && !inTx) return null;
     return { outTx, inTx, transferId, group };
-  }, [initialData?.id, initialData?.isTransfer, initialData?.transferId, initialData?.type, stateTransactions]);
+  }, [initialData, stateTransactions]);
 
   const transferKindForEdit = useMemo(() => {
     if (!transferPair) return null;

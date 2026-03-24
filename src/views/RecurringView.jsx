@@ -173,7 +173,45 @@ export default function RecurringView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-6 view-flow">
+
+      <div className="view-hero">
+        <div className="view-hero-content">
+          <div>
+            <div className="view-eyebrow">Recurring engine</div>
+            <div className="view-hero-title">จัดการรายการประจำและดูว่ารายการไหนถึงรอบแล้ว</div>
+            <div className="view-hero-copy">
+              เปิดหรือปิดแต่ละกฎได้ทันที ดูรายการที่น่าจะถึงรอบในวันนี้ แล้วสั่งสร้างธุรกรรมจริงเมื่อพร้อม
+            </div>
+          </div>
+
+          <div className="view-hero-grid">
+            <div className="view-metric">
+              <div className="view-metric-label">เปิดใช้งาน</div>
+              <div className="view-metric-value">{recurringStats.enabled}/{recurringStats.total}</div>
+              <div className="view-metric-hint">กฎที่พร้อมสร้างรายการอัตโนมัติ</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">ถึงรอบวันนี้</div>
+              <div className="view-metric-value">{recurringStats.due || 0}</div>
+              <div className="view-metric-hint">รายการที่มีโอกาสสร้างได้ทันทีด้วยปุ่ม Run</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">รายการทั้งหมด</div>
+              <div className="view-metric-value">{recurring.length}</div>
+              <div className="view-metric-hint">รวม recurring ทั้งแบบรายรับและรายจ่าย</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">อ้างอิงวันนี้</div>
+              <div className="view-metric-value">{todayISO}</div>
+              <div className="view-metric-hint">ใช้เป็นวันที่อ้างอิงสำหรับการคำนวณรอบถัดไป</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="ui-card p-4 mb-4 flex items-center justify-between">
         <div className="min-w-0">

@@ -347,7 +347,7 @@ function normalizeAccount(a) {
 function normalizeBoot(boot) {
   const root = boot && typeof boot === 'object' && boot.data && typeof boot.data === 'object' ? boot.data : boot;
 
-  const fromUnit = String(root?.moneyUnit || root?.amountUnit || '').toLowerCase() === 'satang' ? 'satang' : 'baht';
+  const fromUnit = String(root?.moneyUnit || root?.amountUnit || '').toLowerCase() === 'baht' ? 'baht' : 'satang';
 
   const convertAmount = (v) => normalizeMoneyFromUnit(v, fromUnit);
 
@@ -517,12 +517,13 @@ export function createInitialState(boot = {}) {
   const tx = toArray(boot?.transactions).map(normalizeTransaction);
   const acc = toArray(boot?.accounts);
   const cats = ensureCategories(boot?.categories);
+  const moneyUnit = String(boot?.moneyUnit || 'satang').toLowerCase() === 'baht' ? 'baht' : 'satang';
 
   // ✅ Always enforce normalized accounts (even if provided)
   const normalizedAccounts = acc.length ? acc.map(normalizeAccount) : DEFAULT_ACCOUNTS.map(normalizeAccount);
 
   return {
-    moneyUnit: String(boot?.moneyUnit || 'satang'),
+    moneyUnit,
     transactions: tx,
     accounts: normalizedAccounts,
     categories: cats,
@@ -1569,13 +1570,23 @@ export function AppStoreProvider({ children }) {
     };
 
     const importBackup = (payload) => {
+      const root = payload && typeof payload === "object" ? payload : {};
+      const hasWrappedData = root.data && typeof root.data === "object";
+      const source = hasWrappedData ? root.data : root;
+      const hasMoneyUnit = String(source?.moneyUnit || source?.amountUnit || "").trim().length > 0;
+      const normalizedPayload = hasWrappedData
+        ? { ...root, data: hasMoneyUnit ? source : { ...source, moneyUnit: "satang" } }
+        : hasMoneyUnit
+        ? root
+        : { ...root, moneyUnit: "satang" };
+
       // ✅ Backup does not include binary attachments; clear old blobs to avoid orphans.
       try {
         void clearAllBlobs();
       } catch {
         // ignore
       }
-      dispatch({ type: ACTIONS.IMPORT_BACKUP, payload });
+      dispatch({ type: ACTIONS.IMPORT_BACKUP, payload: normalizedPayload });
     };
     // inbox
     const addInboxItems = (items) => dispatch({ type: ACTIONS.INBOX_UPSERT_MANY, payload: items });

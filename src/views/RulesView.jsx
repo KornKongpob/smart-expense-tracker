@@ -269,7 +269,45 @@ const applyTemplate = (tpl) => {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-6 view-flow">
+
+      <div className="view-hero">
+        <div className="view-hero-content">
+          <div>
+            <div className="view-eyebrow">Automation rules</div>
+            <div className="view-hero-title">กำหนดกฎสำหรับเติมข้อมูลจากสลิปและ inbox แบบอัตโนมัติ</div>
+            <div className="view-hero-copy">
+              ดูกฎที่เปิดอยู่ทั้งหมด จัดลำดับความสำคัญ เปิดปิดแต่ละกฎ และสร้าง template ใหม่ได้จากหน้าจอเดียว
+            </div>
+          </div>
+
+          <div className="view-hero-grid">
+            <div className="view-metric">
+              <div className="view-metric-label">เปิดใช้งาน</div>
+              <div className="view-metric-value">{enabledCount}</div>
+              <div className="view-metric-hint">กฎที่พร้อมทำงานอัตโนมัติเมื่อมีรายการเข้าเงื่อนไข</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">ปิดอยู่</div>
+              <div className="view-metric-value">{Math.max(0, rules.length - enabledCount)}</div>
+              <div className="view-metric-hint">เก็บไว้ใช้ภายหลังได้โดยไม่ต้องลบทิ้ง</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">กฎทั้งหมด</div>
+              <div className="view-metric-value">{rules.length}</div>
+              <div className="view-metric-hint">เรียงลำดับจาก priority บนลงล่างในรายการด้านล่าง</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Quick start</div>
+              <div className="view-metric-value">Templates</div>
+              <div className="view-metric-hint">มี preset สำหรับ expense, transfer และจ่ายบัตรเครดิตใน modal</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="ui-card overflow-hidden">
         {rules.length ? (

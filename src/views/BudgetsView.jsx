@@ -217,7 +217,45 @@ export default function BudgetsView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-6 view-flow">
+
+      <div className="view-hero">
+        <div className="view-hero-content">
+          <div>
+            <div className="view-eyebrow">Budget planner</div>
+            <div className="view-hero-title">ควบคุมงบรวม งบรายวัน และงบรายหมวดในหน้าจอเดียว</div>
+            <div className="view-hero-copy">
+              ดูการใช้จ่ายเทียบงบของเดือนนี้แบบเร็ว ๆ แล้วแตะเข้าไปแก้ไขงบเฉพาะส่วนที่ต้องการได้ทันที
+            </div>
+          </div>
+
+          <div className="view-hero-grid">
+            <div className="view-metric">
+              <div className="view-metric-label">ใช้จ่ายแล้ว</div>
+              <div className="view-metric-value tabular-nums">{formatCurrency(summary.totalSpent)}</div>
+              <div className="view-metric-hint">{summary.totalLimit ? `จากงบรวม ${formatCurrency(summary.totalLimit)}` : "ยังไม่ได้ตั้งงบรวม"}</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">สถานะเตือน</div>
+              <div className="view-metric-value">{summary.alertCount ? `${summary.alertCount} alert` : "ปกติ"}</div>
+              <div className="view-metric-hint">ระบบเตือนเมื่อใช้เกินระดับที่กำหนดไว้ในแต่ละงบ</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">งบที่จัดการได้</div>
+              <div className="view-metric-value">{rows.length}</div>
+              <div className="view-metric-hint">รวมงบหมวดหมู่และงบพิเศษสำหรับ dashboard</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">เดือนที่กำลังดู</div>
+              <div className="view-metric-value">{formatMonthLabelTH(month)}</div>
+              <div className="view-metric-hint">สลับเดือนซ้ายขวาจากปุ่มบน header</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Summary */}
       <div className="ui-card p-5 mb-5">

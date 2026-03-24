@@ -338,23 +338,57 @@ export default function CategoriesView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-6 view-flow">
 
-      <div className="ui-card p-1 rounded-2xl flex mb-4">
+      <div className="view-hero">
+        <div className="view-hero-content">
+          <div>
+            <div className="view-eyebrow">Category system</div>
+            <div className="view-hero-title">จัดโครงสร้างหมวดหลัก หมวดย่อย และ keyword สำหรับการสแกน</div>
+            <div className="view-hero-copy">
+              จัดระเบียบหมวดหมู่ให้เข้าใจง่ายขึ้น ดูจำนวนหมวดทั้งหมดในมุมเดียว และค้นหาหมวดหรือ keyword ที่ต้องการแก้ได้เร็วขึ้น
+            </div>
+          </div>
+
+          <div className="view-hero-grid">
+            <div className="view-metric">
+              <div className="view-metric-label">หมวดหลัก</div>
+              <div className="view-metric-value">{counts.mains}</div>
+              <div className="view-metric-hint">หมวดระดับแรกที่ใช้เป็นโครงสร้างหลักของรายการ</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">หมวดย่อย</div>
+              <div className="view-metric-value">{counts.subs}</div>
+              <div className="view-metric-hint">หมวดที่ถูกผูกอยู่ใต้หมวดหลัก</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">ประเภทที่ดูอยู่</div>
+              <div className="view-metric-value">{tab === "expense" ? "รายจ่าย" : "รายรับ"}</div>
+              <div className="view-metric-hint">สลับมุมมองเพื่อจัดหมวดสำหรับแต่ละ transaction type</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">สถานะค้นหา</div>
+              <div className="view-metric-value">{isSearching ? "Filtered" : "All"}</div>
+              <div className="view-metric-hint">{isSearching ? `กำลังค้นหาด้วย “${q}”` : "แสดงหมวดทั้งหมดตามโครงสร้างปัจจุบัน"}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="view-segmented mb-4">
         <button
           onClick={() => setTab("expense")}
-          className={`flex-1 py-2.5 rounded-xl text-sm font-extrabold ${
-            tab === "expense" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
-          }`}
+          className={`view-segmented-btn ${tab === "expense" ? "is-active" : ""}`}
           type="button"
         >
           รายจ่าย
         </button>
         <button
           onClick={() => setTab("income")}
-          className={`flex-1 py-2.5 rounded-xl text-sm font-extrabold ${
-            tab === "income" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
-          }`}
+          className={`view-segmented-btn ${tab === "income" ? "is-active" : ""}`}
           type="button"
         >
           รายรับ

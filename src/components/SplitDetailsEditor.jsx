@@ -63,7 +63,7 @@ export default function SplitDetailsEditor({
   targetTotalSatang = null,
   compact = false,
 }) {
-  const list = Array.isArray(groups) ? groups : [];
+  const list = useMemo(() => (Array.isArray(groups) ? groups : []), [groups]);
 
   const { byId: catById, ids: categoryIds } = useMemo(() => buildCategoryIndex(categories), [categories]);
 

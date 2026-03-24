@@ -2,7 +2,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  bestMatchAccountCandidate,
   bestMatchAccountId,
   isCreditAccount,
 } from "../../utils/accountMatch";
@@ -71,6 +70,8 @@ import { buildCategoryHierarchy } from "../../utils/categoryHierarchy";
 import { useTransferFlow } from "./hooks/useTransferFlow";
 import { useTransactionDraft } from "./hooks/useTransactionDraft";
 import { useScanQueue } from "./hooks/useScanQueue";
+import { coerceClipboardFile, filterAllowedUploads, isPdfFile } from "./helpers/fileUploadHelpers.js";
+import { applyAutomationToQueuePatch, buildQueueTypeChangeItem, normalizeQueueItemType } from "./helpers/queueTypeHelpers";
 import EditTransactionMode from "./EditTransactionMode";
 import { duplicateStateFromMatch, toDuplicateComparable } from "../../utils/duplicateDetection";
 import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromNote, appendEvidenceToNote, hashString, humanizeScanStatus } from "./helpers/inputHelpers";
@@ -483,7 +484,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     if (!gid) return false;
     const childCount = (splitGroupTransactions || []).filter((t) => !t?.isSplitParent).length;
     return childCount >= 2;
-  }, [isEditMode, initialData?.isTransfer, initialData?.splitGroupId, splitGroupTransactions.length]);
+  }, [isEditMode, initialData?.isTransfer, initialData?.splitGroupId, splitGroupTransactions]);
 
   const makeEmptySplitLine = () => ({
     txId: "",
@@ -1061,7 +1062,7 @@ const existingRefSet = useMemo(() => {
         }
       }
     }
-  }, [currentLocation, merchantLocationData, entryMode, isEditMode, showAlert, type, isSplitMode, expenseCats, incomeCats]);
+  }, [currentLocation, merchantLocationData, entryMode, isEditMode, showAlert, type, isSplitMode, expenseCats, incomeCats, setCategoryId, setNearbySuggestion, setNote]);
 
   const clearQueue = () => {
     // Queue lifecycle (state + preview objectURL cleanup) lives in useScanQueue().
@@ -1115,110 +1116,6 @@ const existingRefSet = useMemo(() => {
     if (mem && key) mem.set(key, id);
     return id;
   }, [categories, addCategory]);
-
-  // Apply derived automation patch onto a queue item patch, while keeping fields consistent.
-  const applyAutomationToQueuePatch = (basePatch, autoPatch) => {
-    let next = { ...basePatch, ...(autoPatch || {}) };
-
-    const t = next.txType;
-    const defaultAcc = accounts?.[0]?.id || "";
-
-    // Normalize based on type
-    if (t === "transfer" || t === "credit_payment") {
-      next.categoryId = "transfer";
-      next.splitByCategory = false;
-      next.groups = [];
-      next.fromAccountId = next.fromAccountId || next.accountId || defaultAcc;
-      next.toAccountId = next.toAccountId || defaultAcc;
-
-      // credit_payment hint: prefer toAccount = credit, fromAccount = non-credit
-      if (t === "credit_payment") {
-        const credit = (accounts || []).find((a) => a?.type === "credit");
-        const nonCredit = (accounts || []).find((a) => a?.type !== "credit");
-        const toAcc = (accounts || []).find((a) => a?.id === next.toAccountId);
-        const fromAcc = (accounts || []).find((a) => a?.id === next.fromAccountId);
-        if (credit && toAcc?.type !== "credit") next.toAccountId = credit.id;
-        if (nonCredit && fromAcc?.type === "credit") next.fromAccountId = nonCredit.id;
-      }
-    } else {
-      // expense / income
-      next.accountId = next.accountId || defaultAcc;
-      if (t === "income") {
-        next.splitByCategory = false;
-        next.groups = [];
-      }
-      // Ensure categoryId exists at least to prevent blank UI
-      if (!next.categoryId || next.categoryId === "transfer") {
-        next.categoryId = ensureCategory(t === "income" ? "income" : "expense", "other");
-      }
-    }
-
-    // Ignore inappropriate category in transfer types
-    if (t === "transfer" || t === "credit_payment") next.categoryId = "transfer";
-
-    return next;
-  };
-
-  // Normalize queue item shape when `txType` changes (user edits, automation rules, etc.).
-  // This prevents inconsistent states like:
-  // - transfer items still having split/category fields
-  // - income items keeping receipt groups
-  const normalizeQueueItemType = (item) => {
-    const base = item && typeof item === "object" ? item : {};
-    const raw = String(base.txType || base.type || "expense").toLowerCase().trim();
-    const txType = ["expense", "income", "transfer", "credit_payment"].includes(raw) ? raw : "expense";
-
-    const defaultAcc = accounts?.[0]?.id || "";
-    const next = { ...base, txType };
-
-    if (txType === "transfer" || txType === "credit_payment") {
-      next.categoryId = "transfer";
-      next.splitByCategory = false;
-      next.isInstallment = false;
-      next.items = [];
-      next.groups = [];
-
-      next.fromAccountId = next.fromAccountId || next.accountId || defaultAcc;
-      next.toAccountId = next.toAccountId || defaultAcc;
-      // keep a stable single accountId (used by some UI helpers)
-      next.accountId = next.accountId || next.fromAccountId || defaultAcc;
-
-      // credit_payment hint: prefer toAccount = credit, fromAccount = non-credit
-      if (txType === "credit_payment") {
-        const credit = (accounts || []).find((a) => isCreditAccount(a));
-        const nonCredit = (accounts || []).find((a) => !isCreditAccount(a));
-        const fromAcc = (accounts || []).find((a) => a?.id === next.fromAccountId) || null;
-        const toAcc = (accounts || []).find((a) => a?.id === next.toAccountId) || null;
-
-        const fallbackFrom = nonCredit?.id || defaultAcc;
-        const fallbackTo = credit?.id || next.toAccountId || defaultAcc;
-
-        if (!fromAcc || isCreditAccount(fromAcc)) next.fromAccountId = fallbackFrom;
-        if (!toAcc || !isCreditAccount(toAcc)) next.toAccountId = fallbackTo;
-        next.accountId = next.accountId || next.fromAccountId || fallbackFrom;
-      }
-
-      return next;
-    }
-
-    // expense / income
-    next.accountId = next.accountId || next.fromAccountId || next.toAccountId || defaultAcc;
-
-    if (txType === "income") {
-      // Income doesn't support receipt breakdown / splitting.
-      next.splitByCategory = false;
-      next.isInstallment = false;
-      next.items = [];
-      next.groups = [];
-    }
-
-    // Ensure a safe category to prevent blank UI / invalid saves.
-    if (!next.categoryId || next.categoryId === "transfer") {
-      next.categoryId = ensureCategory(txType === "income" ? "income" : "expense", "other");
-    }
-
-    return next;
-  };
 
   // ✅ Async Debounced Duplicate Check
   // Prevents the UI from freezing while typing by running findFuzzyDuplicate outside of the synchronous state updater.
@@ -1291,7 +1188,10 @@ const existingRefSet = useMemo(() => {
 
         // Normalize structure when switching type (keeps fields consistent)
         try {
-          next = normalizeQueueItemType(next);
+          next = normalizeQueueItemType(next, {
+            accounts,
+            ensureCategoryId: ensureCategory,
+          });
         } catch {
           // ignore
         }
@@ -1316,7 +1216,7 @@ const existingRefSet = useMemo(() => {
         return next;
       });
     });
-  }, [accounts, ensureCategory]);
+  }, [accounts, ensureCategory, setQueue]);
 
   const updateQueueGroup = useCallback((qid, gidx, patch) => {
     setQueue((prev) =>
@@ -1370,7 +1270,7 @@ const existingRefSet = useMemo(() => {
     if (firstNonCredit && fromAcc && isCreditAccount(fromAcc)) {
       setFromAccountId(firstNonCredit);
     }
-  }, [type, accounts, creditAccounts, nonCreditAccounts, fromAccountId, toAccountId]);
+  }, [type, accounts, creditAccounts, nonCreditAccounts, fromAccountId, toAccountId, setFromAccountId, setToAccountId]);
 
   const applyPayFull = () => {
     if (!selectedToAcc || !isCreditAccount(selectedToAcc)) {
@@ -1416,96 +1316,14 @@ const existingRefSet = useMemo(() => {
     setQueue((prev) =>
       prev.map((x) => {
         if (x.id !== qid) return x;
-
-        const fallbackAcc = accounts?.[0]?.id || "";
-        const merchant = String(x.merchant || x.note || "").trim();
-        const fromDigits = String(x.fromDigits || "").trim();
-        const toDigits = String(x.toDigits || "").trim();
-
-        if (nextType === "transfer") {
-          return {
-            ...x,
-            txType: "transfer",
-            splitByCategory: false,
-            isInstallment: false,
-            groups: [],
-            categoryId: "transfer",
-            fromAccountId: x.fromAccountId || x.accountId || fallbackAcc,
-            toAccountId: x.toAccountId || fallbackAcc,
-            suggestedCategoryId: "",
-            suggestedReason: "",
-          };
-        }
-
-        if (nextType === "credit_payment") {
-          const pickedFrom =
-            (!x.fromAccountId || isCreditAccount(accounts.find((a) => a.id === x.fromAccountId))) &&
-            nonCreditAccounts?.[0]?.id
-              ? nonCreditAccounts[0].id
-              : x.fromAccountId || x.accountId || nonCreditAccounts?.[0]?.id || fallbackAcc;
-
-          const pickedTo =
-            isCreditAccount(accounts.find((a) => a.id === x.toAccountId)) && x.toAccountId
-              ? x.toAccountId
-              : creditAccounts?.[0]?.id || x.toAccountId || fallbackAcc;
-
-          return {
-            ...x,
-            txType: "credit_payment",
-            splitByCategory: false,
-            isInstallment: false,
-            groups: [],
-            categoryId: "transfer",
-            fromAccountId: pickedFrom,
-            toAccountId: pickedTo,
-            accountId: x.accountId || pickedFrom || fallbackAcc,
-            suggestedCategoryId: "",
-            suggestedReason: "",
-            note: x.note || x.merchant ? x.note : "ชำระบัตรเครดิต",
-          };
-        }
-
-        // expense/income
-        const suggested =
-          categoryMemory?.suggestCategoryId?.(nextType, merchant, fromDigits, toDigits, expenseCats, incomeCats) || "";
-
-        let nextCategoryId = suggested || x.categoryId || "";
-        if (!nextCategoryId || nextCategoryId === "transfer") {
-          nextCategoryId = ensureCategory(nextType, "other");
-        }
-
-        // auto pick single accountId by best match digits
-        const candFrom = bestMatchAccountCandidate(accounts, fromDigits);
-        const candTo = bestMatchAccountCandidate(accounts, toDigits);
-
-        let pickedAccountId = "";
-        if (candFrom.score === 0 && candTo.score === 0) {
-          pickedAccountId = x.accountId || x.fromAccountId || x.toAccountId || fallbackAcc;
-        } else if (candFrom.score > candTo.score) {
-          pickedAccountId = candFrom.id;
-        } else if (candTo.score > candFrom.score) {
-          pickedAccountId = candTo.id;
-        } else {
-          pickedAccountId = candFrom.id || candTo.id || x.accountId || x.fromAccountId || fallbackAcc;
-        }
-
-        return {
-          ...x,
-          txType: nextType,
-          splitByCategory: false,
-          isInstallment: false,
-          groups: nextType === "expense" ? x.groups : [],
-          categoryId: nextCategoryId,
-          accountId: pickedAccountId || fallbackAcc,
-          suggestedCategoryId: suggested || "",
-          suggestedReason: suggested
-            ? merchant
-              ? `เคยใช้กับ ${merchant}`
-              : toDigits || fromDigits
-              ? `เคยใช้กับเลขนี้`
-              : "เคยใช้บัญชีนี้"
-            : "",
-        };
+        return buildQueueTypeChangeItem(x, nextType, {
+          accounts,
+          creditAccounts,
+          nonCreditAccounts,
+          ensureCategoryId: ensureCategory,
+          suggestCategoryId: (txType, merchant, fromDigits, toDigits) =>
+            categoryMemory?.suggestCategoryId?.(txType, merchant, fromDigits, toDigits, expenseCats, incomeCats) || "",
+        });
       })
     );
   }, [accounts, nonCreditAccounts, creditAccounts, categoryMemory, expenseCats, incomeCats, ensureCategory, setQueue]);
@@ -1527,32 +1345,6 @@ const existingRefSet = useMemo(() => {
   };
 
   // ===== file helpers (image + PDF) =====
-  const isPdfFile = (f) => {
-    const t = String(f?.type || "").toLowerCase();
-    const name = String(f?.name || "").toLowerCase();
-    return t === "application/pdf" || name.endsWith(".pdf");
-  };
-
-  const isImageFile = (f) => String(f?.type || "").toLowerCase().startsWith("image/");
-
-  const filterAllowedUploads = (files) => {
-    const arr = Array.isArray(files) ? files : Array.from(files || []);
-    return arr.filter((f) => f && (isImageFile(f) || isPdfFile(f)));
-  };
-
-  const coerceClipboardFile = (blob, idx = 0) => {
-    if (!blob) return null;
-    if (blob instanceof File) return blob;
-    try {
-      const type = String(blob.type || "").toLowerCase();
-      const ext = type === "application/pdf" ? "pdf" : type.startsWith("image/") ? (type.split("/")[1] || "png") : "bin";
-      const name = `clipboard-${Date.now()}-${idx}.${ext}`;
-      return new File([blob], name, { type: blob.type || "application/octet-stream" });
-    } catch {
-      return null;
-    }
-  };
-
   const handleDropZonePaste = (e) => {
     try {
       if (isScanning) return;
@@ -2164,7 +1956,10 @@ if (
             };
             const autoPatch = deriveAutomationPatch(state?.rules || [], autoCtx);
             if (autoPatch && Object.keys(autoPatch).length) {
-              patch = applyAutomationToQueuePatch(patch, autoPatch);
+              patch = applyAutomationToQueuePatch(patch, autoPatch, {
+                accounts,
+                ensureCategoryId: ensureCategory,
+              });
             }
           } catch {
             // ignore automation errors
@@ -2407,7 +2202,8 @@ if (
   };
 
   // ✅ Auto-send only the just-scanned batch to Inbox (multi-files flow)
-  const sendBatchToInbox = (batchId) => {
+  const sendBatchToInbox = useCallback(
+    (batchId) => {
     const ready = (queue || []).filter((q) => q.status === "ready" && q.batchId === batchId);
     if (!ready.length) {
       showAlert?.("ไม่มีรายการที่พร้อมส่งเข้า Inbox");
@@ -2510,12 +2306,14 @@ if (
     navigate("inbox");
     showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
     return true;
-  };
+    },
+    [queue, showAlert, ensureCategory, addScanInboxItems, removeQueueItems, setDupDecisionOpen, navigate]
+  );
 
   // ✅ Multi-files auto send: when scan finishes and all files are ready, auto-send that batch to Inbox
   useEffect(() => {
     const cfg = scanAutoSendRef.current;
-    if (!cfg?.enabled || cfg?.triggered) return;
+    if (!cfg?.enabled || cfg.triggered) return;
     if (scanBatchIdRef.current !== cfg.batchId) return;
     if (isScanning) return;
 
@@ -2537,7 +2335,7 @@ if (
 
     scanAutoSendRef.current = { ...cfg, triggered: true };
     sendBatchToInbox(cfg.batchId);
-  }, [queue, isScanning]);
+  }, [queue, isScanning, sendBatchToInbox, showAlert]);
 
   // Send only *blocked duplicates* to Inbox (used when user chose "บันทึกทันที" but wants to handle duplicates later)
   const sendDuplicateQueueToInbox = () => {

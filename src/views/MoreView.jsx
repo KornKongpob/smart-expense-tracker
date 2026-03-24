@@ -211,7 +211,45 @@ export default function MoreView({ showAlert, showConfirm }) {
     <div className="min-h-dvh">
       <AppHeader title="อื่นๆ" subtitle="จัดการข้อมูล • อัตโนมัติ • ความปลอดภัย" />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-6 view-flow">
+
+      <div className="view-hero">
+        <div className="view-hero-content">
+          <div>
+            <div className="view-eyebrow">Control center</div>
+            <div className="view-hero-title">รวมการตั้งค่า เครื่องมืออัตโนมัติ และการจัดการข้อมูลไว้ในหน้าเดียว</div>
+            <div className="view-hero-copy">
+              เข้าไปจัดการ recurring, automation rules, merchant memory, backup และ theme ได้จาก hub เดียวที่อ่านสถานะสำคัญได้ทันที
+            </div>
+          </div>
+
+          <div className="view-hero-grid">
+            <div className="view-metric">
+              <div className="view-metric-label">Recurring</div>
+              <div className="view-metric-value">{recurringStats.enabled}/{recurringStats.total}</div>
+              <div className="view-metric-hint">กฎ recurring ที่เปิดใช้งานอยู่ในระบบ</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Inbox pending</div>
+              <div className="view-metric-value">{inboxPendingCount}</div>
+              <div className="view-metric-hint">รายการที่ยังรอ approve หรือ review ใน inbox</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Automation</div>
+              <div className="view-metric-value">{rulesStats.enabled}/{rulesStats.total}</div>
+              <div className="view-metric-hint">จำนวน automation rules ที่เปิดใช้งานอยู่</div>
+            </div>
+
+            <div className="view-metric">
+              <div className="view-metric-label">Theme</div>
+              <div className="view-metric-value">{isDark ? "Dark" : "Light"}</div>
+              <div className="view-metric-hint">แตะการ์ด appearance ด้านล่างเพื่อสลับโหมด</div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Quick status */}
       <div className="mt-4 mb-5 ui-card p-4">

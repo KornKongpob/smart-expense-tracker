@@ -51,7 +51,7 @@ export default function InboxItemReviewModal({
     if (!isOpen) return;
     // clone shallowly to avoid mutating store item
     setDraft(item ? { ...item } : null);
-  }, [isOpen, item?.id]);
+  }, [isOpen, item]);
 
   const { url: blobUrl, mimeType } = useBlobInfo(draft?.attachmentId);
 

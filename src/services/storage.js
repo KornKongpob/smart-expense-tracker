@@ -142,7 +142,7 @@ function normalizeBoot(data, defaults = {}) {
     ? defaults.defaultMerchants
     : [];
   const moneyUnitRaw = String(root.moneyUnit || root.amountUnit || obj.moneyUnit || '').toLowerCase();
-  const moneyUnit = moneyUnitRaw === 'satang' ? 'satang' : 'baht';
+  const moneyUnit = moneyUnitRaw === 'baht' ? 'baht' : 'satang';
 
   return { transactions, accounts, categories, budgets, recurring, inbox, scanInbox, rules, merchants, ui, moneyUnit };
 }
@@ -175,13 +175,14 @@ export function saveAll(payload) {
   if (!hasWindow()) return;
 
   const data = isPlainObject(payload) ? payload : {};
+  const moneyUnit = String(data.moneyUnit || "satang").toLowerCase() === "baht" ? "baht" : "satang";
 
   // บังคับ shape ขั้นต่ำ เพื่อลดโอกาส state เพี้ยน
   const record = {
     v: STORAGE_VERSION,
     updatedAt: Date.now(),
     data: {
-      moneyUnit: String(data.moneyUnit || "satang"),
+      moneyUnit,
       transactions: ensureArray(data.transactions, []),
       accounts: ensureArray(data.accounts, []),
       categories: ensureCategoriesShape(data.categories),
@@ -197,7 +198,10 @@ export function saveAll(payload) {
   };
 
   const json = safeStringifyJSON(record);
-  if (!json) return;
+  if (!json) {
+    emitStorageSaveError(new Error("serialize_failed"), { key: STORAGE_KEY, jsonLength: 0 });
+    return;
+  }
 
   try {
     window.localStorage.setItem(STORAGE_KEY, json);

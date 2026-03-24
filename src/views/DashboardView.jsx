@@ -375,7 +375,49 @@ useEffect(() => {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+      <main className="ui-page pt-4 pb-6 view-flow">
+        <div className="view-hero">
+          <div className="view-hero-content">
+            <div>
+              <div className="view-eyebrow">Financial command center</div>
+              <div className="view-hero-title">ภาพรวมการเงินที่อ่านง่ายในหน้าหลักเดียว</div>
+              <div className="view-hero-copy">
+                ติดตามงบรายวัน งบรายเดือน มูลค่าสุทธิ และจำนวนรายการล่าสุดได้พร้อมกัน แล้วค่อยไล่ดูธุรกรรมเชิงลึกด้านล่าง
+              </div>
+            </div>
+
+            <div className="view-hero-grid">
+              <div className="view-metric">
+                <div className="view-metric-label">วันนี้ใช้ไป</div>
+                <div className="view-metric-value tabular-nums">{formatCurrency(todaySpent)}</div>
+                <div className="view-metric-hint">
+                  {dailyLimit > 0 ? `${dailyPct}% ของงบวันนี้` : "ยังไม่ได้ตั้ง daily budget"}
+                </div>
+              </div>
+
+              <div className="view-metric">
+                <div className="view-metric-label">เดือนนี้</div>
+                <div className="view-metric-value tabular-nums">{formatCurrency(monthSpent)}</div>
+                <div className="view-metric-hint">
+                  {monthlyLimit > 0 ? `${monthlyPct}% ของงบเดือน` : "ยังไม่ได้ตั้ง monthly budget"}
+                </div>
+              </div>
+
+              <div className="view-metric">
+                <div className="view-metric-label">มูลค่าสุทธิ</div>
+                <div className="view-metric-value tabular-nums">{formatCurrency(Math.abs(netWorth))}</div>
+                <div className="view-metric-hint">{netWorth >= 0 ? "ฐานะสุทธิเป็นบวก" : "หนี้มากกว่าเงินออม"}</div>
+              </div>
+
+              <div className="view-metric">
+                <div className="view-metric-label">กิจกรรมล่าสุด</div>
+                <div className="view-metric-value tabular-nums">{filtered.length}{hasMore ? "+" : ""}</div>
+                <div className="view-metric-hint">รายการล่าสุดที่ตรงกับตัวกรองปัจจุบัน</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Budget status (tap to edit in Budget page) */}
         <BentoGrid className="mb-5">
           <button
@@ -594,10 +636,13 @@ useEffect(() => {
         </div>
 
         {/* Recent list */}
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-black text-gray-900 flex items-center gap-2">
-            <FileText size={16} /> รายการล่าสุด
-          </h2>
+        <div className="view-section-head">
+          <div>
+            <h2 className="view-section-title flex items-center gap-2">
+              <FileText size={16} /> รายการล่าสุด
+            </h2>
+            <div className="view-section-copy">รวมรายการล่าสุดแบบ grouped ตามวัน พร้อมยอดรับและจ่ายในแต่ละวัน</div>
+          </div>
           <div className="text-xs text-gray-700/60 font-extrabold tabular-nums">
             {filtered.length ? `${filtered.length}${hasMore ? "+" : ""} รายการ` : ""}
           </div>

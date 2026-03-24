@@ -57,12 +57,17 @@ export default function AppHeader({
         className={cn(
           "fixed inset-x-0 top-0 z-40",
           "pt-safe",
-          "bg-white/70 backdrop-blur-2xl",
-          "border-b border-white/35",
           className
         )}
+        style={{
+          background: "linear-gradient(180deg, color-mix(in srgb, var(--bg) 86%, white 14%) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 100%)",
+          borderBottom: "1px solid color-mix(in srgb, var(--border) 88%, white 12%)",
+          boxShadow: "0 18px 44px -34px rgba(15, 23, 42, 0.45)",
+          backdropFilter: "blur(24px)",
+          WebkitBackdropFilter: "blur(24px)",
+        }}
       >
-        <div className="px-4 pb-3 pt-3">
+        <div className="mx-auto max-w-[1180px] px-4 pb-3 pt-3 sm:px-6">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-2 min-w-0">
               {left ? (
@@ -82,11 +87,11 @@ export default function AppHeader({
               ) : null}
 
               <div className="min-w-0">
-                <h1 className="text-[20px] leading-tight font-black text-gray-900 tracking-tight truncate">
+                <h1 className="truncate text-[22px] leading-[1.05] font-black tracking-[-0.03em]" style={{ color: "var(--text)" }}>
                   {title || ""}
                 </h1>
                 {subtitle ? (
-                  <div className="mt-0.5 text-[12px] font-bold text-gray-700/70 truncate">
+                  <div className="mt-1 truncate text-[12px] font-bold tracking-[-0.01em]" style={{ color: "color-mix(in srgb, var(--text) 58%, transparent)" }}>
                     {subtitle}
                   </div>
                 ) : null}
