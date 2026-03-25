@@ -255,12 +255,12 @@ export default function DashboardView() {
               }}
             />
             <div className="relative">
-              <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-slate-500">Scan-first finance</div>
-              <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-slate-950">
+              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Scan-first finance</div>
+              <div className="mt-2 text-3xl font-extrabold tracking-[-0.03em] text-slate-950">
                 รู้เลยวันนี้ต้องทำอะไรกับเงินของเรา
               </div>
-              <div className="mt-2 max-w-2xl text-sm font-bold leading-relaxed text-slate-600">
-                เช็กยอดใช้วันนี้, งานค้างใน Inbox, ความกดดันของงบประมาณ และรายการล่าสุดได้จากหน้าเดียว ก่อนค่อยลงรายละเอียดใน Hub
+              <div className="mt-2 max-w-2xl text-sm font-semibold leading-relaxed text-slate-600">
+                เช็กยอดวันนี้ งานค้าง และรายการล่าสุดได้จากหน้าเดียว แล้วค่อยลงรายละเอียดต่อใน Hub
               </div>
 
               <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">

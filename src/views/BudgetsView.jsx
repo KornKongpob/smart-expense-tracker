@@ -225,7 +225,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             <div className="view-eyebrow">Budget planner</div>
             <div className="view-hero-title">ควบคุมงบรวม งบรายวัน และงบรายหมวดในหน้าจอเดียว</div>
             <div className="view-hero-copy">
-              ดูการใช้จ่ายเทียบงบของเดือนนี้แบบเร็ว ๆ แล้วแตะเข้าไปแก้ไขงบเฉพาะส่วนที่ต้องการได้ทันที
+              ดูการใช้จ่ายเทียบงบของเดือนนี้ แล้วแตะเข้าไปแก้เฉพาะส่วนที่ต้องการได้ทันที
             </div>
           </div>
 

@@ -1,8 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
-  <rect width="96" height="96" rx="24" fill="#11a6e8"/>
-  <rect x="8" y="8" width="80" height="80" rx="20" fill="#28b9f3"/>
-  <path d="M26 32h44l-8 14H34l-8-14Z" fill="#d8f3ff"/>
-  <path d="M32 50h32l-5 14H37l-5-14Z" fill="#ffffff"/>
-  <path d="M41 28h14v6H41z" fill="#d8f3ff"/>
-  <text x="48" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="white">KTB</text>
+  <rect width="96" height="96" rx="24" fill="#11A6E8"/>
+  <rect x="8" y="8" width="80" height="80" rx="20" fill="#2ABAF1"/>
+  <path d="M48 22L62 33H34L48 22Z" fill="#FFFFFF"/>
+  <path d="M26 40L41 35L48 47L33 55L26 40Z" fill="#DDF7FF"/>
+  <path d="M70 40L55 35L48 47L63 55L70 40Z" fill="#DDF7FF"/>
+  <rect x="42" y="34" width="12" height="14" rx="4" fill="#FFFFFF"/>
+  <path d="M37 52H59L54 68H42L37 52Z" fill="#FFFFFF"/>
 </svg>

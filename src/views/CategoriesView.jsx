@@ -347,7 +347,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
             <div className="view-eyebrow">Category system</div>
             <div className="view-hero-title">จัดโครงสร้างหมวดหลัก หมวดย่อย และ keyword สำหรับการสแกน</div>
             <div className="view-hero-copy">
-              จัดระเบียบหมวดหมู่ให้เข้าใจง่ายขึ้น ดูจำนวนหมวดทั้งหมดในมุมเดียว และค้นหาหมวดหรือ keyword ที่ต้องการแก้ได้เร็วขึ้น
+              ดูโครงสร้างหมวดทั้งหมด และค้นหาหมวดหรือ keyword ที่ต้องการแก้ได้เร็วขึ้น
             </div>
           </div>
 

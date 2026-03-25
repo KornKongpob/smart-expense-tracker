@@ -182,7 +182,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             <div className="view-eyebrow">Recurring engine</div>
             <div className="view-hero-title">จัดการรายการประจำและดูว่ารายการไหนถึงรอบแล้ว</div>
             <div className="view-hero-copy">
-              เปิดหรือปิดแต่ละกฎได้ทันที ดูรายการที่น่าจะถึงรอบในวันนี้ แล้วสั่งสร้างธุรกรรมจริงเมื่อพร้อม
+              เปิดปิดแต่ละกฎ ดูรายการที่ถึงรอบวันนี้ และสร้างธุรกรรมจริงเมื่อพร้อม
             </div>
           </div>
 

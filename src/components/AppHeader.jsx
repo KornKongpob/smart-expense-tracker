@@ -87,11 +87,11 @@ export default function AppHeader({
               ) : null}
 
               <div className="min-w-0">
-                <h1 className="truncate text-[22px] leading-[1.05] font-black tracking-[-0.03em]" style={{ color: "var(--text)" }}>
+                <h1 className="truncate text-[22px] leading-[1.08] font-extrabold tracking-[-0.02em]" style={{ color: "var(--text)" }}>
                   {title || ""}
                 </h1>
                 {subtitle ? (
-                  <div className="mt-1 truncate text-[12px] font-bold tracking-[-0.01em]" style={{ color: "color-mix(in srgb, var(--text) 58%, transparent)" }}>
+                  <div className="mt-1 truncate text-[12px] font-semibold tracking-normal" style={{ color: "color-mix(in srgb, var(--text) 58%, transparent)" }}>
                     {subtitle}
                   </div>
                 ) : null}

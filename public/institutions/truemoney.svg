@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
-  <rect width="96" height="96" rx="24" fill="#f97316"/>
-  <rect x="8" y="8" width="80" height="80" rx="20" fill="#fb923c"/>
-  <path d="M26 32h44v10H54v22H42V42H26z" fill="#fff7ed"/>
-  <path d="M62 44c4 0 8 3 8 8s-4 8-8 8-8-3-8-8 4-8 8-8Z" fill="#fff7ed"/>
-  <text x="48" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-size="9.5" font-weight="700" fill="white">TRUEMONEY</text>
+  <rect width="96" height="96" rx="24" fill="#F97316"/>
+  <rect x="8" y="8" width="80" height="80" rx="20" fill="#FB923C"/>
+  <path d="M28 34C28 30.686 30.686 28 34 28H58C61.314 28 64 30.686 64 34V38H68C71.314 38 74 40.686 74 44V58C74 61.314 71.314 64 68 64H34C30.686 64 28 61.314 28 58V34Z" fill="#FFF7ED"/>
+  <path d="M56 46H74V56H56C53.239 56 51 53.761 51 51C51 48.239 53.239 46 56 46Z" fill="#F97316"/>
+  <circle cx="58.5" cy="51" r="2.5" fill="#FFF7ED"/>
 </svg>

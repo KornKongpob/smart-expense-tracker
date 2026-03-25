@@ -376,7 +376,7 @@ export default function MoreView({ showAlert, showConfirm }) {
               <div className="view-eyebrow">Hub control center</div>
               <div className="view-hero-title">รวบงานลึกของแอพไว้ในศูนย์สั่งการเดียว</div>
               <div className="view-hero-copy">
-                ใช้หน้านี้เมื่อเราจะดู analytics, recurring, rules, merchant memory, security, backup และการตั้งค่าระบบ โดยไม่รบกวน flow จับรายการประจำวันของ Today / Scan / Inbox
+                เข้าถึง analytics, recurring, rules, backup และการตั้งค่าระบบจากหน้าเดียว
               </div>
             </div>
 

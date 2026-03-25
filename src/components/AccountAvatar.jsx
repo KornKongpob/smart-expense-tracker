@@ -35,7 +35,7 @@ export default function AccountAvatar({
         institutionId={item.institutionId}
         alt={title}
         className={cn("border border-white/20 shadow-lg", className)}
-        imgClassName={cn("object-cover", contentClassName)}
+        imgClassName={cn("object-contain", contentClassName)}
         labelClassName={textClassName}
       />
     );

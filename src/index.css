@@ -1,5 +1,5 @@
 /* src/index.css */
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700;800&family=Manrope:wght@600;700;800&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -196,7 +196,7 @@ body {
   color: var(--text);
   line-height: 1.45;
 
-  font-family: "IBM Plex Sans Thai", "Manrope", "Noto Sans Thai", "Segoe UI", sans-serif;
+  font-family: "Anuphan", "Manrope", "Noto Sans Thai", "Segoe UI", sans-serif;
 
   /* Bento + Apple-ish background (subtle, readable) */
   background:
@@ -273,7 +273,6 @@ summary::-webkit-details-marker {
 .bento-summary {
   list-style: none;
 }
-
 
 /* Reduce motion */
 @media (prefers-reduced-motion: reduce) {
@@ -479,16 +478,17 @@ summary::-webkit-details-marker {
 
 /* ---------- Form text helpers ---------- */
 .ui-label {
-  font-size: 0.7rem;
-  font-weight: 800;
+  font-size: 0.72rem;
+  font-weight: 700;
   color: rgba(15, 23, 42, 0.56);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0.02em;
 }
 
 .ui-help {
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.45;
   color: rgba(15, 23, 42, 0.50);
 }
 
@@ -582,8 +582,8 @@ summary::-webkit-details-marker {
 .view-eyebrow {
   font-size: 0.7rem;
   line-height: 1;
-  font-weight: 900;
-  letter-spacing: 0.1em;
+  font-weight: 800;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: rgba(15, 23, 42, 0.52);
 }
@@ -591,18 +591,18 @@ summary::-webkit-details-marker {
 .view-hero-title {
   margin-top: 0.45rem;
   font-size: clamp(1.4rem, 1.1rem + 1.2vw, 2.05rem);
-  line-height: 1.02;
-  font-weight: 900;
-  letter-spacing: -0.04em;
+  line-height: 1.08;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--text);
 }
 
 .view-hero-copy {
   margin-top: 0.55rem;
-  max-width: 42rem;
-  font-size: 0.92rem;
-  line-height: 1.55;
-  font-weight: 700;
+  max-width: 36rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  font-weight: 600;
   color: rgba(15, 23, 42, 0.64);
 }
 
@@ -625,8 +625,8 @@ summary::-webkit-details-marker {
 .view-metric-label {
   font-size: 0.68rem;
   line-height: 1;
-  font-weight: 900;
-  letter-spacing: 0.08em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(15, 23, 42, 0.5);
 }
@@ -635,8 +635,8 @@ summary::-webkit-details-marker {
   margin-top: 0.45rem;
   font-size: 1.12rem;
   line-height: 1.15;
-  font-weight: 900;
-  letter-spacing: -0.03em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--text);
 }
 
@@ -644,7 +644,7 @@ summary::-webkit-details-marker {
   margin-top: 0.3rem;
   font-size: 0.76rem;
   line-height: 1.35;
-  font-weight: 700;
+  font-weight: 600;
   color: rgba(15, 23, 42, 0.58);
 }
 

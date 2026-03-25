@@ -18,7 +18,7 @@ export default function InstitutionLogo({
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center overflow-hidden rounded-[inherit] bg-white/90",
+        "inline-flex items-center justify-center overflow-hidden rounded-[inherit] bg-white/95",
         className
       )}
       style={
@@ -33,13 +33,13 @@ export default function InstitutionLogo({
         <img
           src={preset.logoSrc}
           alt={alt || preset.displayName || preset.shortName || "Institution"}
-          className={cn("h-full w-full object-cover", imgClassName)}
+          className={cn("h-full w-full object-contain", imgClassName)}
           draggable={false}
         />
       ) : (
         <span
           className={cn(
-            "font-black uppercase tracking-[-0.03em] text-slate-900",
+            "font-extrabold tracking-[-0.02em] text-slate-900",
             labelClassName || "text-[11px]"
           )}
         >

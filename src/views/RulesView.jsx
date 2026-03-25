@@ -277,7 +277,7 @@ const applyTemplate = (tpl) => {
             <div className="view-eyebrow">Automation rules</div>
             <div className="view-hero-title">กำหนดกฎสำหรับเติมข้อมูลจากสลิปและ inbox แบบอัตโนมัติ</div>
             <div className="view-hero-copy">
-              ดูกฎที่เปิดอยู่ทั้งหมด จัดลำดับความสำคัญ เปิดปิดแต่ละกฎ และสร้าง template ใหม่ได้จากหน้าจอเดียว
+              ดูกฎที่เปิดอยู่ จัดลำดับความสำคัญ เปิดปิด และสร้าง template ใหม่ได้จากหน้าเดียว
             </div>
           </div>
 

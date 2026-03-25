@@ -184,7 +184,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             <div className="view-eyebrow">Merchant memory</div>
             <div className="view-hero-title">รวมร้านค้าและ preference ที่ระบบจะจำให้โดยอัตโนมัติ</div>
             <div className="view-hero-copy">
-              ตรวจสอบ alias ของร้าน ดู mapping ฝั่งรายรับหรือรายจ่าย และจัดการ merge ร้านที่ซ้ำกันเพื่อให้การ auto-fill แม่นขึ้น
+              ดู alias ของร้าน จัดการ mapping และ merge ร้านที่ซ้ำกันเพื่อให้ auto-fill แม่นขึ้น
             </div>
           </div>
 

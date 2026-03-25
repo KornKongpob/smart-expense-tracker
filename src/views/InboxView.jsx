@@ -1056,7 +1056,7 @@ export default function InboxView({ showAlert, showConfirm }) {
             <div className="view-eyebrow">Inbox review</div>
             <div className="view-hero-title">รวมรายการรอตรวจสอบ อนุมัติ และจัดหมวดไว้ในที่เดียว</div>
             <div className="view-hero-copy">
-              ตรวจสอบรายการสแกนที่เข้ามาใหม่ เลือกอนุมัติแบบทีละรายการหรือเป็นชุด แล้วติดตามรายการที่ approve ไปแล้วได้จากหน้าเดียวกัน
+              ตรวจสอบรายการใหม่ อนุมัติทีละรายการหรือเป็นชุด และย้อนดูรายการที่อนุมัติแล้วได้จากหน้าเดียว
             </div>
           </div>
 

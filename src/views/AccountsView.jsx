@@ -96,7 +96,7 @@ function InstitutionPicker({ type, value, onSelect }) {
         <div>
           <div className="text-sm font-black text-gray-900">Preset สถาบันการเงิน</div>
           <div className="mt-1 text-xs font-bold text-gray-700/70">
-            เลือกแบงก์หรือวอลเล็ทก่อน ระบบจะตั้งชื่อ สี และชนิดบัญชีให้เหมาะกับ flow ไทย
+            เลือกสถาบันก่อน ระบบจะตั้งชื่อ สี และชนิดบัญชีให้เหมาะอัตโนมัติ
           </div>
         </div>
         <div className="ui-chip bg-white/70 border-gray-900/10">
@@ -125,7 +125,7 @@ function InstitutionPicker({ type, value, onSelect }) {
                   institutionId={preset.id}
                   alt={preset.displayName}
                   className="w-11 h-11 rounded-2xl shrink-0"
-                  imgClassName="h-full w-full object-cover"
+                  imgClassName="h-full w-full object-contain"
                 />
                 <div className="min-w-0">
                   <div className="text-[13px] font-black truncate">{preset.displayName}</div>
@@ -154,7 +154,7 @@ function AccountVisualPreview({ name, type, currency, color, mode, iconId, emoji
           institutionId={institutionId}
           alt={String(name || "").trim()}
           className="w-full h-full"
-          imgClassName="w-full h-full object-cover"
+          imgClassName="w-full h-full object-contain"
         />
       );
     }
@@ -233,6 +233,49 @@ function AccountVisualPreview({ name, type, currency, color, mode, iconId, emoji
         </div>
       </div>
     </div>
+  );
+}
+
+function AccountSheetModal({ open, title, description, onClose, children }) {
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden overscroll-none"
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget) e.preventDefault();
+      }}
+    >
+      <div
+        className="w-full max-w-xl ui-card-strong shadow-2xl max-h-[92dvh] overflow-hidden flex flex-col"
+        style={{ touchAction: "pan-y" }}
+      >
+        <div className="p-4 border-b border-slate-900/8 shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-lg font-extrabold text-gray-900">{title}</div>
+              {description ? (
+                <div className="text-xs text-gray-800/65 font-semibold mt-1 leading-relaxed">
+                  {description}
+                </div>
+              ) : null}
+            </div>
+            <button type="button" onClick={onClose} className="ui-btn ui-btn-secondary px-3" title="ปิด">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div
+          className="px-4 pb-4 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
+          {children}
+          <div className="h-3 pb-safe" />
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -927,7 +970,7 @@ const create = () => {
     <div className="min-h-dvh">
       <AppHeader
         title="บัญชี"
-        subtitle="จัดการบัญชี/บัตร และเลขท้ายเพื่อช่วยสแกนแม่นขึ้น"
+        subtitle="จัดการบัญชี บัตร และเลขช่วยจำสำหรับสลิป"
         right={
           <button
             type="button"
@@ -951,8 +994,8 @@ const create = () => {
           <div>
             <div className="text-lg font-black text-gray-900">คำแนะนำ</div>
             <div className="text-xs text-gray-800/60 font-bold mt-1 leading-relaxed">
-              จัดการบัญชี/บัตรที่ใช้บันทึกรายการ (แนะนำใส่ <span className="font-black text-gray-900">เลขท้าย 4–6 หลัก</span> จากสลิป)
-              และถ้ามีหลายแบบให้ใส่หลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span> เพื่อ map แม่นขึ้น
+              แนะนำใส่ <span className="font-black text-gray-900">เลขท้าย 4–6 หลัก</span> จากสลิป
+              และถ้ามีหลายแบบให้ใส่หลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span>
             </div>
           </div>
 
@@ -1215,24 +1258,16 @@ const create = () => {
   })()}
 </div>
 
-{/* Create Modal */}
+  {/* Create Modal */}
 
-      {openCreate ? createPortal(
-        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
-          <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-lg font-black text-gray-900">เพิ่มบัญชี</div>
-                <div className="text-xs text-gray-800/65 font-bold mt-1 leading-relaxed">
-                  กรอกข้อมูลหลักให้ครบ แล้วค่อยเพิ่ม “เลขช่วยจำ” เพื่อช่วย map จากสลิปได้แม่นยำขึ้น
-                </div>
-              </div>
-              <button onClick={() => setOpenCreate(false)} className="ui-btn ui-btn-secondary px-3" title="ปิด">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="mt-4">
+      {openCreate ? (
+        <AccountSheetModal
+          open={openCreate}
+          title="เพิ่มบัญชี"
+          description="กรอกข้อมูลหลักก่อน แล้วค่อยเพิ่มเลขช่วยจำถ้าจำเป็น"
+          onClose={() => setOpenCreate(false)}
+        >
+          <div className="mt-4">
               <AccountVisualPreview
                 name={cName}
                 type={cType}
@@ -1346,7 +1381,7 @@ const create = () => {
                   autoComplete="off"
                 />
                 <div className="ui-help mt-1">
-                  รองรับหลายชุด (คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค) • แนะนำใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิป
+                  คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค • แนะนำใส่เลขท้าย 4–6 หลัก
                 </div>
 
                 {(() => {
@@ -1445,7 +1480,7 @@ const create = () => {
                 )}
 
                 <div className="ui-help mt-1">
-                  ถ้ากรอก ระบบจะถามว่าจะบันทึกยอดตั้งต้นเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
+                  ถ้ากรอก ระบบจะถามว่าจะบันทึกเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือไม่
                 </div>
               </div>
             </div>
@@ -1491,7 +1526,7 @@ const create = () => {
                 </div>
 
                 <div className="ui-help mt-2">
-                  แนะนำใส่เลขช่วยจำให้ตรงกับเลขท้ายบนสลิป และเลขท้ายหน้าบัตร (ถ้ามีหลายแบบ ใส่หลายชุดได้)
+                  ใส่เลขท้ายบนสลิปหรือหน้าบัตร ถ้ามีหลายแบบให้ใส่หลายชุด
                 </div>
               </div>
             ) : null}
@@ -1504,12 +1539,7 @@ const create = () => {
                 บันทึก
               </button>
             </div>
-
-            {/* Safe-area spacer (iOS home indicator) */}
-            <div className="h-3 pb-safe" />
-          </div>
-        </div>,
-        document.body
+        </AccountSheetModal>
       ) : null}
 
       
@@ -1600,22 +1630,14 @@ const create = () => {
 ) : null}
 
 {/* Edit Modal */}
-      {openEdit ? createPortal(
-        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
-          <div className="w-full max-w-xl ui-card-strong p-4 shadow-2xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-lg font-black text-gray-900">แก้ไขบัญชี</div>
-                <div className="text-xs text-gray-800/65 font-bold mt-1">
-                  รองรับเลขช่วยจำหลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span>
-                </div>
-              </div>
-              <button onClick={closeEditModal} className="ui-btn ui-btn-secondary px-3" title="ปิด">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="mt-4">
+      {openEdit ? (
+        <AccountSheetModal
+          open={openEdit}
+          title="แก้ไขบัญชี"
+          description={<>รองรับเลขช่วยจำหลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span></>}
+          onClose={closeEditModal}
+        >
+          <div className="mt-4">
               <AccountVisualPreview
                 name={eName}
                 type={eType}
@@ -1726,7 +1748,7 @@ const create = () => {
                   autoComplete="off"
                 />
                 <div className="ui-help mt-1">
-                  แนะนำ: ใส่เลขท้าย 4–6 หลักที่ปรากฏบนสลิป • ถ้าเป็นบัตรเครดิต ใส่ทั้งเลขท้ายบนสลิป และเลขท้ายหน้าบัตร
+                  แนะนำใส่เลขท้าย 4–6 หลัก • บัตรเครดิตใส่ได้มากกว่า 1 ชุด
                 </div>
 
                 {(() => {
@@ -1840,7 +1862,7 @@ const create = () => {
                                 {formatCurrency(Math.abs(delta))} ({delta > 0 ? "เพิ่ม" : "ลด"})
                               </div>
                               <div className="mt-1 text-[11px] text-gray-800/60 font-bold leading-relaxed">
-                                เมื่อกดบันทึก ระบบจะถามว่าจะเก็บส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือปรับเงียบๆ
+                                กดบันทึกแล้วค่อยเลือกว่าจะเก็บเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือปรับเงียบๆ
                               </div>
                             </div>
                           );
@@ -1859,7 +1881,7 @@ const create = () => {
                   )}
 
                   <div className="ui-help mt-1">
-                    ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่
+                    ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือไม่
                   </div>
                 </div>
               </div>
@@ -1942,12 +1964,7 @@ const create = () => {
                 </button>
               </div>
             </div>
-
-            {/* Safe-area spacer (iOS home indicator) */}
-            <div className="h-3 pb-safe" />
-          </div>
-        </div>,
-        document.body
+        </AccountSheetModal>
       ) : null}
 
       {/* ✅ Adjust balance confirmation */}
@@ -2032,14 +2049,14 @@ const create = () => {
       <div className="mt-6 glass-card rounded-3xl p-4 bg-white/20 border border-white/20 shadow-xl">
         <div className="text-sm font-black text-gray-900 flex items-center gap-2">
           <ImageIcon size={18} />
-          Tips: เลขช่วยจำสำหรับ map
+          เลขช่วยจำสำหรับ map
         </div>
         <div className="text-xs text-gray-800/60 font-bold mt-2 leading-relaxed">
-          - ใส่ได้หลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span> เพื่อรองรับรูปแบบสลิปที่ต่างกัน
+          - ใส่ได้หลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span>
           <br />
-          - ถ้ามีเลขบัญชีเต็ม (10+ หลัก) ใส่ได้เลย ระบบจะเก็บไว้เพื่อช่วยจับคู่จากเลขท้ายบนสลิป
+          - ถ้ามีเลขบัญชีเต็ม (10+ หลัก) ใส่ได้เลยเพื่อช่วยจับคู่จากเลขท้าย
           <br />
-          - ถ้าเป็นบัตรเครดิต บางสลิปอาจแสดงเลขคนละส่วน/คนละตำแหน่ง ให้ใส่หลายชุดจะช่วยลดการ map ผิดบัญชี
+          - บัตรเครดิตที่ขึ้นเลขไม่เหมือนกันในแต่ละสลิป สามารถใส่หลายชุดได้
         </div>
       </div>
       </main>
