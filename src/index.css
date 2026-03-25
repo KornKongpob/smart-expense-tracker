@@ -177,7 +177,11 @@ html[data-theme="dark"] .glass-input {
 
 /* Dark Navbar scrim */
 html[data-theme="dark"] .pb-nav {
-  padding-bottom: calc(7rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--app-nav-h, 5rem) + env(safe-area-inset-bottom));
+}
+
+html[data-theme="dark"] .pb-bottom-dock {
+  padding-bottom: calc(6rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
 }
 
 /* ---------- Base ---------- */
@@ -196,7 +200,7 @@ body {
   color: var(--text);
   line-height: 1.45;
 
-  font-family: "Anuphan", "Manrope", "Noto Sans Thai", "Segoe UI", sans-serif;
+  font-family: "Anuphan", "Noto Sans Thai", "Manrope", "Segoe UI", sans-serif;
 
   /* Bento + Apple-ish background (subtle, readable) */
   background:
@@ -247,8 +251,11 @@ body {
 
 /* Space for fixed bottom navbar */
 .pb-nav {
-  /* Use measured navbar height when available to avoid overlaps on different devices */
-  padding-bottom: var(--app-nav-h, calc(7rem + env(safe-area-inset-bottom)));
+  padding-bottom: calc(var(--app-nav-h, 5rem) + env(safe-area-inset-bottom));
+}
+
+.pb-bottom-dock {
+  padding-bottom: calc(6rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
 }
 
 /* Hide Navbar when a modal/overlay is open (set by useLockBodyScroll) */
@@ -432,8 +439,8 @@ summary::-webkit-details-marker {
   min-height: 48px;
   border-radius: var(--radius-control);
   padding: 0.85rem 1.1rem;
-  font-weight: 900;
-  letter-spacing: -0.01em;
+  font-weight: 800;
+  letter-spacing: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -479,15 +486,15 @@ summary::-webkit-details-marker {
 /* ---------- Form text helpers ---------- */
 .ui-label {
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 600;
   color: rgba(15, 23, 42, 0.56);
   text-transform: none;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .ui-help {
   font-size: 0.76rem;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.45;
   color: rgba(15, 23, 42, 0.50);
 }
@@ -582,18 +589,18 @@ summary::-webkit-details-marker {
 .view-eyebrow {
   font-size: 0.7rem;
   line-height: 1;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: none;
   color: rgba(15, 23, 42, 0.52);
 }
 
 .view-hero-title {
   margin-top: 0.45rem;
   font-size: clamp(1.4rem, 1.1rem + 1.2vw, 2.05rem);
-  line-height: 1.08;
+  line-height: 1.12;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 
@@ -602,7 +609,7 @@ summary::-webkit-details-marker {
   max-width: 36rem;
   font-size: 0.9rem;
   line-height: 1.5;
-  font-weight: 600;
+  font-weight: 500;
   color: rgba(15, 23, 42, 0.64);
 }
 
@@ -625,9 +632,9 @@ summary::-webkit-details-marker {
 .view-metric-label {
   font-size: 0.68rem;
   line-height: 1;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
   color: rgba(15, 23, 42, 0.5);
 }
 
@@ -636,7 +643,7 @@ summary::-webkit-details-marker {
   font-size: 1.12rem;
   line-height: 1.15;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 

@@ -44,8 +44,8 @@ function ActionButton({ title, hint, icon, onClick, strong = false, testId }) {
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className={strong ? "text-sm font-black" : "text-sm font-black text-slate-950"}>{title}</div>
-          <div className={strong ? "mt-1 text-[12px] font-bold text-white/70" : "mt-1 text-[12px] font-bold text-slate-600"}>
+          <div className={strong ? "text-sm font-extrabold" : "text-sm font-extrabold text-slate-950"}>{title}</div>
+          <div className={strong ? "mt-1 text-[12px] font-semibold text-white/70" : "mt-1 text-[12px] font-semibold text-slate-600"}>
             {hint}
           </div>
         </div>
@@ -65,9 +65,9 @@ function MetricCard({ label, value, hint, tone = "default" }) {
 
   return (
     <div className="ui-card p-4">
-      <div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">{label}</div>
-      <div className={`mt-2 text-2xl font-black tracking-[-0.04em] tabular-nums ${toneClass}`}>{value}</div>
-      <div className="mt-1 text-[12px] font-bold text-slate-600">{hint}</div>
+      <div className="text-[11px] font-semibold tracking-[0.04em] text-slate-500">{label}</div>
+      <div className={`mt-2 text-2xl font-extrabold tracking-[-0.02em] tabular-nums ${toneClass}`}>{value}</div>
+      <div className="mt-1 text-[12px] font-medium text-slate-600">{hint}</div>
     </div>
   );
 }
@@ -219,14 +219,14 @@ export default function DashboardView() {
   return (
     <div className="min-h-dvh">
       <AppHeader
-        title="Today"
-        subtitle={currentMonth}
+        title="Dashboard"
+        subtitle={`ภาพรวมการเงิน • ${currentMonth}`}
         right={
           <div className="flex items-center gap-2">
             <button
               onClick={() => openScan("receipt")}
               data-testid="today-open-scan"
-              className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-[0_20px_36px_-24px_rgba(15,23,42,0.72)] active:scale-95"
+              className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-xs font-extrabold text-white shadow-[0_20px_36px_-24px_rgba(15,23,42,0.72)] active:scale-95"
               type="button"
               aria-label="Open scan"
             >
@@ -255,12 +255,12 @@ export default function DashboardView() {
               }}
             />
             <div className="relative">
-              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Scan-first finance</div>
-              <div className="mt-2 text-3xl font-extrabold tracking-[-0.03em] text-slate-950">
-                รู้เลยวันนี้ต้องทำอะไรกับเงินของเรา
+              <div className="text-[11px] font-semibold tracking-[0.05em] text-slate-500">Dashboard overview</div>
+              <div className="mt-2 text-3xl font-extrabold tracking-[-0.02em] text-slate-950">
+                สรุปเงินเข้าออก งานค้าง และงบในหน้าเดียว
               </div>
-              <div className="mt-2 max-w-2xl text-sm font-semibold leading-relaxed text-slate-600">
-                เช็กยอดวันนี้ งานค้าง และรายการล่าสุดได้จากหน้าเดียว แล้วค่อยลงรายละเอียดต่อใน Hub
+              <div className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-slate-600">
+                เช็กภาพรวมวันนี้และเดือนนี้ เปิดงานที่ต้องทำต่อได้ทันที แล้วค่อยลงรายละเอียดในส่วนอื่นของแอพ
               </div>
 
               <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -304,15 +304,15 @@ export default function DashboardView() {
           <div className="ui-card p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-sm font-black text-slate-950">Budget pressure</div>
-                <div className="mt-1 text-[12px] font-bold text-slate-600">
-                  ระบบยังใช้ logic เดิมทั้งหมด แต่ย้ายมาไว้เป็นการ์ดตัดสินใจประจำวัน
+                <div className="text-sm font-extrabold text-slate-950">Budget pressure</div>
+                <div className="mt-1 text-[12px] font-medium text-slate-600">
+                  ดูงบรายวันและรายเดือนจากมุมเดียวก่อนลงไปแก้รายละเอียด
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => navigate("budgets")}
-                className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+                className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700"
               >
                 Budgets <ChevronRight size={14} />
               </button>
@@ -320,7 +320,7 @@ export default function DashboardView() {
 
             <div className="mt-4 space-y-4">
               <div>
-                <div className="flex items-center justify-between gap-3 text-[12px] font-bold text-slate-600">
+                <div className="flex items-center justify-between gap-3 text-[12px] font-medium text-slate-600">
                   <span>Daily budget</span>
                   <span className="tabular-nums">{dailyLimit > 0 ? `${dailyPct}%` : "ยังไม่ตั้ง"}</span>
                 </div>
@@ -330,11 +330,11 @@ export default function DashboardView() {
                     style={{ width: `${Math.min(100, Math.max(0, dailyPct || 0))}%` }}
                   />
                 </div>
-                <div className="mt-2 text-[12px] font-bold text-slate-600">{dailySummary}</div>
+                <div className="mt-2 text-[12px] font-medium text-slate-600">{dailySummary}</div>
               </div>
 
               <div>
-                <div className="flex items-center justify-between gap-3 text-[12px] font-bold text-slate-600">
+                <div className="flex items-center justify-between gap-3 text-[12px] font-medium text-slate-600">
                   <span>Monthly budget</span>
                   <span className="tabular-nums">{monthlyLimit > 0 ? `${monthlyPct}%` : "ยังไม่ตั้ง"}</span>
                 </div>
@@ -344,7 +344,7 @@ export default function DashboardView() {
                     style={{ width: `${Math.min(100, Math.max(0, monthlyPct || 0))}%` }}
                   />
                 </div>
-                <div className="mt-2 text-[12px] font-bold text-slate-600">{budgetSummary}</div>
+                <div className="mt-2 text-[12px] font-medium text-slate-600">{budgetSummary}</div>
               </div>
             </div>
           </div>
@@ -352,15 +352,15 @@ export default function DashboardView() {
           <div className="ui-card p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-sm font-black text-slate-950">Accounts snapshot</div>
-                <div className="mt-1 text-[12px] font-bold text-slate-600">
+                <div className="text-sm font-extrabold text-slate-950">Accounts snapshot</div>
+                <div className="mt-1 text-[12px] font-medium text-slate-600">
                   สรุปบัญชีหลักที่กระทบยอดรวมมากที่สุดตอนนี้
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => navigate("accounts")}
-                className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+                className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700"
               >
                 Accounts <ChevronRight size={14} />
               </button>
@@ -377,8 +377,8 @@ export default function DashboardView() {
                   >
                     <AccountPill account={account} fallbackName={account.name} size="md" />
                     <div className="text-right">
-                      <div className="text-sm font-black tabular-nums text-slate-950">{formatCurrency(Math.abs(account.balance || 0))}</div>
-                      <div className="text-[11px] font-bold text-slate-600">{account.balance >= 0 ? "ยอดสุทธิ" : "ยอดติดลบ"}</div>
+                      <div className="text-sm font-extrabold tabular-nums text-slate-950">{formatCurrency(Math.abs(account.balance || 0))}</div>
+                      <div className="text-[11px] font-medium text-slate-600">{account.balance >= 0 ? "ยอดสุทธิ" : "ยอดติดลบ"}</div>
                     </div>
                   </button>
                 ))
@@ -397,15 +397,15 @@ export default function DashboardView() {
           <div className="ui-card p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-sm font-black text-slate-950">Recent activity</div>
-                <div className="mt-1 text-[12px] font-bold text-slate-600">
+                <div className="text-sm font-extrabold text-slate-950">Recent activity</div>
+                <div className="mt-1 text-[12px] font-medium text-slate-600">
                   ใช้กลุ่มรายการล่าสุดเป็นพื้นที่ review ก่อนแก้ไขหรือแตกยอดต่อ
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => navigate("stats")}
-                className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+                className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700"
               >
                 Analytics <ChevronRight size={14} />
               </button>
@@ -441,24 +441,24 @@ export default function DashboardView() {
             <div className="ui-card p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-sm font-black text-slate-950">Inbox workspace</div>
-                  <div className="mt-1 text-[12px] font-bold text-slate-600">
+                  <div className="text-sm font-extrabold text-slate-950">Inbox workspace</div>
+                  <div className="mt-1 text-[12px] font-medium text-slate-600">
                     จุดรวมรายการที่ยังรอ approve, แก้ซ้ำ, หรือเติมข้อมูลก่อนบันทึกจริง
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => navigate("inbox")}
-                  className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+                  className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700"
                 >
                   Open <ChevronRight size={14} />
                 </button>
               </div>
 
               <div className="mt-4 rounded-[1.4rem] bg-slate-950 p-4 text-white">
-                <div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-white/55">Pending review</div>
-                <div className="mt-2 text-3xl font-black tabular-nums">{pendingInboxCount}</div>
-                <div className="mt-2 text-[12px] font-bold text-white/70">
+                <div className="text-[11px] font-semibold tracking-[0.05em] text-white/60">Pending review</div>
+                <div className="mt-2 text-3xl font-extrabold tabular-nums">{pendingInboxCount}</div>
+                <div className="mt-2 text-[12px] font-medium text-white/70">
                   {duplicateInboxCount
                     ? `มีรายการซ้ำหรือใกล้เคียง ${duplicateInboxCount} รายการ`
                     : "ถ้าสแกนหลายใบ ระบบจะส่งมาพักไว้ที่นี่อัตโนมัติ"}
@@ -469,17 +469,17 @@ export default function DashboardView() {
             <div className="ui-card p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                  <div className="flex items-center gap-2 text-sm font-extrabold text-slate-950">
                     <Sparkles size={16} className="text-emerald-600" /> Smart signals
                   </div>
-                  <div className="mt-1 text-[12px] font-bold text-slate-600">
+                  <div className="mt-1 text-[12px] font-medium text-slate-600">
                     AI insight ยังอยู่ แต่ขยับลงมาเป็น layer รองเพื่อไม่กลบงานประจำวัน
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => navigate("more")}
-                  className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+                  className="inline-flex items-center gap-1 text-xs font-extrabold text-emerald-700"
                 >
                   Hub <ChevronRight size={14} />
                 </button>
@@ -489,12 +489,12 @@ export default function DashboardView() {
                 {insights.length ? (
                   insights.map((insight, index) => (
                     <div key={`${insight.type}-${index}`} className="rounded-[1.25rem] border border-slate-900/10 bg-white/80 p-4">
-                      <div className="text-sm font-black text-slate-950">{insight.title}</div>
-                      <div className="mt-1 text-[12px] font-bold leading-relaxed text-slate-600">{insight.body}</div>
+                      <div className="text-sm font-extrabold text-slate-950">{insight.title}</div>
+                      <div className="mt-1 text-[12px] font-medium leading-relaxed text-slate-600">{insight.body}</div>
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-[1.25rem] border border-dashed border-slate-900/12 bg-white/60 p-4 text-[12px] font-bold leading-relaxed text-slate-600">
+                  <div className="rounded-[1.25rem] border border-dashed border-slate-900/12 bg-white/60 p-4 text-[12px] font-medium leading-relaxed text-slate-600">
                     เมื่อมีประวัติการใช้งานมากขึ้น ระบบจะช่วยชี้ pattern รายรับรายจ่าย, budget risk และหมวดที่ต้องเฝ้าดูให้จากตรงนี้
                   </div>
                 )}
@@ -502,10 +502,10 @@ export default function DashboardView() {
             </div>
 
             <div className="ui-card p-5">
-              <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+              <div className="flex items-center gap-2 text-sm font-extrabold text-slate-950">
                 <Target size={16} className="text-emerald-600" /> What next
               </div>
-              <div className="mt-3 space-y-2 text-[12px] font-bold leading-relaxed text-slate-600">
+              <div className="mt-3 space-y-2 text-[12px] font-medium leading-relaxed text-slate-600">
                 <div>ถ้าเพิ่งสแกนหลายใบ ให้ไปที่ Inbox เพื่อ approve แบบชุดเดียว</div>
                 <div>ถ้าจะเช็กงบหรือ recurring, กด Hub เพื่อเข้าถึง power tools ทั้งหมด</div>
                 <div>ถ้าบัญชียังไม่ครบ ให้เพิ่มจาก Accounts แล้วผูกเลขท้ายสลิปเพื่อจับแมตช์อัตโนมัติ</div>

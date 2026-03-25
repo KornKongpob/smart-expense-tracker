@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
   <rect width="96" height="96" rx="24" fill="#F97316"/>
   <rect x="8" y="8" width="80" height="80" rx="20" fill="#FB923C"/>
-  <path d="M28 34C28 30.686 30.686 28 34 28H58C61.314 28 64 30.686 64 34V38H68C71.314 38 74 40.686 74 44V58C74 61.314 71.314 64 68 64H34C30.686 64 28 61.314 28 58V34Z" fill="#FFF7ED"/>
-  <path d="M56 46H74V56H56C53.239 56 51 53.761 51 51C51 48.239 53.239 46 56 46Z" fill="#F97316"/>
+  <path d="M26 34C26 30.686 28.686 28 32 28H58C61.314 28 64 30.686 64 34V38H68C71.314 38 74 40.686 74 44V58C74 61.314 71.314 64 68 64H32C28.686 64 26 61.314 26 58V34Z" fill="#FFF7ED"/>
+  <path d="M55 46H74V56H55C52.239 56 50 53.761 50 51C50 48.239 52.239 46 55 46Z" fill="#F97316"/>
   <circle cx="58.5" cy="51" r="2.5" fill="#FFF7ED"/>
+  <text x="48" y="80.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="10.5" font-weight="700" fill="#FFF7ED" letter-spacing="0.2">TRUE MONEY</text>
 </svg>

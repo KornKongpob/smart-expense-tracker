@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
   <rect width="96" height="96" rx="24" fill="#5B2E91"/>
   <rect x="8" y="8" width="80" height="80" rx="20" fill="#6A38A7"/>
-  <path d="M48 22C55 31 68 36 68 50C68 61.046 59.046 70 48 70C36.954 70 28 61.046 28 50C28 36 41 31 48 22Z" fill="#F4C449"/>
-  <path d="M48 33C52.5 39 59 43 59 50.5C59 56.299 54.299 61 48.5 61C42.701 61 38 56.299 38 50.5C38 43 44.5 39 48 33Z" fill="#5B2E91"/>
-  <path d="M44 60H52V70C52 72.209 50.209 74 48 74C45.791 74 44 72.209 44 70V60Z" fill="#F4C449"/>
+  <path d="M48 20C55 28 68 34 68 48C68 59.046 59.046 68 48 68C36.954 68 28 59.046 28 48C28 34 41 28 48 20Z" fill="#F4C449"/>
+  <path d="M48 31C52.5 37 59 41 59 48.5C59 54.299 54.299 59 48.5 59C42.701 59 38 54.299 38 48.5C38 41 44.5 37 48 31Z" fill="#5B2E91"/>
+  <path d="M44 58H52V68C52 70.209 50.209 72 48 72C45.791 72 44 70.209 44 68V58Z" fill="#F4C449"/>
+  <text x="48" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#F7E7A6" letter-spacing="0.4">SCB</text>
 </svg>

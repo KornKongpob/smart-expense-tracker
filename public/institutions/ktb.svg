@@ -2,8 +2,9 @@
   <rect width="96" height="96" rx="24" fill="#11A6E8"/>
   <rect x="8" y="8" width="80" height="80" rx="20" fill="#2ABAF1"/>
   <path d="M48 22L62 33H34L48 22Z" fill="#FFFFFF"/>
-  <path d="M26 40L41 35L48 47L33 55L26 40Z" fill="#DDF7FF"/>
-  <path d="M70 40L55 35L48 47L63 55L70 40Z" fill="#DDF7FF"/>
-  <rect x="42" y="34" width="12" height="14" rx="4" fill="#FFFFFF"/>
-  <path d="M37 52H59L54 68H42L37 52Z" fill="#FFFFFF"/>
+  <path d="M30 40L41.5 35L48 47L36 55L30 40Z" fill="#DDF7FF"/>
+  <path d="M66 40L54.5 35L48 47L60 55L66 40Z" fill="#DDF7FF"/>
+  <rect x="43" y="34" width="10" height="13" rx="4" fill="#FFFFFF"/>
+  <path d="M38 53H58L54 67H42L38 53Z" fill="#FFFFFF"/>
+  <text x="48" y="81" text-anchor="middle" font-family="Arial, sans-serif" font-size="10.5" font-weight="700" fill="#FFFFFF" letter-spacing="0.3">KRUNGTHAI</text>
 </svg>

@@ -2,7 +2,6 @@ import React from "react";
 import { AlertTriangle, Edit2, FileText, Trash2 } from "lucide-react";
 
 import { formatCurrency } from "../../../utils/format";
-import { isAdjustmentLike } from "../../../utils/receiptAdjustments";
 
 import ScanItemReviewModal from "./ScanItemReviewModal";
 
@@ -10,8 +9,6 @@ export default function ScanQueueList({
   queue,
   expandedId,
   setExpandedId,
-  canCreateFromQueue,
-  onCreateTransactions,
   onRemoveItem,
   onUpdateItem,
   onUpdateGroup,
@@ -30,24 +27,25 @@ export default function ScanQueueList({
   if (!list.length) return null;
 
   const expandedItem = expandedId ? list.find((q) => q.id === expandedId && q.status === "ready") : null;
+  const duplicateCount = list.filter((q) => q?.duplicate).length;
 
   return (
     <div className="mb-28">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-extrabold text-gray-900">
-          Review Queue <span className="text-gray-800/50">({list.length})</span>
-        </h3>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-extrabold text-gray-900">
+            คิวตรวจสอบ <span className="text-gray-800/50">({list.length})</span>
+          </h3>
+          <div className="mt-1 text-[12px] font-medium text-gray-700/60">
+            แตะแก้ไขก่อนบันทึก หรือลบรายการที่ไม่ต้องใช้
+          </div>
+        </div>
 
-        <button
-          type="button"
-          onClick={onCreateTransactions}
-          className={`px-4 py-2 rounded-xl font-extrabold text-sm active:scale-95 ${
-            canCreateFromQueue ? "bg-indigo-600 text-white" : "bg-white/30 text-gray-700/60 border border-white/20"
-          }`}
-          disabled={!canCreateFromQueue}
-        >
-          สร้างรายการ
-        </button>
+        {duplicateCount ? (
+          <div className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/12 px-3 py-1 text-[11px] font-semibold text-amber-800">
+            <AlertTriangle size={12} /> มีรายการเสี่ยงซ้ำ {duplicateCount}
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-3">
@@ -61,9 +59,6 @@ export default function ScanQueueList({
               : q.txType === "income"
               ? "Income"
               : "Expense";
-
-          const nonAdjGroupCount = Array.isArray(q.groups) ? q.groups.filter((g) => !isAdjustmentLike(g)).length : 0;
-          const hasGroups = q.txType === "expense" && nonAdjGroupCount >= 2;
 
           const dupKind = q?.duplicateInfo?.kind || (q.duplicate ? "fuzzy" : "");
           const dupBadgeText = dupKind === "ref" ? "Duplicate (Ref)" : dupKind === "file" ? "Duplicate (File)" : "Possible duplicate";
@@ -111,18 +106,6 @@ export default function ScanQueueList({
                         <AlertTriangle size={12} /> {dupBadgeText}
                       </span>
                     ) : null}
-
-                    {q.txType === "expense" && hasGroups ? (
-                      <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-700 border border-emerald-500/20">
-                        Multi-category
-                      </span>
-                    ) : null}
-
-                    {q.suggestedCategoryId ? (
-                      <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-sky-500/15 text-sky-700 border border-sky-500/20">
-                        Suggested
-                      </span>
-                    ) : null}
                   </div>
 
                   <div className="mt-2 text-sm font-extrabold text-gray-900 truncate">
@@ -141,8 +124,6 @@ export default function ScanQueueList({
                   </div>
 
                   {q.status === "error" ? <div className="mt-2 text-xs text-red-700 break-words">{q.error}</div> : null}
-
-                  {q.suggestedReason ? <div className="mt-1 text-[11px] text-sky-800/70 truncate">{q.suggestedReason}</div> : null}
                 </div>
 
                 <div className="flex flex-col gap-2 shrink-0">

@@ -3570,7 +3570,7 @@ const handleClose = () => {
 
   return (
     <div
-      className="pb-[calc(7rem+env(safe-area-inset-bottom))] min-h-dvh overflow-x-hidden"
+      className="pb-safe min-h-dvh overflow-x-hidden"
       style={{
         overflowX: "hidden",
         touchAction: "pan-y",
@@ -3641,91 +3641,37 @@ const handleClose = () => {
 
       {/*
         Add view uses its own fixed bottom actions (Save / Scan actions).
-        Use pb-nav here to guarantee enough scroll space on small devices
+        Use pb-bottom-dock here to guarantee enough scroll space on small devices
         and prevent the last fields from being hidden behind the fixed bar.
       */}
-      <main className="ui-page pt-4 pb-nav">
+      <main className="ui-page pt-4 pb-bottom-dock">
       {!isEditMode ? (
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <button
-            type="button"
-            onClick={() => {
-              setEntryMode("scan");
-              setScanUploadKind("receipt");
-            }}
-            data-testid="add-lane-receipt"
-            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-black text-gray-900">Receipt scan</div>
-                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
-                  สแกนใบเสร็จและแยกหลายหมวดได้จาก lane นี้
-                </div>
+        <div className="mb-4 rounded-3xl border border-white/20 bg-white/55 p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.18)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="text-sm font-extrabold text-gray-900">
+                {entryMode === "scan" ? "สแกนและตรวจสอบก่อนบันทึก" : "กรอกเองแบบรวดเร็ว"}
               </div>
-              <Camera size={18} className="text-indigo-700" />
+              <div className="mt-1 text-[12px] font-medium text-gray-700/65">
+                {entryMode === "scan"
+                  ? "เลือกชนิดเอกสาร แล้วแนบไฟล์ด้านล่างเพื่อเข้าคิวตรวจสอบ"
+                  : "เลือกรูปแบบรายการที่ต้องการ แล้วกรอกรายละเอียดในส่วนด้านล่าง"}
+              </div>
             </div>
-          </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setEntryMode("scan");
-              setScanUploadKind("slip");
-            }}
-            data-testid="add-lane-slip"
-            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-black text-gray-900">Slip scan</div>
-                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
-                  สแกนสลิปโอนหรือบิลชำระก่อนส่งเข้า review
-                </div>
-              </div>
-              <ArrowRightLeft size={18} className="text-indigo-700" />
+            <div className="inline-flex items-center gap-2 self-start rounded-2xl border border-slate-900/10 bg-white/80 px-3 py-2 text-[12px] font-medium text-gray-800/75 sm:self-auto">
+              {entryMode === "scan" ? <Sparkles size={14} className="text-indigo-700" /> : <FileText size={14} className="text-indigo-700" />}
+              <span>
+                {entryMode === "scan"
+                  ? scanUploadKind === "slip"
+                    ? "โหมดสแกนสลิป"
+                    : "โหมดสแกนใบเสร็จ"
+                  : type === "transfer" || type === "credit_payment"
+                  ? "โหมดโอน/ชำระบัตร"
+                  : "โหมดกรอกเอง"}
+              </span>
             </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setEntryMode("manual");
-              handleManualTypeChange("expense");
-            }}
-            data-testid="add-lane-manual"
-            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-black text-gray-900">Manual expense / income</div>
-                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
-                  เริ่มจากจำนวนเงิน บัญชี และหมวด แล้วสลับเป็นรายรับได้ทันที
-                </div>
-              </div>
-              <FileText size={18} className="text-indigo-700" />
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setEntryMode("manual");
-              handleManualTypeChange("transfer");
-            }}
-            data-testid="add-lane-transfer"
-            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-black text-gray-900">Transfer / card payment</div>
-                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
-                  สร้างรายการโอนเงินหรือชำระบัตรเครดิตแบบจับคู่ให้เลย
-                </div>
-              </div>
-              <CreditCard size={18} className="text-indigo-700" />
-            </div>
-          </button>
+          </div>
         </div>
       ) : null}
 
@@ -3765,26 +3711,27 @@ const handleClose = () => {
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`glass-card rounded-3xl p-5 mb-5 outline-none ${
+            className={`glass-card rounded-3xl p-4 mb-4 outline-none ${
               dropActive ? "ring-2 ring-indigo-500/40 bg-indigo-500/5" : ""
             }`}
           >
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+            <div className="grid gap-4 md:grid-cols-[1.15fr_0.85fr] md:items-start">
               <div className="min-w-0">
                 <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
                   <Sparkles size={18} className="text-indigo-600" />
                   สแกนใบเสร็จ / สลิป
                 </div>
                 <div className="text-xs text-gray-800/60 mt-1">
-                  รองรับหลายไฟล์ (ใบเสร็จ) หรือไฟล์เดียว (สลิป) • แนบ evidence ลง note อัตโนมัติ • จำหมวดจากร้าน/เลขบัญชีเดิมได้ •
-                  เปลี่ยนประเภทได้ • โอนเข้าบัตรเครดิตจะถูกจัดเป็น “ชำระบัตร”
+                  {scanUploadKind === 'slip'
+                    ? 'เลือกสลิป 1 ไฟล์ แล้วตรวจสอบก่อนบันทึกหรือส่งเข้า Inbox'
+                    : 'เลือกใบเสร็จได้หลายไฟล์ แล้วค่อยตรวจและบันทึกจากคิวด้านล่าง'}
                 </div>
-                <div className="mt-2 text-[11px] font-bold text-gray-900/60">
-                  Tip: ลากไฟล์มาวาง (drag & drop) หรือกด Ctrl+V เพื่อวางจาก clipboard (รองรับรูปภาพ + PDF)
+                <div className="mt-2 text-[11px] font-medium text-gray-900/60">
+                  ลากไฟล์มาวาง หรือกด Ctrl+V เพื่อวางจาก clipboard
                 </div>
               </div>
 
-              <div className="w-full md:w-[340px] flex flex-col gap-2 items-stretch">
+              <div className="w-full flex flex-col gap-2 items-stretch md:max-w-[340px] md:justify-self-end">
                 <div className="bg-white/60 border border-white/25 rounded-2xl p-1 flex items-stretch gap-1" role="tablist" aria-label="ประเภทเอกสาร">
                   <button
                     type="button"
@@ -3827,10 +3774,10 @@ const handleClose = () => {
                   </span>
                 </button>
 
-                <div className="text-[11px] leading-relaxed font-bold text-gray-900/60">
+                <div className="text-[11px] leading-relaxed font-medium text-gray-900/60">
                   {scanUploadKind === 'slip'
-                    ? 'สลิป: เลือกได้ทีละ 1 ไฟล์ (เหมาะกับโอนเงิน/ชำระบัตร)'
-                    : 'ใบเสร็จ: เลือกได้หลายไฟล์ (ถ้าเลือกมากกว่า 1 ระบบจะส่งเข้า Inbox อัตโนมัติ)'}
+                    ? 'สลิปเลือกได้ทีละ 1 ไฟล์'
+                    : 'ใบเสร็จเลือกได้หลายไฟล์'}
                 </div>
               </div>
 

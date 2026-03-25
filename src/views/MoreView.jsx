@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   ChevronRight,
+  Home,
   Inbox,
   Lock,
   Moon,
@@ -45,8 +46,8 @@ function MoreRow({ icon, title, subtitle, badge, onClick, danger, testId }) {
         </div>
 
         <div className="min-w-0 text-left">
-          <div className="font-extrabold truncate">{title}</div>
-          {subtitle ? <div className="text-xs font-bold text-gray-700/65 mt-0.5 truncate">{subtitle}</div> : null}
+          <div className="font-bold truncate">{title}</div>
+          {subtitle ? <div className="text-xs font-medium text-gray-700/65 mt-0.5 truncate">{subtitle}</div> : null}
         </div>
       </div>
 
@@ -62,8 +63,8 @@ function HubSection({ title, subtitle, children }) {
   return (
     <section className="ui-card overflow-hidden rounded-3xl">
       <div className="border-b border-slate-900/8 px-4 py-3">
-        <div className="text-sm font-black text-slate-950">{title}</div>
-        {subtitle ? <div className="mt-1 text-[12px] font-bold text-slate-600">{subtitle}</div> : null}
+        <div className="text-sm font-extrabold text-slate-950">{title}</div>
+        {subtitle ? <div className="mt-1 text-[12px] font-medium text-slate-600">{subtitle}</div> : null}
       </div>
       {children}
     </section>
@@ -409,6 +410,7 @@ export default function MoreView({ showAlert, showConfirm }) {
           title="Planning & Analytics"
           subtitle="งานวิเคราะห์และเครื่องมือที่ช่วยตัดสินใจในระดับระบบ"
         >
+          <MoreRow icon={<Home size={20} />} title="Dashboard" subtitle="กลับไปหน้าสรุปภาพรวมหลักของแอพ" onClick={() => navigate("dashboard")} testId="hub-dashboard" />
           <MoreRow icon={<BarChart3 size={20} />} title="Analytics" subtitle="ดูสถิติ, แนวโน้ม และ breakdown เชิงลึก" onClick={() => navigate("stats")} testId="hub-analytics" />
           <MoreRow icon={<Bell size={20} />} title="Budgets" subtitle="ตั้งงบและเฝ้าดู budget pressure" onClick={() => navigate("budgets")} testId="hub-budgets" />
           <MoreRow icon={<Settings size={20} />} title="Categories" subtitle="จัดหมวดหลัก/ย่อยและ keyword สำหรับ auto-categorize" onClick={() => navigate("categories")} testId="hub-categories" />

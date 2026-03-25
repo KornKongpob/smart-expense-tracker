@@ -11,7 +11,7 @@ function NavItem({ active, icon, label, onClick, emphasized = false, testId }) {
       aria-current={active ? "page" : undefined}
       data-testid={testId}
       className={[
-        "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[1.45rem] px-2 py-2.5 transition-all duration-150 active:scale-[0.985]",
+        "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[1.25rem] px-1.5 py-2 transition-all duration-150 active:scale-[0.985]",
         "focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/30",
         active
           ? emphasized
@@ -22,7 +22,7 @@ function NavItem({ active, icon, label, onClick, emphasized = false, testId }) {
     >
       <div
         className={[
-          "flex h-9 w-9 items-center justify-center rounded-full transition-all duration-150",
+          "flex h-8 w-8 items-center justify-center rounded-full transition-all duration-150",
           active && emphasized
             ? "bg-white/14"
             : active
@@ -32,7 +32,7 @@ function NavItem({ active, icon, label, onClick, emphasized = false, testId }) {
       >
         {icon}
       </div>
-      <span className={active ? "text-[11px] font-black tracking-[-0.01em]" : "text-[11px] font-extrabold tracking-[-0.01em]"}>
+      <span className={active ? "text-[10.5px] font-bold leading-none tracking-normal" : "text-[10.5px] font-semibold leading-none tracking-normal"}>
         {label}
       </span>
     </button>
@@ -52,7 +52,7 @@ export default function Navbar() {
 
     const updateHeight = () => {
       const height = Math.ceil(el.getBoundingClientRect().height || 0);
-      if (height > 0) document.documentElement.style.setProperty("--app-nav-h", `${height + 8}px`);
+      if (height > 0) document.documentElement.style.setProperty("--app-nav-h", `${height + 2}px`);
     };
 
     updateHeight();
@@ -73,18 +73,21 @@ export default function Navbar() {
   }, []);
 
   return (
-    <div className="app-navbar fixed inset-x-0 bottom-0 z-[40] px-4 pb-safe pointer-events-none">
+    <div
+      className="app-navbar fixed inset-x-0 bottom-0 z-[35] px-3 pointer-events-none sm:px-4"
+      style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.35rem)" }}
+    >
       <div
-        className="absolute inset-x-0 bottom-0 h-44 pointer-events-none"
+        className="absolute inset-x-0 bottom-0 h-28 pointer-events-none"
         style={{
           background:
             "linear-gradient(to top, color-mix(in srgb, var(--bg) 97%, transparent), color-mix(in srgb, var(--bg) 80%, transparent) 42%, transparent)",
         }}
       />
 
-      <nav ref={navRef} className="mx-auto w-full max-w-[40rem] pb-3 pointer-events-auto" aria-label="Bottom navigation">
+      <nav ref={navRef} className="mx-auto w-full max-w-[34rem] pb-1.5 pointer-events-auto" aria-label="Bottom navigation">
         <div
-          className="relative overflow-hidden rounded-[2rem] border border-white/55 px-2.5 py-2.5 shadow-[0_-16px_44px_-28px_rgba(15,23,42,0.42)]"
+          className="relative overflow-hidden rounded-[1.7rem] border border-white/60 px-2 py-2 shadow-[0_-14px_32px_-24px_rgba(15,23,42,0.35)]"
           style={{
             background: "var(--surface-strong)",
             backdropFilter: "blur(24px)",
@@ -92,12 +95,12 @@ export default function Navbar() {
           }}
         >
           <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-white/20 to-transparent" />
-          <div className="relative flex items-end gap-1">
+          <div className="relative flex items-end gap-0.5">
             <NavItem
               active={currentView === "dashboard"}
               onClick={() => actions.navigate("dashboard")}
               icon={<Home size={20} />}
-              label="Today"
+              label="Dashboard"
               testId="nav-today"
             />
             <NavItem
