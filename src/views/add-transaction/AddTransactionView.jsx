@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  bestMatchAccountCandidate,
   bestMatchAccountId,
   isCreditAccount,
 } from "../../utils/accountMatch";
@@ -1544,8 +1545,10 @@ const existingRefSet = useMemo(() => {
           const toDigits = digitsOnly(result?.to_account);
 
           // map account ids by digits (support both account digits and card digits)
-          const matchedFromId = bestMatchAccountId(accounts, fromDigits);
-          const matchedToId = bestMatchAccountId(accounts, toDigits);
+          const fromMatch = bestMatchAccountCandidate(accounts, fromDigits, { minScore: 0 });
+          const toMatch = bestMatchAccountCandidate(accounts, toDigits, { minScore: 0 });
+          const matchedFromId = fromMatch.id || "";
+          const matchedToId = toMatch.id || "";
           const matchedFromAcc = matchedFromId ? accounts.find((a) => a.id === matchedFromId) : null;
           const matchedToAcc = matchedToId ? accounts.find((a) => a.id === matchedToId) : null;
 
@@ -1680,6 +1683,46 @@ if (finalTxType === "transfer" || finalTxType === "credit_payment") {
     if (cashAcc?.id) detectedAccountId = cashAcc.id;
   }
 }
+
+const serializeAccountMatch = (match, selectedId = "") => ({
+  id: String(selectedId || match?.id || "").trim(),
+  score: Number(match?.score || 0) || 0,
+  matchedAccountDigits: String(match?.matchedAccountDigits || "").trim(),
+  matchedSlipDigits: String(match?.matchedSlipDigits || "").trim(),
+});
+
+const scanAccountMatch =
+  finalTxType === "transfer" || finalTxType === "credit_payment"
+    ? {
+        kind: "pair",
+        ready: !!detectedFromId && !!detectedToId && detectedFromId !== detectedToId,
+        from: serializeAccountMatch(fromMatch, detectedFromId),
+        to: serializeAccountMatch(toMatch, detectedToId),
+      }
+    : (() => {
+        const selectedMatch =
+          detectedAccountId && detectedAccountId === matchedFromId
+            ? fromMatch
+            : detectedAccountId && detectedAccountId === matchedToId
+              ? toMatch
+              : aiAccountId && detectedAccountId === aiAccountId
+                ? { id: detectedAccountId, score: 6, matchedAccountDigits: "", matchedSlipDigits: "" }
+                : { id: detectedAccountId, score: 0, matchedAccountDigits: "", matchedSlipDigits: "" };
+
+        return {
+          kind: "single",
+          ready: !!detectedAccountId,
+          source:
+            aiAccountId && detectedAccountId === aiAccountId
+              ? "model"
+              : selectedMatch?.matchedSlipDigits
+                ? "digits"
+                : detectedAccountId
+                  ? "fallback"
+                  : "missing",
+          selected: serializeAccountMatch(selectedMatch, detectedAccountId),
+        };
+      })();
 
 // Hybrid guardrail:
 // - transfer slips / bill payments must NOT produce line-item breakdown
@@ -1902,6 +1945,7 @@ if (
               dateWasDefault,
               flags: scanFlags || null,
               confidence: scanConfidence || null,
+              accountMatch: scanAccountMatch,
               model: result?._model || null,
               endpointUsed: result?._endpointUsed || null,
               slip:
@@ -3601,6 +3645,90 @@ const handleClose = () => {
         and prevent the last fields from being hidden behind the fixed bar.
       */}
       <main className="ui-page pt-4 pb-nav">
+      {!isEditMode ? (
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <button
+            type="button"
+            onClick={() => {
+              setEntryMode("scan");
+              setScanUploadKind("receipt");
+            }}
+            data-testid="add-lane-receipt"
+            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-gray-900">Receipt scan</div>
+                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
+                  สแกนใบเสร็จและแยกหลายหมวดได้จาก lane นี้
+                </div>
+              </div>
+              <Camera size={18} className="text-indigo-700" />
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEntryMode("scan");
+              setScanUploadKind("slip");
+            }}
+            data-testid="add-lane-slip"
+            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-gray-900">Slip scan</div>
+                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
+                  สแกนสลิปโอนหรือบิลชำระก่อนส่งเข้า review
+                </div>
+              </div>
+              <ArrowRightLeft size={18} className="text-indigo-700" />
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEntryMode("manual");
+              handleManualTypeChange("expense");
+            }}
+            data-testid="add-lane-manual"
+            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-gray-900">Manual expense / income</div>
+                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
+                  เริ่มจากจำนวนเงิน บัญชี และหมวด แล้วสลับเป็นรายรับได้ทันที
+                </div>
+              </div>
+              <FileText size={18} className="text-indigo-700" />
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEntryMode("manual");
+              handleManualTypeChange("transfer");
+            }}
+            data-testid="add-lane-transfer"
+            className="ui-card p-4 text-left active:scale-[0.985] transition-all"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-gray-900">Transfer / card payment</div>
+                <div className="mt-1 text-[12px] font-bold text-gray-700/65">
+                  สร้างรายการโอนเงินหรือชำระบัตรเครดิตแบบจับคู่ให้เลย
+                </div>
+              </div>
+              <CreditCard size={18} className="text-indigo-700" />
+            </div>
+          </button>
+        </div>
+      ) : null}
+
       {/* Mode Tabs (new only) */}
       {!isEditMode ? (
         <div className="glass-panel border border-white/20 p-1.5 rounded-2xl flex mb-5">
@@ -3661,6 +3789,7 @@ const handleClose = () => {
                   <button
                     type="button"
                     onClick={() => setScanUploadKind('receipt')}
+                    data-testid="scan-kind-receipt"
                     className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-[0.99] ${scanUploadKind === 'receipt' ? 'bg-gray-900/90 text-white shadow-sm' : 'text-gray-900/70 hover:bg-white/40'}`}
                     aria-selected={scanUploadKind === 'receipt'}
                     role="tab"
@@ -3670,6 +3799,7 @@ const handleClose = () => {
                   <button
                     type="button"
                     onClick={() => setScanUploadKind('slip')}
+                    data-testid="scan-kind-slip"
                     className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-[0.99] ${scanUploadKind === 'slip' ? 'bg-gray-900/90 text-white shadow-sm' : 'text-gray-900/70 hover:bg-white/40'}`}
                     aria-selected={scanUploadKind === 'slip'}
                     role="tab"
@@ -3681,6 +3811,7 @@ const handleClose = () => {
                 <button
                   type="button"
                   onClick={handlePickScanFiles}
+                  data-testid="scan-pick-files"
                   className="px-4 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold text-sm active:scale-95 disabled:opacity-60"
                   disabled={isScanning}
                 >
@@ -3708,6 +3839,7 @@ const handleClose = () => {
                 type="file"
                 accept="image/*,application/pdf"
                 multiple
+                data-testid="scan-file-input"
                 className="hidden"
                 onChange={handleFilesSelected}
                 disabled={isScanning}
@@ -3717,6 +3849,7 @@ const handleClose = () => {
                 ref={slipFileInputRef}
                 type="file"
                 accept="image/*,application/pdf"
+                data-testid="scan-slip-input"
                 className="hidden"
                 onChange={handleFilesSelected}
                 disabled={isScanning}
@@ -3839,6 +3972,7 @@ const handleClose = () => {
                   <button
                     key={t.id}
                     onClick={() => handleManualTypeChange(t.id)}
+                    data-testid={`manual-type-${t.id}`}
                     className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
                       type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/40"
                     }`}
@@ -3942,6 +4076,7 @@ const handleClose = () => {
                       onChange={setFromAccountId}
                       title="เลือกบัญชีต้นทาง"
                       placeholder="เลือกบัญชีต้นทาง"
+                      testId="add-account-from"
                     />
                   </div>
                   <div>
@@ -3952,6 +4087,7 @@ const handleClose = () => {
                       onChange={setToAccountId}
                       title="เลือกบัญชีปลายทาง"
                       placeholder="เลือกบัญชีปลายทาง"
+                      testId="add-account-to"
                     />
                   </div>
                 </div>
@@ -3980,6 +4116,7 @@ const handleClose = () => {
                         onChange={setFromAccountId}
                         title="เลือกบัญชีที่จ่าย"
                         placeholder="เลือกบัญชีที่จ่าย"
+                        testId="add-credit-from"
                       />
                       <div className="text-[11px] text-gray-900/55 mt-1">แนะนำ: ใช้บัญชีธนาคาร/เงินสด (ไม่ใช่บัตร)</div>
                     </div>
@@ -3992,6 +4129,7 @@ const handleClose = () => {
                         onChange={setToAccountId}
                         title="เลือกบัตรเครดิต"
                         placeholder="เลือกบัตรเครดิต"
+                        testId="add-credit-to"
                       />
                     </div>
                   </div>
@@ -4049,6 +4187,7 @@ const handleClose = () => {
                   <button
                     type="button"
                     onClick={toggleSplitMode}
+                    data-testid="manual-split-toggle"
                     className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
                       isSplitMode
                         ? "bg-emerald-600/90 text-white border-emerald-500/20 shadow-sm"
@@ -4130,6 +4269,7 @@ const handleClose = () => {
                       <button
                         type="button"
                         onClick={addSplitLine}
+                        data-testid="split-add-line"
                         className="ui-btn ui-btn-secondary"
                       >
                         <Plus size={14} /> เพิ่มบรรทัด
@@ -4225,6 +4365,7 @@ const handleClose = () => {
                         <button
                           type="button"
                           onClick={() => setIsInstallment((v) => !v)}
+                          data-testid="manual-installment-toggle"
                           className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
                             isInstallment
                               ? "bg-gray-900/90 text-white border-white/10 shadow-sm"
@@ -4244,6 +4385,7 @@ const handleClose = () => {
                               min={2}
                               max={120}
                               value={installmentMonths}
+                              data-testid="manual-installment-months"
                               onChange={(e) => {
                                 const n = Math.max(2, Math.min(120, Math.trunc(Number(e.target.value) || 2)));
                                 setInstallmentMonths(n);
@@ -4289,6 +4431,7 @@ const handleClose = () => {
               <button
                 onClick={handleSaveManual}
                 disabled={isSaving}
+                data-testid="manual-save"
                 className={`ui-btn ui-btn-primary w-full py-4 rounded-2xl ${isSaving ? "opacity-70" : ""}`}
                 type="button"
               >
@@ -4307,6 +4450,7 @@ const handleClose = () => {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={sendQueueToInbox}
+                data-testid="scan-send-inbox"
                 className={`ui-btn w-full ${canSendToInbox ? "ui-btn-secondary" : "ui-btn-secondary opacity-60"}`}
                 type="button"
                 disabled={!canSendToInbox}
@@ -4317,6 +4461,7 @@ const handleClose = () => {
 
               <button
                 onClick={handlePostScanSaveNow}
+                data-testid="scan-save-now"
                 className={`ui-btn w-full ${canCreateFromQueue ? "ui-btn-primary" : "ui-btn-primary opacity-60"}`}
                 type="button"
                 disabled={!canCreateFromQueue}

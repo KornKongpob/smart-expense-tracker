@@ -1,5 +1,5 @@
 // src/app/App.jsx
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "../store/store.jsx";
 import { useUndo } from "../utils/useUndo";
 import { parseHash, replaceHash } from "../utils/hashRouter";
@@ -9,22 +9,23 @@ import { getBudget, toMonthKey } from "../store/selectors.js";
 import { sumExpenseForMonth } from "../utils/transaction";
 import { STORAGE_SAVE_ERROR_EVENT } from "../services/storage";
 import Navbar from "../components/Navbar";
-import DashboardView from "../views/DashboardView";
-import AddTransactionView from "../views/AddTransactionView";
-import AccountsView from "../views/AccountsView";
-import StatsView from "../views/StatsView";
-import BudgetsView from "../views/BudgetsView";
-import CategoriesView from "../views/CategoriesView";
-import RecurringView from "../views/RecurringView";
-import RulesView from "../views/RulesView";
-import InboxView from "../views/InboxView";
-import MerchantLibraryView from "../views/MerchantLibraryView";
-import MoreView from "../views/MoreView";
 import ConfirmationModal from "../components/ConfirmationModal";
 import PinLockScreen from "../components/PinLockScreen.jsx";
 import OnboardingScreen from "../components/OnboardingScreen.jsx";
-import QuickAddSheet from "../components/QuickAddSheet.jsx";
 import { X, CheckCircle2, AlertTriangle } from "lucide-react";
+
+const DashboardView = lazy(() => import("../views/DashboardView"));
+const AddTransactionView = lazy(() => import("../views/AddTransactionView"));
+const AccountsView = lazy(() => import("../views/AccountsView"));
+const StatsView = lazy(() => import("../views/StatsView"));
+const BudgetsView = lazy(() => import("../views/BudgetsView"));
+const CategoriesView = lazy(() => import("../views/CategoriesView"));
+const RecurringView = lazy(() => import("../views/RecurringView"));
+const RulesView = lazy(() => import("../views/RulesView"));
+const InboxView = lazy(() => import("../views/InboxView"));
+const MerchantLibraryView = lazy(() => import("../views/MerchantLibraryView"));
+const MoreView = lazy(() => import("../views/MoreView"));
+const RESET_ALL_EVENT = "app:after-reset-all";
 
 function AlertToast({ message, onClose }) {
   if (!message) return null;
@@ -86,6 +87,22 @@ function ConfirmModal({ confirm, setConfirm }) {
   );
 }
 
+function ViewFallback() {
+  return (
+    <div className="min-h-dvh">
+      <div className="ui-page pt-[calc(var(--app-header-h,76px)+1rem)] pb-nav">
+        <div className="ui-card-strong p-6 animate-fade-in-up">
+          <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Loading</div>
+          <div className="mt-2 text-2xl font-black text-slate-950">Preparing your workspace…</div>
+          <div className="mt-3 h-2 rounded-full bg-slate-900/10 overflow-hidden">
+            <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-emerald-500 via-blue-500 to-slate-950 animate-pulse" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const store = useAppStore();
   const { state } = store;
@@ -99,7 +116,6 @@ export default function App() {
   // Hide bottom navbar while the on-screen keyboard is open (prevents overlap with inputs),
   // and expose the keyboard inset as a CSS variable for fixed buttons.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   useEffect(() => {
     // Default
@@ -254,6 +270,16 @@ export default function App() {
     }
   });
 
+  useEffect(() => {
+    const onResetAll = () => {
+      setOnboardingDone(false);
+      setIsUnlocked(true);
+    };
+
+    window.addEventListener(RESET_ALL_EVENT, onResetAll);
+    return () => window.removeEventListener(RESET_ALL_EVENT, onResetAll);
+  }, []);
+
   // If PIN is removed in another tab, unlock.
   useEffect(() => {
     const onStorage = () => {
@@ -368,12 +394,12 @@ export default function App() {
       )}
 
       <div key={view} className="animate-view-enter">
-        {renderView()}
+        <Suspense fallback={<ViewFallback />}>
+          {renderView()}
+        </Suspense>
       </div>
 
-      {showNavbar ? <Navbar onFabPress={() => setQuickAddOpen(true)} /> : null}
-
-      <QuickAddSheet isOpen={quickAddOpen} onClose={() => setQuickAddOpen(false)} />
+      {showNavbar ? <Navbar /> : null}
     </div>
   );
 }

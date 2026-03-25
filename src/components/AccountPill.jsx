@@ -1,23 +1,8 @@
 // src/components/AccountPill.jsx
 import React, { useMemo } from "react";
-import { ACCOUNT_ICONS } from "../constants/presets.jsx";
 import { cn } from "../utils/cn";
 import { choosePrimaryDigits, getAccountDigitCandidates } from "../utils/accountMatch";
-
-function isLikelyImageUrl(s) {
-  const v = String(s || "").trim();
-  if (!v) return false;
-  if (v.startsWith("data:image/")) return true;
-  if (v.startsWith("http://") || v.startsWith("https://")) return true;
-  return false;
-}
-
-function resolvePresetIcon(iconId) {
-  const id = String(iconId || "").trim();
-  if (!id) return null;
-  const found = (ACCOUNT_ICONS || []).find((x) => String(x?.id || "") === id);
-  return found?.icon || null;
-}
+import AccountAvatar from "./AccountAvatar.jsx";
 
 /**
  * AccountPill
@@ -33,7 +18,7 @@ export default function AccountPill({
 }) {
   const acc = account && typeof account === "object" ? account : null;
 
-  const name = String(acc?.name || fallbackName || "").trim() || "—";
+  const name = String(acc?.name || fallbackName || "").trim() || "â€”";
   const color = String(acc?.color || "#111827");
 
   const hint = useMemo(() => {
@@ -42,31 +27,8 @@ export default function AccountPill({
     const primary = choosePrimaryDigits(digits);
     if (!primary) return "";
     const short = String(primary).slice(-6);
-    return short ? `•••• ${short}` : "";
+    return short ? `â€¢â€¢â€¢â€¢ ${short}` : "";
   }, [acc, showHint]);
-
-  const iconNode = useMemo(() => {
-    if (!acc) return <span className="leading-none">💳</span>;
-
-    const img = acc?.image || (isLikelyImageUrl(acc?.icon) ? acc?.icon : "");
-    if (isLikelyImageUrl(img)) {
-      return (
-        <img
-          src={String(img)}
-          alt=""
-          className="w-full h-full object-cover"
-          draggable={false}
-        />
-      );
-    }
-
-    const preset = resolvePresetIcon(acc?.iconId);
-    if (preset) return preset;
-
-    const raw = String(acc?.icon || "").trim();
-    if (raw) return <span className="leading-none">{raw}</span>;
-    return <span className="leading-none">💳</span>;
-  }, [acc]);
 
   const dim = size === "md" ? "w-7 h-7 rounded-2xl" : "w-6 h-6 rounded-xl";
   const titleCls = size === "md" ? "text-[13px]" : "text-[12px]";
@@ -74,20 +36,15 @@ export default function AccountPill({
 
   return (
     <span className={cn("inline-flex items-center gap-2 min-w-0 max-w-full", className)} title={name}>
-      <span
-        className={cn(
-          "shrink-0 overflow-hidden border border-white/15 shadow-sm",
-          dim,
-          "flex items-center justify-center text-white"
-        )}
-        style={{ background: color }}
-        aria-hidden="true"
-      >
-        <span className={cn("flex items-center justify-center", size === "md" ? "text-[14px]" : "text-[13px]")}
-        >
-          {iconNode}
-        </span>
-      </span>
+      <AccountAvatar
+        account={acc}
+        name={name}
+        type={acc?.type || "bank"}
+        color={color}
+        className={cn("shrink-0", dim)}
+        contentClassName="h-full w-full"
+        textClassName={size === "md" ? "text-[14px]" : "text-[13px]"}
+      />
 
       <span className="min-w-0">
         <span className={cn("block font-extrabold text-gray-900 truncate", titleCls)}>{name}</span>

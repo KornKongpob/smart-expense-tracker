@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <rect width="96" height="96" rx="24" fill="#6b3f24"/>
+  <rect x="8" y="8" width="80" height="80" rx="20" fill="#80502f"/>
+  <path d="M28 28h12v18l16-18h16L54 48l20 20H58L40 50v18H28z" fill="#fff7ed"/>
+  <text x="48" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="white">KKP</text>
+</svg>

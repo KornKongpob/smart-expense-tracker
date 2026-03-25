@@ -1,4 +1,5 @@
 /* src/index.css */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -7,13 +8,10 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* ===== Brand / UI tokens (Bento + Apple-ish + SaaS cards) ===== */
-  /* Apple-style background gray */
-  --bg: #eef4ff;
-
-  /* Card surfaces (slightly translucent, but more "SaaS" than full glass) */
-  --surface: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 249, 255, 0.90) 100%);
-  --surface-strong: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(248, 250, 255, 0.95) 100%);
+  /* ===== Brand / UI tokens (Thai-fintech premium) ===== */
+  --bg: #f4f7f2;
+  --surface: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(247, 250, 245, 0.94) 100%);
+  --surface-strong: linear-gradient(180deg, rgba(255, 255, 255, 0.995) 0%, rgba(248, 251, 247, 0.98) 100%);
 
   /* Borders are subtle + crisp */
   --border: rgba(15, 23, 42, 0.10);
@@ -22,21 +20,21 @@
   --text: #0b1220;
   --muted: #61708a;
 
-  --primary: #2563eb;
-  --primary-700: #1d4ed8;
+  --primary: #0f766e;
+  --primary-700: #115e59;
 
   --success: #059669;
   --warning: #d97706;
   --danger: #dc2626;
 
   /* Softer shadows to match Apple/SaaS dashboards */
-  --shadow-card: 0 20px 48px -28px rgba(15, 23, 42, 0.28);
-  --shadow-card-strong: 0 28px 70px -34px rgba(15, 23, 42, 0.32);
+  --shadow-card: 0 18px 42px -28px rgba(15, 23, 42, 0.26);
+  --shadow-card-strong: 0 24px 60px -34px rgba(15, 23, 42, 0.34);
 
   /* Slightly tighter radii for bento tiles */
-  --radius-card: 1.5rem;      /* 24px */
-  --radius-card-strong: 1.75rem; /* 28px */
-  --radius-control: 1.1rem;     /* 17.6px */
+  --radius-card: 1.35rem;
+  --radius-card-strong: 1.65rem;
+  --radius-control: 1rem;
 
   /* Bento spacing */
   --bento-gap: 1rem; /* 16px */
@@ -198,15 +196,14 @@ body {
   color: var(--text);
   line-height: 1.45;
 
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: "IBM Plex Sans Thai", "Manrope", "Noto Sans Thai", "Segoe UI", sans-serif;
 
   /* Bento + Apple-ish background (subtle, readable) */
   background:
-    radial-gradient(900px 540px at 0% 0%, rgba(37, 99, 235, 0.16), transparent 56%),
-    radial-gradient(760px 560px at 100% 0%, rgba(99, 102, 241, 0.14), transparent 52%),
-    radial-gradient(1000px 760px at 50% 100%, rgba(16, 185, 129, 0.10), transparent 60%),
-    linear-gradient(180deg, var(--bg) 0%, #f8fbff 42%, #f3f7fc 100%);
+    radial-gradient(900px 520px at 0% 0%, rgba(15, 118, 110, 0.14), transparent 56%),
+    radial-gradient(720px 540px at 100% 0%, rgba(15, 23, 42, 0.10), transparent 52%),
+    radial-gradient(1000px 760px at 50% 100%, rgba(217, 119, 6, 0.08), transparent 60%),
+    linear-gradient(180deg, var(--bg) 0%, #fbfdf9 42%, #f5f8f2 100%);
   background-attachment: fixed;
 }
 

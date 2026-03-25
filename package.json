@@ -9,7 +9,8 @@
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
     "preview": "node ./node_modules/vite/dist/node/cli.js preview",
     "test": "node --experimental-specifier-resolution=node --test tests/utils.edge.test.js",
-    "test:coverage": "node --experimental-specifier-resolution=node --test --experimental-test-coverage tests/utils.edge.test.js"
+    "test:coverage": "node --experimental-specifier-resolution=node --test --experimental-test-coverage tests/utils.edge.test.js",
+    "test:e2e": "node tests/e2e/run-e2e.mjs"
   },
   "dependencies": {
     "busboy": "^1.6.0",
@@ -31,6 +32,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "playwright": "1.58.2",
     "tailwindcss": "^4.1.18",
     "vite": "^7.2.4"
   }

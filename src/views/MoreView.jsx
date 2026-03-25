@@ -1,19 +1,20 @@
-// src/views/MoreView.jsx
 import { useMemo, useRef } from "react";
 import { useState as useStateLocal } from "react";
 import {
-  Settings,
-  Upload,
-  Trash2,
-  ChevronRight,
+  BarChart3,
   Bell,
-  Repeat,
-  PlayCircle,
+  ChevronRight,
   Inbox,
-  Wand2,
-  Store,
+  Lock,
   Moon,
+  PlayCircle,
+  Repeat,
+  Settings,
+  Store,
   Sun,
+  Trash2,
+  Upload,
+  Wand2,
 } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
@@ -23,11 +24,11 @@ import { isRecurringDue } from "../utils/recurring";
 import { validateBackupImport } from "../schemas/index.js";
 import { transactionsToCsv, downloadCsv } from "../utils/exportCsv";
 
-// Declared at module-scope to satisfy react-hooks/static-components
-function MoreRow({ icon, title, subtitle, badge, onClick, danger }) {
+function MoreRow({ icon, title, subtitle, badge, onClick, danger, testId }) {
   return (
     <button
       onClick={onClick}
+      data-testid={testId}
       className={["ui-row", danger ? "text-red-700" : "text-gray-900"].join(" ")}
       type="button"
     >
@@ -57,25 +58,126 @@ function MoreRow({ icon, title, subtitle, badge, onClick, danger }) {
   );
 }
 
+function HubSection({ title, subtitle, children }) {
+  return (
+    <section className="ui-card overflow-hidden rounded-3xl">
+      <div className="border-b border-slate-900/8 px-4 py-3">
+        <div className="text-sm font-black text-slate-950">{title}</div>
+        {subtitle ? <div className="mt-1 text-[12px] font-bold text-slate-600">{subtitle}</div> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function PinModal({ isOpen, hasPin, pin, setPin, confirmPin, setConfirmPin, error, onClose, onSave, onRemove }) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/40 p-3 sm:items-center">
+      <div className="w-full max-w-sm ui-card-strong p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-black text-gray-900">Security / PIN</div>
+            <div className="mt-1 text-xs font-bold text-gray-700/70">
+              ใช้รหัส 6 หลักเพื่อบังคับล็อกแอพทุกครั้งที่เปิดใหม่
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="ui-btn ui-btn-secondary px-3">
+            <ChevronRight size={16} className="rotate-180" />
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="ui-label">{hasPin ? "PIN ใหม่" : "ตั้ง PIN"}</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              value={pin}
+              onChange={(event) => setPin(String(event.target.value || "").replace(/[^\d]/g, "").slice(0, 6))}
+              data-testid="hub-pin-input"
+              className="ui-input"
+              placeholder="6 หลัก"
+            />
+          </div>
+
+          <div>
+            <label className="ui-label">ยืนยัน PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              value={confirmPin}
+              onChange={(event) => setConfirmPin(String(event.target.value || "").replace(/[^\d]/g, "").slice(0, 6))}
+              data-testid="hub-pin-confirm"
+              className="ui-input"
+              placeholder="ใส่อีกครั้ง"
+            />
+          </div>
+
+          {error ? <div className="text-sm font-bold text-red-700">{error}</div> : null}
+        </div>
+
+        <div className="mt-5 flex items-center justify-between gap-2">
+          {hasPin ? (
+            <button type="button" onClick={onRemove} data-testid="hub-pin-remove" className="ui-btn ui-btn-secondary border-red-200 bg-red-50/70 text-red-700">
+              ลบ PIN
+            </button>
+          ) : (
+            <span />
+          )}
+
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={onClose} className="ui-btn ui-btn-secondary">
+              ยกเลิก
+            </button>
+            <button type="button" onClick={onSave} data-testid="hub-pin-save" className="ui-btn ui-btn-primary">
+              บันทึก PIN
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MoreView({ showAlert, showConfirm }) {
   const { state, navigate, exportBackup, importBackup, resetAll, runRecurringNow } = useAppStore();
   const fileRef = useRef(null);
 
-  // Theme state (moved to top-level to comply with React hooks rules)
   const THEME_KEY = "app_theme";
-  const [theme, setThemeState] = useStateLocal(() => {
-    try { return localStorage.getItem(THEME_KEY) || "light"; } catch { return "light"; }
-  });
-  const setTheme = (t) => {
-    try {
-      localStorage.setItem(THEME_KEY, t);
-      document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "");
-    } catch { /* ignore */ }
-    setThemeState(t);
-  };
-  const isDark = theme === "dark";
+  const PIN_KEY = "privacy_pin_6";
 
-  const merchantCount = Array.isArray(state?.merchants) ? state.merchants.length : 0;
+  const [theme, setThemeState] = useStateLocal(() => {
+    try {
+      return localStorage.getItem(THEME_KEY) || "light";
+    } catch {
+      return "light";
+    }
+  });
+  const [pinModalOpen, setPinModalOpen] = useStateLocal(false);
+  const [pinValue, setPinValue] = useStateLocal("");
+  const [pinConfirm, setPinConfirm] = useStateLocal("");
+  const [pinError, setPinError] = useStateLocal("");
+  const [hasPin, setHasPin] = useStateLocal(() => {
+    try {
+      return !!localStorage.getItem(PIN_KEY);
+    } catch {
+      return false;
+    }
+  });
+
+  const setTheme = (nextTheme) => {
+    try {
+      localStorage.setItem(THEME_KEY, nextTheme);
+      document.documentElement.setAttribute("data-theme", nextTheme === "dark" ? "dark" : "");
+    } catch {
+      // ignore
+    }
+    setThemeState(nextTheme);
+  };
 
   const inboxList = useMemo(() => {
     if (Array.isArray(state?.inbox)) return state.inbox;
@@ -83,29 +185,100 @@ export default function MoreView({ showAlert, showConfirm }) {
     return [];
   }, [state?.inbox, state?.scanInbox]);
 
-  const inboxPendingCount = useMemo(() => {
-    return (inboxList || []).filter((it) => String(it?.status || "pending").toLowerCase() !== "approved").length;
-  }, [inboxList]);
-
-  const inboxApprovedCount = useMemo(() => {
-    return (inboxList || []).filter((it) => String(it?.status || "").toLowerCase() === "approved").length;
-  }, [inboxList]);
-
-  const inboxDupCount = useMemo(() => {
-    return (inboxList || []).filter((it) => !!it?.duplicate && String(it?.status || "pending").toLowerCase() !== "approved").length;
-  }, [inboxList]);
+  const inboxPendingCount = useMemo(
+    () => inboxList.filter((item) => String(item?.status || "pending").toLowerCase() !== "approved").length,
+    [inboxList]
+  );
+  const inboxApprovedCount = useMemo(
+    () => inboxList.filter((item) => String(item?.status || "").toLowerCase() === "approved").length,
+    [inboxList]
+  );
+  const inboxDupCount = useMemo(
+    () =>
+      inboxList.filter(
+        (item) => !!item?.duplicate && String(item?.status || "pending").toLowerCase() !== "approved"
+      ).length,
+    [inboxList]
+  );
 
   const recurringStats = useMemo(() => {
     const list = state?.recurring || [];
-    const enabled = list.filter((r) => r?.enabled !== false).length;
+    const enabled = list.filter((item) => item?.enabled !== false).length;
     return { total: list.length, enabled };
   }, [state?.recurring]);
 
   const rulesStats = useMemo(() => {
     const list = Array.isArray(state?.rules) ? state.rules : [];
-    const enabled = list.filter((r) => r?.enabled !== false).length;
+    const enabled = list.filter((item) => item?.enabled !== false).length;
     return { total: list.length, enabled };
   }, [state?.rules]);
+
+  const merchantCount = Array.isArray(state?.merchants) ? state.merchants.length : 0;
+  const isDark = theme === "dark";
+
+  const recurringHealth = useMemo(() => {
+    const list = state?.recurring || [];
+    if (!list.length) return "ยังไม่มี recurring rule";
+
+    const todayISO = toISODate(new Date());
+    let dueish = 0;
+    for (const item of list) {
+      if (item?.enabled === false) continue;
+      if (isRecurringDue(item, todayISO)) dueish += 1;
+    }
+
+    if (!dueish) return "ยังไม่พบกฎที่ถึงรอบวันนี้";
+    return `มีกฎถึงรอบ ${dueish} รายการ กด Run ได้ทันที`;
+  }, [state?.recurring]);
+
+  const inboxSubtitle =
+    inboxPendingCount || inboxApprovedCount
+      ? `รออนุมัติ ${inboxPendingCount} • อนุมัติแล้ว ${inboxApprovedCount}${inboxDupCount ? ` • ซ้ำ? ${inboxDupCount}` : ""}`
+      : "ยังไม่มีรายการใน Inbox";
+
+  const openPinModal = () => {
+    setPinValue("");
+    setPinConfirm("");
+    setPinError("");
+    setPinModalOpen(true);
+  };
+
+  const savePin = () => {
+    if (pinValue.length !== 6) {
+      setPinError("PIN ต้องเป็นตัวเลข 6 หลัก");
+      return;
+    }
+    if (pinValue !== pinConfirm) {
+      setPinError("PIN สองช่องไม่ตรงกัน");
+      return;
+    }
+
+    try {
+      localStorage.setItem(PIN_KEY, pinValue);
+      setHasPin(true);
+      setPinModalOpen(false);
+      setPinValue("");
+      setPinConfirm("");
+      setPinError("");
+      showAlert?.("บันทึก PIN แล้ว");
+    } catch (error) {
+      setPinError(String(error?.message || error || "บันทึก PIN ไม่สำเร็จ"));
+    }
+  };
+
+  const removePin = () => {
+    try {
+      localStorage.removeItem(PIN_KEY);
+      setHasPin(false);
+      setPinModalOpen(false);
+      setPinValue("");
+      setPinConfirm("");
+      setPinError("");
+      showAlert?.("ลบ PIN แล้ว");
+    } catch (error) {
+      setPinError(String(error?.message || error || "ลบ PIN ไม่สำเร็จ"));
+    }
+  };
 
   const onExport = () => {
     const data = exportBackup();
@@ -117,19 +290,17 @@ export default function MoreView({ showAlert, showConfirm }) {
     fileRef.current?.click();
   };
 
-  const onImportFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow reselect same file
+  const onImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
 
     try {
       const text = await file.text();
       const json = JSON.parse(text);
 
-      // ✅ Backward compatible import:
-      // - Accept both raw backups and versioned backups: { v, exportedAt, data: {...} }
-      // - If moneyUnit is missing (old broken exports), assume 'satang' to avoid x100 inflation.
-      const hasMoneyUnit = (o) => o && typeof o === "object" && String(o.moneyUnit || o.amountUnit || "").trim().length > 0;
+      const hasMoneyUnit = (value) =>
+        value && typeof value === "object" && String(value.moneyUnit || value.amountUnit || "").trim().length > 0;
 
       let payload = json;
       let assumedSatang = false;
@@ -144,14 +315,13 @@ export default function MoreView({ showAlert, showConfirm }) {
         assumedSatang = true;
       }
 
-      // ✅ Zod schema validation (non-blocking: warn but still allow import)
       const validation = validateBackupImport(payload);
       const validationWarn = validation.success
         ? ""
-        : `\n\n⚠️ พบข้อมูลที่อาจไม่สมบูรณ์: ${String(validation.error || "").slice(0, 200)}`;
+        : `\n\nพบข้อมูลที่อาจไม่สมบูรณ์: ${String(validation.error || "").slice(0, 200)}`;
 
       const warnText = assumedSatang
-        ? "\n\nหมายเหตุ: ไฟล์นี้ไม่มี moneyUnit → ระบบจะตีความเป็น 'satang' เพื่อป้องกันจำนวนเงินเพี้ยน x100"
+        ? "\n\nไฟล์นี้ไม่มี moneyUnit ระบบจึงตีความเป็น satang เพื่อป้องกันยอดเพี้ยน x100"
         : "";
 
       showConfirm?.(
@@ -164,167 +334,176 @@ export default function MoreView({ showAlert, showConfirm }) {
         },
         true
       );
-    } catch (err) {
-      showAlert?.(`ไฟล์ไม่ถูกต้อง: ${String(err?.message || err)}`);
+    } catch (error) {
+      showAlert?.(`ไฟล์ไม่ถูกต้อง: ${String(error?.message || error)}`);
     }
   };
 
   const onReset = () => {
-    showConfirm?.("ล้างข้อมูลทั้งหมด", "ยืนยันล้างข้อมูลทั้งหมด? (ย้อนกลับไม่ได้)", () => resetAll(), true);
+    showConfirm?.(
+      "ล้างข้อมูลทั้งหมด",
+      "ยืนยันล้างข้อมูลทั้งหมด? (ย้อนกลับไม่ได้)",
+      () => resetAll(),
+      true
+    );
   };
 
   const onRunRecurring = () => {
-    const res = runRecurringNow?.() || { createdCount: 0, truncatedRules: [], cap: 0, todayISO: toISODate(new Date()) };
-    const today = res.todayISO || toISODate(new Date());
-    const n = Number(res.createdCount || 0) || 0;
-    const truncated = Array.isArray(res.truncatedRules) ? res.truncatedRules.length : 0;
+    const result =
+      runRecurringNow?.() || { createdCount: 0, truncatedRules: [], cap: 0, todayISO: toISODate(new Date()) };
+    const today = result.todayISO || toISODate(new Date());
+    const count = Number(result.createdCount || 0) || 0;
+    const truncated = Array.isArray(result.truncatedRules) ? result.truncatedRules.length : 0;
+
     if (truncated) {
       showAlert?.(
-        `สร้างรายการ Recurring เพิ่มแล้ว ${n} รายการ (ถึงวันที่ ${today}) — บางกฎถูกจำกัดต่อครั้ง ${res.cap} รายการ (กด Run อีกครั้งเพื่อสร้างต่อ)`
+        `สร้างรายการ Recurring แล้ว ${count} รายการ (ถึงวันที่ ${today}) และยังมีบางกฎถูกจำกัดต่อครั้ง ${result.cap} รายการ`
       );
       return;
     }
-    showAlert?.(`สร้างรายการ Recurring เพิ่มแล้ว ${n} รายการ (ถึงวันที่ ${today})`);
+
+    showAlert?.(`สร้างรายการ Recurring แล้ว ${count} รายการ (ถึงวันที่ ${today})`);
   };
-
-  const recurringHealth = useMemo(() => {
-    const list = state?.recurring || [];
-    if (!list.length) return "";
-
-    const todayISO = toISODate(new Date());
-
-    let dueish = 0;
-    for (const r of list) {
-      if (r?.enabled === false) continue;
-      if (isRecurringDue(r, todayISO)) dueish += 1;
-    }
-
-    if (!dueish) return "ยังไม่พบรายการที่น่าจะถึงรอบในวันนี้";
-    return `มี ${dueish} กฎที่อาจถึงรอบ (กด Run เพื่อสร้างทันที)`;
-  }, [state?.recurring]);
-
-  const inboxSubtitle = inboxPendingCount || inboxApprovedCount
-    ? `รออนุมัติ ${inboxPendingCount} • อนุมัติแล้ว ${inboxApprovedCount}${inboxDupCount ? ` • ซ้ำ? ${inboxDupCount}` : ""}`
-    : "ยังไม่มีรายการใน Inbox";
 
   return (
     <div className="min-h-dvh">
-      <AppHeader title="อื่นๆ" subtitle="จัดการข้อมูล • อัตโนมัติ • ความปลอดภัย" />
+      <AppHeader title="Hub" subtitle="Power tools • automation • security • backup" />
 
       <main className="ui-page pt-4 pb-6 view-flow">
+        <section className="view-hero">
+          <div className="view-hero-content">
+            <div>
+              <div className="view-eyebrow">Hub control center</div>
+              <div className="view-hero-title">รวบงานลึกของแอพไว้ในศูนย์สั่งการเดียว</div>
+              <div className="view-hero-copy">
+                ใช้หน้านี้เมื่อเราจะดู analytics, recurring, rules, merchant memory, security, backup และการตั้งค่าระบบ โดยไม่รบกวน flow จับรายการประจำวันของ Today / Scan / Inbox
+              </div>
+            </div>
 
-      <div className="view-hero">
-        <div className="view-hero-content">
-          <div>
-            <div className="view-eyebrow">Control center</div>
-            <div className="view-hero-title">รวมการตั้งค่า เครื่องมืออัตโนมัติ และการจัดการข้อมูลไว้ในหน้าเดียว</div>
-            <div className="view-hero-copy">
-              เข้าไปจัดการ recurring, automation rules, merchant memory, backup และ theme ได้จาก hub เดียวที่อ่านสถานะสำคัญได้ทันที
+            <div className="view-hero-grid">
+              <div className="view-metric">
+                <div className="view-metric-label">Recurring</div>
+                <div className="view-metric-value">{recurringStats.enabled}/{recurringStats.total}</div>
+                <div className="view-metric-hint">กฎ recurring ที่เปิดใช้งานอยู่</div>
+              </div>
+              <div className="view-metric">
+                <div className="view-metric-label">Inbox pending</div>
+                <div className="view-metric-value">{inboxPendingCount}</div>
+                <div className="view-metric-hint">รายการที่ยังรอ review หรือ approve</div>
+              </div>
+              <div className="view-metric">
+                <div className="view-metric-label">Rules</div>
+                <div className="view-metric-value">{rulesStats.enabled}/{rulesStats.total}</div>
+                <div className="view-metric-hint">automation rules ที่เปิดใช้งานอยู่</div>
+              </div>
+              <div className="view-metric">
+                <div className="view-metric-label">Theme</div>
+                <div className="view-metric-value">{isDark ? "Dark" : "Light"}</div>
+                <div className="view-metric-hint">{hasPin ? "PIN เปิดใช้งาน" : "ยังไม่ได้ตั้ง PIN"}</div>
+              </div>
             </div>
           </div>
+        </section>
 
-          <div className="view-hero-grid">
-            <div className="view-metric">
-              <div className="view-metric-label">Recurring</div>
-              <div className="view-metric-value">{recurringStats.enabled}/{recurringStats.total}</div>
-              <div className="view-metric-hint">กฎ recurring ที่เปิดใช้งานอยู่ในระบบ</div>
-            </div>
+        <HubSection
+          title="Planning & Analytics"
+          subtitle="งานวิเคราะห์และเครื่องมือที่ช่วยตัดสินใจในระดับระบบ"
+        >
+          <MoreRow icon={<BarChart3 size={20} />} title="Analytics" subtitle="ดูสถิติ, แนวโน้ม และ breakdown เชิงลึก" onClick={() => navigate("stats")} testId="hub-analytics" />
+          <MoreRow icon={<Bell size={20} />} title="Budgets" subtitle="ตั้งงบและเฝ้าดู budget pressure" onClick={() => navigate("budgets")} testId="hub-budgets" />
+          <MoreRow icon={<Settings size={20} />} title="Categories" subtitle="จัดหมวดหลัก/ย่อยและ keyword สำหรับ auto-categorize" onClick={() => navigate("categories")} testId="hub-categories" />
+        </HubSection>
 
-            <div className="view-metric">
-              <div className="view-metric-label">Inbox pending</div>
-              <div className="view-metric-value">{inboxPendingCount}</div>
-              <div className="view-metric-hint">รายการที่ยังรอ approve หรือ review ใน inbox</div>
-            </div>
+        <HubSection
+          title="Automation & Memory"
+          subtitle="ทำให้แอพจำร้านค้า, สแกนฉลาดขึ้น และสร้างรายการอัตโนมัติ"
+        >
+          <MoreRow icon={<Inbox size={20} />} title="Inbox" subtitle={inboxSubtitle} badge={inboxPendingCount} onClick={() => navigate("inbox")} testId="hub-inbox" />
+          <MoreRow
+            icon={<Repeat size={20} />}
+            title="Recurring"
+            subtitle={recurringHealth}
+            onClick={() => navigate("recurring")}
+            testId="hub-recurring"
+          />
+          <MoreRow icon={<PlayCircle size={20} />} title="Run Recurring Now" subtitle="สร้างรายการที่ถึงรอบทันที" onClick={onRunRecurring} testId="hub-run-recurring" />
+          <MoreRow
+            icon={<Wand2 size={20} />}
+            title="Automation Rules"
+            subtitle={rulesStats.total ? `เปิดใช้ ${rulesStats.enabled} • ทั้งหมด ${rulesStats.total}` : "ตั้งกฎเพื่อ auto-fill หลังสแกน"}
+            onClick={() => navigate("rules")}
+            testId="hub-rules"
+          />
+          <MoreRow
+            icon={<Store size={20} />}
+            title="Merchant Library"
+            subtitle={merchantCount ? `มี ${merchantCount} ร้านที่ระบบจำได้` : "จำร้าน → หมวด/บัญชี แบบฉลาด"}
+            onClick={() => navigate("merchants")}
+            testId="hub-merchants"
+          />
+        </HubSection>
 
-            <div className="view-metric">
-              <div className="view-metric-label">Automation</div>
-              <div className="view-metric-value">{rulesStats.enabled}/{rulesStats.total}</div>
-              <div className="view-metric-hint">จำนวน automation rules ที่เปิดใช้งานอยู่</div>
-            </div>
+        <HubSection
+          title="Security & Appearance"
+          subtitle="ปรับประสบการณ์ใช้งานและความปลอดภัยของแอพ"
+        >
+          <MoreRow
+            icon={<Lock size={20} />}
+            title="Security / PIN"
+            subtitle={hasPin ? "PIN เปิดใช้งานอยู่ แตะเพื่อเปลี่ยนหรือลบ" : "ตั้ง PIN 6 หลักเพื่อบังคับล็อกแอพ"}
+            onClick={openPinModal}
+            testId="hub-security"
+          />
+          <MoreRow
+            icon={isDark ? <Moon size={20} /> : <Sun size={20} />}
+            title={isDark ? "Dark mode (เปิดอยู่)" : "Dark mode"}
+            subtitle={isDark ? "แตะเพื่อกลับไปโหมดสว่าง" : "แตะเพื่อสลับเป็นโหมดมืด"}
+            onClick={() => setTheme(isDark ? "light" : "dark")}
+            testId="hub-theme"
+          />
+        </HubSection>
 
-            <div className="view-metric">
-              <div className="view-metric-label">Theme</div>
-              <div className="view-metric-value">{isDark ? "Dark" : "Light"}</div>
-              <div className="view-metric-hint">แตะการ์ด appearance ด้านล่างเพื่อสลับโหมด</div>
-            </div>
-          </div>
-        </div>
-      </div>
+        <HubSection
+          title="Backup & Reset"
+          subtitle="ดูแลข้อมูลสำรอง, import/export และการรีเซ็ตเครื่องนี้"
+        >
+          <MoreRow icon={<Upload size={20} />} title="Import Backup JSON" subtitle="ทับข้อมูลเดิมทั้งหมดในเครื่องนี้" onClick={onPickImport} testId="hub-import-backup" />
+          <input ref={fileRef} type="file" accept="application/json,.json" data-testid="hub-import-file" className="hidden" onChange={onImportFile} />
+          <MoreRow icon={<Upload size={20} />} title="Export Backup JSON" subtitle="ดาวน์โหลดไฟล์สำรองข้อมูลฉบับเต็ม" onClick={onExport} testId="hub-export-backup" />
+          <MoreRow
+            icon={<Upload size={20} />}
+            title="Export CSV"
+            subtitle="ดาวน์โหลดรายการเป็น CSV สำหรับ Excel หรือรายงาน"
+            onClick={() => {
+              const csv = transactionsToCsv(state.transactions || [], { categories: state.categories, accounts: state.accounts });
+              const date = new Date();
+              const fileName = `transactions-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}.csv`;
+              downloadCsv(csv, fileName);
+              showAlert?.("ส่งออก CSV แล้ว");
+            }}
+            testId="hub-export-csv"
+          />
+          <MoreRow icon={<Trash2 size={20} />} title="Reset all data" subtitle="ล้างข้อมูลทั้งหมดและย้อนกลับไม่ได้" danger onClick={onReset} testId="hub-reset" />
+        </HubSection>
 
-      {/* Quick status */}
-      <div className="mt-4 mb-5 ui-card p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs font-bold text-gray-700/70">สถานะการทำงาน</div>
-            <div className="mt-1 text-sm font-extrabold text-gray-900">
-              Recurring: <span className="tabular-nums">{recurringStats.enabled}</span> เปิดใช้งาน จาก{" "}
-              <span className="tabular-nums">{recurringStats.total}</span> รายการ
-            </div>
-            {recurringHealth ? <div className="mt-1 text-[11px] font-bold text-gray-700/60">{recurringHealth}</div> : null}
-          </div>
-
-          {inboxPendingCount ? (
-            <div className="shrink-0">
-              <div className="text-[11px] font-extrabold text-gray-700/60 text-right">Inbox</div>
-              <div className="mt-1 ui-badge">{inboxPendingCount}</div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Shortcuts */}
-      <div className="ui-card overflow-hidden rounded-3xl mb-4">
-        <MoreRow icon={<Inbox size={20} />} title="Inbox (สแกน/รับเข้า)" subtitle={inboxSubtitle} badge={inboxPendingCount} onClick={() => navigate("inbox")} />
-        <MoreRow
-          icon={<Wand2 size={20} />}
-          title="Automation Rules"
-          subtitle={rulesStats.total ? `เปิดใช้ ${rulesStats.enabled} • ทั้งหมด ${rulesStats.total}` : "ตั้งกฎเพื่อ auto-fill หลังสแกน"}
-          onClick={() => navigate("rules")}
-        />
-        <MoreRow
-          icon={<Store size={20} />}
-          title="Merchant Library"
-          subtitle={merchantCount ? `มี ${merchantCount} ร้าน` : "จำร้าน → หมวด/บัญชี แบบฉลาด"}
-          onClick={() => navigate("merchants")}
-        />
-        <MoreRow icon={<Settings size={20} />} title="จัดการหมวดหมู่" subtitle="แก้ไขหมวดหลัก/ย่อย + Tombstone" onClick={() => navigate("categories")} />
-        <MoreRow icon={<Bell size={20} />} title="Budgets" subtitle="ตั้งงบ + แจ้งเตือน" onClick={() => navigate("budgets")} />
-        <MoreRow icon={<Repeat size={20} />} title="Recurring" subtitle="ตั้งรายการรายจ่าย/รายรับอัตโนมัติ" onClick={() => navigate("recurring")} />
-        <MoreRow icon={<PlayCircle size={20} />} title="Run Recurring Now" subtitle="สร้างรายการที่ถึงรอบทันที" onClick={onRunRecurring} />
-      </div>
-
-      {/* Appearance */}
-      <div className="ui-card overflow-hidden rounded-3xl mb-4">
-        <MoreRow
-          icon={isDark ? <Moon size={20} /> : <Sun size={20} />}
-          title={isDark ? "โหมดมืด (เปิดอยู่)" : "โหมดมืด"}
-          subtitle={isDark ? "แตะเพื่อเปลี่ยนเป็นโหมดสว่าง" : "แตะเพื่อเปลี่ยนเป็นโหมดมืด"}
-          onClick={() => setTheme(isDark ? "light" : "dark")}
-        />
-      </div>
-
-      {/* Data */}
-      <div className="ui-card overflow-hidden rounded-3xl mb-4">
-        <MoreRow icon={<Upload size={20} />} title="นำเข้าข้อมูล (Import Backup JSON)" subtitle="ทับข้อมูลเดิมทั้งหมดในเครื่องนี้" onClick={onPickImport} />
-        <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onImportFile} />
-        <MoreRow icon={<Upload size={20} />} title="ส่งออกข้อมูล (Backup JSON)" subtitle="ดาวน์โหลดไฟล์สำรองข้อมูล" onClick={onExport} />
-        <MoreRow
-          icon={<Upload size={20} />}
-          title="ส่งออก CSV"
-          subtitle="ดาวน์โหลดรายการเป็น CSV (เปิดใน Excel ได้)"
-          onClick={() => {
-            const csv = transactionsToCsv(state.transactions || [], { categories: state.categories, accounts: state.accounts });
-            const d = new Date();
-            const fname = `transactions-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.csv`;
-            downloadCsv(csv, fname);
-            showAlert?.("ส่งออก CSV แล้ว");
-          }}
-        />
-        <MoreRow icon={<Trash2 size={20} />} title="ล้างข้อมูลทั้งหมด" subtitle="ย้อนกลับไม่ได้" danger onClick={onReset} />
-      </div>
-
-      <div className="text-center text-gray-500 text-xs mt-8 pb-safe">Smart Expense Tracker</div>
+        <div className="pb-safe text-center text-xs font-bold text-slate-500">Smart Expense Tracker Hub</div>
       </main>
+
+      <PinModal
+        isOpen={pinModalOpen}
+        hasPin={hasPin}
+        pin={pinValue}
+        setPin={setPinValue}
+        confirmPin={pinConfirm}
+        setConfirmPin={setPinConfirm}
+        error={pinError}
+        onClose={() => {
+          setPinModalOpen(false);
+          setPinError("");
+        }}
+        onSave={savePin}
+        onRemove={removePin}
+      />
     </div>
   );
 }

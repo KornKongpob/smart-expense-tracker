@@ -263,7 +263,7 @@ const applyTemplate = (tpl) => {
         subtitle={`เปิดใช้งาน ${enabledCount} จาก ${rules.length} กฎ`}
         onBack={() => navigate("more")}
         right={
-          <button type="button" onClick={openNew} className="ui-icon-btn text-gray-900 active:scale-95" aria-label="เพิ่มกฎ">
+          <button type="button" onClick={openNew} data-testid="rules-add" className="ui-icon-btn text-gray-900 active:scale-95" aria-label="เพิ่มกฎ">
             <Plus size={18} />
           </button>
         }
@@ -342,6 +342,7 @@ const applyTemplate = (tpl) => {
                     <button
                       type="button"
                       onClick={() => moveRule(r.id, "up")}
+                      data-testid={`rules-move-up-${r.id}`}
                       className="w-9 h-9 rounded-xl glass-icon-btn text-gray-700 flex items-center justify-center active:scale-95"
                       aria-label="move up"
                     >
@@ -350,6 +351,7 @@ const applyTemplate = (tpl) => {
                     <button
                       type="button"
                       onClick={() => moveRule(r.id, "down")}
+                      data-testid={`rules-move-down-${r.id}`}
                       className="w-9 h-9 rounded-xl glass-icon-btn text-gray-700 flex items-center justify-center active:scale-95"
                       aria-label="move down"
                     >
@@ -361,6 +363,7 @@ const applyTemplate = (tpl) => {
                     <button
                       type="button"
                       onClick={() => toggleEnabled(r)}
+                      data-testid={`rules-toggle-${r.id}`}
                       className="w-9 h-9 rounded-xl glass-icon-btn text-gray-700 flex items-center justify-center active:scale-95"
                       aria-label="toggle"
                     >
@@ -369,6 +372,7 @@ const applyTemplate = (tpl) => {
                     <button
                       type="button"
                       onClick={() => openEdit(r)}
+                      data-testid={`rules-edit-${r.id}`}
                       className="w-9 h-9 rounded-xl glass-icon-btn text-gray-700 flex items-center justify-center active:scale-95"
                       aria-label="edit"
                     >
@@ -377,6 +381,7 @@ const applyTemplate = (tpl) => {
                     <button
                       type="button"
                       onClick={() => onDelete(r.id)}
+                      data-testid={`rules-delete-${r.id}`}
                       className="w-9 h-9 rounded-xl bg-red-600/10 text-red-700 border border-red-500/20 flex items-center justify-center active:scale-95"
                       aria-label="delete"
                     >
@@ -403,6 +408,7 @@ const applyTemplate = (tpl) => {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                data-testid="rules-name-input"
                 placeholder="เช่น: KBank → Food expense"
                 className="w-full px-3 py-2 rounded-xl glass-input"
               />
@@ -588,6 +594,7 @@ const applyTemplate = (tpl) => {
               <button
                 type="button"
                 onClick={onSave}
+                data-testid="rules-save"
                 className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold active:scale-95"
               >
                 Save

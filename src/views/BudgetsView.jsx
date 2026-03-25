@@ -322,6 +322,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                 <button
                   type="button"
                   onClick={() => openEdit(BUDGET_DAILY_ID)}
+                  data-testid="budget-daily-card"
                   className="glass-panel border border-white/20 rounded-2xl p-4 text-left active:scale-[0.99]"
                   title="แตะเพื่อตั้ง/แก้ไข Daily budget"
                 >
@@ -375,6 +376,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                 <button
                   type="button"
                   onClick={() => openEdit(BUDGET_TOTAL_ID)}
+                  data-testid="budget-monthly-card"
                   className="glass-panel border border-white/20 rounded-2xl p-4 text-left active:scale-[0.99]"
                   title="แตะเพื่อตั้ง/แก้ไข Monthly budget"
                 >
@@ -580,6 +582,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             value={limit}
             onChange={(e) => setLimit(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
             inputMode="decimal"
+            data-testid="budget-limit-input"
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
             placeholder="เช่น 5000.00"
           />
@@ -605,6 +608,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             type="number"
             min="10"
             max="100"
+            data-testid="budget-alert-input"
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
             placeholder="90"
           />
@@ -635,6 +639,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={save}
+              data-testid="budget-save"
               className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
             >
               <Check size={18} /> บันทึก

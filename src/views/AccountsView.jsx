@@ -8,6 +8,14 @@ import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { ACCOUNT_COLORS, ACCOUNT_ICONS, EMOJI_PRESETS } from "../constants/presets.jsx";
 import {
+  getInstitutionChipLabel,
+  getInstitutionDefaultName,
+  getInstitutionOptionsByType,
+  getInstitutionPresetById,
+  inferInstitutionAccountType,
+  THAI_INSTITUTION_PRESETS,
+} from "../constants/institutions";
+import {
   Plus,
   Trash2,
   Pencil,
@@ -23,6 +31,8 @@ import {
 } from "lucide-react";
 
 import AppHeader from "../components/AppHeader";
+import AccountAvatar from "../components/AccountAvatar.jsx";
+import InstitutionLogo from "../components/InstitutionLogo.jsx";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 // ===== Visual helpers =====
@@ -52,6 +62,12 @@ const defaultIconIdForType = (t) => {
   return "wallet";
 };
 
+const defaultInstitutionIdForType = (t) => {
+  if (t === "cash") return "cash_wallet";
+  if (t === "credit") return "generic_credit";
+  return "generic_bank";
+};
+
 const pickRandomColor = () => {
   const palette = Array.isArray(ACCOUNT_COLORS) && ACCOUNT_COLORS.length ? ACCOUNT_COLORS : ["#111827"];
   return palette[Math.floor(Math.random() * palette.length)];
@@ -68,11 +84,80 @@ const shadeHex = (hex, pct = -18) => {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 };
 
-function AccountVisualPreview({ name, type, currency, color, mode, iconId, emoji, image }) {
+function InstitutionPicker({ type, value, onSelect }) {
+  const options = useMemo(() => {
+    const list = getInstitutionOptionsByType(type);
+    return list.length ? list : THAI_INSTITUTION_PRESETS;
+  }, [type]);
+
+  return (
+    <div className="mt-4 ui-card p-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-sm font-black text-gray-900">Preset สถาบันการเงิน</div>
+          <div className="mt-1 text-xs font-bold text-gray-700/70">
+            เลือกแบงก์หรือวอลเล็ทก่อน ระบบจะตั้งชื่อ สี และชนิดบัญชีให้เหมาะกับ flow ไทย
+          </div>
+        </div>
+        <div className="ui-chip bg-white/70 border-gray-900/10">
+          {type === "credit" ? "โหมดบัตรเครดิต" : type === "cash" ? "โหมดเงินสด/วอลเล็ท" : "โหมดบัญชีธนาคาร"}
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        {options.map((preset) => {
+          const selected = String(value || "") === String(preset.id || "");
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => onSelect?.(preset)}
+              data-testid={`institution-${preset.id}`}
+              className={[
+                "rounded-[1.35rem] border p-3 text-left transition-all active:scale-[0.985]",
+                selected
+                  ? "bg-slate-950 text-white border-slate-950 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.7)]"
+                  : "bg-white/75 border-slate-900/10 text-slate-900 hover:bg-white",
+              ].join(" ")}
+            >
+              <div className="flex items-start gap-3">
+                <InstitutionLogo
+                  institutionId={preset.id}
+                  alt={preset.displayName}
+                  className="w-11 h-11 rounded-2xl shrink-0"
+                  imgClassName="h-full w-full object-cover"
+                />
+                <div className="min-w-0">
+                  <div className="text-[13px] font-black truncate">{preset.displayName}</div>
+                  <div className={selected ? "mt-1 text-[11px] font-bold text-white/72" : "mt-1 text-[11px] font-bold text-gray-700/60"}>
+                    {(preset.accountTypes || []).join(" • ")}
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AccountVisualPreview({ name, type, currency, color, mode, iconId, emoji, image, institutionId }) {
   const bg = String(color || "#111827");
   const bg2 = shadeHex(bg, -14);
+  const institution = getInstitutionPresetById(institutionId);
 
   const iconNode = (() => {
+    if (institutionId) {
+      return (
+        <InstitutionLogo
+          institutionId={institutionId}
+          alt={String(name || "").trim()}
+          className="w-full h-full"
+          imgClassName="w-full h-full object-cover"
+        />
+      );
+    }
     if (mode === "image" && isImageSrc(image)) {
       return (
         <img
@@ -132,6 +217,18 @@ function AccountVisualPreview({ name, type, currency, color, mode, iconId, emoji
             >
               {currencyLabel(currency)}
             </span>
+            {institution ? (
+              <span
+                className="ui-chip"
+                style={{
+                  background: "rgba(255,255,255,0.14)",
+                  borderColor: "rgba(255,255,255,0.18)",
+                  color: "white",
+                }}
+              >
+                {getInstitutionChipLabel(institution)}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -489,6 +586,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const [openCreate, setOpenCreate] = useState(false);
   const [cName, setCName] = useState("");
   const [cType, setCType] = useState("bank");
+  const [cInstitutionId, setCInstitutionId] = useState(defaultInstitutionIdForType("bank"));
   const [cCurrency, setCCurrency] = useState("THB");
   const [cAccountNumber, setCAccountNumber] = useState("");
   // visual
@@ -512,6 +610,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const resetCreate = () => {
     setCName("");
     setCType("bank");
+    setCInstitutionId(defaultInstitutionIdForType("bank"));
     setCCurrency("THB");
     setCAccountNumber("");
     setCInitialBalance("");
@@ -526,6 +625,20 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     setCCreditLimit("");
     setCStatementDay(20);
     setCDueDay(5);
+  };
+
+  const applyCreateInstitution = (presetLike) => {
+    const preset = typeof presetLike === "string" ? getInstitutionPresetById(presetLike) : presetLike;
+    if (!preset) return;
+    const nextType = inferInstitutionAccountType(preset, cType);
+    setCInstitutionId(preset.id);
+    setCType(nextType);
+    setCColor(preset.brandColor || randomColor());
+    setCName(getInstitutionDefaultName(preset, nextType));
+    setCIconMode("preset");
+    setCIconId(String(preset.iconId || defaultIconIdForType(nextType)));
+    setCIcon(defaultEmojiForType(nextType));
+    if ((preset.accountTypes || []).includes("cash")) setCCurrency("THB");
   };
 
   // auto-suggest icon when changing account type (create modal only)
@@ -544,6 +657,13 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cType, openCreate, cIconMode]);
 
+  useEffect(() => {
+    if (!openCreate) return;
+    const preset = getInstitutionPresetById(cInstitutionId);
+    if (preset && (preset.accountTypes || []).includes(cType)) return;
+    setCInstitutionId(defaultInstitutionIdForType(cType));
+  }, [cInstitutionId, cType, openCreate]);
+
 const create = () => {
   if (!cName.trim()) return notify("กรุณาใส่ชื่อบัญชี", "warn");
 
@@ -553,6 +673,7 @@ const create = () => {
   const baseAccount = {
     id: generateId(),
     name: cName.trim(),
+    institutionId: cInstitutionId,
     // keep emoji as fallback for legacy rendering
     icon: (String(cIcon || "").trim() || defaultEmojiForType(cType)).slice(0, 4),
     iconId: cIconMode === "preset" ? String(cIconId || defaultIconIdForType(cType)) : "",
@@ -602,6 +723,7 @@ const create = () => {
   const [eEditing, setEEditing] = useState(null);
   const [eName, setEName] = useState("");
   const [eType, setEType] = useState("bank");
+  const [eInstitutionId, setEInstitutionId] = useState(defaultInstitutionIdForType("bank"));
   const [eCurrency, setECurrency] = useState("THB");
   const [eAccountNumber, setEAccountNumber] = useState("");
   // visual
@@ -629,6 +751,7 @@ const create = () => {
     setEEditing(acc?.id || null);
     setEName(acc?.name || "");
     setEType(acc?.type || "bank");
+    setEInstitutionId(acc?.institutionId || defaultInstitutionIdForType(acc?.type || "bank"));
     setECurrency(acc?.currency || "THB");
     setEAccountNumber(Array.isArray(acc.matchDigits) && acc.matchDigits.length ? acc.matchDigits.join(", ") : String(acc.accountNumber || ""));
     const hasImg = isImageSrc(acc?.image) || isImageSrc(acc?.icon);
@@ -656,6 +779,7 @@ const create = () => {
     setEEditing(null);
     setEName("");
     setEType("bank");
+    setEInstitutionId(defaultInstitutionIdForType("bank"));
     setECurrency("THB");
     setEAccountNumber("");
     setEIconMode("preset");
@@ -668,6 +792,27 @@ const create = () => {
     setEDueDay(5);
   };
 
+  const applyEditInstitution = (presetLike) => {
+    const preset = typeof presetLike === "string" ? getInstitutionPresetById(presetLike) : presetLike;
+    if (!preset) return;
+    const nextType = inferInstitutionAccountType(preset, eType);
+    setEInstitutionId(preset.id);
+    setEType(nextType);
+    setEColor(preset.brandColor || "#111827");
+    setEName(getInstitutionDefaultName(preset, nextType));
+    setEIconMode("preset");
+    setEIconId(String(preset.iconId || defaultIconIdForType(nextType)));
+    setEIcon(defaultEmojiForType(nextType));
+    if ((preset.accountTypes || []).includes("cash")) setECurrency("THB");
+  };
+
+  useEffect(() => {
+    if (!openEdit) return;
+    const preset = getInstitutionPresetById(eInstitutionId);
+    if (preset && (preset.accountTypes || []).includes(eType)) return;
+    setEInstitutionId(defaultInstitutionIdForType(eType));
+  }, [eInstitutionId, eType, openEdit]);
+
   const saveEdit = () => {
     if (!eEditing) return;
     if (!eName.trim()) return notify("กรุณาใส่ชื่อบัญชี", "warn");
@@ -678,6 +823,7 @@ const create = () => {
     const partial = {
       id: eEditing,
       name: eName.trim(),
+      institutionId: eInstitutionId,
       // keep emoji as fallback for legacy rendering
       icon: (String(eIcon || "").trim() || defaultEmojiForType(eType)).slice(0, 4),
       iconId: eIconMode === "preset" ? String(eIconId || defaultIconIdForType(eType)) : "",
@@ -789,6 +935,7 @@ const create = () => {
               resetCreate();
               setOpenCreate(true);
             }}
+            data-testid="accounts-add"
             className="ui-btn ui-btn-primary active:scale-[0.99]"
           >
             <Plus size={18} />
@@ -954,22 +1101,15 @@ const create = () => {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3 min-w-0">
-                        <div
-                          className="shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg border border-white/20 overflow-hidden"
-                          style={{ background: acc.color || "#111827", color: "white" }}
-                          title={acc.name}
-                        >
-                          {(() => {
-                            const img = isImageSrc(acc?.image) ? acc.image : isImageSrc(acc?.icon) ? acc.icon : "";
-                            if (img) {
-                              return <img src={String(img)} alt="" className="w-full h-full object-cover" draggable={false} />;
-                            }
-                            const preset = resolvePresetIcon(acc?.iconId);
-                            if (preset) return <span className="text-white">{preset}</span>;
-                            const raw = String(acc?.icon || "").trim() || defaultEmojiForType(acc?.type);
-                            return <span className="drop-shadow text-[22px] leading-none">{raw}</span>;
-                          })()}
-                        </div>
+                        <AccountAvatar
+                          account={acc}
+                          name={acc.name}
+                          type={acc.type}
+                          color={acc.color || "#111827"}
+                          className="shrink-0 w-12 h-12 rounded-2xl"
+                          contentClassName="h-full w-full"
+                          textClassName="text-[22px]"
+                        />
 
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -981,6 +1121,11 @@ const create = () => {
                             <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
                               {currencyLabel(acc.currency)}
                             </div>
+                            {acc.institutionId ? (
+                              <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
+                                {getInstitutionChipLabel(getInstitutionPresetById(acc.institutionId))}
+                              </div>
+                            ) : null}
                           </div>
 
                           {(() => {
@@ -1042,6 +1187,7 @@ const create = () => {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => openEditModal(acc)}
+                            data-testid={`account-edit-${acc.id}`}
                             className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
                             title="แก้ไข"
                           >
@@ -1049,6 +1195,7 @@ const create = () => {
                           </button>
                           <button
                             onClick={() => del(acc.id)}
+                            data-testid={`account-delete-${acc.id}`}
                             className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
                             title="ลบ"
                           >
@@ -1095,6 +1242,7 @@ const create = () => {
                 iconId={cIconId}
                 emoji={cIcon}
                 image={cImage}
+                institutionId={cInstitutionId}
               />
             </div>
 
@@ -1117,7 +1265,7 @@ const create = () => {
                     <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
-                        onClick={() => setCType("bank")}
+                        onClick={() => applyCreateInstitution("generic_bank")}
                         className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
                           cType === "bank" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
@@ -1126,7 +1274,7 @@ const create = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setCType("cash")}
+                        onClick={() => applyCreateInstitution("cash_wallet")}
                         className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
                           cType === "cash" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
@@ -1135,7 +1283,7 @@ const create = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setCType("credit")}
+                        onClick={() => applyCreateInstitution("generic_credit")}
                         className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
                           cType === "credit" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
@@ -1156,6 +1304,12 @@ const create = () => {
                 </div>
               </div>
             </div>
+
+            <InstitutionPicker
+              type={cType}
+              value={cInstitutionId}
+              onSelect={applyCreateInstitution}
+            />
 
             <AccountVisualPicker
               type={cType}
@@ -1346,7 +1500,7 @@ const create = () => {
               <button onClick={() => setOpenCreate(false)} className="ui-btn ui-btn-secondary">
                 ยกเลิก
               </button>
-              <button onClick={create} className="ui-btn ui-btn-primary">
+              <button onClick={create} data-testid="account-create-save" className="ui-btn ui-btn-primary">
                 บันทึก
               </button>
             </div>
@@ -1471,6 +1625,7 @@ const create = () => {
                 iconId={eIconId}
                 emoji={eIcon}
                 image={eImage}
+                institutionId={eInstitutionId}
               />
             </div>
 
@@ -1487,7 +1642,7 @@ const create = () => {
                     <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
-                        onClick={() => setEType("bank")}
+                        onClick={() => applyEditInstitution("generic_bank")}
                         className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
                           eType === "bank" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
@@ -1496,7 +1651,7 @@ const create = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setEType("cash")}
+                        onClick={() => applyEditInstitution("cash_wallet")}
                         className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
                           eType === "cash" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
@@ -1505,7 +1660,7 @@ const create = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setEType("credit")}
+                        onClick={() => applyEditInstitution("generic_credit")}
                         className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
                           eType === "credit" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
@@ -1526,6 +1681,12 @@ const create = () => {
                 </div>
               </div>
             </div>
+
+            <InstitutionPicker
+              type={eType}
+              value={eInstitutionId}
+              onSelect={applyEditInstitution}
+            />
 
             <AccountVisualPicker
               type={eType}
@@ -1776,7 +1937,7 @@ const create = () => {
                 <button onClick={closeEditModal} className="ui-btn ui-btn-secondary">
                   ยกเลิก
                 </button>
-                <button onClick={saveEdit} className="ui-btn ui-btn-primary">
+                <button onClick={saveEdit} data-testid="account-edit-save" className="ui-btn ui-btn-primary">
                   บันทึก
                 </button>
               </div>

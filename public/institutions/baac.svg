@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <rect width="96" height="96" rx="24" fill="#0d8a4b"/>
+  <rect x="8" y="8" width="80" height="80" rx="20" fill="#0fa456"/>
+  <path d="M48 24c10 0 18 10 18 22S58 68 48 68 30 58 30 46s8-22 18-22Z" fill="#ecfdf5"/>
+  <path d="M39 54c3-8 9-15 18-22-2 11-8 18-18 22Z" fill="#0d8a4b"/>
+  <path d="M39 40c6 3 11 8 14 15-9-2-14-7-14-15Z" fill="#16a34a"/>
+  <text x="48" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="white">BAAC</text>
+</svg>

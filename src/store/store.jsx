@@ -12,6 +12,7 @@ import { setHash } from "../utils/hashRouter";
 import { clearAllBlobs, deleteBlob } from "../services/blobStore";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
 import { ACCOUNT_ICONS } from "../constants/presets.jsx"; // ✅ for iconId validation + future UI usage
+import { THAI_INSTITUTION_PRESET_MAP } from "../constants/institutions";
 import { generateId } from "../utils/id";
 import { parseDigitsList as parseDigitsListUtil, choosePrimaryDigits } from "../utils/accountMatch";
 import { calcAccountBalance, parseDateSafe } from "./selectors";
@@ -39,6 +40,7 @@ const DEFAULT_ACCOUNTS = [
     color: "#1DD1A1",
     icon: "💵",
     iconId: "cash",
+    institutionId: "cash_wallet",
     openingBalance: 0,
     accountNumber: "",
     creditLimit: 0,
@@ -47,6 +49,9 @@ const DEFAULT_ACCOUNTS = [
     cardLast4: "",
   },
 ];
+const ONBOARDING_KEY = "onboarding_done_v1";
+const PIN_KEY = "privacy_pin_6";
+const RESET_ALL_EVENT = "app:after-reset-all";
 
 const AppStoreContext = createContext(null);
 
@@ -263,6 +268,12 @@ const hasValidIconId = (iconId) => {
   return (ACCOUNT_ICONS || []).some((x) => String(x?.id || "") === id);
 };
 
+const hasValidInstitutionId = (institutionId) => {
+  const id = String(institutionId || "").trim();
+  if (!id) return false;
+  return !!THAI_INSTITUTION_PRESET_MAP[id];
+};
+
 /**
  * ✅ Normalize account shape with backward compatibility
  * - icon: emoji string (legacy)  ✅ still supported
@@ -285,6 +296,7 @@ function normalizeAccount(a) {
   // new icon id for preset icons (string only) + validate
   // if invalid -> keep but also allow UI to fallback to emoji
   const iconId = hasValidIconId(a?.iconId) ? String(a.iconId) : "";
+  const institutionId = hasValidInstitutionId(a?.institutionId) ? String(a.institutionId) : "";
 
   const openingBalance = safeSatang(a?.openingBalance, 0);
 
@@ -328,6 +340,7 @@ function normalizeAccount(a) {
     color,
     icon,
     iconId,
+    institutionId,
     openingBalance,
     currency,
 
@@ -1552,6 +1565,19 @@ export function AppStoreProvider({ children }) {
         // ignore
       }
       clearAll();
+      try {
+        localStorage.removeItem(ONBOARDING_KEY);
+        localStorage.removeItem(PIN_KEY);
+      } catch {
+        // ignore
+      }
+      try {
+        sessionStorage.removeItem("add.entryMode.force");
+        sessionStorage.removeItem("add.scanUploadKind.force");
+        sessionStorage.removeItem("add.txType.force");
+      } catch {
+        // ignore
+      }
       dispatch({
         type: ACTIONS.RESET_ALL,
         payload: {
@@ -1567,6 +1593,11 @@ export function AppStoreProvider({ children }) {
           ui: { view: "dashboard", editingId: null },
         },
       });
+      try {
+        window.dispatchEvent(new CustomEvent(RESET_ALL_EVENT));
+      } catch {
+        // ignore
+      }
     };
 
     const importBackup = (payload) => {

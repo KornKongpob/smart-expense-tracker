@@ -1,373 +1,242 @@
-// src/views/DashboardView.jsx
-import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Calendar, Search, AlertTriangle, FileText, CreditCard, Inbox as InboxIcon, Camera } from "lucide-react";
+import { useMemo } from "react";
+import {
+  Camera,
+  ChevronRight,
+  CreditCard,
+  Inbox as InboxIcon,
+  Landmark,
+  Sparkles,
+  Target,
+  Wallet,
+} from "lucide-react";
 import TransactionCard from "../components/TransactionCard";
 import AppHeader from "../components/AppHeader";
 import EmptyState from "../components/EmptyState";
-import AccountPicker from "../components/AccountPicker";
-import BentoGrid from "../components/bento/BentoGrid";
+import AccountPill from "../components/AccountPill.jsx";
 import { useAppStore } from "../store/store.jsx";
 import { getBudget, toMonthKey, calcAccountBalance } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
-import { isCreditAccount } from "../utils/accountMatch";
-import { Landmark, Sparkles } from "lucide-react";
 import { generateInsights } from "../utils/aiInsights";
 import {
+  compareTxNewestFirst,
+  daysInMonthKey,
   isTransferLike,
-  signedExpenseSatang,
+  sumCategoryBudgetsForMonth,
   sumExpenseForDate,
   sumExpenseForMonth,
-  daysInMonthKey,
-  compareTxNewestFirst,
-  sumCategoryBudgetsForMonth,
 } from "../utils/transaction";
 
 const BUDGET_TOTAL_ID = "__TOTAL__";
 const BUDGET_DAILY_ID = "__DAILY__";
-// ✅ Safe createdAt accessor (prevents crash when rendering transfer/split groups)
-const getTxCreatedAt = (t) => {
-  const n = Number(t?.createdAt || t?.updatedAt || 0);
-  return Number.isFinite(n) ? n : 0;
-};
 
+function ActionButton({ title, hint, icon, onClick, strong = false, testId }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className={[
+        "rounded-[1.6rem] border p-4 text-left transition-all active:scale-[0.985]",
+        strong
+          ? "bg-slate-950 text-white border-slate-950 shadow-[0_26px_60px_-36px_rgba(15,23,42,0.75)]"
+          : "bg-white/80 text-slate-950 border-slate-900/10 hover:bg-white",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className={strong ? "text-sm font-black" : "text-sm font-black text-slate-950"}>{title}</div>
+          <div className={strong ? "mt-1 text-[12px] font-bold text-white/70" : "mt-1 text-[12px] font-bold text-slate-600"}>
+            {hint}
+          </div>
+        </div>
+        <div className={strong ? "text-white" : "text-slate-950"}>{icon}</div>
+      </div>
+    </button>
+  );
+}
+
+function MetricCard({ label, value, hint, tone = "default" }) {
+  const toneClass =
+    tone === "alert"
+      ? "text-red-700"
+      : tone === "success"
+      ? "text-emerald-700"
+      : "text-slate-950";
+
+  return (
+    <div className="ui-card p-4">
+      <div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-slate-500">{label}</div>
+      <div className={`mt-2 text-2xl font-black tracking-[-0.04em] tabular-nums ${toneClass}`}>{value}</div>
+      <div className="mt-1 text-[12px] font-bold text-slate-600">{hint}</div>
+    </div>
+  );
+}
 
 export default function DashboardView() {
   const store = useAppStore();
   const { state, navigate } = store;
 
-  const [filterAccount, setFilterAccount] = useState("");
-  const [q, setQ] = useState("");
-  const [filterTag, setFilterTag] = useState("");
-const PAGE_SIZE = 40;
-const [limit, setLimit] = useState(PAGE_SIZE);
-
-// Reset paging when filters change
-useEffect(() => {
-  setLimit(PAGE_SIZE);
-}, [filterAccount, q, filterTag]);
-
-
-  // ===== Budget tracking (Daily / Monthly) =====
   const todayISO = toISODate(new Date());
   const currentMonth = toMonthKey(todayISO);
-
-  const todaySpent = useMemo(
-    () => sumExpenseForDate(state.transactions || [], todayISO),
-    [state.transactions, todayISO]
+  const accounts = useMemo(() => (Array.isArray(state.accounts) ? state.accounts : []), [state.accounts]);
+  const transactions = useMemo(() => (Array.isArray(state.transactions) ? state.transactions : []), [state.transactions]);
+  const categories = useMemo(
+    () => (state.categories && typeof state.categories === "object" ? state.categories : { expense: [], income: [] }),
+    [state.categories]
   );
 
-  const monthSpent = useMemo(
-    () => sumExpenseForMonth(state.transactions || [], currentMonth),
-    [state.transactions, currentMonth]
-  );
+  const todaySpent = useMemo(() => sumExpenseForDate(transactions, todayISO), [transactions, todayISO]);
+  const monthSpent = useMemo(() => sumExpenseForMonth(transactions, currentMonth), [transactions, currentMonth]);
 
   const monthlyBudgetCustom = useMemo(
     () => getBudget(state.budgets || [], currentMonth, BUDGET_TOTAL_ID),
     [state.budgets, currentMonth]
   );
-
   const dailyBudgetCustom = useMemo(
     () => getBudget(state.budgets || [], currentMonth, BUDGET_DAILY_ID),
     [state.budgets, currentMonth]
   );
-
   const perCatMonthlyLimit = useMemo(
     () => sumCategoryBudgetsForMonth(state.budgets || [], currentMonth),
     [state.budgets, currentMonth]
   );
 
-  const monthlyLimit = (Number(monthlyBudgetCustom?.limit || 0) > 0 ? Number(monthlyBudgetCustom.limit) : perCatMonthlyLimit) || 0;
+  const monthlyLimit =
+    (Number(monthlyBudgetCustom?.limit || 0) > 0 ? Number(monthlyBudgetCustom.limit) : perCatMonthlyLimit) || 0;
   const derivedDailyLimit = monthlyLimit > 0 ? Math.round(monthlyLimit / daysInMonthKey(currentMonth)) : 0;
-  const dailyLimit = (Number(dailyBudgetCustom?.limit || 0) > 0 ? Number(dailyBudgetCustom.limit) : derivedDailyLimit) || 0;
+  const dailyLimit =
+    (Number(dailyBudgetCustom?.limit || 0) > 0 ? Number(dailyBudgetCustom.limit) : derivedDailyLimit) || 0;
 
   const dailyPct = dailyLimit > 0 ? Math.round((todaySpent / dailyLimit) * 100) : 0;
   const monthlyPct = monthlyLimit > 0 ? Math.round((monthSpent / monthlyLimit) * 100) : 0;
-
   const dailyOver = dailyLimit > 0 ? Math.max(0, todaySpent - dailyLimit) : 0;
   const monthlyOver = monthlyLimit > 0 ? Math.max(0, monthSpent - monthlyLimit) : 0;
 
-  const allCats = useMemo(() => {
-    const exp = state.categories?.expense || [];
-    const inc = state.categories?.income || [];
-    return [...exp, ...inc];
-  }, [state.categories]);
+  const inboxList = Array.isArray(state?.inbox) ? state.inbox : [];
+  const pendingInboxCount = inboxList.filter((item) => String(item?.status || "pending").toLowerCase() !== "approved").length;
+  const duplicateInboxCount = inboxList.filter(
+    (item) => !!item?.duplicate && String(item?.status || "pending").toLowerCase() !== "approved"
+  ).length;
 
-  // ===== Net Worth =====
   const netWorth = useMemo(() => {
-    const accs = state.accounts || [];
-    const txs = state.transactions || [];
     let total = 0;
-    for (const a of accs) {
-      const bal = calcAccountBalance(accs, txs, a.id);
-      total += bal;
-    }
+    for (const account of accounts) total += calcAccountBalance(accounts, transactions, account.id);
     return total;
-  }, [state.accounts, state.transactions]);
+  }, [accounts, transactions]);
 
-  const accountName = (id) => state.accounts?.find((a) => a.id === id)?.name || "—";
+  const allCategories = useMemo(() => {
+    const all = [...(categories.expense || []), ...(categories.income || [])];
+    return new Map(all.map((category) => [String(category.id), category]));
+  }, [categories]);
 
-  // ===== AI Insights =====
-  const insights = useMemo(() => {
-    try {
-      return generateInsights(state.transactions || [], state.categories, { currentMonth });
-    } catch { return []; }
-  }, [state.transactions, state.categories, currentMonth]);
+  const recentItems = useMemo(() => {
+    const accountMap = new Map(accounts.map((account) => [String(account.id), account]));
+    const seenTransfers = new Set();
+    const seenSplitGroups = new Set();
 
-  // ===== All tags for filter dropdown =====
-  const allTags = useMemo(() => {
-    const seen = new Set();
-    const out = [];
-    for (const t of state.transactions || []) {
-      for (const tag of Array.isArray(t?.tags) ? t.tags : []) {
-        const nt = String(tag || "").trim().toLowerCase();
-        if (!nt || seen.has(nt)) continue;
-        seen.add(nt);
-        out.push(nt);
-      }
-    }
-    return out.sort();
-  }, [state.transactions]);
-
-  const { items: filtered, hasMore } = useMemo(() => {
-    const txsAll = state.transactions || [];
-    const accountsArr = state.accounts || [];
-    const expenseCats = state.categories?.expense || [];
-    const incomeCats = state.categories?.income || [];
-
-    const accountsById = new Map(accountsArr.map((a) => [a.id, a]));
-
-    const qn = String(q || "").trim().toLowerCase();
-
-    const matchQuery = (t) => {
-      if (!qn) return true;
-      const catName = String(allCats.find((c) => c.id === t.category)?.name || "").toLowerCase();
-      const tagsText = Array.isArray(t?.tags) ? t.tags.join(" ") : "";
-      const text = `${t.note || ""} ${t.merchant || ""} ${t.ref || ""} ${catName} ${tagsText}`.toLowerCase();
-      return text.includes(qn);
-    };
-
-    const ftag = String(filterTag || "").trim().toLowerCase();
-    const matchTag = (t) => {
-      if (!ftag) return true;
-      const arr = Array.isArray(t?.tags) ? t.tags : [];
-      return arr.some((tag) => String(tag || "").trim().toLowerCase() === ftag);
-    };
-
-    // 1) filter raw tx list (behaviorเดิม)
-    let base = txsAll.slice();
-
-    if (filterAccount) base = base.filter((t) => t.accountId === filterAccount);
-
-    // ✅ Search should include split-children so keywords inside child lines can be found.
-    // Without a query, keep the list clean by hiding children (they show inside parent breakdown).
-    if (!qn) {
-      base = base.filter((t) => !t?.isSplitChild);
-    }
-    base = base.filter(matchQuery);
-    base = base.filter(matchTag);
-
-    // keep ordering (latest date first; same date: latest added first)
-    base.sort(compareTxNewestFirst);
-
-    // 2) index transfer pairs from ALL txs (so we can still show From→To even when filterAccount is set)
-    const byTransferId = new Map();
-    for (const t of txsAll) {
-      if (!isTransferLike(t)) continue;
-      const tid = String(t.transferId || "").trim();
-      if (!tid) continue;
-      if (!byTransferId.has(tid)) byTransferId.set(tid, []);
-      byTransferId.get(tid).push(t);
-    }
-
-    // 2.1) index split groups from ALL txs (เพื่อ group ใน UI แต่ยังเก็บ tx แยกจริง)
-    const bySplitGroupId = new Map();
-    for (const t of txsAll) {
-      if (isTransferLike(t)) continue;
-      const gid = String(t?.splitGroupId || "").trim();
-      if (!gid) continue;
-      if (!bySplitGroupId.has(gid)) bySplitGroupId.set(gid, []);
-      bySplitGroupId.get(gid).push(t);
-    }
-
-    // 3) build display list (Transfer/ชำระบัตร: แสดงครั้งเดียว)
-    const seenTransferIds = new Set();
-    const seenSplitGroupIds = new Set();
-    const out = [];
-    let hasMore = false;
-
-    for (const t of base) {
-      const tid = String(t.transferId || "").trim();
-      const gid = String(t?.splitGroupId || "").trim();
-
-      if (isTransferLike(t) && tid) {
-        if (seenTransferIds.has(tid)) continue;
-        seenTransferIds.add(tid);
-
-        const group = byTransferId.get(tid) || [t];
-
-        const outTx = group.find((x) => x.type === "expense") || group[0] || null;
-        const inTx = group.find((x) => x.type === "income") || group.find((x) => x.id !== outTx?.id) || null;
-
-        // representative: prefer the leg that matches current account filter (for edit context),
-        // else prefer expense leg (เหมาะกับมุมมอง "จ่ายออก")
-        let rep = t;
-        if (filterAccount) rep = group.find((x) => x.accountId === filterAccount) || outTx || t;
-        else rep = outTx || t;
-
-        const fromAcc = accountsById.get(outTx?.accountId || "") || null;
-        const toAcc = accountsById.get(inTx?.accountId || "") || null;
-
-        // credit-card payment = โอนจากบัญชีปกติ -> บัตรเครดิต (2 legs แต่ UI แสดง 1 ครั้ง)
-        const isCardPayment = !!(fromAcc && toAcc && !isCreditAccount(fromAcc) && isCreditAccount(toAcc));
-
-        const fromName = fromAcc?.name || (outTx?.accountId ? "บัญชีต้นทาง" : "");
-        const toName = toAcc?.name || (inTx?.accountId ? "บัญชีปลายทาง" : "");
-
-        const accountLabel =
-          fromName && toName
-            ? `${fromName} → ${toName}`
-            : accountsById.get(rep?.accountId || "")?.name || "—";
-
-        const prefix = isCardPayment ? "ชำระบัตรเครดิต" : "Transfer";
-
-        // note for display only (ไม่แก้ของจริงใน store)
-        const baseNote = String(rep?.note || outTx?.note || inTx?.note || "").trim();
-        const displayNote = baseNote
-          ? baseNote.toLowerCase().includes(prefix.toLowerCase())
-            ? baseNote
-            : `${prefix} • ${baseNote}`
-          : `${prefix} • ${accountLabel}`;
-
-        const displayTx = {
-          ...rep,
-          // keep real tx id for edit (START_EDIT_TRANSACTION uses id)
-          id: rep?.id || outTx?.id || t.id,
-          isTransfer: true,
-          transferId: tid,
-          category: String(rep?.category || outTx?.category || "transfer") || "transfer",
-          // extra flags for downstream UI (TransactionCard can use later)
-          transferKind: isCardPayment ? "card_payment" : "transfer",
-          isCardPayment,
-          note: displayNote,
-          // For ordering: if same date, prefer the leg that was added most recently
-          createdAt: Math.max(getTxCreatedAt(rep), getTxCreatedAt(outTx), getTxCreatedAt(inTx)),
-        };
-
-        const cat =
-          expenseCats.find((c) => c.id === displayTx.category) ||
-          incomeCats.find((c) => c.id === displayTx.category) ||
-          null;
-
-        out.push({ tx: displayTx, category: cat, accountName: accountLabel });
-      } else if (!isTransferLike(t) && gid) {
-        // ✅ Split group: show a single card. If we have a split-parent tx, use it as the representative.
-        // Children are the "real" categorized transactions (used for budgets/reports).
-        if (seenSplitGroupIds.has(gid)) continue;
-        seenSplitGroupIds.add(gid);
-
-        const group = bySplitGroupId.get(gid) || [t];
-
-        const parent = group.find((x) => !!x?.isSplitParent) || null;
-        const rawLines = parent
-          ? group.filter(
-              (x) =>
-                !!x?.isSplitChild || String(x?.splitParentId || "").trim() === String(parent?.id || "").trim()
-            )
-          : group.filter((x) => !x?.isSplitParent);
-
-        const linesBase = rawLines && rawLines.length ? rawLines : group.filter((x) => !x?.isSplitParent);
-
-        const groupSorted = [...linesBase].sort((a, b) => {
-          const ia = Number(a?.splitIndex || 0) || 0;
-          const ib = Number(b?.splitIndex || 0) || 0;
-          if (ia && ib && ia !== ib) return ia - ib;
-          return Math.abs(Number(b?.amount || 0)) - Math.abs(Number(a?.amount || 0));
-        });
-
-        // representative for edit context
-        let rep = parent || t;
-        if (!parent) {
-          if (filterAccount) rep = groupSorted.find((x) => x.accountId === filterAccount) || groupSorted[0] || t;
-          else rep = groupSorted[0] || t;
+    return [...transactions]
+      .sort(compareTxNewestFirst)
+      .filter((tx) => {
+        if (tx?.isSplitChild) return false;
+        const transferId = String(tx?.transferId || "").trim();
+        if (isTransferLike(tx)) {
+          if (transferId) {
+            if (seenTransfers.has(transferId)) return false;
+            seenTransfers.add(transferId);
+          } else if (tx?.type === "income") {
+            return false;
+          }
         }
 
-        const total = parent ? Number(parent?.amount || 0) || 0 : groupSorted.reduce((s, x) => s + (Number(x?.amount) || 0), 0);
-        const label = String(
-          (parent?.splitLabel || rep?.splitLabel || groupSorted.find((x) => x?.splitLabel)?.splitLabel || "")
-        ).trim();
+        const splitGroupId = String(tx?.splitGroupId || "").trim();
+        if (splitGroupId) {
+          if (seenSplitGroups.has(splitGroupId)) return false;
+          seenSplitGroups.add(splitGroupId);
+          if (!tx?.isSplitParent) return false;
+        }
+        return true;
+      })
+      .slice(0, 8)
+      .map((tx) => ({
+        tx,
+        category: allCategories.get(String(tx?.category || "")) || null,
+        accountName: accountMap.get(String(tx?.accountId || ""))?.name || "—",
+      }));
+  }, [accounts, allCategories, transactions]);
 
-        const baseNote = String((parent?.note || rep?.note || "").trim());
-        const displayNote = label || baseNote || `Split (${groupSorted.length})`;
+  const accountSnapshots = useMemo(() => {
+    return accounts
+      .map((account) => ({
+        ...account,
+        balance: calcAccountBalance(accounts, transactions, account.id),
+      }))
+      .sort((a, b) => Math.abs(Number(b.balance || 0)) - Math.abs(Number(a.balance || 0)))
+      .slice(0, 4);
+  }, [accounts, transactions]);
 
-        const createdAtCandidates = []
-          .concat(parent ? [getTxCreatedAt(parent)] : [])
-          .concat(groupSorted.map((x) => getTxCreatedAt(x)));
-
-        const displayTx = {
-          ...(parent || rep),
-          id: (parent || rep)?.id || t.id,
-          amount: total,
-          note: displayNote,
-          isSplitGroup: true,
-          splitGroupId: gid,
-          splitLines: groupSorted,
-          createdAt: Math.max(...createdAtCandidates),
-        };
-
-        const accName = accountsById.get(displayTx.accountId)?.name || "—";
-        out.push({ tx: displayTx, category: null, accountName: accName });
-      } else {
-        const cat =
-          expenseCats.find((c) => c.id === t.category) ||
-          incomeCats.find((c) => c.id === t.category) ||
-          null;
-
-        const accName = accountsById.get(t.accountId)?.name || "—";
-        out.push({ tx: t, category: cat, accountName: accName });
-      }
-
-      if (out.length >= limit) {
-        hasMore = true;
-        break;
-      }
+  const insights = useMemo(() => {
+    try {
+      return generateInsights(transactions, categories, { currentMonth }).slice(0, 2);
+    } catch {
+      return [];
     }
+  }, [categories, currentMonth, transactions]);
 
-    return { items: out, hasMore };
-  }, [state.transactions, state.accounts, state.categories, filterAccount, q, filterTag, allCats, limit]);
+  const budgetSummary =
+    monthlyLimit > 0
+      ? monthlyOver > 0
+        ? `เกินงบเดือน ${formatCurrency(monthlyOver)}`
+        : `เหลืองบเดือน ${formatCurrency(Math.max(0, monthlyLimit - monthSpent))}`
+      : "ยังไม่ได้ตั้งงบรวมเดือนนี้";
 
-  const startNewTransaction = () => {
+  const dailySummary =
+    dailyLimit > 0
+      ? dailyOver > 0
+        ? `วันนี้เกินงบ ${formatCurrency(dailyOver)}`
+        : `วันนี้เหลืองบ ${formatCurrency(Math.max(0, dailyLimit - todaySpent))}`
+      : "ยังไม่ได้ตั้งงบรายวัน";
+
+  const openScan = (kind = "receipt") => {
+    try {
+      sessionStorage.setItem("add.entryMode.force", "scan");
+      sessionStorage.setItem("add.scanUploadKind.force", kind);
+    } catch {
+      // ignore
+    }
     store.startNewTransaction();
   };
 
-  const startEditTransaction = (id) => {
-    if (!id) return;
-    store.startEditTransaction(id);
+  const openManual = (txType = "expense") => {
+    try {
+      sessionStorage.setItem("add.entryMode.force", "manual");
+      sessionStorage.setItem("add.txType.force", txType);
+    } catch {
+      // ignore
+    }
+    store.startNewTransaction();
   };
-
-  const accounts = state.accounts || [];
 
   return (
     <div className="min-h-dvh">
       <AppHeader
-        title="หน้าแรก"
+        title="Today"
         subtitle={currentMonth}
         right={
           <div className="flex items-center gap-2">
             <button
-              onClick={() => store.startNewTransaction()}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 text-xs font-extrabold active:scale-95 transition-all"
+              onClick={() => openScan("receipt")}
+              data-testid="today-open-scan"
+              className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-[0_20px_36px_-24px_rgba(15,23,42,0.72)] active:scale-95"
               type="button"
-              aria-label="Quick Scan"
-              title="สแกนใบเสร็จ"
+              aria-label="Open scan"
             >
-              <Camera size={14} /> สแกน
+              <Camera size={15} /> Scan
             </button>
             <button
               onClick={() => navigate("inbox")}
               className="ui-icon-btn text-gray-800 active:scale-95"
               type="button"
               aria-label="Inbox"
-              title="Inbox"
             >
               <InboxIcon size={18} />
             </button>
@@ -376,394 +245,274 @@ useEffect(() => {
       />
 
       <main className="ui-page pt-4 pb-6 view-flow">
-        <div className="view-hero">
-          <div className="view-hero-content">
-            <div>
-              <div className="view-eyebrow">Financial command center</div>
-              <div className="view-hero-title">ภาพรวมการเงินที่อ่านง่ายในหน้าหลักเดียว</div>
-              <div className="view-hero-copy">
-                ติดตามงบรายวัน งบรายเดือน มูลค่าสุทธิ และจำนวนรายการล่าสุดได้พร้อมกัน แล้วค่อยไล่ดูธุรกรรมเชิงลึกด้านล่าง
+        <section className="ui-card-strong overflow-hidden">
+          <div className="relative p-5 md:p-6">
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  "radial-gradient(640px 220px at 0% 0%, rgba(16,185,129,0.20), transparent 56%), radial-gradient(540px 240px at 100% 0%, rgba(15,23,42,0.18), transparent 54%)",
+              }}
+            />
+            <div className="relative">
+              <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-slate-500">Scan-first finance</div>
+              <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-slate-950">
+                รู้เลยวันนี้ต้องทำอะไรกับเงินของเรา
               </div>
-            </div>
-
-            <div className="view-hero-grid">
-              <div className="view-metric">
-                <div className="view-metric-label">วันนี้ใช้ไป</div>
-                <div className="view-metric-value tabular-nums">{formatCurrency(todaySpent)}</div>
-                <div className="view-metric-hint">
-                  {dailyLimit > 0 ? `${dailyPct}% ของงบวันนี้` : "ยังไม่ได้ตั้ง daily budget"}
-                </div>
-              </div>
-
-              <div className="view-metric">
-                <div className="view-metric-label">เดือนนี้</div>
-                <div className="view-metric-value tabular-nums">{formatCurrency(monthSpent)}</div>
-                <div className="view-metric-hint">
-                  {monthlyLimit > 0 ? `${monthlyPct}% ของงบเดือน` : "ยังไม่ได้ตั้ง monthly budget"}
-                </div>
+              <div className="mt-2 max-w-2xl text-sm font-bold leading-relaxed text-slate-600">
+                เช็กยอดใช้วันนี้, งานค้างใน Inbox, ความกดดันของงบประมาณ และรายการล่าสุดได้จากหน้าเดียว ก่อนค่อยลงรายละเอียดใน Hub
               </div>
 
-              <div className="view-metric">
-                <div className="view-metric-label">มูลค่าสุทธิ</div>
-                <div className="view-metric-value tabular-nums">{formatCurrency(Math.abs(netWorth))}</div>
-                <div className="view-metric-hint">{netWorth >= 0 ? "ฐานะสุทธิเป็นบวก" : "หนี้มากกว่าเงินออม"}</div>
-              </div>
-
-              <div className="view-metric">
-                <div className="view-metric-label">กิจกรรมล่าสุด</div>
-                <div className="view-metric-value tabular-nums">{filtered.length}{hasMore ? "+" : ""}</div>
-                <div className="view-metric-hint">รายการล่าสุดที่ตรงกับตัวกรองปัจจุบัน</div>
+              <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+                <MetricCard
+                  label="Today spend"
+                  value={formatCurrency(todaySpent)}
+                  hint={dailySummary}
+                  tone={dailyOver > 0 ? "alert" : "default"}
+                />
+                <MetricCard
+                  label="Month spend"
+                  value={formatCurrency(monthSpent)}
+                  hint={budgetSummary}
+                  tone={monthlyOver > 0 ? "alert" : "default"}
+                />
+                <MetricCard
+                  label="Balance"
+                  value={formatCurrency(Math.abs(netWorth))}
+                  hint={netWorth >= 0 ? "สถานะรวมยังเป็นบวก" : "ภาระหนี้มากกว่าสินทรัพย์"}
+                  tone={netWorth >= 0 ? "success" : "alert"}
+                />
+                <MetricCard
+                  label="Inbox pending"
+                  value={String(pendingInboxCount)}
+                  hint={duplicateInboxCount ? `มีรายการซ้ำต้องเช็ก ${duplicateInboxCount}` : "พร้อมตรวจและอนุมัติ"}
+                  tone={pendingInboxCount > 0 ? "alert" : "success"}
+                />
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Budget status (tap to edit in Budget page) */}
-        <BentoGrid className="mb-5">
-          <button
-            type="button"
-            onClick={() => navigate("budgets")}
-            className="ui-card p-4 text-left active:scale-[0.99] transition-transform focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300/40 md:col-span-6"
-          >
-            <div className="text-xs font-extrabold text-gray-700/70 mb-2 flex items-center gap-2">
-              <CalendarDays size={14} /> วันนี้
-            </div>
+        <section className="grid gap-3 md:grid-cols-4">
+          <ActionButton title="Receipt scan" hint="สแกนใบเสร็จหลายใบแล้วค่อย review" icon={<Camera size={18} />} onClick={() => openScan("receipt")} strong testId="today-action-receipt" />
+          <ActionButton title="Slip scan" hint="เปิดเข้า lane สำหรับสลิปโอน/ชำระทันที" icon={<InboxIcon size={18} />} onClick={() => openScan("slip")} testId="today-action-slip" />
+          <ActionButton title="Manual entry" hint="กรอก expense หรือ income แบบเร็ว" icon={<Wallet size={18} />} onClick={() => openManual("expense")} testId="today-action-manual" />
+          <ActionButton title="Transfer / card" hint="สร้างโอนเงินหรือชำระบัตร" icon={<CreditCard size={18} />} onClick={() => openManual("transfer")} testId="today-action-transfer" />
+        </section>
 
-            <div className="text-lg font-black text-gray-900 tabular-nums">{formatCurrency(todaySpent)}</div>
-
-            <div className="mt-1 text-[11px] text-gray-700/70 font-bold">
-              {dailyLimit > 0
-                ? `งบ ${formatCurrency(dailyLimit)} • ${dailyPct}%`
-                : "ยังไม่ตั้ง Daily budget (แตะเพื่อตั้ง)"}
-            </div>
-
-            {dailyLimit > 0 ? (
-              <div className="mt-3">
-                <div className="h-2 rounded-full bg-slate-900/10 overflow-hidden">
-                  <div
-                    className={dailyOver > 0 ? "h-full bg-red-600/80" : "h-full bg-slate-900/60"}
-                    style={{ width: `${Math.min(100, Math.max(0, dailyPct))}%` }}
-                  />
-                </div>
-                <div
-                  className={
-                    `mt-2 text-[11px] font-extrabold ${dailyOver > 0 ? "text-red-700" : "text-gray-700/70"}`
-                  }
-                >
-                  {dailyOver > 0
-                    ? `เกินงบ ${formatCurrency(dailyOver)}`
-                    : `เหลือ ${formatCurrency(Math.max(0, dailyLimit - todaySpent))}`}
-                </div>
-                {!(Number(dailyBudgetCustom?.limit || 0) > 0) && dailyLimit > 0 && monthlyLimit > 0 ? (
-                  <div className="mt-0.5 text-[10px] text-gray-600/70">* คำนวณจากงบรายเดือน / จำนวนวัน</div>
-                ) : null}
-              </div>
-            ) : null}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate("budgets")}
-            className="ui-card p-4 text-left active:scale-[0.99] transition-transform focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300/40 md:col-span-6"
-          >
-            <div className="text-xs font-extrabold text-gray-700/70 mb-2 flex items-center gap-2">
-              <Calendar size={14} /> เดือนนี้
-            </div>
-
-            <div className="text-lg font-black text-gray-900 tabular-nums">{formatCurrency(monthSpent)}</div>
-
-            <div className="mt-1 text-[11px] text-gray-700/70 font-bold">
-              {monthlyLimit > 0 ? (
-                Number(monthlyBudgetCustom?.limit || 0) > 0
-                  ? `งบ ${formatCurrency(monthlyLimit)} • ${monthlyPct}%`
-                  : `งบ ${formatCurrency(monthlyLimit)} (รวมจากหมวด) • ${monthlyPct}%`
-              ) : (
-                "ยังไม่ตั้ง Monthly budget (แตะเพื่อตั้ง)"
-              )}
-            </div>
-
-            {monthlyLimit > 0 ? (
-              <div className="mt-3">
-                <div className="h-2 rounded-full bg-slate-900/10 overflow-hidden">
-                  <div
-                    className={monthlyOver > 0 ? "h-full bg-red-600/80" : "h-full bg-slate-900/60"}
-                    style={{ width: `${Math.min(100, Math.max(0, monthlyPct))}%` }}
-                  />
-                </div>
-                <div
-                  className={
-                    `mt-2 text-[11px] font-extrabold ${monthlyOver > 0 ? "text-red-700" : "text-gray-700/70"}`
-                  }
-                >
-                  {monthlyOver > 0
-                    ? `เกินงบ ${formatCurrency(monthlyOver)}`
-                    : `เหลือ ${formatCurrency(Math.max(0, monthlyLimit - monthSpent))}`}
+        <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="ui-card p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-black text-slate-950">Budget pressure</div>
+                <div className="mt-1 text-[12px] font-bold text-slate-600">
+                  ระบบยังใช้ logic เดิมทั้งหมด แต่ย้ายมาไว้เป็นการ์ดตัดสินใจประจำวัน
                 </div>
               </div>
-            ) : null}
-          </button>
-        </BentoGrid>
-
-        {/* Net Worth */}
-        <div className="ui-card p-4 mb-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs font-extrabold text-gray-700/70 mb-1 flex items-center gap-2">
-                <Landmark size={14} /> มูลค่าสุทธิ (Net Worth)
-              </div>
-              <div className={`text-xl font-black tabular-nums ${netWorth >= 0 ? "text-gray-900" : "text-red-700"}`}>
-                {formatCurrency(Math.abs(netWorth))}
-              </div>
-              {netWorth < 0 && (
-                <div className="text-[11px] font-bold text-red-600/80 mt-0.5">ติดลบ — หนี้มากกว่าเงินออม</div>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate("accounts")}
-              className="text-xs font-extrabold text-indigo-700 active:scale-95"
-            >
-              ดูบัญชี →
-            </button>
-          </div>
-        </div>
-
-        {/* AI Insights */}
-        {insights.length > 0 && (
-          <div className="mb-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={14} className="text-indigo-600" />
-              <span className="text-xs font-extrabold text-gray-700/70 uppercase tracking-wider">Insights</span>
-            </div>
-            <div className="space-y-2">
-              {insights.map((ins, i) => (
-                <div
-                  key={`${ins.type}-${i}`}
-                  className={`ui-card p-3.5 border-l-4 ${
-                    ins.severity === "warning" ? "border-l-amber-500" :
-                    ins.severity === "success" ? "border-l-emerald-500" :
-                    "border-l-indigo-500"
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <span className="text-lg shrink-0">{ins.icon}</span>
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-gray-900">{ins.title}</div>
-                      <div className="text-xs text-gray-600 mt-0.5">{ins.body}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Filters */}
-        <div className="ui-card p-4 mb-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-black text-gray-900">ค้นหา & กรอง</div>
-            {filterAccount || q || filterTag ? (
               <button
                 type="button"
-                onClick={() => {
-                  setQ("");
-                  setFilterAccount("");
-                  setFilterTag("");
-                }}
-                className="ui-btn ui-btn-secondary !min-h-[40px] px-3 py-2"
+                onClick={() => navigate("budgets")}
+                className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
               >
-                ล้าง
+                Budgets <ChevronRight size={14} />
               </button>
-            ) : null}
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-3 text-[12px] font-bold text-slate-600">
+                  <span>Daily budget</span>
+                  <span className="tabular-nums">{dailyLimit > 0 ? `${dailyPct}%` : "ยังไม่ตั้ง"}</span>
+                </div>
+                <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-900/10">
+                  <div
+                    className={dailyOver > 0 ? "h-full bg-red-600" : "h-full bg-emerald-500"}
+                    style={{ width: `${Math.min(100, Math.max(0, dailyPct || 0))}%` }}
+                  />
+                </div>
+                <div className="mt-2 text-[12px] font-bold text-slate-600">{dailySummary}</div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-3 text-[12px] font-bold text-slate-600">
+                  <span>Monthly budget</span>
+                  <span className="tabular-nums">{monthlyLimit > 0 ? `${monthlyPct}%` : "ยังไม่ตั้ง"}</span>
+                </div>
+                <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-900/10">
+                  <div
+                    className={monthlyOver > 0 ? "h-full bg-red-600" : "h-full bg-slate-950"}
+                    style={{ width: `${Math.min(100, Math.max(0, monthlyPct || 0))}%` }}
+                  />
+                </div>
+                <div className="mt-2 text-[12px] font-bold text-slate-600">{budgetSummary}</div>
+              </div>
+            </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-3">
-            <div>
-              <div className="ui-label">ค้นหา</div>
-              <div className="mt-1 relative">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-900/45" />
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  className="ui-input pl-10"
-                  placeholder="เช่น ร้าน, หมวด, ref"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="ui-label">บัญชี</div>
-              <div className="mt-1">
-                <AccountPicker
-                  accounts={accounts}
-                  value={filterAccount}
-                  onChange={setFilterAccount}
-                  title="เลือกบัญชี"
-                  placeholder="ทั้งหมด"
-                  allowEmpty
-                  emptyLabel="ทั้งหมด"
-                />
-              </div>
-            </div>
-
-            {allTags.length > 0 && (
+          <div className="ui-card p-5">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="ui-label">แท็ก</div>
-                <div className="mt-1">
-                  <select
-                    value={filterTag}
-                    onChange={(e) => setFilterTag(e.target.value)}
-                    className="ui-select"
+                <div className="text-sm font-black text-slate-950">Accounts snapshot</div>
+                <div className="mt-1 text-[12px] font-bold text-slate-600">
+                  สรุปบัญชีหลักที่กระทบยอดรวมมากที่สุดตอนนี้
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("accounts")}
+                className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+              >
+                Accounts <ChevronRight size={14} />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {accountSnapshots.length ? (
+                accountSnapshots.map((account) => (
+                  <button
+                    key={account.id}
+                    type="button"
+                    onClick={() => navigate("accounts")}
+                    className="flex w-full items-center justify-between gap-3 rounded-[1.2rem] border border-slate-900/8 bg-white/72 px-3 py-3 text-left active:scale-[0.99]"
                   >
-                    <option value="">ทั้งหมด</option>
-                    {allTags.map((tag) => (
-                      <option key={tag} value={tag}>#{tag}</option>
-                    ))}
-                  </select>
+                    <AccountPill account={account} fallbackName={account.name} size="md" />
+                    <div className="text-right">
+                      <div className="text-sm font-black tabular-nums text-slate-950">{formatCurrency(Math.abs(account.balance || 0))}</div>
+                      <div className="text-[11px] font-bold text-slate-600">{account.balance >= 0 ? "ยอดสุทธิ" : "ยอดติดลบ"}</div>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <EmptyState
+                  icon={<Landmark size={28} />}
+                  title="ยังไม่มีบัญชีเพิ่มเติม"
+                  description="เริ่มจากเงินสดก่อน แล้วเพิ่มธนาคารไทยหรือบัตรเครดิตจากหน้า Accounts"
+                />
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="ui-card p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-sm font-black text-slate-950">Recent activity</div>
+                <div className="mt-1 text-[12px] font-bold text-slate-600">
+                  ใช้กลุ่มรายการล่าสุดเป็นพื้นที่ review ก่อนแก้ไขหรือแตกยอดต่อ
                 </div>
               </div>
-            )}
-          </div>
-
-          {filterAccount || q || filterTag ? (
-            <div className="mt-3 ui-help flex items-start gap-2">
-              <AlertTriangle size={14} className="shrink-0 mt-[2px]" />
-              <div>
-                กรองอยู่ • Transfer/ชำระบัตรเครดิต และ Split จะแสดงเป็น 1 รายการ (ข้อมูลจริงยังเป็นหลายรายการ)
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Recent list */}
-        <div className="view-section-head">
-          <div>
-            <h2 className="view-section-title flex items-center gap-2">
-              <FileText size={16} /> รายการล่าสุด
-            </h2>
-            <div className="view-section-copy">รวมรายการล่าสุดแบบ grouped ตามวัน พร้อมยอดรับและจ่ายในแต่ละวัน</div>
-          </div>
-          <div className="text-xs text-gray-700/60 font-extrabold tabular-nums">
-            {filtered.length ? `${filtered.length}${hasMore ? "+" : ""} รายการ` : ""}
-          </div>
-        </div>
-
-        {filtered.length ? (
-          <div className="space-y-1">
-            {(() => {
-              const groups = [];
-              let currentDate = "";
-              let currentGroup = null;
-
-              for (const item of filtered) {
-                const tx = item?.tx || item;
-                const txDate = String(tx?.date || "").slice(0, 10);
-
-                if (txDate !== currentDate) {
-                  currentDate = txDate;
-                  currentGroup = { date: txDate, items: [] };
-                  groups.push(currentGroup);
-                }
-                currentGroup.items.push(item);
-              }
-
-              return groups.map((group) => {
-                // Calculate daily expense subtotal
-                let dailyExpense = 0;
-                let dailyIncome = 0;
-                for (const item of group.items) {
-                  const tx = item?.tx || item;
-                  if (isTransferLike(tx)) continue;
-                  if (tx?.isSplitParent) continue;
-                  const amt = Number(tx?.amount || 0);
-                  if (String(tx?.type || "").toLowerCase() === "expense") {
-                    dailyExpense += signedExpenseSatang(tx);
-                  } else if (String(tx?.type || "").toLowerCase() === "income") {
-                    dailyIncome += amt;
-                  }
-                }
-
-                // Format date header
-                let dateLabel = group.date;
-                try {
-                  const [y, m, d] = group.date.split("-").map(Number);
-                  const dt = new Date(y, m - 1, d);
-                  const isToday = group.date === todayISO;
-                  const yesterday = new Date();
-                  yesterday.setDate(yesterday.getDate() - 1);
-                  const yISO = toISODate(yesterday);
-                  const isYesterday = group.date === yISO;
-
-                  const dayName = isToday ? "วันนี้" : isYesterday ? "เมื่อวาน" : new Intl.DateTimeFormat("th-TH", { weekday: "short" }).format(dt);
-                  const dateStr = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short" }).format(dt);
-                  dateLabel = `${dayName} ${dateStr}`;
-                } catch {
-                  // ignore
-                }
-
-                return (
-                  <div key={group.date} className="mb-4">
-                    {/* Date header */}
-                    <div className="flex items-center justify-between px-1 py-2">
-                      <div className="text-xs font-extrabold text-gray-700/70">{dateLabel}</div>
-                      <div className="flex items-center gap-3 text-xs font-extrabold tabular-nums">
-                        {dailyIncome > 0 && (
-                          <span className="text-emerald-700">+{formatCurrency(dailyIncome)}</span>
-                        )}
-                        {dailyExpense > 0 && (
-                          <span className="text-red-700">-{formatCurrency(dailyExpense)}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Transaction cards for this date */}
-                    <div className="space-y-2">
-                      {group.items.map((item) => {
-                        const tx = item?.tx || item;
-                        const fallbackCategory =
-                          allCats.find((c) => c.id === tx.category) || { name: "ไม่ระบุ", icon: "❓", color: "#ccc" };
-                        const category =
-                          tx.isTransfer
-                            ? { name: tx.isCardPayment ? "ชำระบัตรเครดิต" : "Transfer", icon: "🔁", color: "#94a3b8" }
-                            : item?.category || fallbackCategory;
-
-                        return (
-                          <TransactionCard
-                            key={tx.id}
-                            tx={tx}
-                            category={category}
-                            accountName={item?.accountName || accountName(tx.accountId)}
-                            onClick={() => startEditTransaction(tx.id)}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-
-            {hasMore ? (
               <button
                 type="button"
-                onClick={() => setLimit((n) => n + PAGE_SIZE)}
-                className="w-full ui-btn ui-btn-secondary"
+                onClick={() => navigate("stats")}
+                className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
               >
-                โหลดเพิ่ม
+                Analytics <ChevronRight size={14} />
               </button>
-            ) : null}
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {recentItems.length ? (
+                recentItems.map((item) => (
+                  <TransactionCard
+                    key={item.tx.id}
+                    tx={item.tx}
+                    category={item.category}
+                    accountName={item.accountName}
+                    onClick={() => store.startEditTransaction(item.tx.id)}
+                  />
+                ))
+              ) : (
+                <EmptyState
+                  icon={<Camera size={28} />}
+                  title="เริ่มบันทึกรายการแรก"
+                  description="สแกนใบเสร็จหรือกรอกเองก็ได้ ระบบจะเริ่มจำหมวด ร้านค้า และบัญชีให้ทันที"
+                  action={
+                    <button type="button" onClick={() => openScan("receipt")} className="ui-btn ui-btn-primary">
+                      <Camera size={16} /> เริ่มสแกน
+                    </button>
+                  }
+                />
+              )}
+            </div>
           </div>
-        ) : (
-          <EmptyState
-            title="ยังไม่มีรายการ"
-            description="เริ่มบันทึกรายการแรกของคุณได้เลย"
-            action={
-              <button onClick={startNewTransaction} className="ui-btn ui-btn-primary" type="button">
-                เริ่มบันทึก
-              </button>
-            }
-          />
-        )}
+
+          <div className="space-y-4">
+            <div className="ui-card p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-sm font-black text-slate-950">Inbox workspace</div>
+                  <div className="mt-1 text-[12px] font-bold text-slate-600">
+                    จุดรวมรายการที่ยังรอ approve, แก้ซ้ำ, หรือเติมข้อมูลก่อนบันทึกจริง
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate("inbox")}
+                  className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+                >
+                  Open <ChevronRight size={14} />
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-[1.4rem] bg-slate-950 p-4 text-white">
+                <div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-white/55">Pending review</div>
+                <div className="mt-2 text-3xl font-black tabular-nums">{pendingInboxCount}</div>
+                <div className="mt-2 text-[12px] font-bold text-white/70">
+                  {duplicateInboxCount
+                    ? `มีรายการซ้ำหรือใกล้เคียง ${duplicateInboxCount} รายการ`
+                    : "ถ้าสแกนหลายใบ ระบบจะส่งมาพักไว้ที่นี่อัตโนมัติ"}
+                </div>
+              </div>
+            </div>
+
+            <div className="ui-card p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                    <Sparkles size={16} className="text-emerald-600" /> Smart signals
+                  </div>
+                  <div className="mt-1 text-[12px] font-bold text-slate-600">
+                    AI insight ยังอยู่ แต่ขยับลงมาเป็น layer รองเพื่อไม่กลบงานประจำวัน
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate("more")}
+                  className="inline-flex items-center gap-1 text-xs font-black text-emerald-700"
+                >
+                  Hub <ChevronRight size={14} />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {insights.length ? (
+                  insights.map((insight, index) => (
+                    <div key={`${insight.type}-${index}`} className="rounded-[1.25rem] border border-slate-900/10 bg-white/80 p-4">
+                      <div className="text-sm font-black text-slate-950">{insight.title}</div>
+                      <div className="mt-1 text-[12px] font-bold leading-relaxed text-slate-600">{insight.body}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-[1.25rem] border border-dashed border-slate-900/12 bg-white/60 p-4 text-[12px] font-bold leading-relaxed text-slate-600">
+                    เมื่อมีประวัติการใช้งานมากขึ้น ระบบจะช่วยชี้ pattern รายรับรายจ่าย, budget risk และหมวดที่ต้องเฝ้าดูให้จากตรงนี้
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="ui-card p-5">
+              <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                <Target size={16} className="text-emerald-600" /> What next
+              </div>
+              <div className="mt-3 space-y-2 text-[12px] font-bold leading-relaxed text-slate-600">
+                <div>ถ้าเพิ่งสแกนหลายใบ ให้ไปที่ Inbox เพื่อ approve แบบชุดเดียว</div>
+                <div>ถ้าจะเช็กงบหรือ recurring, กด Hub เพื่อเข้าถึง power tools ทั้งหมด</div>
+                <div>ถ้าบัญชียังไม่ครบ ให้เพิ่มจาก Accounts แล้วผูกเลขท้ายสลิปเพื่อจับแมตช์อัตโนมัติ</div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
   );

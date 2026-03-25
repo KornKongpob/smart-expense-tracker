@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <rect width="96" height="96" rx="24" fill="#cb2027"/>
+  <rect x="8" y="8" width="80" height="80" rx="20" fill="#dd2a32"/>
+  <circle cx="48" cy="46" r="18" stroke="#fff1f2" stroke-width="6"/>
+  <path d="M48 28v36M30 46h36" stroke="#fff1f2" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="48" cy="46" r="5" fill="#cb2027"/>
+  <text x="48" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-size="10.5" font-weight="700" fill="white">ICBC</text>
+</svg>

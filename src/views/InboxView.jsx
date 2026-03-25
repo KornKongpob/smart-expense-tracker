@@ -74,6 +74,89 @@ function normalizeTxType(t) {
   return "expense";
 }
 
+function getInboxDocType(item) {
+  return String(item?.docType || item?.doc_type || item?.scanMeta?.docType || item?.meta?.docType || "")
+    .toLowerCase()
+    .trim();
+}
+
+function formatDocTypeLabel(docType) {
+  if (docType === "receipt") return "Receipt";
+  if (docType === "transfer_slip") return "Slip";
+  if (docType === "bill_payment") return "Bill payment";
+  return docType ? docType.replace(/_/g, " ") : "";
+}
+
+function readOverallConfidence(confidence) {
+  if (typeof confidence === "number" && Number.isFinite(confidence)) {
+    if (confidence > 1) return Math.max(0, Math.min(1, confidence / 100));
+    return Math.max(0, Math.min(1, confidence));
+  }
+  if (confidence && typeof confidence === "object") {
+    return readOverallConfidence(confidence.overall ?? confidence.score ?? confidence.amount ?? null);
+  }
+  return null;
+}
+
+function getInboxAccountMatch(item) {
+  const fromScanMeta = item?.scanMeta && typeof item.scanMeta === "object" ? item.scanMeta.accountMatch : null;
+  if (fromScanMeta && typeof fromScanMeta === "object") return fromScanMeta;
+  const fromMeta = item?.meta && typeof item.meta === "object" ? item.meta.accountMatch : null;
+  if (fromMeta && typeof fromMeta === "object") return fromMeta;
+  return null;
+}
+
+function getAccountMatchBadge(item) {
+  const match = getInboxAccountMatch(item);
+  if (!match) return null;
+
+  if (String(match?.kind || "") === "pair") {
+    const fromScore = Number(match?.from?.score || 0);
+    const toScore = Number(match?.to?.score || 0);
+    const ready = !!match?.ready;
+    if (ready && fromScore >= 4 && toScore >= 4) return { label: "Account pair high", tone: "ok" };
+    if (ready && fromScore >= 3 && toScore >= 3) return { label: "Account pair medium", tone: "info" };
+    return { label: ready ? "Check account pair" : "Fix transfer accounts", tone: "warn" };
+  }
+
+  const score = Number(match?.selected?.score || 0);
+  const ready = !!match?.ready;
+  const source = String(match?.source || "").trim();
+
+  if (!ready) return { label: "Need account", tone: "warn" };
+  if (source === "model" || score >= 4) return { label: "Account match high", tone: "ok" };
+  if (score >= 3) return { label: "Account match medium", tone: "info" };
+  return { label: "Check account", tone: "warn" };
+}
+
+function getRequiredFixes(item) {
+  const txType = normalizeTxType(item?.type || item?.txType);
+  const fixes = [];
+
+  if (!isPositiveNumber(Number(item?.amount))) fixes.push("amount");
+
+  if (txType === "transfer" || txType === "credit_payment") {
+    const fromId = String(item?.fromAccountId || "").trim();
+    const toId = String(item?.toAccountId || "").trim();
+    if (!fromId) fixes.push("from account");
+    if (!toId) fixes.push("to account");
+    if (fromId && toId && fromId === toId) fixes.push("account pair");
+  } else {
+    if (!String(item?.accountId || "").trim()) fixes.push("account");
+    if (!String(item?.categoryId || item?.category || "").trim()) fixes.push("category");
+  }
+
+  if (
+    !!item?.splitByCategory &&
+    Array.isArray(item?.groups) &&
+    item.groups.some((group) => !String(group?.categoryId || group?.category || "").trim() && !isAdjustmentLike(group))
+  ) {
+    fixes.push("split categories");
+  }
+
+  return fixes;
+}
+
 function buildTransactionsFromInboxItem(item, ctx = {}) {
   const accounts = Array.isArray(ctx?.accounts) ? ctx.accounts : [];
   const txType = normalizeTxType(item?.type || item?.txType);
@@ -1191,6 +1274,10 @@ export default function InboxView({ showAlert, showConfirm }) {
             const toLabel = it?.toAccountId ? accountsById.get(it.toAccountId)?.name : "";
             const catLabel = it?.categoryId ? categoriesById.get(it.categoryId)?.name : "";
             const ref = it?.referenceId || it?.ref || "";
+            const docTypeLabel = formatDocTypeLabel(getInboxDocType(it));
+            const scanConfidence = readOverallConfidence(it?.scanMeta?.confidence || it?.meta?.confidence || null);
+            const accountMatchBadge = getAccountMatchBadge(it);
+            const requiredFixes = getRequiredFixes(it);
 
             const isSelected = selectedIds.has(it.id);
 
@@ -1221,6 +1308,39 @@ export default function InboxView({ showAlert, showConfirm }) {
                         <div className="px-2.5 py-1.5 rounded-2xl bg-amber-100/80 border border-amber-200 text-xs font-extrabold text-amber-800 inline-flex items-center gap-2">
                           <AlertTriangle size={14} />
                           Possible duplicate
+                        </div>
+                      ) : null}
+
+                      {docTypeLabel ? (
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-slate-100/90 border border-slate-200 text-xs font-extrabold text-slate-700">
+                          {docTypeLabel}
+                        </div>
+                      ) : null}
+
+                      {scanConfidence != null ? (
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-sky-100/90 border border-sky-200 text-xs font-extrabold text-sky-800">
+                          Scan {Math.round(scanConfidence * 100)}%
+                        </div>
+                      ) : null}
+
+                      {accountMatchBadge ? (
+                        <div
+                          className={[
+                            "px-2.5 py-1.5 rounded-2xl border text-xs font-extrabold",
+                            accountMatchBadge.tone === "ok"
+                              ? "bg-emerald-100/85 border-emerald-200 text-emerald-800"
+                              : accountMatchBadge.tone === "info"
+                                ? "bg-blue-100/85 border-blue-200 text-blue-800"
+                                : "bg-orange-100/90 border-orange-200 text-orange-800",
+                          ].join(" ")}
+                        >
+                          {accountMatchBadge.label}
+                        </div>
+                      ) : null}
+
+                      {requiredFixes.length ? (
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-rose-100/90 border border-rose-200 text-xs font-extrabold text-rose-800">
+                          Fix: {requiredFixes.slice(0, 2).join(", ")}
                         </div>
                       ) : null}
 

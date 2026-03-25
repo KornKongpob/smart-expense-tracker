@@ -163,6 +163,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
         right={
           <button
             onClick={openNew}
+            data-testid="recurring-add"
             className="ui-icon-btn text-gray-900 active:scale-95"
             type="button"
             aria-label="เพิ่มรายการประจำ"
@@ -233,6 +234,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
         <button
           type="button"
           onClick={runNow}
+          data-testid="recurring-run-now"
           className="px-4 py-3 rounded-2xl bg-emerald-600/90 text-white font-extrabold active:scale-95 shadow-sm inline-flex items-center gap-2"
         >
           <PlayCircle size={18} /> Run
@@ -315,6 +317,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                       <button
                         type="button"
                         onClick={() => toggle(r)}
+                        data-testid={`recurring-toggle-${r.id}`}
                         className={`w-14 h-8 rounded-full transition-all relative ${
                           r.enabled ? "bg-gray-900/90" : "bg-white/25"
                         } border border-white/25`}
@@ -331,6 +334,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                         <button
                           type="button"
                           onClick={() => openEdit(r)}
+                          data-testid={`recurring-edit-${r.id}`}
                           className="w-10 h-10 rounded-full glass-icon-btn text-gray-800 flex items-center justify-center active:scale-95"
                           title="แก้ไข"
                         >
@@ -340,6 +344,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                         <button
                           type="button"
                           onClick={() => remove(r.id)}
+                          data-testid={`recurring-delete-${r.id}`}
                           className="w-10 h-10 rounded-full bg-red-500/10 text-red-700 flex items-center justify-center active:scale-95 border border-red-500/15"
                           title="ลบ"
                         >
@@ -389,6 +394,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             value={amount}
             onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
             inputMode="decimal"
+            data-testid="recurring-amount-input"
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
           />
 
@@ -413,6 +419,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
+            data-testid="recurring-note-input"
             className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
             placeholder="เช่น ค่าเช่า, Netflix"
           />
@@ -424,6 +431,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
+                data-testid="recurring-start-input"
                 className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
               />
             </div>
@@ -483,6 +491,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={save}
+              data-testid="recurring-save"
               className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
             >
               <Check size={18} /> บันทึก

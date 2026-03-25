@@ -169,7 +169,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
         subtitle="จำร้าน → หมวด/บัญชี อัตโนมัติ (หลัง Save scan หรือ Approve ใน Inbox)"
         onBack={() => navigate("more")}
         right={
-          <button type="button" onClick={openAdd} className="ui-btn ui-btn-primary active:scale-[0.99]">
+          <button type="button" onClick={openAdd} data-testid="merchant-add" className="ui-btn ui-btn-primary active:scale-[0.99]">
             <Plus size={18} />
             เพิ่ม
           </button>
@@ -288,6 +288,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                     <button
                       type="button"
                       onClick={() => openEdit(m)}
+                      data-testid={`merchant-edit-${m.id}`}
                       className="ui-btn ui-btn-secondary"
                     >
                       <Edit2 size={16} />
@@ -296,6 +297,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                     <button
                       type="button"
                       onClick={() => openMerge(m)}
+                      data-testid={`merchant-merge-${m.id}`}
                       className="ui-btn ui-btn-secondary"
                     >
                       <GitMerge size={16} />
@@ -304,6 +306,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                     <button
                       type="button"
                       onClick={() => confirmDelete(m)}
+                      data-testid={`merchant-delete-${m.id}`}
                       className="px-4 py-2 rounded-2xl bg-red-600 text-white font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
                     >
                       <Trash2 size={16} />
@@ -342,6 +345,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             <input
               value={editing?.canonical || ""}
               onChange={(e) => setEditing((d) => ({ ...d, canonical: e.target.value }))}
+              data-testid="merchant-name-input"
               placeholder="เช่น 7-ELEVEN"
               className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
             />
@@ -361,6 +365,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             <textarea
               value={editing?.aliasesText ?? (Array.isArray(editing?.aliases) ? editing.aliases.join("\n") : "")}
               onChange={(e) => setEditing((d) => ({ ...d, aliasesText: e.target.value }))}
+              data-testid="merchant-aliases-input"
               rows={4}
               className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
               placeholder="7-11\nSeven Eleven\n7eleven"
@@ -438,6 +443,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
           <button
             type="button"
             onClick={commitEdit}
+            data-testid="merchant-save"
             className="mt-1 px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
           >
             <Check size={18} />
@@ -472,6 +478,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             <select
               value={mergeTargetId}
               onChange={(e) => setMergeTargetId(e.target.value)}
+              data-testid="merchant-merge-target"
               className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
             >
               <option value="">เลือกปลายทาง</option>
@@ -489,6 +496,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
           <button
             type="button"
             onClick={commitMerge}
+            data-testid="merchant-merge-save"
             disabled={!mergeTargetId}
             className={`px-4 py-3 rounded-2xl font-extrabold active:scale-95 inline-flex items-center justify-center gap-2 ${
               mergeTargetId ? "bg-indigo-600 text-white" : "bg-white/20 text-gray-700/50 border border-white/20"

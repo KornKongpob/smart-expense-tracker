@@ -121,7 +121,7 @@ export default function ConfirmationModal({
 
           {/* Actions */}
           <div className="flex gap-3 mt-5">
-            <button type="button" onClick={onCancel} className="ui-btn ui-btn-secondary flex-1">
+            <button type="button" onClick={onCancel} data-testid="confirm-cancel" className="ui-btn ui-btn-secondary flex-1">
               {cancelText}
             </button>
 
@@ -129,6 +129,7 @@ export default function ConfirmationModal({
               ref={confirmBtnRef}
               type="button"
               onClick={onConfirm}
+              data-testid="confirm-accept"
               className={[
                 "ui-btn flex-1",
                 "focus-visible:ring-4",

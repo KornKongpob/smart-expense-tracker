@@ -329,6 +329,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
           <button
             type="button"
             onClick={() => openNew("")}
+            data-testid="categories-add"
             className="ui-icon-btn text-gray-800 active:scale-95"
             aria-label="เพิ่มหมวด"
             title="เพิ่มหมวด"
@@ -615,6 +616,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                data-testid="category-name-input"
                 className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
                 placeholder="เช่น อาหาร, กาแฟ"
               />
@@ -714,6 +716,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                 <input
                   value={kwInput}
                   onChange={(e) => setKwInput(e.target.value)}
+                  data-testid="category-keyword-input"
                   className="flex-1 px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
                   placeholder="พิมพ์คำ แล้วกดเพิ่ม (คั่นด้วย , หรือขึ้นบรรทัดใหม่ได้)"
                 />
@@ -748,6 +751,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={addOrSave}
+              data-testid="categories-save"
               className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
             >
               <Check size={18} />

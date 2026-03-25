@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <rect width="96" height="96" rx="24" fill="#f97316"/>
+  <rect x="8" y="8" width="80" height="80" rx="20" fill="#fb923c"/>
+  <path d="M26 32h44v10H54v22H42V42H26z" fill="#fff7ed"/>
+  <path d="M62 44c4 0 8 3 8 8s-4 8-8 8-8-3-8-8 4-8 8-8Z" fill="#fff7ed"/>
+  <text x="48" y="82" text-anchor="middle" font-family="Arial, sans-serif" font-size="9.5" font-weight="700" fill="white">TRUEMONEY</text>
+</svg>

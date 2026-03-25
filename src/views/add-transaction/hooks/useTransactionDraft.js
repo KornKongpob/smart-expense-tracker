@@ -2,20 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 
 export function useTransactionDraft({ initialData, isEditMode, transferKindForEdit, transferPair, accounts, toISODate, normalizeLatLng }) {
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan");
-  
-  // One-shot entry mode override (e.g., from Inbox/Quick Add)
-  useEffect(() => {
-    if (isEditMode) return;
-    try {
-      const forced = String(sessionStorage.getItem("add.entryMode.force") || "").trim();
-      if (forced) {
-        setEntryMode(forced);
-        sessionStorage.removeItem("add.entryMode.force");
-      }
-    } catch {
-      // ignore
-    }
-  }, [isEditMode]);
 
 const [scanUploadKind, setScanUploadKind] = useState("receipt");
 
@@ -44,6 +30,35 @@ const [scanUploadKind, setScanUploadKind] = useState("receipt");
     return norm ? { ...norm } : null;
   });
   const [nearbySuggestion, setNearbySuggestion] = useState(null);
+
+  // One-shot entry mode override (e.g., from Inbox/Quick Add)
+  useEffect(() => {
+    if (isEditMode) return;
+    try {
+      const forced = String(sessionStorage.getItem("add.entryMode.force") || "").trim();
+      if (forced) {
+        setEntryMode(forced);
+        sessionStorage.removeItem("add.entryMode.force");
+      }
+
+      const forcedScanKind = String(sessionStorage.getItem("add.scanUploadKind.force") || "").trim();
+      if (forcedScanKind === "receipt" || forcedScanKind === "slip") {
+        setEntryMode("scan");
+        setScanUploadKind(forcedScanKind);
+        sessionStorage.removeItem("add.scanUploadKind.force");
+      }
+
+      const forcedType = String(sessionStorage.getItem("add.txType.force") || "").trim();
+      if (forcedType === "expense" || forcedType === "income" || forcedType === "transfer" || forcedType === "credit_payment") {
+        setEntryMode("manual");
+        setType(forcedType);
+        if (forcedType === "transfer" || forcedType === "credit_payment") setCategoryId("transfer");
+        sessionStorage.removeItem("add.txType.force");
+      }
+    } catch {
+      // ignore
+    }
+  }, [isEditMode]);
 
   return {
     entryMode,

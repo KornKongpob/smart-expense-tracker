@@ -48,6 +48,7 @@ export default function AccountPicker({
   emptyLabel = "(ไม่ระบุ)",
   disabled = false,
   className,
+  testId,
 }) {
   const btnRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -314,6 +315,7 @@ export default function AccountPicker({
         type="button"
         disabled={disabled}
         onClick={() => setOpen(true)}
+        data-testid={testId}
         className={cn(
           "w-full rounded-2xl px-4 py-3 text-left",
           "border border-white/25 bg-white/35 backdrop-blur",
