@@ -33,7 +33,7 @@ export default function ScanQueueList({
     <div className="mb-28">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h3 className="text-sm font-extrabold text-gray-900">
+          <h3 className="text-sm font-semibold text-gray-900">
             คิวตรวจสอบ <span className="text-gray-800/50">({list.length})</span>
           </h3>
           <div className="mt-1 text-[12px] font-medium text-gray-700/60">
@@ -73,7 +73,7 @@ export default function ScanQueueList({
                         <div className="w-full h-full flex items-center justify-center">
                           <div className="inline-flex flex-col items-center text-gray-900/80">
                             <FileText size={16} />
-                            <span className="text-[10px] font-extrabold mt-1">PDF</span>
+                            <span className="text-[10px] font-semibold mt-1">PDF</span>
                           </div>
                         </div>
                       ) : (
@@ -85,30 +85,30 @@ export default function ScanQueueList({
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-white/30 text-gray-900 border border-white/15">
+                    <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-white/30 text-gray-900 border border-white/15">
                       {badge}
                     </span>
 
                     {q.status === "scanning" ? (
-                      <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-indigo-500/15 text-indigo-700 border border-indigo-500/20">
+                      <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-indigo-500/15 text-indigo-700 border border-indigo-500/20">
                         Scanning...
                       </span>
                     ) : null}
 
                     {q.status === "error" ? (
-                      <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-red-500/10 text-red-700 border border-red-500/15">
+                      <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-red-500/10 text-red-700 border border-red-500/15">
                         Error
                       </span>
                     ) : null}
 
                     {q.duplicate ? (
-                      <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-amber-500/15 text-amber-800 inline-flex items-center gap-1 border border-amber-500/20">
+                      <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-500/15 text-amber-800 inline-flex items-center gap-1 border border-amber-500/20">
                         <AlertTriangle size={12} /> {dupBadgeText}
                       </span>
                     ) : null}
                   </div>
 
-                  <div className="mt-2 text-sm font-extrabold text-gray-900 truncate">
+                  <div className="mt-2 text-sm font-semibold text-gray-900 truncate">
                     {q.amount != null
                       ? formatCurrency(q.amount)
                       : q.status === "error"

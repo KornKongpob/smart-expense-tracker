@@ -341,43 +341,8 @@ export default function CategoriesView({ showAlert, showConfirm }) {
 
       <main className="ui-page pt-4 pb-6 view-flow">
 
-      <div className="view-hero">
-        <div className="view-hero-content">
-          <div>
-            <div className="view-eyebrow">Category system</div>
-            <div className="view-hero-title">จัดโครงสร้างหมวดหลัก หมวดย่อย และ keyword สำหรับการสแกน</div>
-            <div className="view-hero-copy">
-              ดูโครงสร้างหมวดทั้งหมด และค้นหาหมวดหรือ keyword ที่ต้องการแก้ได้เร็วขึ้น
-            </div>
-          </div>
-
-          <div className="view-hero-grid">
-            <div className="view-metric">
-              <div className="view-metric-label">หมวดหลัก</div>
-              <div className="view-metric-value">{counts.mains}</div>
-              <div className="view-metric-hint">หมวดระดับแรกที่ใช้เป็นโครงสร้างหลักของรายการ</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">หมวดย่อย</div>
-              <div className="view-metric-value">{counts.subs}</div>
-              <div className="view-metric-hint">หมวดที่ถูกผูกอยู่ใต้หมวดหลัก</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">ประเภทที่ดูอยู่</div>
-              <div className="view-metric-value">{tab === "expense" ? "รายจ่าย" : "รายรับ"}</div>
-              <div className="view-metric-hint">สลับมุมมองเพื่อจัดหมวดสำหรับแต่ละ transaction type</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">สถานะค้นหา</div>
-              <div className="view-metric-value">{isSearching ? "Filtered" : "All"}</div>
-              <div className="view-metric-hint">{isSearching ? `กำลังค้นหาด้วย “${q}”` : "แสดงหมวดทั้งหมดตามโครงสร้างปัจจุบัน"}</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Summary */}
+      <div className="text-[13px] text-slate-500 mb-1">หมวดหลัก {counts.mains} • หมวดย่อย {counts.subs}</div>
 
       <div className="view-segmented mb-4">
         <button
@@ -410,8 +375,8 @@ export default function CategoriesView({ showAlert, showConfirm }) {
 
       <div className="ui-card p-3 rounded-2xl mb-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-extrabold text-gray-900/70">สรุป</div>
-          <div className="text-sm font-extrabold text-gray-900 truncate">
+          <div className="text-xs font-semibold text-gray-900/70">สรุป</div>
+          <div className="text-sm font-semibold text-gray-900 truncate">
             หมวดหลัก {counts.mains} • หมวดย่อย {counts.subs} • ทั้งหมด {counts.total}
           </div>
           {isSearching ? <div className="text-[11px] text-gray-900/55 mt-0.5">กำลังแสดงผลตามคำค้นหา</div> : null}
@@ -420,7 +385,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
           <button
             type="button"
             onClick={collapseAll}
-            className="px-3 py-2 rounded-2xl bg-white/25 border border-white/20 text-xs font-extrabold text-gray-900/80 active:scale-95"
+            className="px-3 py-2 rounded-2xl bg-white/25 border border-white/20 text-xs font-semibold text-gray-900/80 active:scale-95"
             title="ย่อทั้งหมด"
           >
             ย่อทั้งหมด
@@ -428,7 +393,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
           <button
             type="button"
             onClick={expandAll}
-            className="px-3 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+            className="px-3 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-semibold active:scale-95"
             title="ขยายทั้งหมด"
           >
             ขยายทั้งหมด
@@ -458,7 +423,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                       {parent.icon}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-extrabold text-gray-900 truncate flex items-center gap-2">
+                      <div className="font-semibold text-gray-900 truncate flex items-center gap-2">
                         {canExpand ? (
                           <span
                             className={`inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/25 border border-white/20 text-gray-900/70 transition-transform ${
@@ -522,11 +487,11 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                 {kids.length && isExpanded ? (
                   <div className="border-t border-white/15 px-4 py-3 bg-white/5">
                     <div className="flex items-center justify-between gap-3 mb-2">
-                      <div className="text-xs font-extrabold text-gray-900/70">หมวดย่อย ({kids.length})</div>
+                      <div className="text-xs font-semibold text-gray-900/70">หมวดย่อย ({kids.length})</div>
                       <button
                         type="button"
                         onClick={() => openNew(parent.id)}
-                        className="px-3 py-2 rounded-2xl bg-white/25 border border-white/20 text-xs font-extrabold text-gray-900/80 active:scale-95"
+                        className="px-3 py-2 rounded-2xl bg-white/25 border border-white/20 text-xs font-semibold text-gray-900/80 active:scale-95"
                       >
                         + เพิ่มหมวดย่อย
                       </button>
@@ -548,7 +513,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                                   {c.icon}
                                 </div>
                                 <div className="min-w-0">
-                                  <div className="text-sm font-extrabold text-gray-900 truncate">{c.name}</div>
+                                  <div className="text-sm font-semibold text-gray-900 truncate">{c.name}</div>
                                   <div className="text-[11px] text-gray-700/70">
                                     {c.keywords?.length ? (
                                       <>
@@ -600,8 +565,8 @@ export default function CategoriesView({ showAlert, showConfirm }) {
             <div className="w-16 h-16 glass-chip rounded-full flex items-center justify-center mx-auto mb-3 text-gray-600">
               <CornerDownRight size={28} />
             </div>
-            <p className="text-gray-800 font-extrabold">ไม่พบหมวดหมู่</p>
-            <button onClick={() => openNew("")} className="mt-3 text-emerald-700 text-sm font-extrabold" type="button">
+            <p className="text-gray-800 font-semibold">ไม่พบหมวดหมู่</p>
+            <button onClick={() => openNew("")} className="mt-3 text-emerald-700 text-sm font-semibold" type="button">
               เพิ่มหมวดหมู่
             </button>
           </div>
@@ -617,7 +582,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 data-testid="category-name-input"
-                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
                 placeholder="เช่น อาหาร, กาแฟ"
               />
             </label>
@@ -628,7 +593,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                 <input
                   value={icon}
                   onChange={(e) => setIcon(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
                   placeholder="🏷️"
                 />
               </label>
@@ -637,7 +602,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                 <select
                   value={color}
                   onChange={(e) => setColor(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
                 >
                   {PRESET_COLORS.map((c) => (
                     <option key={c} value={c}>
@@ -649,7 +614,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
             </div>
 
             <div>
-              <div className="text-xs font-extrabold text-gray-900/70 mb-2">โครงสร้าง</div>
+              <div className="text-xs font-semibold text-gray-900/70 mb-2">โครงสร้าง</div>
               {editingHasChildren ? (
                 <div className="text-[11px] text-amber-900/70 mb-2">
                   หมวดนี้มีหมวดย่อยอยู่แล้ว จึงถูกล็อกให้เป็น “หมวดหลัก” (กันโครงสร้างซ้อน 3 ชั้น)
@@ -664,7 +629,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                     setParentId("");
                   }}
                   disabled={editingHasChildren}
-                  className={`flex-1 py-2.5 rounded-xl text-xs font-extrabold ${
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-semibold ${
                     editingHasChildren || level === "main" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
                   } ${editingHasChildren ? "opacity-80" : ""}`}
                 >
@@ -680,7 +645,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                     }
                   }}
                   disabled={editingHasChildren}
-                  className={`flex-1 py-2.5 rounded-xl text-xs font-extrabold ${
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-semibold ${
                     !editingHasChildren && level === "sub" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-600"
                   } ${editingHasChildren ? "opacity-80" : ""}`}
                 >
@@ -695,7 +660,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                   <select
                     value={parentId}
                     onChange={(e) => setParentId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                    className="w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
                   >
                     <option value="">(เลือกหมวดหลัก)</option>
                     {parentOptions.map((p) => (
@@ -711,19 +676,19 @@ export default function CategoriesView({ showAlert, showConfirm }) {
 
             {/* Keywords */}
             <div>
-              <div className="text-xs font-extrabold text-gray-900/70 mb-1">Keywords (ช่วยจัดหมวดจากการสแกน)</div>
+              <div className="text-xs font-semibold text-gray-900/70 mb-1">Keywords (ช่วยจัดหมวดจากการสแกน)</div>
               <div className="flex gap-2">
                 <input
                   value={kwInput}
                   onChange={(e) => setKwInput(e.target.value)}
                   data-testid="category-keyword-input"
-                  className="flex-1 px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                  className="flex-1 px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
                   placeholder="พิมพ์คำ แล้วกดเพิ่ม (คั่นด้วย , หรือขึ้นบรรทัดใหม่ได้)"
                 />
                 <button
                   type="button"
                   onClick={addKeyword}
-                  className="px-4 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-extrabold active:scale-95"
+                  className="px-4 py-2 rounded-2xl bg-gray-900/90 text-white text-xs font-semibold active:scale-95"
                 >
                   + เพิ่ม
                 </button>
@@ -736,7 +701,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
                       key={kw}
                       type="button"
                       onClick={() => removeKeyword(kw)}
-                      className="px-3 py-1.5 rounded-full bg-white/20 border border-white/20 text-[11px] font-extrabold text-gray-900/80 active:scale-95"
+                      className="px-3 py-1.5 rounded-full bg-white/20 border border-white/20 text-[11px] font-semibold text-gray-900/80 active:scale-95"
                       title="ลบ keyword"
                     >
                       {kw} <span className="text-gray-900/50">×</span>
@@ -752,7 +717,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
               type="button"
               onClick={addOrSave}
               data-testid="categories-save"
-              className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
+              className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-semibold active:scale-95 inline-flex items-center justify-center gap-2"
             >
               <Check size={18} />
               {editingId ? "บันทึก" : "สร้างหมวด"}

@@ -219,42 +219,13 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
       <main className="ui-page pt-4 pb-6 view-flow">
 
-      <div className="view-hero">
-        <div className="view-hero-content">
-          <div>
-            <div className="view-eyebrow">Budget planner</div>
-            <div className="view-hero-title">ควบคุมงบรวม งบรายวัน และงบรายหมวดในหน้าจอเดียว</div>
-            <div className="view-hero-copy">
-              ดูการใช้จ่ายเทียบงบของเดือนนี้ แล้วแตะเข้าไปแก้เฉพาะส่วนที่ต้องการได้ทันที
-            </div>
-          </div>
-
-          <div className="view-hero-grid">
-            <div className="view-metric">
-              <div className="view-metric-label">ใช้จ่ายแล้ว</div>
-              <div className="view-metric-value tabular-nums">{formatCurrency(summary.totalSpent)}</div>
-              <div className="view-metric-hint">{summary.totalLimit ? `จากงบรวม ${formatCurrency(summary.totalLimit)}` : "ยังไม่ได้ตั้งงบรวม"}</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">สถานะเตือน</div>
-              <div className="view-metric-value">{summary.alertCount ? `${summary.alertCount} alert` : "ปกติ"}</div>
-              <div className="view-metric-hint">ระบบเตือนเมื่อใช้เกินระดับที่กำหนดไว้ในแต่ละงบ</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">งบที่จัดการได้</div>
-              <div className="view-metric-value">{rows.length}</div>
-              <div className="view-metric-hint">รวมงบหมวดหมู่และงบพิเศษสำหรับ dashboard</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">เดือนที่กำลังดู</div>
-              <div className="view-metric-value">{formatMonthLabelTH(month)}</div>
-              <div className="view-metric-hint">สลับเดือนซ้ายขวาจากปุ่มบน header</div>
-            </div>
-          </div>
+      {/* Summary bar */}
+      <div className="ui-card p-4 flex items-center justify-between gap-3">
+        <div className="text-[13px] text-slate-500">
+          ใช้ไป <span className="font-semibold text-slate-900 tabular-nums" style={{ fontFamily: "'Inter', sans-serif" }}>{formatCurrency(summary.totalSpent)}</span>
+          {summary.totalLimit ? ` / ${formatCurrency(summary.totalLimit)}` : ""}
         </div>
+        <div className="text-[13px] text-slate-500">{summary.alertCount ? `⚠️ เกินงบ ${summary.alertCount}` : "✅ ปกติ"}</div>
       </div>
 
       {/* Summary */}
@@ -262,7 +233,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs font-bold text-gray-900/60 uppercase">สรุปเดือนนี้</div>
-            <div className="mt-1 text-lg font-extrabold text-gray-900">
+            <div className="mt-1 text-lg font-semibold text-gray-900">
               ใช้ไป {formatCurrency(summary.totalSpent)}
               {summary.totalLimit ? (
                 <span className="text-gray-800/60 text-sm font-bold"> / งบรวม {formatCurrency(summary.totalLimit)}</span>
@@ -273,11 +244,11 @@ export default function BudgetsView({ showAlert, showConfirm }) {
           </div>
 
           {summary.alertCount ? (
-            <div className="px-3 py-1.5 rounded-full bg-amber-500/15 text-amber-900 text-xs font-extrabold inline-flex items-center gap-1 border border-amber-500/20 shrink-0">
+            <div className="px-3 py-1.5 rounded-full bg-amber-500/15 text-amber-900 text-xs font-semibold inline-flex items-center gap-1 border border-amber-500/20 shrink-0">
               <Bell size={14} /> Alert {summary.alertCount}
             </div>
           ) : (
-            <div className="px-3 py-1.5 rounded-full bg-white/20 text-gray-800/70 text-xs font-extrabold border border-white/20 shrink-0">
+            <div className="px-3 py-1.5 rounded-full bg-white/20 text-gray-800/70 text-xs font-semibold border border-white/20 shrink-0">
               ปกติ
             </div>
           )}
@@ -326,11 +297,11 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                   className="glass-panel border border-white/20 rounded-2xl p-4 text-left active:scale-[0.99]"
                   title="แตะเพื่อตั้ง/แก้ไข Daily budget"
                 >
-                  <div className="text-xs font-extrabold text-gray-900/70 flex items-center gap-2">
+                  <div className="text-xs font-semibold text-gray-900/70 flex items-center gap-2">
                     <span className="text-lg">{PSEUDO_BUDGET_CATS[BUDGET_DAILY_ID].icon}</span> Daily budget
                   </div>
 
-                  <div className="mt-1 text-sm font-extrabold text-gray-900">
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
                     {dailyLimit ? formatCurrency(dailyLimit) : <span className="text-gray-500">ยังไม่ตั้ง</span>}
                   </div>
 
@@ -338,11 +309,11 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                     {isCurrentMonth ? (
                       dailyLimit ? (
                         <>
-                          วันนี้ใช้ไป <span className="font-extrabold">{formatCurrency(daySpent)}</span> ({dayPct}%)
+                          วันนี้ใช้ไป <span className="font-semibold">{formatCurrency(daySpent)}</span> ({dayPct}%)
                         </>
                       ) : (
                         <>
-                          วันนี้ใช้ไป <span className="font-extrabold">{formatCurrency(daySpent)}</span>
+                          วันนี้ใช้ไป <span className="font-semibold">{formatCurrency(daySpent)}</span>
                         </>
                       )
                     ) : (
@@ -359,7 +330,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                         />
                       </div>
                       <div
-                        className={`mt-2 text-[11px] font-extrabold ${dayOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
+                        className={`mt-2 text-[11px] font-semibold ${dayOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
                       >
                         {dayOver > 0
                           ? `เกินงบ ${formatCurrency(dayOver)}`
@@ -380,11 +351,11 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                   className="glass-panel border border-white/20 rounded-2xl p-4 text-left active:scale-[0.99]"
                   title="แตะเพื่อตั้ง/แก้ไข Monthly budget"
                 >
-                  <div className="text-xs font-extrabold text-gray-900/70 flex items-center gap-2">
+                  <div className="text-xs font-semibold text-gray-900/70 flex items-center gap-2">
                     <span className="text-lg">{PSEUDO_BUDGET_CATS[BUDGET_TOTAL_ID].icon}</span> Monthly budget
                   </div>
 
-                  <div className="mt-1 text-sm font-extrabold text-gray-900">
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
                     {monthlyLimit ? formatCurrency(monthlyLimit) : <span className="text-gray-500">ยังไม่ตั้ง</span>}
                   </div>
 
@@ -392,16 +363,16 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                     {monthlyLimit ? (
                       Number(overallMonthlyBudget?.limit || 0) > 0 ? (
                         <>
-                          ใช้ไป <span className="font-extrabold">{formatCurrency(monthSpent)}</span> ({monthPct}%)
+                          ใช้ไป <span className="font-semibold">{formatCurrency(monthSpent)}</span> ({monthPct}%)
                         </>
                       ) : (
                         <>
-                          ใช้ไป <span className="font-extrabold">{formatCurrency(monthSpent)}</span> ({monthPct}%) • รวมจากหมวด
+                          ใช้ไป <span className="font-semibold">{formatCurrency(monthSpent)}</span> ({monthPct}%) • รวมจากหมวด
                         </>
                       )
                     ) : (
                       <>
-                        ใช้ไป <span className="font-extrabold">{formatCurrency(monthSpent)}</span>
+                        ใช้ไป <span className="font-semibold">{formatCurrency(monthSpent)}</span>
                       </>
                     )}
                   </div>
@@ -415,7 +386,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                         />
                       </div>
                       <div
-                        className={`mt-2 text-[11px] font-extrabold ${monthOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
+                        className={`mt-2 text-[11px] font-semibold ${monthOver > 0 ? "text-red-700" : "text-gray-900/60"}`}
                       >
                         {monthOver > 0
                           ? `เกินงบ ${formatCurrency(monthOver)}`
@@ -459,14 +430,14 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                   </div>
 
                   <div className="min-w-0">
-                    <div className="font-extrabold text-gray-900 truncate">{cat.name}</div>
+                    <div className="font-semibold text-gray-900 truncate">{cat.name}</div>
 
                     <div className="text-xs text-gray-700/80 mt-0.5">
-                      ใช้แล้ว <span className="font-extrabold">{formatCurrency(spent)}</span>
+                      ใช้แล้ว <span className="font-semibold">{formatCurrency(spent)}</span>
                       {lim ? (
                         <>
                           {" "}
-                          / งบ <span className="font-extrabold">{formatCurrency(lim)}</span>{" "}
+                          / งบ <span className="font-semibold">{formatCurrency(lim)}</span>{" "}
                           <span className={`${alert ? "text-amber-800" : "text-gray-700/80"}`}>
                             ({pct}% • เตือนที่ {ap}%)
                           </span>
@@ -489,7 +460,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                 </div>
 
                 {alert ? (
-                  <div className="px-3 py-1 rounded-full glass-chip text-amber-900 text-xs font-extrabold inline-flex items-center gap-1 shrink-0">
+                  <div className="px-3 py-1 rounded-full glass-chip text-amber-900 text-xs font-semibold inline-flex items-center gap-1 shrink-0">
                     <Bell size={14} /> Alert
                   </div>
                 ) : null}
@@ -525,11 +496,11 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
             <div className="min-w-0">
               <div className="text-xs text-gray-800/60">หมวดหมู่</div>
-              <div className="text-sm font-extrabold text-gray-900 truncate">
+              <div className="text-sm font-semibold text-gray-900 truncate">
                 {editingCat?.name || editingCategoryId}
               </div>
               <div className="text-[12px] text-gray-800/60 mt-0.5">
-                ใช้แล้วเดือนนี้: <span className="font-extrabold text-gray-900">{formatCurrency(editingSpent)}</span>
+                ใช้แล้วเดือนนี้: <span className="font-semibold text-gray-900">{formatCurrency(editingSpent)}</span>
               </div>
             </div>
           </div>
@@ -541,7 +512,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
               }`}
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="text-xs font-extrabold text-gray-900/70">
+                <div className="text-xs font-semibold text-gray-900/70">
                   สถานะ:{" "}
                   {preview.willAlert ? (
                     <span className="text-amber-800">เตือนแล้ว ({preview.pct}%)</span>
@@ -550,7 +521,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                   )}
                 </div>
                 {preview.willAlert ? (
-                  <div className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-amber-500/15 text-amber-900 border border-amber-500/20">
+                  <div className="text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-500/15 text-amber-900 border border-amber-500/20">
                     <Bell size={12} className="inline-block mr-1" />
                     Alert
                   </div>
@@ -583,7 +554,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             onChange={(e) => setLimit(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
             inputMode="decimal"
             data-testid="budget-limit-input"
-            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-semibold text-gray-900"
             placeholder="เช่น 5000.00"
           />
 
@@ -593,7 +564,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                 key={v}
                 type="button"
                 onClick={() => setLimit(String(v))}
-                className="px-3 py-1.5 rounded-full glass-chip text-[12px] font-extrabold text-gray-900/80 border border-white/20 active:scale-95"
+                className="px-3 py-1.5 rounded-full glass-chip text-[12px] font-semibold text-gray-900/80 border border-white/20 active:scale-95"
                 title={`ตั้ง ${v}`}
               >
                 {formatCurrency(v * 100)}
@@ -609,7 +580,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             min="10"
             max="100"
             data-testid="budget-alert-input"
-            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-semibold text-gray-900"
             placeholder="90"
           />
 
@@ -619,7 +590,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
                 key={v}
                 type="button"
                 onClick={() => setAlertPct(String(v))}
-                className="flex-1 py-2 rounded-2xl glass-chip font-extrabold text-gray-900/80 border border-white/20 active:scale-95"
+                className="flex-1 py-2 rounded-2xl glass-chip font-semibold text-gray-900/80 border border-white/20 active:scale-95"
               >
                 {v}%
               </button>
@@ -632,7 +603,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="flex-1 py-3 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
+              className="flex-1 py-3 rounded-2xl glass-chip font-semibold text-gray-800 active:scale-95"
             >
               ยกเลิก
             </button>
@@ -640,7 +611,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
               type="button"
               onClick={save}
               data-testid="budget-save"
-              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
+              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-semibold flex items-center justify-center gap-2 active:scale-95"
             >
               <Check size={18} /> บันทึก
             </button>
@@ -650,7 +621,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={remove}
-              className="w-full mt-3 py-3 rounded-2xl bg-red-500/10 text-red-700 font-extrabold flex items-center justify-center gap-2 border border-red-500/15"
+              className="w-full mt-3 py-3 rounded-2xl bg-red-500/10 text-red-700 font-semibold flex items-center justify-center gap-2 border border-red-500/15"
             >
               <Trash2 size={18} /> ลบงบประมาณ
             </button>

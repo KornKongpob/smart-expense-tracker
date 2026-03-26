@@ -51,7 +51,7 @@ export default function AccountChipsPicker({
     : "w-7 h-7 rounded-xl overflow-hidden bg-white/20 border border-white/15 shrink-0 flex items-center justify-center";
 
   const emojiIconClass = isCompact ? "text-base leading-none" : "text-xl leading-none";
-  const labelClass = isCompact ? "text-xs font-extrabold truncate max-w-[9.5rem]" : "text-sm font-extrabold truncate";
+  const labelClass = isCompact ? "text-xs font-semibold truncate max-w-[9.5rem]" : "text-sm font-semibold truncate";
   const checkSize = isCompact ? 12 : 14;
 
   return (
@@ -93,7 +93,7 @@ export default function AccountChipsPicker({
 
       {showSelectedText && selected?.name ? (
         <div className="text-xs text-gray-900/55 ml-1">
-          เลือกบัญชี: <span className="font-extrabold text-gray-900">{selected.name}</span>
+          เลือกบัญชี: <span className="font-semibold text-gray-900">{selected.name}</span>
         </div>
       ) : null}
     </div>

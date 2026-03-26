@@ -271,43 +271,8 @@ const applyTemplate = (tpl) => {
 
       <main className="ui-page pt-4 pb-6 view-flow">
 
-      <div className="view-hero">
-        <div className="view-hero-content">
-          <div>
-            <div className="view-eyebrow">Automation rules</div>
-            <div className="view-hero-title">กำหนดกฎสำหรับเติมข้อมูลจากสลิปและ inbox แบบอัตโนมัติ</div>
-            <div className="view-hero-copy">
-              ดูกฎที่เปิดอยู่ จัดลำดับความสำคัญ เปิดปิด และสร้าง template ใหม่ได้จากหน้าเดียว
-            </div>
-          </div>
-
-          <div className="view-hero-grid">
-            <div className="view-metric">
-              <div className="view-metric-label">เปิดใช้งาน</div>
-              <div className="view-metric-value">{enabledCount}</div>
-              <div className="view-metric-hint">กฎที่พร้อมทำงานอัตโนมัติเมื่อมีรายการเข้าเงื่อนไข</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">ปิดอยู่</div>
-              <div className="view-metric-value">{Math.max(0, rules.length - enabledCount)}</div>
-              <div className="view-metric-hint">เก็บไว้ใช้ภายหลังได้โดยไม่ต้องลบทิ้ง</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">กฎทั้งหมด</div>
-              <div className="view-metric-value">{rules.length}</div>
-              <div className="view-metric-hint">เรียงลำดับจาก priority บนลงล่างในรายการด้านล่าง</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">Quick start</div>
-              <div className="view-metric-value">Templates</div>
-              <div className="view-metric-hint">มี preset สำหรับ expense, transfer และจ่ายบัตรเครดิตใน modal</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Summary */}
+      <div className="text-[13px] text-slate-500">เปิดใช้ {enabledCount} จาก {rules.length} กฎ</div>
 
       <div className="ui-card overflow-hidden">
         {rules.length ? (
@@ -316,13 +281,13 @@ const applyTemplate = (tpl) => {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <div className="font-extrabold text-gray-900 truncate">{r.name || "Automation Rule"}</div>
+                    <div className="font-semibold text-gray-900 truncate">{r.name || "Automation Rule"}</div>
                     {r.enabled !== false ? (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600/15 text-emerald-800 font-extrabold">ON</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600/15 text-emerald-800 font-semibold">ON</span>
                     ) : (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-500/15 text-gray-700 font-extrabold">OFF</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-500/15 text-gray-700 font-semibold">OFF</span>
                     )}
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-600/12 text-indigo-800 font-extrabold">#{r.priority}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-600/12 text-indigo-800 font-semibold">#{r.priority}</span>
                   </div>
 
                   <div className="text-xs text-gray-700/70 mt-1 break-words">
@@ -394,7 +359,7 @@ const applyTemplate = (tpl) => {
           ))
         ) : (
           <div className="p-6 text-center">
-            <div className="text-gray-900 font-extrabold">ยังไม่มี Automation Rules</div>
+            <div className="text-gray-900 font-semibold">ยังไม่มี Automation Rules</div>
             <div className="text-xs text-gray-700/70 mt-1">กด + เพื่อสร้าง Rule เพื่อ auto-fill fields หลังสแกน</div>
           </div>
         )}
@@ -404,7 +369,7 @@ const applyTemplate = (tpl) => {
         <ModalShell title={editingId ? "Edit Rule" : "New Rule"} onClose={() => setOpen(false)}>
           <div className="space-y-4">
             <div>
-              <div className="text-xs font-extrabold text-gray-900 mb-1">Name</div>
+              <div className="text-xs font-semibold text-gray-900 mb-1">Name</div>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -420,7 +385,7 @@ const applyTemplate = (tpl) => {
               className="w-full flex items-center justify-between px-3 py-3 rounded-xl glass-chip"
             >
               <div>
-                <div className="text-sm font-extrabold text-gray-900">Enabled</div>
+                <div className="text-sm font-semibold text-gray-900">Enabled</div>
                 <div className="text-xs text-gray-700/70">ปิดได้โดยไม่ต้องลบ</div>
               </div>
               <div className="text-gray-800">{enabled ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}</div>
@@ -428,17 +393,17 @@ const applyTemplate = (tpl) => {
 
             <div className="glass-card rounded-2xl p-4">
   <div className="flex items-center justify-between gap-2 mb-3">
-    <div className="text-sm font-extrabold text-gray-900">สร้างแบบเร็ว</div>
+    <div className="text-sm font-semibold text-gray-900">สร้างแบบเร็ว</div>
     <div className="text-[11px] font-bold text-gray-800/60">กดเพื่อเติมค่าเริ่มต้น แล้วแก้ต่อได้</div>
   </div>
   <div className="flex flex-wrap gap-2">
-    <button type="button" onClick={() => applyTemplate("expense")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95">
+    <button type="button" onClick={() => applyTemplate("expense")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-semibold text-gray-900 active:scale-95">
       Expense ตาม keyword
     </button>
-    <button type="button" onClick={() => applyTemplate("transfer")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95">
+    <button type="button" onClick={() => applyTemplate("transfer")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-semibold text-gray-900 active:scale-95">
       Transfer ระหว่างบัญชี
     </button>
-    <button type="button" onClick={() => applyTemplate("credit_payment")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95">
+    <button type="button" onClick={() => applyTemplate("credit_payment")} className="px-3 py-2 rounded-xl bg-white/20 border border-white/30 font-semibold text-gray-900 active:scale-95">
       จ่ายบัตรเครดิต
     </button>
   </div>
@@ -446,11 +411,11 @@ const applyTemplate = (tpl) => {
 
 <div className="glass-card rounded-2xl p-4">
   <div className="flex items-center justify-between gap-2 mb-3">
-    <div className="text-sm font-extrabold text-gray-900">เงื่อนไข (AND)</div>
+    <div className="text-sm font-semibold text-gray-900">เงื่อนไข (AND)</div>
     <button
       type="button"
       onClick={() => setShowAdvanced((v) => !v)}
-      className="px-3 py-1.5 rounded-xl bg-white/20 border border-white/30 font-extrabold text-gray-900 active:scale-95"
+      className="px-3 py-1.5 rounded-xl bg-white/20 border border-white/30 font-semibold text-gray-900 active:scale-95"
     >
       {showAdvanced ? "ซ่อนขั้นสูง" : "แสดงขั้นสูง"}
     </button>
@@ -459,13 +424,13 @@ const applyTemplate = (tpl) => {
 
               <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">ข้อความมีคำว่า (keyword)</div>
+                  <div className="text-xs font-semibold text-gray-900 mb-1">ข้อความมีคำว่า (keyword)</div>
                   <input value={keywordContains} onChange={(e) => setKeywordContains(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: 7-11 / GRAB / LINE MAN" />
                   <div className="text-[11px] text-gray-700/60 mt-1">ใส่คำที่มักเจอบนสลิป/ใบเสร็จ (ไม่ต้องใส่ตัวพิมพ์ใหญ่-เล็กให้เป๊ะ)</div>
                 </div>
                 {showAdvanced ? (
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">Regex (ขั้นสูง)</div>
+                  <div className="text-xs font-semibold text-gray-900 mb-1">Regex (ขั้นสูง)</div>
                   <input value={regex} onChange={(e) => setRegex(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder='เช่น: /kbank|kasikorn/i' />
                   <div className="text-[11px] text-gray-700/60 mt-1">รองรับ /pattern/flags หรือใส่เป็น pattern ตรงๆ (default i)</div>
                 </div>
@@ -473,32 +438,32 @@ const applyTemplate = (tpl) => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">จำนวนเงินขั้นต่ำ</div>
+                    <div className="text-xs font-semibold text-gray-900 mb-1">จำนวนเงินขั้นต่ำ</div>
                     <input value={amountMin} onChange={(e) => setAmountMin(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))} className="w-full px-3 py-2 rounded-xl glass-input" inputMode="decimal" placeholder="เช่น: 100.00" />
                   </div>
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">จำนวนเงินขั้นสูง</div>
+                    <div className="text-xs font-semibold text-gray-900 mb-1">จำนวนเงินขั้นสูง</div>
                     <input value={amountMax} onChange={(e) => setAmountMax(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" inputMode="decimal" placeholder="เช่น: 500" />
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">ชื่อธนาคารมีคำว่า</div>
+                  <div className="text-xs font-semibold text-gray-900 mb-1">ชื่อธนาคารมีคำว่า</div>
                   <input value={bankContains} onChange={(e) => setBankContains(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: SCB" />
                 </div>
 
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">อ้างอิง/Ref มีคำว่า</div>
+                  <div className="text-xs font-semibold text-gray-900 mb-1">อ้างอิง/Ref มีคำว่า</div>
                   <input value={refContains} onChange={(e) => setRefContains(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: QR" />
                 </div>
                 {showAdvanced ? (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">เลขท้ายบัญชีต้นทาง (endsWith)</div>
+                    <div className="text-xs font-semibold text-gray-900 mb-1">เลขท้ายบัญชีต้นทาง (endsWith)</div>
                     <input value={fromDigitsEndsWith} onChange={(e) => setFromDigitsEndsWith(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: 1234,5678" />
                   </div>
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">เลขท้ายบัญชีปลายทาง (endsWith)</div>
+                    <div className="text-xs font-semibold text-gray-900 mb-1">เลขท้ายบัญชีปลายทาง (endsWith)</div>
                     <input value={toDigitsEndsWith} onChange={(e) => setToDigitsEndsWith(e.target.value)} className="w-full px-3 py-2 rounded-xl glass-input" placeholder="เช่น: 4321" />
                   </div>
                 </div>
@@ -507,11 +472,11 @@ const applyTemplate = (tpl) => {
             </div>
 
             <div className="glass-card rounded-2xl p-4">
-              <div className="text-sm font-extrabold text-gray-900 mb-3">Actions</div>
+              <div className="text-sm font-semibold text-gray-900 mb-3">Actions</div>
 
               <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">ตั้งประเภท (Type)</div>
+                  <div className="text-xs font-semibold text-gray-900 mb-1">ตั้งประเภท (Type)</div>
                   <select value={setType} onChange={(e) => { const v = e.target.value; setSetType(v); setSetCategoryId(""); }} className="w-full px-3 py-2 rounded-xl glass-input">
                     {TYPE_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -522,7 +487,7 @@ const applyTemplate = (tpl) => {
                 </div>
 
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">หมวดหมู่ (Category)</div>
+                  <div className="text-xs font-semibold text-gray-900 mb-1">หมวดหมู่ (Category)</div>
                   {setType === "expense" || setType === "income" ? (
                     <CategorySelect
                       categories={(setType === "income" ? (categories.income || []) : (categories.expense || []))}
@@ -540,7 +505,7 @@ const applyTemplate = (tpl) => {
                 </div>
                 {setType !== "transfer" && setType !== "credit_payment" ? (
                 <div>
-                  <div className="text-xs font-extrabold text-gray-900 mb-1">บัญชี (Account)</div>
+                  <div className="text-xs font-semibold text-gray-900 mb-1">บัญชี (Account)</div>
                   <AccountPicker
                     accounts={accounts}
                     value={setAccountId}
@@ -555,7 +520,7 @@ const applyTemplate = (tpl) => {
                 {(setType === "transfer" || setType === "credit_payment" || showAdvanced) ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">จากบัญชี (From)</div>
+                    <div className="text-xs font-semibold text-gray-900 mb-1">จากบัญชี (From)</div>
                     <AccountPicker
                       accounts={accounts}
                       value={setFromAccountId}
@@ -567,7 +532,7 @@ const applyTemplate = (tpl) => {
                     />
                   </div>
                   <div>
-                    <div className="text-xs font-extrabold text-gray-900 mb-1">ไปบัญชี (To)</div>
+                    <div className="text-xs font-semibold text-gray-900 mb-1">ไปบัญชี (To)</div>
                     <AccountPicker
                       accounts={accounts}
                       value={setToAccountId}
@@ -587,7 +552,7 @@ const applyTemplate = (tpl) => {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="flex-1 py-3 rounded-2xl bg-white/20 border border-white/30 font-extrabold text-gray-800 active:scale-95"
+                className="flex-1 py-3 rounded-2xl bg-white/20 border border-white/30 font-semibold text-gray-800 active:scale-95"
               >
                 Cancel
               </button>
@@ -595,7 +560,7 @@ const applyTemplate = (tpl) => {
                 type="button"
                 onClick={onSave}
                 data-testid="rules-save"
-                className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold active:scale-95"
+                className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-semibold active:scale-95"
               >
                 Save
               </button>

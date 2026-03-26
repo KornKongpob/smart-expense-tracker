@@ -176,47 +176,12 @@ export default function RecurringView({ showAlert, showConfirm }) {
 
       <main className="ui-page pt-4 pb-6 view-flow">
 
-      <div className="view-hero">
-        <div className="view-hero-content">
-          <div>
-            <div className="view-eyebrow">Recurring engine</div>
-            <div className="view-hero-title">จัดการรายการประจำและดูว่ารายการไหนถึงรอบแล้ว</div>
-            <div className="view-hero-copy">
-              เปิดปิดแต่ละกฎ ดูรายการที่ถึงรอบวันนี้ และสร้างธุรกรรมจริงเมื่อพร้อม
-            </div>
-          </div>
-
-          <div className="view-hero-grid">
-            <div className="view-metric">
-              <div className="view-metric-label">เปิดใช้งาน</div>
-              <div className="view-metric-value">{recurringStats.enabled}/{recurringStats.total}</div>
-              <div className="view-metric-hint">กฎที่พร้อมสร้างรายการอัตโนมัติ</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">ถึงรอบวันนี้</div>
-              <div className="view-metric-value">{recurringStats.due || 0}</div>
-              <div className="view-metric-hint">รายการที่มีโอกาสสร้างได้ทันทีด้วยปุ่ม Run</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">รายการทั้งหมด</div>
-              <div className="view-metric-value">{recurring.length}</div>
-              <div className="view-metric-hint">รวม recurring ทั้งแบบรายรับและรายจ่าย</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">อ้างอิงวันนี้</div>
-              <div className="view-metric-value">{todayISO}</div>
-              <div className="view-metric-hint">ใช้เป็นวันที่อ้างอิงสำหรับการคำนวณรอบถัดไป</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Summary */}
+      <div className="text-[13px] text-slate-500">เปิดใช้ {recurringStats.enabled}/{recurringStats.total} • ถึงรอบ {recurringStats.due || 0} รายการ</div>
 
       <div className="ui-card p-4 mb-4 flex items-center justify-between">
         <div className="min-w-0">
-          <div className="font-extrabold text-gray-900 flex items-center gap-2">
+          <div className="font-semibold text-gray-900 flex items-center gap-2">
             <span className="w-9 h-9 rounded-2xl glass-chip flex items-center justify-center text-emerald-700">
               <Repeat size={18} />
             </span>
@@ -235,7 +200,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
           type="button"
           onClick={runNow}
           data-testid="recurring-run-now"
-          className="px-4 py-3 rounded-2xl bg-emerald-600/90 text-white font-extrabold active:scale-95 shadow-sm inline-flex items-center gap-2"
+          className="px-4 py-3 rounded-2xl bg-emerald-600/90 text-white font-semibold active:scale-95 shadow-sm inline-flex items-center gap-2"
         >
           <PlayCircle size={18} /> Run
         </button>
@@ -280,14 +245,14 @@ export default function RecurringView({ showAlert, showConfirm }) {
 
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <div className="font-extrabold text-gray-900 truncate">{r.note || "Recurring"}</div>
+                          <div className="font-semibold text-gray-900 truncate">{r.note || "Recurring"}</div>
                           {isDue ? (
-                            <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-800 border border-emerald-500/20">
+                            <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-800 border border-emerald-500/20">
                               ถึงรอบ
                             </span>
                           ) : null}
                           {r.enabled === false ? (
-                            <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-white/25 text-gray-700 border border-white/20">
+                            <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-white/25 text-gray-700 border border-white/20">
                               ปิดใช้งาน
                             </span>
                           ) : null}
@@ -300,7 +265,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                         <div className="text-xs text-gray-700/70 mt-0.5">
                           {r.frequency} ทุก {r.interval} • เริ่ม {r.startDate}
                           <span className="mx-2">•</span>
-                          รอบถัดไป <span className="font-extrabold text-gray-900">{nextDueISO}</span>
+                          รอบถัดไป <span className="font-semibold text-gray-900">{nextDueISO}</span>
                         </div>
 
                         {r.lastGenerated ? (
@@ -309,7 +274,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                           <div className="text-[11px] text-gray-700/55 mt-1">ยังไม่เคยสร้างรายการ</div>
                         )}
 
-                        <div className="mt-2 text-lg font-extrabold text-gray-900">{formatCurrency(r.amount)}</div>
+                        <div className="mt-2 text-lg font-semibold text-gray-900">{formatCurrency(r.amount)}</div>
                       </div>
                     </div>
 
@@ -361,8 +326,8 @@ export default function RecurringView({ showAlert, showConfirm }) {
             <div className="w-16 h-16 glass-chip rounded-full flex items-center justify-center mx-auto mb-3 text-gray-600">
               <Repeat size={32} />
             </div>
-            <p className="text-gray-800 font-extrabold">ยังไม่มี Recurring</p>
-            <button onClick={openNew} className="mt-3 text-emerald-700 text-sm font-extrabold" type="button">
+            <p className="text-gray-800 font-semibold">ยังไม่มี Recurring</p>
+            <button onClick={openNew} className="mt-3 text-emerald-700 text-sm font-semibold" type="button">
               เพิ่มรายการประจำ
             </button>
           </div>
@@ -380,7 +345,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                   setRType(t);
                   ensureCategoryInType(t);
                 }}
-                className={`flex-1 py-2 rounded-xl text-xs font-extrabold ${
+                className={`flex-1 py-2 rounded-xl text-xs font-semibold ${
                   rtype === t ? "bg-gray-900/90 text-white" : "text-gray-700 hover:bg-white/10"
                 }`}
               >
@@ -395,7 +360,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value, { maxDecimals: 2 }))}
             inputMode="decimal"
             data-testid="recurring-amount-input"
-            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-semibold text-gray-900"
           />
 
           <label className="text-xs font-bold text-gray-700 mb-1 block mt-4">หมวดหมู่</label>
@@ -403,7 +368,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             categories={catsForType || []}
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
-            className="w-full glass-input rounded-2xl px-4 py-3 bg-transparent outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 bg-transparent outline-none focus:border-gray-900 text-sm font-semibold text-gray-900"
           />
 
           <label className="text-xs font-bold text-gray-700 mb-1 block mt-4">บัญชี</label>
@@ -420,7 +385,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             data-testid="recurring-note-input"
-            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-semibold text-gray-900"
             placeholder="เช่น ค่าเช่า, Netflix"
           />
 
@@ -432,7 +397,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 data-testid="recurring-start-input"
-                className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+                className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-semibold text-gray-900"
               />
             </div>
             <div>
@@ -440,7 +405,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
               <select
                 value={frequency}
                 onChange={(e) => setFrequency(e.target.value)}
-                className="w-full glass-input rounded-2xl px-4 py-3 bg-transparent outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
+                className="w-full glass-input rounded-2xl px-4 py-3 bg-transparent outline-none focus:border-gray-900 text-sm font-semibold text-gray-900"
               >
                 <option value="monthly">รายเดือน</option>
                 <option value="weekly">รายสัปดาห์</option>
@@ -454,16 +419,16 @@ export default function RecurringView({ showAlert, showConfirm }) {
             onChange={(e) => setInterval(e.target.value)}
             type="number"
             min="1"
-            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-extrabold text-gray-900"
+            className="w-full glass-input rounded-2xl px-4 py-3 outline-none focus:border-gray-900 font-semibold text-gray-900"
             placeholder="1"
           />
 
           {/* Preview next due */}
           <div className="mt-4 glass-panel border border-white/20 rounded-2xl px-4 py-3">
-            <div className="text-[12px] text-gray-700/70 font-extrabold">Preview</div>
+            <div className="text-[12px] text-gray-700/70 font-semibold">Preview</div>
             <div className="text-sm text-gray-900 mt-1">
               รอบถัดไป:{" "}
-              <span className="font-extrabold">
+              <span className="font-semibold">
                 {getNextRecurringDueISO(
                   {
                     startDate,
@@ -484,7 +449,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="flex-1 py-3 rounded-2xl glass-chip font-extrabold text-gray-800 active:scale-95"
+              className="flex-1 py-3 rounded-2xl glass-chip font-semibold text-gray-800 active:scale-95"
             >
               ยกเลิก
             </button>
@@ -492,7 +457,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
               type="button"
               onClick={save}
               data-testid="recurring-save"
-              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold flex items-center justify-center gap-2 active:scale-95"
+              className="flex-1 py-3 rounded-2xl bg-gray-900/90 text-white font-semibold flex items-center justify-center gap-2 active:scale-95"
             >
               <Check size={18} /> บันทึก
             </button>
@@ -506,7 +471,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
                 setOpen(false);
                 showConfirm?.("ลบ Recurring", "ยืนยันลบรายการ Recurring นี้?", () => deleteRecurring(id), true);
               }}
-              className="w-full mt-3 py-3 rounded-2xl bg-red-500/10 text-red-700 font-extrabold flex items-center justify-center gap-2 border border-red-500/15"
+              className="w-full mt-3 py-3 rounded-2xl bg-red-500/10 text-red-700 font-semibold flex items-center justify-center gap-2 border border-red-500/15"
             >
               <Trash2 size={18} /> ลบ Recurring
             </button>

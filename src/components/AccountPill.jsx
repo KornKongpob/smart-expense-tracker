@@ -47,7 +47,7 @@ export default function AccountPill({
       />
 
       <span className="min-w-0">
-        <span className={cn("block font-extrabold text-gray-900 truncate", titleCls)}>{name}</span>
+        <span className={cn("block font-semibold text-gray-900 truncate", titleCls)}>{name}</span>
         {hint ? <span className={cn("block font-bold text-gray-700/55 truncate", hintCls)}>{hint}</span> : null}
       </span>
     </span>

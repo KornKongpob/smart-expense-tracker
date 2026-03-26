@@ -159,7 +159,7 @@ export default function AccountPicker({
         <div className="flex items-start gap-3 min-w-0">
           <AccountPill account={a} size="md" className="shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-extrabold text-gray-900 truncate">{String(a?.name || "—")}</div>
+            <div className="text-sm font-semibold text-gray-900 truncate">{String(a?.name || "—")}</div>
             <div className="text-[11px] font-bold text-gray-800/55 truncate">
               {typeLabel(a?.type)} • {currencyLabel(a?.currency)}
             </div>
@@ -186,7 +186,7 @@ export default function AccountPicker({
       >
         <div className="p-3 border-b border-white/20 bg-white/35">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-sm font-black text-gray-900">{title}</div>
+            <div className="text-sm font-semibold text-gray-900">{title}</div>
             <button
               type="button"
               onClick={() => setOpen(false)}
@@ -210,7 +210,7 @@ export default function AccountPicker({
             <button
               type="button"
               onClick={clearAndClose}
-              className="mt-2 w-full rounded-2xl bg-white/25 border border-white/20 px-3 py-2 text-xs font-extrabold text-gray-900/70 hover:bg-white/35"
+              className="mt-2 w-full rounded-2xl bg-white/25 border border-white/20 px-3 py-2 text-xs font-semibold text-gray-900/70 hover:bg-white/35"
             >
               {emptyLabel}
             </button>
@@ -219,14 +219,14 @@ export default function AccountPicker({
 
         <div className="max-h-[360px] overflow-auto p-2 no-scrollbar">
           {Object.entries(grouped).every(([, arr]) => !arr.length) ? (
-            <div className="p-4 text-sm font-extrabold text-gray-900/60">ไม่พบบัญชี</div>
+            <div className="p-4 text-sm font-semibold text-gray-900/60">ไม่พบบัญชี</div>
           ) : (
             ["cash", "bank", "credit", "other"].map((k) => {
               const arr = grouped[k] || [];
               if (!arr.length) return null;
               return (
                 <div key={k} className="mb-2">
-                  <div className="px-3 py-2 text-[11px] font-black text-gray-900/55 uppercase tracking-wide">
+                  <div className="px-3 py-2 text-[11px] font-semibold text-gray-900/55 uppercase tracking-wide">
                     {typeLabel(k)} ({arr.length})
                   </div>
                   <div className="space-y-1">
@@ -251,7 +251,7 @@ export default function AccountPicker({
         <div className="px-4 pt-3 pb-2 border-b border-white/15">
           <div className="mx-auto h-1.5 w-12 rounded-full bg-gray-200" />
           <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="text-sm font-black text-gray-900">{title}</div>
+            <div className="text-sm font-semibold text-gray-900">{title}</div>
             <button
               type="button"
               onClick={() => setOpen(false)}
@@ -275,7 +275,7 @@ export default function AccountPicker({
             <button
               type="button"
               onClick={clearAndClose}
-              className="mt-2 w-full rounded-2xl bg-white/25 border border-white/20 px-3 py-2 text-xs font-extrabold text-gray-900/70"
+              className="mt-2 w-full rounded-2xl bg-white/25 border border-white/20 px-3 py-2 text-xs font-semibold text-gray-900/70"
             >
               {emptyLabel}
             </button>
@@ -284,14 +284,14 @@ export default function AccountPicker({
 
         <div className="max-h-[65vh] overflow-auto p-2 no-scrollbar">
           {Object.entries(grouped).every(([, arr]) => !arr.length) ? (
-            <div className="p-4 text-sm font-extrabold text-gray-900/60">ไม่พบบัญชี</div>
+            <div className="p-4 text-sm font-semibold text-gray-900/60">ไม่พบบัญชี</div>
           ) : (
             ["cash", "bank", "credit", "other"].map((k) => {
               const arr = grouped[k] || [];
               if (!arr.length) return null;
               return (
                 <div key={k} className="mb-2">
-                  <div className="px-3 py-2 text-[11px] font-black text-gray-900/55 uppercase tracking-wide">
+                  <div className="px-3 py-2 text-[11px] font-semibold text-gray-900/55 uppercase tracking-wide">
                     {typeLabel(k)} ({arr.length})
                   </div>
                   <div className="space-y-1">
@@ -329,7 +329,7 @@ export default function AccountPicker({
           {selected ? (
             <AccountPill account={selected} size="sm" />
           ) : (
-            <div className="text-sm font-extrabold text-gray-900/70 truncate">{placeholder}</div>
+            <div className="text-sm font-semibold text-gray-900/70 truncate">{placeholder}</div>
           )}
         </div>
         <ChevronDown size={18} className="text-gray-900/45 shrink-0" aria-hidden="true" />

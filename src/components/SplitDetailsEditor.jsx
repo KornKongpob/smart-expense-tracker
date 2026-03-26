@@ -167,7 +167,7 @@ export default function SplitDetailsEditor({
       <div className="glass-panel border border-white/20 rounded-2xl p-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-xs font-extrabold text-gray-900/75 flex items-center gap-2">
+            <div className="text-xs font-semibold text-gray-900/75 flex items-center gap-2">
               <Tag size={14} /> Split details
             </div>
             <div className="text-[11px] text-gray-900/55 mt-1">
@@ -176,8 +176,8 @@ export default function SplitDetailsEditor({
           </div>
 
           <div className="shrink-0 text-right">
-            <div className="text-[11px] font-extrabold text-gray-900/70">รวมสุทธิ</div>
-            <div className="text-sm font-black text-gray-900">{formatCurrency(Math.abs(sums.net))}</div>
+            <div className="text-[11px] font-semibold text-gray-900/70">รวมสุทธิ</div>
+            <div className="text-sm font-semibold text-gray-900">{formatCurrency(Math.abs(sums.net))}</div>
             <div className="text-[10px] text-gray-900/55">
               {sums.itemsCount} รายการ • {sums.adjustmentCount} ปรับยอด
             </div>
@@ -188,13 +188,13 @@ export default function SplitDetailsEditor({
           <div className={`mt-3 rounded-2xl border p-3 ${diffOk ? "bg-emerald-500/10 border-emerald-500/15" : "bg-amber-500/10 border-amber-500/15"}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[11px] font-extrabold text-gray-900/75 flex items-center gap-2">
+                <div className="text-[11px] font-semibold text-gray-900/75 flex items-center gap-2">
                   <Sparkles size={12} />
                   ตรวจยอดรวม
                 </div>
                 <div className="text-[11px] text-gray-900/55">
                   เป้าหมาย: {formatCurrency(Math.abs(target))} • ต่าง:{" "}
-                  <span className={diffOk ? "text-emerald-700 font-extrabold" : "text-amber-800 font-extrabold"}>
+                  <span className={diffOk ? "text-emerald-700 font-semibold" : "text-amber-800 font-semibold"}>
                     {formatCurrency(Math.abs(diff || 0))}
                   </span>
                 </div>
@@ -208,7 +208,7 @@ export default function SplitDetailsEditor({
 
         {onChangeParentCategory ? (
           <div className="mt-3">
-            <div className="text-[11px] font-extrabold text-gray-900/70 mb-1">หมวดหลัก (ใช้เป็นค่าเริ่มต้น)</div>
+            <div className="text-[11px] font-semibold text-gray-900/70 mb-1">หมวดหลัก (ใช้เป็นค่าเริ่มต้น)</div>
             <CategorySelect
               categories={categories}
               value={safeId(parentCategoryId)}
@@ -223,7 +223,7 @@ export default function SplitDetailsEditor({
           <button
             type="button"
             onClick={onAutoCategorize}
-            className="px-3 py-2 rounded-xl text-[11px] font-extrabold bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 active:scale-95 inline-flex items-center gap-2"
+            className="px-3 py-2 rounded-xl text-[11px] font-semibold bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 active:scale-95 inline-flex items-center gap-2"
             title="ใช้ AI/Rules เดาหมวดให้ทุกบรรทัด"
           >
             <Wand2 size={14} />
@@ -233,7 +233,7 @@ export default function SplitDetailsEditor({
           <button
             type="button"
             onClick={() => setOverwriteAuto((v) => !v)}
-            className={`px-3 py-2 rounded-xl text-[11px] font-extrabold border active:scale-95 ${
+            className={`px-3 py-2 rounded-xl text-[11px] font-semibold border active:scale-95 ${
               overwriteAuto ? "bg-gray-900/90 text-white border-white/15" : "bg-white/10 text-gray-900/65 border-white/10"
             }`}
             title="ถ้าเปิด: Auto จะเขียนทับหมวดเดิมด้วย"
@@ -244,7 +244,7 @@ export default function SplitDetailsEditor({
           <button
             type="button"
             onClick={onClearCategories}
-            className="px-3 py-2 rounded-xl text-[11px] font-extrabold bg-white/10 border border-white/10 text-gray-900/60 active:scale-95 inline-flex items-center gap-2"
+            className="px-3 py-2 rounded-xl text-[11px] font-semibold bg-white/10 border border-white/10 text-gray-900/60 active:scale-95 inline-flex items-center gap-2"
             title="ล้างหมวดของทุกบรรทัด"
           >
             <RotateCcw size={14} />
@@ -283,16 +283,16 @@ export default function SplitDetailsEditor({
             <div key={`${qid || "q"}-${idx}`} className={`glass-panel border rounded-2xl p-3 ${isCategoryMissing ? "border-red-400/50 bg-red-50/30" : "border-white/20"}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-extrabold border ${badgeColor}`}>
+                  <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold border ${badgeColor}`}>
                     {badgeIcon}
                     <span>{label}</span>
                   </div>
 
-                  <div className="mt-2 text-sm font-extrabold text-gray-900 break-words">{name}</div>
+                  <div className="mt-2 text-sm font-semibold text-gray-900 break-words">{name}</div>
                 </div>
 
                 <div className="shrink-0 text-right">
-                  <div className="text-[11px] font-extrabold text-gray-900/70">ยอด</div>
+                  <div className="text-[11px] font-semibold text-gray-900/70">ยอด</div>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -301,14 +301,14 @@ export default function SplitDetailsEditor({
                       const cleaned = sanitizeMoneyInput(e.target.value);
                       onChangeGroup?.(idx, { amount: parseMoneyToSatang(cleaned) });
                     }}
-                    className="w-24 text-right outline-none text-sm font-black text-gray-900 bg-transparent"
+                    className="w-24 text-right outline-none text-sm font-semibold text-gray-900 bg-transparent"
                     placeholder="0.00"
                   />
                 </div>
               </div>
 
               <div className="mt-3">
-                <div className="text-[11px] font-extrabold mb-1 flex items-center justify-between">
+                <div className="text-[11px] font-semibold mb-1 flex items-center justify-between">
                   <span className={isCategoryMissing ? "text-red-600" : "text-gray-900/70"}>
                     {isCategoryMissing ? "⚠️ ต้องเลือกหมวดหมู่" : "หมวดหมู่"}
                   </span>
@@ -326,7 +326,7 @@ export default function SplitDetailsEditor({
                     <button
                       type="button"
                       onClick={() => onChangeGroup?.(idx, { categoryId: suggestedId })}
-                      className="px-2 py-1 rounded-full text-[10px] font-extrabold bg-indigo-500/15 text-indigo-800 border border-indigo-500/20 active:scale-95"
+                      className="px-2 py-1 rounded-full text-[10px] font-semibold bg-indigo-500/15 text-indigo-800 border border-indigo-500/20 active:scale-95"
                       title="แนะนำจากข้อความในบรรทัด"
                     >
                       แนะนำ: {suggestedCat.icon || "🏷️"} {suggestedCat.name}
@@ -337,7 +337,7 @@ export default function SplitDetailsEditor({
                     <button
                       type="button"
                       onClick={() => onChangeGroup?.(idx, { categoryId: safeId(parentCategoryId) })}
-                      className="px-2 py-1 rounded-full text-[10px] font-extrabold bg-white/15 text-gray-900/70 border border-white/15 active:scale-95"
+                      className="px-2 py-1 rounded-full text-[10px] font-semibold bg-white/15 text-gray-900/70 border border-white/15 active:scale-95"
                       title="ใช้หมวดหลัก"
                     >
                       หมวดหลัก: {catById.get(safeId(parentCategoryId))?.icon || "🏷️"} {catById.get(safeId(parentCategoryId))?.name || "ตามหมวดหลัก"}

@@ -509,10 +509,22 @@ function inferCategoryFromText(text) {
   )
     return "shopping";
 
+  if (has(["rent", "ค่าเช่า", "หอพัก", "คอนโด", "ห้องเช่า"])) return "rent";
+  if (has(["insurance", "ประกัน", "ค่าประกัน", "เบี้ยประกัน", "ประกันภัย", "ประกันชีวิต"])) return "insurance";
+  if (has(["subscription", "สมาชิก", "รายเดือน", "netflix", "spotify", "youtube premium", "icloud", "apple", "google one"])) return "subscriptions";
+  if (has(["coffee", "café", "cafe", "starbucks", "amazon cafe", "inthanin", "กาแฟ", "คาเฟ่", "อินทนิล", "อเมซอน"])) return "coffee";
+  if (has(["drinks", "beverage", "smoothie", "juice", "เครื่องดื่ม", "น้ำผลไม้", "ชานม", "ชาไข่มุก", "bubble"])) return "drinks";
+  if (has(["grocery", "groceries", "ผัก", "ผลไม้", "เนื้อ", "นม", "ไข่", "วัตถุดิบ", "ของสด", "ซุปเปอร์มาร์เก็ต", "tops", "villa"])) return "groceries";
+  if (has(["beauty", "salon", "haircut", "spa", "nail", "ทำผม", "ร้านเสริมสวย", "สปา", "เล็บ", "เครื่องสำอาง"])) return "beauty";
+  if (has(["education", "school", "tutor", "course", "เรียน", "คอร์ส", "โรงเรียน", "มหาวิทยาลัย", "ค่าเทอม", "กวดวิชา"])) return "education";
+  if (has(["donation", "บริจาค", "ทำบุญ", "กุศล"])) return "donation";
+  if (has(["pet", "สัตว์เลี้ยง", "หมา", "แมว", "อาหารสัตว์", "สัตวแพทย์"])) return "pets";
+
   if (has(["salary", "payroll", "เงินเดือน"])) return "salary";
   if (has(["bonus", "โบนัส"])) return "bonus";
   if (has(["refund", "เงินคืน", "คืนเงิน"])) return "refund";
-  if (has(["investment", "ลงทุน"])) return "investment";
+  if (has(["investment", "ลงทุน", "หุ้น", "กองทุน"])) return "investment";
+  if (has(["freelance", "ค่าจ้าง", "รับจ้าง"])) return "freelance";
 
   return null;
 }
@@ -1040,21 +1052,31 @@ async function callOpenAI({ base64, mimeType, filename, accounts = [], images = 
   const prompt = `
 You are an OCR+parser for Thai receipts and Thai bank/payment transfer slips used in a personal expense tracker.
 Return STRICT JSON ONLY. No markdown. No extra text.
+Language: Thai (th). Most text will be in Thai script with some English.
 
 IMPORTANT:
 - If multiple images are provided, they are CROPS/ENHANCEMENTS/TILES of the SAME document.
   Combine information across all images. Prefer the clearest text instance.
   Do NOT double-count or duplicate line items.
+- Thai digits ๐-๙ MUST be converted to Arabic 0-9 in all numeric fields (amount, date, account digits).
+- Dates may use Buddhist Era (พ.ศ.) — e.g. 2567 means 2024 AD, 2568 means 2025 AD, 2569 means 2026 AD. Always return Gregorian (AD) dates.
+- Thai months: ม.ค.=Jan, ก.พ.=Feb, มี.ค.=Mar, เม.ย.=Apr, พ.ค.=May, มิ.ย.=Jun, ก.ค.=Jul, ส.ค.=Aug, ก.ย.=Sep, ต.ค.=Oct, พ.ย.=Nov, ธ.ค.=Dec
 
 Decide doc_type:
 - receipt: itemized receipt/invoice with purchased line items
-- transfer_slip: bank transfer / payment slip / credit card payment slip
-- bill_payment: utility bill payment slip
+- transfer_slip: bank transfer / payment slip / PromptPay QR payment / credit card payment slip
+- bill_payment: utility bill payment slip (ค่าไฟ, ค่าน้ำ, ค่าโทรศัพท์)
 - unknown: otherwise
+
+Common Thai receipt formats:
+- 7-Eleven / CP All: columns are qty, item name, price. Ignore lines with ฿0.00 or "N" suffix (promo/freebie).
+- Lotus's / Big C / Makro: columns are item name, qty, unit price, total. "รวม" or "TOTAL" line is the grand total.
+- Thai bank slips (KBank, SCB, BBL, KTB, BAY, ttb): look for "จำนวนเงิน" or "Amount" for the transfer amount. "ผู้โอน"/"จาก" = sender, "ผู้รับ"/"ไปยัง" = receiver.
+- PromptPay QR slips: amount is near "จำนวนเงิน", ref is near "รหัสอ้างอิง", receiver near "ผู้รับ" or "PromptPay ID".
 
 Rules:
 - If unsure, use null.
-- amount: grand total paid.
+- amount: grand total paid (in Thai Baht). If the slip shows สตางค์ (satang), include as decimal (e.g. 150.50).
 - evidence: include key lines you used (<= 220 chars).
 
 Line items rules:

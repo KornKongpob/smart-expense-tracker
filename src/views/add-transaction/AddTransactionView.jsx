@@ -3645,56 +3645,22 @@ const handleClose = () => {
         and prevent the last fields from being hidden behind the fixed bar.
       */}
       <main className="ui-page pt-4 pb-bottom-dock">
-      {!isEditMode ? (
-        <div className="mb-4 rounded-3xl border border-white/20 bg-white/55 p-4 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.18)]">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <div className="text-sm font-extrabold text-gray-900">
-                {entryMode === "scan" ? "สแกนและตรวจสอบก่อนบันทึก" : "กรอกเองแบบรวดเร็ว"}
-              </div>
-              <div className="mt-1 text-[12px] font-medium text-gray-700/65">
-                {entryMode === "scan"
-                  ? "เลือกชนิดเอกสาร แล้วแนบไฟล์ด้านล่างเพื่อเข้าคิวตรวจสอบ"
-                  : "เลือกรูปแบบรายการที่ต้องการ แล้วกรอกรายละเอียดในส่วนด้านล่าง"}
-              </div>
-            </div>
-
-            <div className="inline-flex items-center gap-2 self-start rounded-2xl border border-slate-900/10 bg-white/80 px-3 py-2 text-[12px] font-medium text-gray-800/75 sm:self-auto">
-              {entryMode === "scan" ? <Sparkles size={14} className="text-indigo-700" /> : <FileText size={14} className="text-indigo-700" />}
-              <span>
-                {entryMode === "scan"
-                  ? scanUploadKind === "slip"
-                    ? "โหมดสแกนสลิป"
-                    : "โหมดสแกนใบเสร็จ"
-                  : type === "transfer" || type === "credit_payment"
-                  ? "โหมดโอน/ชำระบัตร"
-                  : "โหมดกรอกเอง"}
-              </span>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {/* Mode Tabs (new only) */}
       {!isEditMode ? (
-        <div className="glass-panel border border-white/20 p-1.5 rounded-2xl flex mb-5">
+        <div className="view-segmented mb-5">
           <button
             onClick={() => setEntryMode("scan")}
-            className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
-              entryMode === "scan" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
-            }`}
+            className={`view-segmented-btn ${entryMode === "scan" ? "is-active" : ""}`}
             type="button"
           >
-            สแกนหลายรูป
+            📷 สแกน
           </button>
           <button
             onClick={() => setEntryMode("manual")}
-            className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
-              entryMode === "manual" ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/10"
-            }`}
+            className={`view-segmented-btn ${entryMode === "manual" ? "is-active" : ""}`}
             type="button"
           >
-            กรอกเอง
+            ✏️ กรอกเอง
           </button>
         </div>
       ) : null}
@@ -3711,101 +3677,84 @@ const handleClose = () => {
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`glass-card rounded-3xl p-4 mb-4 outline-none ${
-              dropActive ? "ring-2 ring-indigo-500/40 bg-indigo-500/5" : ""
+            className={`ui-card rounded-xl p-5 mb-4 outline-none border-dashed ${
+              dropActive ? "ring-2 ring-teal-500/40 bg-teal-50" : ""
             }`}
           >
-            <div className="grid gap-4 md:grid-cols-[1.15fr_0.85fr] md:items-start">
-              <div className="min-w-0">
-                <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
-                  <Sparkles size={18} className="text-indigo-600" />
-                  สแกนใบเสร็จ / สลิป
-                </div>
-                <div className="text-xs text-gray-800/60 mt-1">
-                  {scanUploadKind === 'slip'
-                    ? 'เลือกสลิป 1 ไฟล์ แล้วตรวจสอบก่อนบันทึกหรือส่งเข้า Inbox'
-                    : 'เลือกใบเสร็จได้หลายไฟล์ แล้วค่อยตรวจและบันทึกจากคิวด้านล่าง'}
-                </div>
-                <div className="mt-2 text-[11px] font-medium text-gray-900/60">
-                  ลากไฟล์มาวาง หรือกด Ctrl+V เพื่อวางจาก clipboard
-                </div>
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                <Camera size={28} />
+              </div>
+              <div>
+                <div className="text-[15px] font-semibold text-slate-900">แตะเพื่อเลือกรูป</div>
+                <div className="text-[13px] text-slate-500 mt-1">หรือลากไฟล์มาวาง</div>
               </div>
 
-              <div className="w-full flex flex-col gap-2 items-stretch md:max-w-[340px] md:justify-self-end">
-                <div className="bg-white/60 border border-white/25 rounded-2xl p-1 flex items-stretch gap-1" role="tablist" aria-label="ประเภทเอกสาร">
-                  <button
-                    type="button"
-                    onClick={() => setScanUploadKind('receipt')}
-                    data-testid="scan-kind-receipt"
-                    className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-[0.99] ${scanUploadKind === 'receipt' ? 'bg-gray-900/90 text-white shadow-sm' : 'text-gray-900/70 hover:bg-white/40'}`}
-                    aria-selected={scanUploadKind === 'receipt'}
-                    role="tab"
-                  >
-                    ใบเสร็จ
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScanUploadKind('slip')}
-                    data-testid="scan-kind-slip"
-                    className={`flex-1 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-[0.99] ${scanUploadKind === 'slip' ? 'bg-gray-900/90 text-white shadow-sm' : 'text-gray-900/70 hover:bg-white/40'}`}
-                    aria-selected={scanUploadKind === 'slip'}
-                    role="tab"
-                  >
-                    สลิปโอน/ชำระ
-                  </button>
-                </div>
-
+              <div className="view-segmented w-full max-w-[280px]" role="tablist" aria-label="ประเภทเอกสาร">
                 <button
                   type="button"
-                  onClick={handlePickScanFiles}
-                  data-testid="scan-pick-files"
-                  className="px-4 py-3 rounded-2xl bg-gray-900/90 text-white font-extrabold text-sm active:scale-95 disabled:opacity-60"
-                  disabled={isScanning}
+                  onClick={() => setScanUploadKind('receipt')}
+                  data-testid="scan-kind-receipt"
+                  className={`view-segmented-btn ${scanUploadKind === 'receipt' ? 'is-active' : ''}`}
+                  aria-selected={scanUploadKind === 'receipt'}
+                  role="tab"
                 >
-                  <span className="inline-flex items-center gap-2">
-                    {isScanning ? (
-                      <Loader size={18} className="animate-spin" />
-                    ) : scanUploadKind === 'slip' ? (
-                      <ArrowRightLeft size={18} />
-                    ) : (
-                      <Camera size={18} />
-                    )}
-                    แนบไฟล์เพื่อสแกน
-                  </span>
+                  ใบเสร็จ
                 </button>
-
-                <div className="text-[11px] leading-relaxed font-medium text-gray-900/60">
-                  {scanUploadKind === 'slip'
-                    ? 'สลิปเลือกได้ทีละ 1 ไฟล์'
-                    : 'ใบเสร็จเลือกได้หลายไฟล์'}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setScanUploadKind('slip')}
+                  data-testid="scan-kind-slip"
+                  className={`view-segmented-btn ${scanUploadKind === 'slip' ? 'is-active' : ''}`}
+                  aria-selected={scanUploadKind === 'slip'}
+                  role="tab"
+                >
+                  สลิปโอน/ชำระ
+                </button>
               </div>
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,application/pdf"
-                multiple
-                data-testid="scan-file-input"
-                className="hidden"
-                onChange={handleFilesSelected}
+              <button
+                type="button"
+                onClick={handlePickScanFiles}
+                data-testid="scan-pick-files"
+                className="ui-btn ui-btn-primary w-full max-w-[280px]"
                 disabled={isScanning}
-              />
-
-              <input
-                ref={slipFileInputRef}
-                type="file"
-                accept="image/*,application/pdf"
-                data-testid="scan-slip-input"
-                className="hidden"
-                onChange={handleFilesSelected}
-                disabled={isScanning}
-              />
+              >
+                {isScanning ? (
+                  <Loader size={18} className="animate-spin" />
+                ) : scanUploadKind === 'slip' ? (
+                  <ArrowRightLeft size={18} />
+                ) : (
+                  <Camera size={18} />
+                )}
+                แนบไฟล์เพื่อสแกน
+              </button>
             </div>
 
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              data-testid="scan-file-input"
+              className="hidden"
+              onChange={handleFilesSelected}
+              disabled={isScanning}
+            />
+
+            <input
+              ref={slipFileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              data-testid="scan-slip-input"
+              className="hidden"
+              onChange={handleFilesSelected}
+              disabled={isScanning}
+            />
+
             {isScanning || scanStatus ? (
-              <div className="mt-4 glass-panel border border-white/20 rounded-2xl p-3 text-sm text-gray-900 flex items-center gap-2">
-                <Loader size={16} className="animate-spin text-gray-900" />
+              <div className="mt-4 flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm text-slate-700">
+                <Loader size={16} className="animate-spin text-teal-600" />
                 <span className="truncate">{scanStatus || "กำลังสแกน..."}</span>
               </div>
             ) : null}
@@ -3833,12 +3782,12 @@ const handleClose = () => {
               merchants={state.merchants}
             />
           ) : (
-            <div className="text-center py-14 glass-card rounded-3xl border border-white/15">
-              <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 text-gray-500">
-                <Camera size={32} />
+            <div className="text-center py-12 ui-card rounded-xl">
+              <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
+                <Camera size={28} />
               </div>
-              <p className="text-gray-900 font-extrabold">ยังไม่มีรูปในคิว</p>
-              <p className="text-gray-900/60 text-sm mt-1">กด “แนบไฟล์เพื่อสแกน” เพื่อเริ่มสแกน</p>
+              <p className="text-slate-900 font-semibold">ยังไม่มีรูปในคิว</p>
+              <p className="text-slate-500 text-[13px] mt-1">กด "แนบไฟล์เพื่อสแกน" เพื่อเริ่ม</p>
             </div>
           )}
         </>
@@ -3920,7 +3869,7 @@ const handleClose = () => {
                     key={t.id}
                     onClick={() => handleManualTypeChange(t.id)}
                     data-testid={`manual-type-${t.id}`}
-                    className={`flex-1 py-3 rounded-xl text-sm font-extrabold transition-all ${
+                    className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all ${
                       type === t.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/40"
                     }`}
                     type="button"
@@ -4041,14 +3990,14 @@ const handleClose = () => {
               ) : type === "credit_payment" ? (
                 <div className="space-y-3">
                   <div className="rounded-2xl bg-indigo-600/10 border border-indigo-600/15 p-4">
-                    <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
+                    <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                       <CreditCard size={16} className="text-indigo-700" /> ชำระบัตรเครดิต
                     </div>
                     <div className="text-[12px] text-gray-900/60 mt-1">
                       ระบบจะสร้าง 2 legs (เงินออกจากบัญชีจ่าย + เงินเข้าไปลดหนี้บัตร) และจัดเป็น “ชำระบัตร” (ไม่ใช่รายจ่าย) เพื่อกันซ้ำกับรายการรูด
                     </div>
                     {selectedToAcc && isCreditAccount(selectedToAcc) ? (
-                      <div className="mt-3 text-sm font-extrabold text-gray-900">
+                      <div className="mt-3 text-sm font-semibold text-gray-900">
                         ยอดค้างชำระ: <span className="tabular-nums">{formatCurrency(creditDebt)}</span>
                       </div>
                     ) : null}
@@ -4109,7 +4058,7 @@ const handleClose = () => {
                   />
                   {accounts.find((a) => String(a?.id || "") === String(accountId || ""))?.name ? (
                     <div className="mt-2 text-xs text-gray-900/55">
-                      เลือกบัญชี: <span className="font-extrabold text-gray-900">{accounts.find((a) => String(a?.id || "") === String(accountId || ""))?.name}</span>
+                      เลือกบัญชี: <span className="font-semibold text-gray-900">{accounts.find((a) => String(a?.id || "") === String(accountId || ""))?.name}</span>
                     </div>
                   ) : null}
                 </div>
@@ -4135,7 +4084,7 @@ const handleClose = () => {
                     type="button"
                     onClick={toggleSplitMode}
                     data-testid="manual-split-toggle"
-                    className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
+                    className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-semibold border active:scale-95 transition-all ${
                       isSplitMode
                         ? "bg-emerald-600/90 text-white border-emerald-500/20 shadow-sm"
                         : "bg-white/70 text-gray-900 border-slate-900/10 hover:bg-white"
@@ -4161,7 +4110,7 @@ const handleClose = () => {
                       {splitLines.map((l, idx) => (
                         <div key={`${l.txId || "new"}-${idx}`} className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
                           <div className="flex items-center justify-between gap-3">
-                            <div className="text-[11px] text-gray-900/65 font-extrabold">
+                            <div className="text-[11px] text-gray-900/65 font-semibold">
                               Line {idx + 1} <span className="font-bold">/{splitLines.length}</span>
                             </div>
                             <button
@@ -4256,7 +4205,7 @@ const handleClose = () => {
                       <Sparkles size={18} className="text-gray-900" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-black text-gray-900">Advanced options</div>
+                      <div className="text-sm font-semibold text-gray-900">Advanced options</div>
                       <div className="mt-0.5 text-[12px] font-bold text-gray-800/60">อ้างอิง • แท็ก • ไฟล์แนบ • ผ่อนชำระ</div>
                     </div>
                   </div>
@@ -4282,7 +4231,7 @@ const handleClose = () => {
                         >
                           {String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
                             <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center">
-                              <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
+                              <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900/80">
                                 <FileText size={18} /> เปิดไฟล์ PDF
                               </div>
                             </div>
@@ -4313,7 +4262,7 @@ const handleClose = () => {
                           type="button"
                           onClick={() => setIsInstallment((v) => !v)}
                           data-testid="manual-installment-toggle"
-                          className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all ${
+                          className={`shrink-0 px-4 py-2 rounded-2xl text-xs font-semibold border active:scale-95 transition-all ${
                             isInstallment
                               ? "bg-gray-900/90 text-white border-white/10 shadow-sm"
                               : "bg-white/70 text-gray-900 border-indigo-600/15 hover:bg-white"
@@ -4433,7 +4382,7 @@ const handleClose = () => {
           <div className="relative w-full max-w-sm glass-card rounded-3xl p-5 border border-white/20">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-extrabold text-gray-900">พบ Possible duplicate</h3>
+                <h3 className="text-lg font-semibold text-gray-900">พบ Possible duplicate</h3>
                 <p className="mt-1 text-sm text-gray-900/70">มี {duplicateReadyCount} รายการที่อาจซ้ำ ต้องการทำอย่างไร?</p>
               </div>
               <button
@@ -4450,14 +4399,14 @@ const handleClose = () => {
               <button
                 type="button"
                 onClick={() => handleDupDecision("send")}
-                className="w-full py-4 rounded-2xl bg-gray-900/90 text-white font-extrabold shadow-xl active:scale-95"
+                className="w-full py-4 rounded-2xl bg-gray-900/90 text-white font-semibold shadow-xl active:scale-95"
               >
                 ส่งรายการซ้ำไปที่ Inbox
               </button>
               <button
                 type="button"
                 onClick={() => handleDupDecision("skip")}
-                className="w-full py-4 rounded-2xl bg-white/30 text-gray-900 font-extrabold border border-white/20 active:scale-95"
+                className="w-full py-4 rounded-2xl bg-white/30 text-gray-900 font-semibold border border-white/20 active:scale-95"
               >
                 ข้ามรายการซ้ำ
               </button>
@@ -4465,7 +4414,7 @@ const handleClose = () => {
               <button
                 type="button"
                 onClick={() => handleDupDecision("save")}
-                className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-indigo-200 active:scale-95"
+                className="w-full py-4 rounded-2xl bg-indigo-600 text-white font-semibold shadow-indigo-200 active:scale-95"
               >
                 บันทึกรายการซ้ำตอนนี้
               </button>

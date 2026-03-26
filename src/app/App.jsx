@@ -47,7 +47,7 @@ function AlertToast({ message, onClose }) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-extrabold text-gray-900 break-words whitespace-pre-wrap">{msg}</div>
+          <div className="text-sm font-semibold text-gray-900 break-words whitespace-pre-wrap">{msg}</div>
         </div>
 
         <button
@@ -92,8 +92,8 @@ function ViewFallback() {
     <div className="min-h-dvh">
       <div className="ui-page pt-[calc(var(--app-header-h,76px)+1rem)] pb-nav">
         <div className="ui-card-strong p-6 animate-fade-in-up">
-          <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Loading</div>
-          <div className="mt-2 text-2xl font-black text-slate-950">Preparing your workspace…</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Loading</div>
+          <div className="mt-2 text-2xl font-semibold text-slate-950">Preparing your workspace…</div>
           <div className="mt-3 h-2 rounded-full bg-slate-900/10 overflow-hidden">
             <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-emerald-500 via-blue-500 to-slate-950 animate-pulse" />
           </div>
@@ -371,12 +371,12 @@ export default function App() {
       {undoItem && (
         <div className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] z-[90] left-1/2 -translate-x-1/2 w-[min(92vw,420px)] animate-fade-in-up">
           <div className="ui-toast flex items-center justify-between gap-3">
-            <span className="text-sm font-extrabold text-gray-900 truncate">{undoItem.label}</span>
+            <span className="text-sm font-semibold text-gray-900 truncate">{undoItem.label}</span>
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={performUndo}
-                className="px-3 py-1.5 rounded-xl text-xs font-black text-indigo-700 bg-indigo-600/15 border border-indigo-600/20 active:scale-95 transition-transform"
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-indigo-700 bg-indigo-600/15 border border-indigo-600/20 active:scale-95 transition-transform"
               >
                 เลิกทำ
               </button>

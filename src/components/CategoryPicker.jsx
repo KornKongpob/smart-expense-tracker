@@ -152,7 +152,7 @@ export default function CategoryPicker({
 
   const isSelected = (id) => String(id || "") === selectedId;
   const chipBaseClass =
-    "w-full px-3 py-3 rounded-2xl border text-left text-sm font-extrabold transition-all active:scale-[0.99] min-w-0";
+    "w-full px-3 py-3 rounded-2xl border text-left text-sm font-semibold transition-all active:scale-[0.99] min-w-0";
   const chipStateClass = (on, deleted) =>
     `${on ? "bg-gray-900/90 text-white border-white/10 shadow-sm" : "bg-white/20 text-gray-900 border-white/15 hover:bg-white/10"} ${
       deleted ? "opacity-70" : ""
@@ -171,7 +171,7 @@ export default function CategoryPicker({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={placeholder}
-          className="w-full glass-input rounded-2xl pl-10 pr-10 py-3 bg-white/30 outline-none focus:border-gray-900 text-sm font-extrabold text-gray-900"
+          className="w-full glass-input rounded-2xl pl-10 pr-10 py-3 bg-white/30 outline-none focus:border-gray-900 text-sm font-semibold text-gray-900"
         />
         {query ? (
           <button
@@ -230,7 +230,7 @@ export default function CategoryPicker({
                         {c?.icon || "🏷️"}
                       </div>
                       <div className="min-w-0">
-                        <div className="text-sm font-extrabold truncate">{c?.name}</div>
+                        <div className="text-sm font-semibold truncate">{c?.name}</div>
                         <div className={`text-[11px] truncate ${isSelected(id) ? "text-white/75" : "text-gray-900/55"}`}>{crumb}</div>
                       </div>
                     </div>
@@ -240,7 +240,7 @@ export default function CategoryPicker({
               })}
             </div>
           ) : (
-            <div className="px-4 py-5 text-sm text-gray-900/60 font-extrabold">ไม่พบหมวดหมู่</div>
+            <div className="px-4 py-5 text-sm text-gray-900/60 font-semibold">ไม่พบหมวดหมู่</div>
           )}
         </div>
       ) : (
@@ -248,7 +248,7 @@ export default function CategoryPicker({
           {/* Recent (hide in twoStep main stage to keep UI focused on "main first") */}
           {!twoStep && recentCats.length ? (
             <div className="mt-3">
-              <div className="text-[11px] font-extrabold text-gray-900/55 uppercase mb-2">ล่าสุด</div>
+              <div className="text-[11px] font-semibold text-gray-900/55 uppercase mb-2">ล่าสุด</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {recentCats.map((cat) => {
                   const id = String(cat?.id || "").trim();
@@ -276,7 +276,7 @@ export default function CategoryPicker({
           {/* Main categories */}
           {!twoStep || stage === "main" ? (
             <div className="mt-4">
-              <div className="text-[11px] font-extrabold text-gray-900/55 uppercase mb-2">หมวดหลัก</div>
+              <div className="text-[11px] font-semibold text-gray-900/55 uppercase mb-2">หมวดหลัก</div>
               <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 ${maxListHeightClass} overflow-y-auto pr-1 no-scrollbar`}>
                 {hierarchy.main.map((cat) => {
                   const id = String(cat?.id || "").trim();
@@ -324,7 +324,7 @@ export default function CategoryPicker({
           {/* Sub categories */}
           {!twoStep && subcats.length ? (
             <div className="mt-4">
-              <div className="text-[11px] font-extrabold text-gray-900/55 uppercase mb-2">หมวดย่อย</div>
+              <div className="text-[11px] font-semibold text-gray-900/55 uppercase mb-2">หมวดย่อย</div>
               <div className={`grid grid-cols-2 gap-2 ${maxListHeightClass} overflow-y-auto pr-1 no-scrollbar`}
               >
                 {subcats.map((cat) => {
@@ -344,7 +344,7 @@ export default function CategoryPicker({
                         <span className="truncate">{cat?.name}</span>
                       </div>
                       {deleted ? (
-                        <div className={`text-[10px] font-extrabold mt-1 ${on ? "text-white/70" : "text-red-700/70"}`}>(Deleted)</div>
+                        <div className={`text-[10px] font-semibold mt-1 ${on ? "text-white/70" : "text-red-700/70"}`}>(Deleted)</div>
                       ) : null}
                     </button>
                   );
@@ -360,15 +360,15 @@ export default function CategoryPicker({
                 <button
                   type="button"
                   onClick={() => setStage("main")}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/20 border border-white/15 text-xs font-extrabold text-gray-900/80 active:scale-95"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/20 border border-white/15 text-xs font-semibold text-gray-900/80 active:scale-95"
                 >
                   <ChevronLeft size={16} /> เปลี่ยนหมวดหลัก
                 </button>
 
                 <div className="min-w-0 flex items-center gap-2">
-                  <div className="text-[11px] font-extrabold text-gray-900/55 uppercase">หมวดย่อย</div>
+                  <div className="text-[11px] font-semibold text-gray-900/55 uppercase">หมวดย่อย</div>
                   {activeMainCat ? (
-                    <div className="text-[11px] font-extrabold text-gray-900/70 min-w-0 truncate">
+                    <div className="text-[11px] font-semibold text-gray-900/70 min-w-0 truncate">
                       • {activeMainCat.icon} {activeMainCat.name}
                     </div>
                   ) : null}
@@ -383,7 +383,7 @@ export default function CategoryPicker({
                     onChange?.(activeMainId);
                     setStage("main");
                   }}
-                  className="w-full mb-2 px-3 py-3 rounded-2xl border border-white/15 bg-white/20 text-left text-sm font-extrabold text-gray-900 active:scale-[0.99]"
+                  className="w-full mb-2 px-3 py-3 rounded-2xl border border-white/15 bg-white/20 text-left text-sm font-semibold text-gray-900 active:scale-[0.99]"
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="shrink-0 text-base">{activeMainCat?.icon || "🏷️"}</span>
@@ -414,7 +414,7 @@ export default function CategoryPicker({
                         <span className="truncate">{cat?.name}</span>
                       </div>
                       {deleted ? (
-                        <div className={`text-[10px] font-extrabold mt-1 ${on ? "text-white/70" : "text-red-700/70"}`}>(Deleted)</div>
+                        <div className={`text-[10px] font-semibold mt-1 ${on ? "text-white/70" : "text-red-700/70"}`}>(Deleted)</div>
                       ) : null}
                     </button>
                   );

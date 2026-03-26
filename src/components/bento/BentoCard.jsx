@@ -31,7 +31,7 @@ export default function BentoCard({
 
             <div className="min-w-0">
               {title ? (
-                <div className="text-sm font-black text-gray-900 tracking-tight truncate">{title}</div>
+                <div className="text-sm font-semibold text-gray-900 tracking-tight truncate">{title}</div>
               ) : null}
               {subtitle ? (
                 <div className="mt-0.5 text-[12px] font-bold text-gray-800/60 leading-snug">{subtitle}</div>

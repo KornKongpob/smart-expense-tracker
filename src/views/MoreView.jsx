@@ -63,7 +63,7 @@ function HubSection({ title, subtitle, children }) {
   return (
     <section className="ui-card overflow-hidden rounded-3xl">
       <div className="border-b border-slate-900/8 px-4 py-3">
-        <div className="text-sm font-extrabold text-slate-950">{title}</div>
+        <div className="text-sm font-semibold text-slate-950">{title}</div>
         {subtitle ? <div className="mt-1 text-[12px] font-medium text-slate-600">{subtitle}</div> : null}
       </div>
       {children}
@@ -79,7 +79,7 @@ function PinModal({ isOpen, hasPin, pin, setPin, confirmPin, setConfirmPin, erro
       <div className="w-full max-w-sm ui-card-strong p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-lg font-black text-gray-900">Security / PIN</div>
+            <div className="text-lg font-semibold text-gray-900">Security / PIN</div>
             <div className="mt-1 text-xs font-bold text-gray-700/70">
               ใช้รหัส 6 หลักเพื่อบังคับล็อกแอพทุกครั้งที่เปิดใหม่
             </div>
@@ -201,12 +201,6 @@ export default function MoreView({ showAlert, showConfirm }) {
       ).length,
     [inboxList]
   );
-
-  const recurringStats = useMemo(() => {
-    const list = state?.recurring || [];
-    const enabled = list.filter((item) => item?.enabled !== false).length;
-    return { total: list.length, enabled };
-  }, [state?.recurring]);
 
   const rulesStats = useMemo(() => {
     const list = Array.isArray(state?.rules) ? state.rules : [];
@@ -368,114 +362,58 @@ export default function MoreView({ showAlert, showConfirm }) {
 
   return (
     <div className="min-h-dvh">
-      <AppHeader title="Hub" subtitle="Power tools • automation • security • backup" />
+      <AppHeader title="ตั้งค่า" />
 
       <main className="ui-page pt-4 pb-6 view-flow">
-        <section className="view-hero">
-          <div className="view-hero-content">
-            <div>
-              <div className="view-eyebrow">Hub control center</div>
-              <div className="view-hero-title">รวบงานลึกของแอพไว้ในศูนย์สั่งการเดียว</div>
-              <div className="view-hero-copy">
-                เข้าถึง analytics, recurring, rules, backup และการตั้งค่าระบบจากหน้าเดียว
-              </div>
-            </div>
-
-            <div className="view-hero-grid">
-              <div className="view-metric">
-                <div className="view-metric-label">Recurring</div>
-                <div className="view-metric-value">{recurringStats.enabled}/{recurringStats.total}</div>
-                <div className="view-metric-hint">กฎ recurring ที่เปิดใช้งานอยู่</div>
-              </div>
-              <div className="view-metric">
-                <div className="view-metric-label">Inbox pending</div>
-                <div className="view-metric-value">{inboxPendingCount}</div>
-                <div className="view-metric-hint">รายการที่ยังรอ review หรือ approve</div>
-              </div>
-              <div className="view-metric">
-                <div className="view-metric-label">Rules</div>
-                <div className="view-metric-value">{rulesStats.enabled}/{rulesStats.total}</div>
-                <div className="view-metric-hint">automation rules ที่เปิดใช้งานอยู่</div>
-              </div>
-              <div className="view-metric">
-                <div className="view-metric-label">Theme</div>
-                <div className="view-metric-value">{isDark ? "Dark" : "Light"}</div>
-                <div className="view-metric-hint">{hasPin ? "PIN เปิดใช้งาน" : "ยังไม่ได้ตั้ง PIN"}</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <HubSection
-          title="Planning & Analytics"
-          subtitle="งานวิเคราะห์และเครื่องมือที่ช่วยตัดสินใจในระดับระบบ"
-        >
-          <MoreRow icon={<Home size={20} />} title="Dashboard" subtitle="กลับไปหน้าสรุปภาพรวมหลักของแอพ" onClick={() => navigate("dashboard")} testId="hub-dashboard" />
-          <MoreRow icon={<BarChart3 size={20} />} title="Analytics" subtitle="ดูสถิติ, แนวโน้ม และ breakdown เชิงลึก" onClick={() => navigate("stats")} testId="hub-analytics" />
-          <MoreRow icon={<Bell size={20} />} title="Budgets" subtitle="ตั้งงบและเฝ้าดู budget pressure" onClick={() => navigate("budgets")} testId="hub-budgets" />
-          <MoreRow icon={<Settings size={20} />} title="Categories" subtitle="จัดหมวดหลัก/ย่อยและ keyword สำหรับ auto-categorize" onClick={() => navigate("categories")} testId="hub-categories" />
+        <HubSection title="นำทาง">
+          <MoreRow icon={<Home size={20} />} title="หน้าหลัก" subtitle="ภาพรวมรายรับรายจ่าย" onClick={() => navigate("dashboard")} testId="hub-dashboard" />
+          <MoreRow icon={<BarChart3 size={20} />} title="สถิติ" subtitle="กราฟและ breakdown" onClick={() => navigate("stats")} testId="hub-analytics" />
+          <MoreRow icon={<Bell size={20} />} title="งบประมาณ" subtitle="ตั้งงบรายวัน/เดือน/หมวด" onClick={() => navigate("budgets")} testId="hub-budgets" />
         </HubSection>
 
-        <HubSection
-          title="Automation & Memory"
-          subtitle="ทำให้แอพจำร้านค้า, สแกนฉลาดขึ้น และสร้างรายการอัตโนมัติ"
-        >
+        <HubSection title="ระบบอัตโนมัติ">
+          <MoreRow icon={<Settings size={20} />} title="หมวดหมู่" subtitle="จัดกลุ่มรายจ่ายและรายรับ" onClick={() => navigate("categories")} testId="hub-categories" />
           <MoreRow icon={<Inbox size={20} />} title="Inbox" subtitle={inboxSubtitle} badge={inboxPendingCount} onClick={() => navigate("inbox")} testId="hub-inbox" />
-          <MoreRow
-            icon={<Repeat size={20} />}
-            title="Recurring"
-            subtitle={recurringHealth}
-            onClick={() => navigate("recurring")}
-            testId="hub-recurring"
-          />
-          <MoreRow icon={<PlayCircle size={20} />} title="Run Recurring Now" subtitle="สร้างรายการที่ถึงรอบทันที" onClick={onRunRecurring} testId="hub-run-recurring" />
+          <MoreRow icon={<Repeat size={20} />} title="รายการประจำ" subtitle={recurringHealth} onClick={() => navigate("recurring")} testId="hub-recurring" />
+          <MoreRow icon={<PlayCircle size={20} />} title="รัน Recurring" subtitle="สร้างรายการที่ถึงรอบทันที" onClick={onRunRecurring} testId="hub-run-recurring" />
           <MoreRow
             icon={<Wand2 size={20} />}
-            title="Automation Rules"
-            subtitle={rulesStats.total ? `เปิดใช้ ${rulesStats.enabled} • ทั้งหมด ${rulesStats.total}` : "ตั้งกฎเพื่อ auto-fill หลังสแกน"}
+            title="กฎอัตโนมัติ"
+            subtitle={rulesStats.total ? `เปิดใช้ ${rulesStats.enabled} จาก ${rulesStats.total}` : "ตั้งกฎ auto-fill หลังสแกน"}
             onClick={() => navigate("rules")}
             testId="hub-rules"
           />
           <MoreRow
             icon={<Store size={20} />}
-            title="Merchant Library"
-            subtitle={merchantCount ? `มี ${merchantCount} ร้านที่ระบบจำได้` : "จำร้าน → หมวด/บัญชี แบบฉลาด"}
+            title="ร้านค้า"
+            subtitle={merchantCount ? `${merchantCount} ร้าน` : "จำร้านค้าอัตโนมัติ"}
             onClick={() => navigate("merchants")}
             testId="hub-merchants"
           />
         </HubSection>
 
-        <HubSection
-          title="Security & Appearance"
-          subtitle="ปรับประสบการณ์ใช้งานและความปลอดภัยของแอพ"
-        >
-          <MoreRow
-            icon={<Lock size={20} />}
-            title="Security / PIN"
-            subtitle={hasPin ? "PIN เปิดใช้งานอยู่ แตะเพื่อเปลี่ยนหรือลบ" : "ตั้ง PIN 6 หลักเพื่อบังคับล็อกแอพ"}
-            onClick={openPinModal}
-            testId="hub-security"
-          />
+        <HubSection title="ข้อมูลและความปลอดภัย">
           <MoreRow
             icon={isDark ? <Moon size={20} /> : <Sun size={20} />}
             title={isDark ? "Dark mode (เปิดอยู่)" : "Dark mode"}
-            subtitle={isDark ? "แตะเพื่อกลับไปโหมดสว่าง" : "แตะเพื่อสลับเป็นโหมดมืด"}
+            subtitle={isDark ? "แตะเพื่อปิด" : "แตะเพื่อเปิด"}
             onClick={() => setTheme(isDark ? "light" : "dark")}
             testId="hub-theme"
           />
-        </HubSection>
-
-        <HubSection
-          title="Backup & Reset"
-          subtitle="ดูแลข้อมูลสำรอง, import/export และการรีเซ็ตเครื่องนี้"
-        >
-          <MoreRow icon={<Upload size={20} />} title="Import Backup JSON" subtitle="ทับข้อมูลเดิมทั้งหมดในเครื่องนี้" onClick={onPickImport} testId="hub-import-backup" />
+          <MoreRow
+            icon={<Lock size={20} />}
+            title="PIN Lock"
+            subtitle={hasPin ? "เปิดอยู่ — แตะเพื่อเปลี่ยน" : "ตั้ง PIN 6 หลัก"}
+            onClick={openPinModal}
+            testId="hub-security"
+          />
+          <MoreRow icon={<Upload size={20} />} title="Export Backup" subtitle="สำรองข้อมูล JSON" onClick={onExport} testId="hub-export-backup" />
+          <MoreRow icon={<Upload size={20} />} title="Import Backup" subtitle="นำเข้าจากไฟล์ JSON" onClick={onPickImport} testId="hub-import-backup" />
           <input ref={fileRef} type="file" accept="application/json,.json" data-testid="hub-import-file" className="hidden" onChange={onImportFile} />
-          <MoreRow icon={<Upload size={20} />} title="Export Backup JSON" subtitle="ดาวน์โหลดไฟล์สำรองข้อมูลฉบับเต็ม" onClick={onExport} testId="hub-export-backup" />
           <MoreRow
             icon={<Upload size={20} />}
             title="Export CSV"
-            subtitle="ดาวน์โหลดรายการเป็น CSV สำหรับ Excel หรือรายงาน"
+            subtitle="สำหรับ Excel"
             onClick={() => {
               const csv = transactionsToCsv(state.transactions || [], { categories: state.categories, accounts: state.accounts });
               const date = new Date();
@@ -485,10 +423,11 @@ export default function MoreView({ showAlert, showConfirm }) {
             }}
             testId="hub-export-csv"
           />
-          <MoreRow icon={<Trash2 size={20} />} title="Reset all data" subtitle="ล้างข้อมูลทั้งหมดและย้อนกลับไม่ได้" danger onClick={onReset} testId="hub-reset" />
         </HubSection>
 
-        <div className="pb-safe text-center text-xs font-bold text-slate-500">Smart Expense Tracker Hub</div>
+        <HubSection title="">
+          <MoreRow icon={<Trash2 size={20} />} title="ลบข้อมูลทั้งหมด" subtitle="ย้อนกลับไม่ได้" danger onClick={onReset} testId="hub-reset" />
+        </HubSection>
       </main>
 
       <PinModal

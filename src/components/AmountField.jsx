@@ -68,7 +68,7 @@ export default function AmountField({
 
         <div
           className={[
-            "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-extrabold border",
+            "inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border",
             meta.chipBg,
             meta.chipText,
             meta.chipBorder,
@@ -85,7 +85,7 @@ export default function AmountField({
         <div className="ui-help">แสดงผล</div>
         <div
           className={[
-            "text-3xl font-extrabold tabular-nums text-gray-900 mt-1 drop-shadow-sm",
+            "text-3xl font-semibold tabular-nums text-gray-900 mt-1 drop-shadow-sm",
             meta.glow,
           ].join(" ")}
         >
@@ -111,7 +111,7 @@ export default function AmountField({
           disabled={disabled}
           aria-label={label}
           className={[
-            "ui-input mt-2 text-lg font-extrabold tabular-nums",
+            "ui-input mt-2 text-lg font-semibold tabular-nums",
             "placeholder:text-gray-900/35",
             disabled ? "opacity-60 cursor-not-allowed" : "",
             "focus-visible:ring-4",
@@ -124,7 +124,7 @@ export default function AmountField({
         <div className="mt-2 ui-help">ใส่ได้ถึง 2 ตำแหน่งทศนิยม (สตางค์)</div>
 
         {helper ? (
-          <div className="mt-3 ui-card-strong p-4 text-[12px] font-extrabold text-gray-900/85">
+          <div className="mt-3 ui-card-strong p-4 text-[12px] font-semibold text-gray-900/85">
             {helper}
           </div>
         ) : null}

@@ -93,7 +93,7 @@ export default function ConfirmationModal({
                 <h3
                   id={titleId}
                   className={[
-                    "text-lg font-extrabold tracking-tight",
+                    "text-lg font-semibold tracking-tight",
                     isDestructive ? "text-red-700" : "text-gray-900",
                   ].join(" ")}
                 >
@@ -141,8 +141,8 @@ export default function ConfirmationModal({
           </div>
 
           <div className="mt-3 text-[11px] text-gray-900/45">
-            กด <span className="font-extrabold">Esc</span> เพื่อปิด • กด{" "}
-            <span className="font-extrabold">Enter</span> เพื่อยืนยัน
+            กด <span className="font-semibold">Esc</span> เพื่อปิด • กด{" "}
+            <span className="font-semibold">Enter</span> เพื่อยืนยัน
           </div>
         </div>
       </div>

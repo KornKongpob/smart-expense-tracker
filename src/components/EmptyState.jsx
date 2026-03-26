@@ -12,7 +12,7 @@ export default function EmptyState({
   return (
     <div className={cn("ui-card", "text-center py-12", className)}>
       {icon ? <div className="mx-auto mb-3 opacity-35">{icon}</div> : null}
-      <div className="text-base font-extrabold text-gray-900">{title || "ไม่มีข้อมูล"}</div>
+      <div className="text-base font-semibold text-gray-900">{title || "ไม่มีข้อมูล"}</div>
       {description ? (
         <div className="mt-2 text-sm font-bold text-gray-700/70 whitespace-pre-wrap">
           {description}

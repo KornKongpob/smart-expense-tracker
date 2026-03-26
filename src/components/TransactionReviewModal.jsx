@@ -48,7 +48,7 @@ function StepPill({ active, done, index, label, icon, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`shrink-0 px-3 py-2 rounded-full text-xs font-extrabold border transition-all active:scale-95 flex items-center gap-2 ${
+      className={`shrink-0 px-3 py-2 rounded-full text-xs font-semibold border transition-all active:scale-95 flex items-center gap-2 ${
         active
           ? "bg-gray-900/90 text-white border-white/15"
           : done
@@ -58,7 +58,7 @@ function StepPill({ active, done, index, label, icon, onClick }) {
       aria-current={active ? "step" : undefined}
     >
       <span
-        className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-black ${
+        className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-semibold ${
           active ? "bg-white/20" : done ? "bg-emerald-500/20 text-emerald-900" : "bg-white/15"
         }`}
       >
@@ -194,14 +194,14 @@ export default function TransactionReviewModal({
                   )}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-xs font-extrabold text-gray-900/80">ไฟล์</div>
-                  <div className="text-sm font-black text-gray-900 truncate">{q?.fileName || "(ไม่มีชื่อไฟล์)"}</div>
+                  <div className="text-xs font-semibold text-gray-900/80">ไฟล์</div>
+                  <div className="text-sm font-semibold text-gray-900 truncate">{q?.fileName || "(ไม่มีชื่อไฟล์)"}</div>
                   <div className="mt-1 text-[11px] text-gray-900/55 truncate">แตะปุ่ม “ดูไฟล์” เพื่อเปิดแท็บใหม่</div>
                   <a
                     href={q.previewUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="inline-flex mt-2 px-3 py-1.5 rounded-xl text-[11px] font-extrabold bg-white/20 border border-white/15 text-gray-900/80 active:scale-95"
+                    className="inline-flex mt-2 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-white/20 border border-white/15 text-gray-900/80 active:scale-95"
                   >
                     ดูไฟล์
                   </a>
@@ -232,7 +232,7 @@ export default function TransactionReviewModal({
                       key={t.id}
                       type="button"
                       onClick={() => onTypeChange?.(qid, t.id)}
-                      className={`px-3 py-2 rounded-xl text-xs font-extrabold transition-all active:scale-95 ${
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 ${
                         txType === t.id
                           ? "bg-gray-900/90 text-white shadow-sm"
                           : "bg-white/20 text-gray-900/70 border border-white/15"
@@ -268,7 +268,7 @@ export default function TransactionReviewModal({
                       const satang = parseMoneyToSatang(cleaned);
                       setAmountInput(formatMoneyInputFromSatang(Math.abs(satang || 0), { emptyIfZero: true }));
                     }}
-                    className="w-full outline-none text-lg font-extrabold text-gray-900 bg-transparent"
+                    className="w-full outline-none text-lg font-semibold text-gray-900 bg-transparent"
                     placeholder="0.00"
                   />
                   <div className="text-[11px] text-gray-800/55 mt-1">* แก้ยอดตรงนี้จะปิดโหมดแยกหมวด</div>
@@ -279,7 +279,7 @@ export default function TransactionReviewModal({
                     type="date"
                     value={q?.date || toISODate(new Date())}
                     onChange={(e) => onUpdateItemRef.current?.(qid, { date: e.target.value })}
-                    className="w-full outline-none text-sm font-extrabold text-gray-900 bg-transparent"
+                    className="w-full outline-none text-sm font-semibold text-gray-900 bg-transparent"
                   />
                 </div>
               </div>
@@ -641,7 +641,7 @@ export default function TransactionReviewModal({
                 <div className="rounded-2xl bg-white/10 border border-white/15 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-gray-900/75">ผ่อนชำระ (Installment)</div>
+                      <div className="text-xs font-semibold text-gray-900/75">ผ่อนชำระ (Installment)</div>
                       <div className="text-[11px] text-gray-900/55">ใช้ได้เฉพาะ Expense + บัญชีบัตร + ไม่ split</div>
                     </div>
                     <button
@@ -662,7 +662,7 @@ export default function TransactionReviewModal({
 
                   {q?.isInstallment ? (
                     <div className="mt-3">
-                      <div className="text-[11px] font-extrabold text-gray-900/70 mb-1">จำนวนงวด</div>
+                      <div className="text-[11px] font-semibold text-gray-900/70 mb-1">จำนวนงวด</div>
                       <select
                         value={String(q?.installmentMonths || 3)}
                         onChange={(e) => onUpdateItemRef.current?.(qid, { installmentMonths: Number(e.target.value) || 3 })}
@@ -700,10 +700,10 @@ export default function TransactionReviewModal({
                       <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="text-xs font-extrabold text-gray-900/80 truncate">{title}</div>
+                            <div className="text-xs font-semibold text-gray-900/80 truncate">{title}</div>
                             {subtitle ? <div className="text-[11px] text-gray-900/55 truncate">{subtitle}</div> : null}
                           </div>
-                          <div className="shrink-0 text-[12px] font-black text-gray-900">
+                          <div className="shrink-0 text-[12px] font-semibold text-gray-900">
                             {sign}
                             {formatCurrency(Math.abs(Number(g.amount) || 0))}
                           </div>
@@ -740,30 +740,30 @@ export default function TransactionReviewModal({
           <div className="space-y-2 text-sm">
             <div className="flex items-center justify-between gap-3">
               <div className="text-gray-900/60">ประเภท</div>
-              <div className="font-extrabold text-gray-900">{t || "—"}</div>
+              <div className="font-semibold text-gray-900">{t || "—"}</div>
             </div>
 
             <div className="flex items-center justify-between gap-3">
               <div className="text-gray-900/60">ยอด</div>
-              <div className="font-extrabold text-gray-900">{formatCurrency(Math.abs(Number(q?.amount) || 0))}</div>
+              <div className="font-semibold text-gray-900">{formatCurrency(Math.abs(Number(q?.amount) || 0))}</div>
             </div>
 
             <div className="flex items-center justify-between gap-3">
               <div className="text-gray-900/60">วันที่</div>
-              <div className="font-extrabold text-gray-900">{q?.date || "—"}</div>
+              <div className="font-semibold text-gray-900">{q?.date || "—"}</div>
             </div>
 
             {t === "transfer" || t === "credit_payment" ? (
               <>
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-gray-900/60">From</div>
-                  <div className="font-extrabold text-gray-900 truncate max-w-[14rem]">
+                  <div className="font-semibold text-gray-900 truncate max-w-[14rem]">
                     {accounts?.find((a) => String(a?.id || "") === String(q?.fromAccountId || ""))?.name || "—"}
                   </div>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-gray-900/60">To</div>
-                  <div className="font-extrabold text-gray-900 truncate max-w-[14rem]">
+                  <div className="font-semibold text-gray-900 truncate max-w-[14rem]">
                     {accounts?.find((a) => String(a?.id || "") === String(q?.toAccountId || ""))?.name || "—"}
                   </div>
                 </div>
@@ -771,14 +771,14 @@ export default function TransactionReviewModal({
             ) : (
               <div className="flex items-center justify-between gap-3">
                 <div className="text-gray-900/60">บัญชี</div>
-                <div className="font-extrabold text-gray-900 truncate max-w-[14rem]">{acc?.name || "—"}</div>
+                <div className="font-semibold text-gray-900 truncate max-w-[14rem]">{acc?.name || "—"}</div>
               </div>
             )}
 
             {t === "expense" || t === "income" ? (
               <div className="flex items-center justify-between gap-3">
                 <div className="text-gray-900/60">หมวดหลัก</div>
-                <div className="font-extrabold text-gray-900 truncate max-w-[14rem]">
+                <div className="font-semibold text-gray-900 truncate max-w-[14rem]">
                   {cat ? `${cat.icon || "🏷️"} ${cat.name}` : "—"}
                 </div>
               </div>
@@ -787,7 +787,7 @@ export default function TransactionReviewModal({
             {q?.merchant ? (
               <div className="flex items-center justify-between gap-3">
                 <div className="text-gray-900/60">ร้าน</div>
-                <div className="font-extrabold text-gray-900 truncate max-w-[14rem]">{q.merchant}</div>
+                <div className="font-semibold text-gray-900 truncate max-w-[14rem]">{q.merchant}</div>
               </div>
             ) : null}
 
@@ -840,7 +840,7 @@ export default function TransactionReviewModal({
       {q?.duplicate ? (
         <div className="glass-panel border border-amber-500/20 rounded-2xl p-3 mb-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-extrabold text-amber-800 flex items-center gap-2">
+            <div className="text-sm font-semibold text-amber-800 flex items-center gap-2">
               <AlertTriangle size={16} /> {dupBadgeText}
             </div>
             <div className="text-[12px] text-amber-800/80">
@@ -906,7 +906,7 @@ export default function TransactionReviewModal({
             type="button"
             disabled={!canGoBack}
             onClick={() => setStep((s) => Math.max(0, s - 1))}
-            className={`flex items-center gap-2 px-3 py-3 rounded-xl text-sm font-extrabold transition-all active:scale-95 border ${
+            className={`flex items-center gap-2 px-3 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 border ${
               canGoBack ? "bg-white border-gray-200 text-gray-800" : "bg-white/50 border-gray-100 text-gray-400"
             }`}
           >
@@ -931,7 +931,7 @@ export default function TransactionReviewModal({
                 doneFn?.();
               }
             }}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25 active:scale-95"
+            className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25 active:scale-95"
           >
             {canGoNext ? (
               <>

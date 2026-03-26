@@ -571,7 +571,7 @@ function PillTab({ active, onClick, label, count }) {
     <button
       type="button"
       onClick={onClick}
-      className={`px-4 py-2 rounded-2xl text-sm font-extrabold border active:scale-95 transition-all inline-flex items-center gap-2 ${
+      className={`px-4 py-2 rounded-2xl text-sm font-semibold border active:scale-95 transition-all inline-flex items-center gap-2 ${
         active
           ? "bg-gray-900/90 text-white border-white/10 shadow-lg"
           : "bg-white/30 text-gray-900/70 border-white/20"
@@ -580,7 +580,7 @@ function PillTab({ active, onClick, label, count }) {
       {label}
       {typeof count === "number" ? (
         <span
-          className={`min-w-[26px] px-2 py-0.5 rounded-full text-xs font-black ${
+          className={`min-w-[26px] px-2 py-0.5 rounded-full text-xs font-semibold ${
             active ? "bg-white/15 text-white" : "bg-gray-900/10 text-gray-900/70"
           }`}
         >
@@ -607,7 +607,7 @@ function AttachmentThumb({ attachmentId }) {
         >
           {String(mimeType || "").toLowerCase() === "application/pdf" ? (
             <div className="w-full h-28 flex items-center justify-center bg-white/10">
-              <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900/80">
                 <FileText size={18} />
                 PDF
               </div>
@@ -1050,43 +1050,8 @@ export default function InboxView({ showAlert, showConfirm }) {
 
       <main className="ui-page pt-4 pb-6 min-w-0 view-flow">
 
-      <div className="view-hero">
-        <div className="view-hero-content">
-          <div>
-            <div className="view-eyebrow">Inbox review</div>
-            <div className="view-hero-title">รวมรายการรอตรวจสอบ อนุมัติ และจัดหมวดไว้ในที่เดียว</div>
-            <div className="view-hero-copy">
-              ตรวจสอบรายการใหม่ อนุมัติทีละรายการหรือเป็นชุด และย้อนดูรายการที่อนุมัติแล้วได้จากหน้าเดียว
-            </div>
-          </div>
-
-          <div className="view-hero-grid">
-            <div className="view-metric">
-              <div className="view-metric-label">Pending</div>
-              <div className="view-metric-value">{pendingCount}</div>
-              <div className="view-metric-hint">รายการที่ยังรอ review หรือ approve</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">Approved</div>
-              <div className="view-metric-value">{approved.length}</div>
-              <div className="view-metric-hint">ประวัติรายการที่ส่งเข้า transactions แล้ว</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">Selected</div>
-              <div className="view-metric-value">{selectedCount}</div>
-              <div className="view-metric-hint">จำนวนรายการที่เลือกไว้สำหรับ bulk action</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">Search</div>
-              <div className="view-metric-value">{query ? "Active" : "All"}</div>
-              <div className="view-metric-hint">{query ? `กำลังค้นหาด้วย “${query}”` : "ยังไม่ได้กรองด้วยข้อความค้นหา"}</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Summary */}
+      <div className="text-[13px] text-slate-500">รอตรวจ {pendingCount} • อนุมัติแล้ว {approved.length}{selectedCount ? ` • เลือก ${selectedCount}` : ""}</div>
 
         {/* Tabs + actions */}
       <div className="mt-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
@@ -1143,7 +1108,7 @@ export default function InboxView({ showAlert, showConfirm }) {
       {tab === "pending" ? (
         <div className="mt-3 glass-card rounded-3xl p-3 border border-white/20">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-extrabold text-gray-900/70 inline-flex items-center gap-2">
+            <div className="text-sm font-semibold text-gray-900/70 inline-flex items-center gap-2">
               <Layers size={16} />
               Selected: {selectedCount}
             </div>
@@ -1152,7 +1117,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={selectAll}
-                className="px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95"
+                className="px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-semibold active:scale-95"
                 disabled={!filtered.length}
               >
                 Select all
@@ -1160,7 +1125,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={deselectAll}
-                className="px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95"
+                className="px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-semibold active:scale-95"
                 disabled={!selectedCount}
               >
                 Deselect all
@@ -1168,7 +1133,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={() => approveIds(Array.from(selectedIds))}
-                className={`px-3 py-2 rounded-2xl font-extrabold active:scale-95 inline-flex items-center gap-2 ${
+                className={`px-3 py-2 rounded-2xl font-semibold active:scale-95 inline-flex items-center gap-2 ${
                   selectedCount
                     ? "bg-indigo-600 text-white shadow-indigo-200"
                     : "bg-white/20 text-gray-700/50 border border-white/20"
@@ -1181,7 +1146,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={() => deleteIds(Array.from(selectedIds))}
-                className={`px-3 py-2 rounded-2xl font-extrabold active:scale-95 inline-flex items-center gap-2 ${
+                className={`px-3 py-2 rounded-2xl font-semibold active:scale-95 inline-flex items-center gap-2 ${
                   selectedCount
                     ? "bg-red-600 text-white shadow-red-200"
                     : "bg-white/20 text-gray-700/50 border border-white/20"
@@ -1195,7 +1160,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={() => autoCategorizeIds(Array.from(selectedIds))}
-                className={`px-3 py-2 rounded-2xl font-extrabold active:scale-95 inline-flex items-center gap-2 ${
+                className={`px-3 py-2 rounded-2xl font-semibold active:scale-95 inline-flex items-center gap-2 ${
                   selectedCount
                     ? "bg-emerald-600 text-white shadow-emerald-200"
                     : "bg-white/20 text-gray-700/50 border border-white/20"
@@ -1210,7 +1175,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={selectDuplicatesOnly}
-                className="px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95 inline-flex items-center gap-2"
+                className="px-3 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-semibold active:scale-95 inline-flex items-center gap-2"
                 disabled={!filtered.length}
                 title="เลือกเฉพาะรายการที่ระบบมองว่าอาจซ้ำ"
               >
@@ -1221,7 +1186,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={() => approveIds(filtered.map((x) => x.id))}
-                className="px-3 py-2 rounded-2xl bg-indigo-600 text-white shadow-indigo-200 font-extrabold active:scale-95 inline-flex items-center gap-2"
+                className="px-3 py-2 rounded-2xl bg-indigo-600 text-white shadow-indigo-200 font-semibold active:scale-95 inline-flex items-center gap-2"
                 disabled={!filtered.length}
                 title="Approve ทุกรายการที่แสดง (ตาม filter/search)"
               >
@@ -1232,7 +1197,7 @@ export default function InboxView({ showAlert, showConfirm }) {
               <button
                 type="button"
                 onClick={() => deleteIds(filtered.map((x) => x.id))}
-                className="px-3 py-2 rounded-2xl bg-red-600 text-white shadow-red-200 font-extrabold active:scale-95 inline-flex items-center gap-2"
+                className="px-3 py-2 rounded-2xl bg-red-600 text-white shadow-red-200 font-semibold active:scale-95 inline-flex items-center gap-2"
                 disabled={!filtered.length}
                 title="ลบทุกรายการที่แสดง (ตาม filter/search)"
               >
@@ -1250,7 +1215,7 @@ export default function InboxView({ showAlert, showConfirm }) {
           <div className="mx-auto w-12 h-12 rounded-2xl bg-gray-900/10 flex items-center justify-center">
             <Inbox size={22} />
           </div>
-          <div className="mt-3 text-lg font-extrabold text-gray-900">ไม่มีรายการ</div>
+          <div className="mt-3 text-lg font-semibold text-gray-900">ไม่มีรายการ</div>
           <div className="mt-1 text-sm text-gray-900/60">
             {tab === "pending" ? "ลองสแกนใบเสร็จ แล้วเลือก “Send to Inbox”" : "ยังไม่มีรายการที่ approve แล้ว"}
           </div>
@@ -1299,26 +1264,26 @@ export default function InboxView({ showAlert, showConfirm }) {
                         </button>
                       ) : null}
 
-                      <div className="px-3 py-1.5 rounded-2xl bg-white/30 border border-white/20 text-xs font-extrabold inline-flex items-center gap-2">
+                      <div className="px-3 py-1.5 rounded-2xl bg-white/30 border border-white/20 text-xs font-semibold inline-flex items-center gap-2">
                         <Icon size={14} />
                         {label}
                       </div>
 
                       {it?.duplicate ? (
-                        <div className="px-2.5 py-1.5 rounded-2xl bg-amber-100/80 border border-amber-200 text-xs font-extrabold text-amber-800 inline-flex items-center gap-2">
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-amber-100/80 border border-amber-200 text-xs font-semibold text-amber-800 inline-flex items-center gap-2">
                           <AlertTriangle size={14} />
                           Possible duplicate
                         </div>
                       ) : null}
 
                       {docTypeLabel ? (
-                        <div className="px-2.5 py-1.5 rounded-2xl bg-slate-100/90 border border-slate-200 text-xs font-extrabold text-slate-700">
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-slate-100/90 border border-slate-200 text-xs font-semibold text-slate-700">
                           {docTypeLabel}
                         </div>
                       ) : null}
 
                       {scanConfidence != null ? (
-                        <div className="px-2.5 py-1.5 rounded-2xl bg-sky-100/90 border border-sky-200 text-xs font-extrabold text-sky-800">
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-sky-100/90 border border-sky-200 text-xs font-semibold text-sky-800">
                           Scan {Math.round(scanConfidence * 100)}%
                         </div>
                       ) : null}
@@ -1326,7 +1291,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                       {accountMatchBadge ? (
                         <div
                           className={[
-                            "px-2.5 py-1.5 rounded-2xl border text-xs font-extrabold",
+                            "px-2.5 py-1.5 rounded-2xl border text-xs font-semibold",
                             accountMatchBadge.tone === "ok"
                               ? "bg-emerald-100/85 border-emerald-200 text-emerald-800"
                               : accountMatchBadge.tone === "info"
@@ -1339,19 +1304,19 @@ export default function InboxView({ showAlert, showConfirm }) {
                       ) : null}
 
                       {requiredFixes.length ? (
-                        <div className="px-2.5 py-1.5 rounded-2xl bg-rose-100/90 border border-rose-200 text-xs font-extrabold text-rose-800">
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-rose-100/90 border border-rose-200 text-xs font-semibold text-rose-800">
                           Fix: {requiredFixes.slice(0, 2).join(", ")}
                         </div>
                       ) : null}
 
                       {tab === "approved" ? (
-                        <div className="px-2.5 py-1.5 rounded-2xl bg-emerald-100/70 border border-emerald-200 text-xs font-extrabold text-emerald-800">
+                        <div className="px-2.5 py-1.5 rounded-2xl bg-emerald-100/70 border border-emerald-200 text-xs font-semibold text-emerald-800">
                           Approved
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="mt-2 text-2xl font-black text-gray-900">
+                    <div className="mt-2 text-2xl font-semibold text-gray-900">
                       {isPositiveNumber(Number(it?.amount)) ? formatCurrency(Number(it.amount)) : "—"}
                     </div>
 
@@ -1385,7 +1350,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                       <div
                         className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-28 overflow-y-auto overflow-x-hidden no-scrollbar"
                       >
-                        <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
+                        <div className="text-[10px] font-semibold text-gray-900/55 uppercase tracking-wide mb-2">
                           Breakdown ({it.groups.length})
                         </div>
                         <div className="space-y-2">
@@ -1403,7 +1368,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                             return (
                               <div key={`${it.id}-g-${idx}`} className="flex items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal wrap-anywhere">
+                                  <div className="text-xs font-semibold text-gray-900/85 break-words whitespace-normal wrap-anywhere">
                                     {cat?.name || "—"}
                                   </div>
                                   {lineNote ? (
@@ -1412,7 +1377,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                                     </div>
                                   ) : null}
                                 </div>
-                                <div className={`shrink-0 text-xs font-black ${cls}`}>
+                                <div className={`shrink-0 text-xs font-semibold ${cls}`}>
                                   {sign}{amt}
                                 </div>
                               </div>
@@ -1429,7 +1394,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setEditingId(String(it.id)); }}
-                          className="px-4 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
+                          className="px-4 py-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900/80 font-semibold active:scale-95 inline-flex items-center justify-center gap-2"
                         >
                           <Edit2 size={16} />
                           Edit
@@ -1438,7 +1403,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); approveIds([it.id]); }}
-                          className="px-4 py-2 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-indigo-200 active:scale-95 inline-flex items-center justify-center gap-2"
+                          className="px-4 py-2 rounded-2xl bg-indigo-600 text-white font-semibold shadow-indigo-200 active:scale-95 inline-flex items-center justify-center gap-2"
                         >
                           <Check size={16} />
                           Approve

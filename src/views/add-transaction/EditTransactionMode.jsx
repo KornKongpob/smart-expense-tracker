@@ -30,7 +30,7 @@ function SectionTab({ active, icon, label, onClick, badge }) {
       type="button"
       onClick={onClick}
       className={cn(
-        "shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl border text-sm font-extrabold transition-all active:scale-95",
+        "shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl border text-sm font-semibold transition-all active:scale-95",
         active
           ? "bg-gray-900/90 text-white border-white/15 shadow-sm"
           : "bg-white/45 text-gray-900/70 border-white/30 hover:bg-white/70"
@@ -41,7 +41,7 @@ function SectionTab({ active, icon, label, onClick, badge }) {
       {badge ? (
         <span
           className={cn(
-            "inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full text-[10px] font-black",
+            "inline-flex items-center justify-center min-w-6 h-6 px-1.5 rounded-full text-[10px] font-semibold",
             active ? "bg-white/15 text-white" : "bg-gray-900/8 text-gray-900/70"
           )}
         >
@@ -63,7 +63,7 @@ function SectionCard({ title, subtitle, icon, actions, children }) {
             <IconComponent size={18} className="text-gray-900" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-black text-gray-900 tracking-tight">{title}</div>
+            <div className="text-sm font-semibold text-gray-900 tracking-tight">{title}</div>
             {subtitle ? <div className="mt-0.5 text-[12px] font-bold text-gray-800/60">{subtitle}</div> : null}
           </div>
         </div>
@@ -85,7 +85,7 @@ function SummaryBadge({ children, tone = "default" }) {
       : "bg-white/55 text-gray-900 border-white/30";
 
   return (
-    <span className={cn("inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-extrabold", toneClass)}>
+    <span className={cn("inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-semibold", toneClass)}>
       {children}
     </span>
   );
@@ -95,7 +95,7 @@ function SummaryMetric({ label, value }) {
   return (
     <div className="rounded-2xl bg-white/45 border border-white/25 p-3 min-w-0">
       <div className="text-[11px] font-bold text-gray-900/55 uppercase tracking-wide">{label}</div>
-      <div className="mt-1 text-sm font-extrabold text-gray-900 truncate">{value || "-"}</div>
+      <div className="mt-1 text-sm font-semibold text-gray-900 truncate">{value || "-"}</div>
     </div>
   );
 }
@@ -333,7 +333,7 @@ export default function EditTransactionMode(props) {
                 {initialAttachmentId ? <SummaryBadge>มีไฟล์แนบ</SummaryBadge> : null}
               </div>
 
-              <div className="mt-3 text-3xl md:text-4xl font-black tracking-tight text-gray-900 tabular-nums">
+              <div className="mt-3 text-3xl md:text-4xl font-semibold tracking-tight text-gray-900 tabular-nums">
                 {formatCurrency(isSplitMode ? splitTotalNumber : amountNumber || 0)}
               </div>
 
@@ -341,7 +341,7 @@ export default function EditTransactionMode(props) {
                 {date || "-"} • {accountSummary}
               </div>
               <div className="mt-1 text-sm font-bold text-gray-900/55">{categorySummary}</div>
-              <div className="mt-3 text-base font-extrabold text-gray-900 wrap-anywhere">{headerTitle}</div>
+              <div className="mt-3 text-base font-semibold text-gray-900 wrap-anywhere">{headerTitle}</div>
             </div>
 
             {initialAttachmentId ? (
@@ -356,7 +356,7 @@ export default function EditTransactionMode(props) {
                   String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
                     <div className="inline-flex flex-col items-center gap-1 text-gray-900/75">
                       <FileText size={18} />
-                      <span className="text-[10px] font-black">PDF</span>
+                      <span className="text-[10px] font-semibold">PDF</span>
                     </div>
                   ) : (
                     <img src={attachmentUrl} alt="attachment preview" className="w-full h-full object-cover" />
@@ -411,7 +411,7 @@ export default function EditTransactionMode(props) {
                     type="button"
                     onClick={() => onSelectType?.(item.id)}
                     className={cn(
-                      "py-3 rounded-xl text-sm font-extrabold transition-all active:scale-[0.99]",
+                      "py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.99]",
                       type === item.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-800/60 hover:bg-white/40"
                     )}
                   >
@@ -485,7 +485,7 @@ export default function EditTransactionMode(props) {
               <div className="space-y-4">
                 {type === "credit_payment" ? (
                   <div className="rounded-2xl bg-indigo-600/10 border border-indigo-600/15 p-4">
-                    <div className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
+                    <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                       <CreditCard size={16} className="text-indigo-700" />
                       ชำระบัตรเครดิต
                     </div>
@@ -493,7 +493,7 @@ export default function EditTransactionMode(props) {
                       ระบบจะบันทึกเป็นการย้ายเงินจากบัญชีจ่ายไปลดหนี้บัตร เพื่อไม่ให้นับซ้ำกับรายการรูดบัตร
                     </div>
                     {selectedToAcc && isCreditAccount(selectedToAcc) ? (
-                      <div className="mt-3 text-sm font-extrabold text-gray-900">
+                      <div className="mt-3 text-sm font-semibold text-gray-900">
                         ยอดค้างชำระ: <span className="tabular-nums">{formatCurrency(creditDebt)}</span>
                       </div>
                     ) : null}
@@ -576,7 +576,7 @@ export default function EditTransactionMode(props) {
                 type="button"
                 onClick={toggleSplitMode}
                 className={cn(
-                  "px-4 py-2 rounded-2xl text-xs font-extrabold border active:scale-95 transition-all",
+                  "px-4 py-2 rounded-2xl text-xs font-semibold border active:scale-95 transition-all",
                   isSplitMode
                     ? "bg-emerald-600/90 text-white border-emerald-500/20 shadow-sm"
                     : "bg-white/70 text-gray-900 border-slate-900/10 hover:bg-white"
@@ -631,21 +631,21 @@ export default function EditTransactionMode(props) {
                         >
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-white/70 border border-white/30 text-gray-900">
+                              <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-white/70 border border-white/30 text-gray-900">
                                 รายการ {index + 1}
                               </span>
                               {!isValid && hasData ? (
-                                <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-amber-500/12 border border-amber-500/20 text-amber-900">
+                                <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-500/12 border border-amber-500/20 text-amber-900">
                                   ข้อมูลไม่ครบ
                                 </span>
                               ) : null}
                               {isValid && hasData ? (
-                                <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-emerald-600/10 border border-emerald-600/15 text-emerald-800">
+                                <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-600/10 border border-emerald-600/15 text-emerald-800">
                                   พร้อม
                                 </span>
                               ) : null}
                             </div>
-                            <div className="mt-2 text-sm font-extrabold text-gray-900 truncate">{lineTitle}</div>
+                            <div className="mt-2 text-sm font-semibold text-gray-900 truncate">{lineTitle}</div>
                             <div className="mt-1 text-[12px] text-gray-900/60 truncate">
                               {category?.name || "ยังไม่เลือกหมวด"} • {amount > 0 ? formatCurrency(amount) : "ยังไม่ระบุยอด"}
                             </div>
@@ -693,7 +693,7 @@ export default function EditTransactionMode(props) {
                               <button
                                 type="button"
                                 onClick={() => removeSplitLine(index)}
-                                className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-500/10 border border-red-500/15 text-red-700 text-sm font-extrabold active:scale-95"
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-500/10 border border-red-500/15 text-red-700 text-sm font-semibold active:scale-95"
                               >
                                 <Trash2 size={14} />
                                 ลบบรรทัดนี้
@@ -740,7 +740,7 @@ export default function EditTransactionMode(props) {
                     >
                       {String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
                         <div className="w-full min-h-[180px] max-h-72 flex items-center justify-center">
-                          <div className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/80">
+                          <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900/80">
                             <FileText size={18} />
                             เปิดไฟล์ PDF
                           </div>
@@ -777,7 +777,7 @@ export default function EditTransactionMode(props) {
               </div>
 
               <div className="rounded-2xl bg-red-500/8 border border-red-500/15 p-3">
-                <div className="text-sm font-extrabold text-red-900">Danger zone</div>
+                <div className="text-sm font-semibold text-red-900">Danger zone</div>
                 <div className="mt-1 text-[12px] text-red-900/70">
                   ลบรายการนี้ถ้าไม่ต้องการเก็บไว้ในระบบอีกต่อไป
                 </div>
@@ -796,12 +796,12 @@ export default function EditTransactionMode(props) {
           <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
             <div className="min-w-0 text-[12px] font-bold text-gray-900/65">{footerHint}</div>
             {saveDisabled ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2 py-1 rounded-full bg-amber-500/12 border border-amber-500/20 text-amber-900 shrink-0">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-500/12 border border-amber-500/20 text-amber-900 shrink-0">
                 <AlertTriangle size={12} />
                 ตรวจสอบก่อนบันทึก
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2 py-1 rounded-full bg-emerald-600/10 border border-emerald-600/15 text-emerald-800 shrink-0">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-600/10 border border-emerald-600/15 text-emerald-800 shrink-0">
                 <Check size={12} />
                 พร้อมบันทึก
               </span>

@@ -152,12 +152,12 @@ export default function QuickAddSheet({ isOpen, onClose }) {
 
         {/* Header + Quick Scan */}
         <div className="flex items-center justify-between mb-5 shrink-0">
-          <h3 className="text-xl font-black text-gray-900 tracking-tight">บันทึกเร็ว</h3>
+          <h3 className="text-xl font-semibold text-gray-900 tracking-tight">บันทึกเร็ว</h3>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleQuickScan}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 text-xs font-extrabold active:scale-95 transition-all"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 text-xs font-semibold active:scale-95 transition-all"
             >
               <Camera size={14} /> สแกน
             </button>
@@ -178,7 +178,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
                 key={t.key}
                 type="button"
                 onClick={() => { setType(t.key); setMainCatId(""); setSubCatId(""); setSearchQuery(""); }}
-                className={`flex-1 py-2 rounded-xl text-sm font-extrabold transition-all active:scale-[0.97] ${
+                className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.97] ${
                   type === t.key ? t.color : "text-gray-500"
                 }`}
               >
@@ -190,12 +190,12 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           {/* Amount — large display */}
           <div className="mb-4">
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-gray-400">฿</span>
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-semibold text-gray-400">฿</span>
               <input
                 ref={amountRef}
                 type="text"
                 inputMode="decimal"
-                className="w-full pl-10 pr-4 py-4 rounded-2xl bg-gray-50 border border-gray-200 text-2xl font-black text-gray-900 tracking-tight text-right outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 transition-all"
+                className="w-full pl-10 pr-4 py-4 rounded-2xl bg-gray-50 border border-gray-200 text-2xl font-semibold text-gray-900 tracking-tight text-right outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 transition-all"
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(sanitizeMoneyInput(e.target.value))}
@@ -212,7 +212,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
                     key={a.id}
                     type="button"
                     onClick={() => setAccountId(a.id)}
-                    className={`shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-2xl border text-xs font-extrabold transition-all active:scale-95 ${
+                    className={`shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-2xl border text-xs font-semibold transition-all active:scale-95 ${
                       accountId === a.id
                         ? "bg-indigo-600/10 border-indigo-500/30 text-indigo-800 shadow-sm"
                         : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
@@ -243,7 +243,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           {/* Recent categories */}
           {recentCats.length > 0 && !mainCatId && !searchQuery && (
             <div className="mb-4">
-              <div className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider mb-2">ล่าสุด</div>
+              <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">ล่าสุด</div>
               <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                 {recentCats.map((cat) => {
                   const isActive = effectiveCatId === cat.id;
@@ -261,7 +261,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
                           setSubCatId("");
                         }
                       }}
-                      className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-2xl border text-xs font-extrabold transition-all active:scale-95 ${
+                      className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-2xl border text-xs font-semibold transition-all active:scale-95 ${
                         isActive
                           ? "bg-indigo-600/15 border-indigo-500/30 text-indigo-800 shadow-sm"
                           : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
@@ -279,7 +279,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           {/* Main categories */}
           <div className="mb-2">
             <div className="flex items-center justify-between mb-3">
-              <div className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider">
+              <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 {mainCatId && selectedMain && !searchQuery ? (
                   <button type="button" onClick={() => { setMainCatId(""); setSubCatId(""); }} className="flex items-center gap-1 text-indigo-600 active:scale-95 px-2 py-1 bg-indigo-50 rounded-lg">
                     ← เลือกหมวดหลัก
@@ -361,7 +361,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
                 {/* Selected main */}
                 <div className="flex items-center gap-2 mb-3 p-2.5 rounded-2xl bg-indigo-600/10 border border-indigo-500/20">
                   <span className="text-xl">{selectedMain?.icon || "📦"}</span>
-                  <span className="text-sm font-extrabold text-indigo-800">{selectedMain?.name || ""}</span>
+                  <span className="text-sm font-semibold text-indigo-800">{selectedMain?.name || ""}</span>
                   <Check size={14} className="ml-auto text-indigo-600" />
                 </div>
 
@@ -407,7 +407,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           <button
             type="button"
             onClick={handleOpenFull}
-            className="flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700 hover:bg-gray-50 active:scale-[0.98] transition-all"
+            className="flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl border border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-[0.98] transition-all"
           >
             รายละเอียดเพิ่ม <ChevronRight size={14} />
           </button>
@@ -415,7 +415,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
             type="button"
             onClick={handleSave}
             disabled={!parseMoneyToSatang(amount)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl text-sm font-extrabold transition-all active:scale-[0.98] ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98] ${
               parseMoneyToSatang(amount)
                 ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed"

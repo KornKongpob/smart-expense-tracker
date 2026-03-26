@@ -47,7 +47,7 @@ export default function ModalShell({
         style={{ touchAction: "pan-y" }}
       >
         <div className="flex items-center justify-between mb-4 shrink-0">
-          <h3 className="text-lg font-extrabold text-gray-900">{title}</h3>
+          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
           <button
             type="button"
             onClick={onClose}

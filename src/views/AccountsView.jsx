@@ -94,7 +94,7 @@ function InstitutionPicker({ type, value, onSelect }) {
     <div className="mt-4 ui-card p-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <div className="text-sm font-black text-gray-900">Preset สถาบันการเงิน</div>
+          <div className="text-sm font-semibold text-gray-900">Preset สถาบันการเงิน</div>
           <div className="mt-1 text-xs font-bold text-gray-700/70">
             เลือกสถาบันก่อน ระบบจะตั้งชื่อ สี และชนิดบัญชีให้เหมาะอัตโนมัติ
           </div>
@@ -128,7 +128,7 @@ function InstitutionPicker({ type, value, onSelect }) {
                   imgClassName="h-full w-full object-contain"
                 />
                 <div className="min-w-0">
-                  <div className="text-[13px] font-black truncate">{preset.displayName}</div>
+                  <div className="text-[13px] font-semibold truncate">{preset.displayName}</div>
                   <div className={selected ? "mt-1 text-[11px] font-bold text-white/72" : "mt-1 text-[11px] font-bold text-gray-700/60"}>
                     {(preset.accountTypes || []).join(" • ")}
                   </div>
@@ -195,7 +195,7 @@ function AccountVisualPreview({ name, type, currency, color, mode, iconId, emoji
           {iconNode}
         </div>
         <div className="min-w-0">
-          <div className="text-base font-black text-white truncate">{String(name || "").trim() || "บัญชีใหม่"}</div>
+          <div className="text-base font-semibold text-white truncate">{String(name || "").trim() || "บัญชีใหม่"}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span
               className="ui-chip"
@@ -253,7 +253,7 @@ function AccountSheetModal({ open, title, description, onClose, children }) {
         <div className="p-4 border-b border-slate-900/8 shrink-0">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-lg font-extrabold text-gray-900">{title}</div>
+              <div className="text-lg font-semibold text-gray-900">{title}</div>
               {description ? (
                 <div className="text-xs text-gray-800/65 font-semibold mt-1 leading-relaxed">
                   {description}
@@ -305,7 +305,7 @@ function AccountVisualPicker({
   return (
     <div className="mt-4 ui-card p-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="text-sm font-black text-gray-900">รูปลักษณ์บัญชี</div>
+        <div className="text-sm font-semibold text-gray-900">รูปลักษณ์บัญชี</div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -333,7 +333,7 @@ function AccountVisualPicker({
 
       {mode === "preset" ? (
         <div className="mt-3">
-          <div className="text-xs font-extrabold text-gray-800/70">เลือกไอคอน</div>
+          <div className="text-xs font-semibold text-gray-800/70">เลือกไอคอน</div>
           <div className="mt-2 grid grid-cols-4 sm:grid-cols-6 gap-2">
             {(ACCOUNT_ICONS || []).map((it) => {
               const selected = String(iconId || "") === String(it?.id || "");
@@ -356,7 +356,7 @@ function AccountVisualPicker({
                     </span>
                   ) : null}
                   <span className="text-gray-900">{it.icon}</span>
-                  <span className="text-[10px] font-extrabold text-gray-800/70 truncate max-w-full">{it.name}</span>
+                  <span className="text-[10px] font-semibold text-gray-800/70 truncate max-w-full">{it.name}</span>
                 </button>
               );
             })}
@@ -368,7 +368,7 @@ function AccountVisualPicker({
             return (
               <div className="mt-3 flex items-center gap-2 flex-wrap">
                 <span className="ui-chip bg-white/70 border-gray-900/10">
-                  เลือกอยู่: <span className="ml-1 font-black text-gray-900">{it.name}</span>
+                  เลือกอยู่: <span className="ml-1 font-semibold text-gray-900">{it.name}</span>
                 </span>
               </div>
             );
@@ -434,7 +434,7 @@ function AccountVisualPicker({
           {String(emoji || "").trim() ? (
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <span className="ui-chip bg-white/70 border-gray-900/10">
-                เลือกอยู่: <span className="ml-1 font-black text-gray-900">{String(emoji || "").trim()}</span>
+                เลือกอยู่: <span className="ml-1 font-semibold text-gray-900">{String(emoji || "").trim()}</span>
               </span>
             </div>
           ) : null}
@@ -490,7 +490,7 @@ function AccountVisualPicker({
 
       <div className="mt-4">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-xs font-extrabold text-gray-800/70">สีบัญชี</div>
+          <div className="text-xs font-semibold text-gray-800/70">สีบัญชี</div>
           <div className="flex items-center gap-2">
             <input
               type="color"
@@ -992,10 +992,10 @@ const create = () => {
       <div className="mt-4 ui-card p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-lg font-black text-gray-900">คำแนะนำ</div>
+            <div className="text-lg font-semibold text-gray-900">คำแนะนำ</div>
             <div className="text-xs text-gray-800/60 font-bold mt-1 leading-relaxed">
-              แนะนำใส่ <span className="font-black text-gray-900">เลขท้าย 4–6 หลัก</span> จากสลิป
-              และถ้ามีหลายแบบให้ใส่หลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span>
+              แนะนำใส่ <span className="font-semibold text-gray-900">เลขท้าย 4–6 หลัก</span> จากสลิป
+              และถ้ามีหลายแบบให้ใส่หลายชุด เช่น <span className="font-semibold text-gray-900">6345, 4373</span>
             </div>
           </div>
 
@@ -1010,7 +1010,7 @@ const create = () => {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="ค้นหาชื่อ/ประเภท/สกุลเงิน/เลขช่วยจำ..."
-              className="w-full bg-transparent outline-none text-sm font-extrabold text-gray-900 placeholder:text-gray-800/40"
+              className="w-full bg-transparent outline-none text-sm font-semibold text-gray-900 placeholder:text-gray-800/40"
             />
           </div>
           {q ? (
@@ -1037,7 +1037,7 @@ const create = () => {
           ) : (
             <AlertTriangle size={18} className="text-amber-700" />
           )}
-          <div className="text-sm font-extrabold text-gray-900">{alertMsg}</div>
+          <div className="text-sm font-semibold text-gray-900">{alertMsg}</div>
         </div>
       ) : null}
 
@@ -1103,7 +1103,7 @@ const create = () => {
     if (!hasAny) {
       return (
         <div className="glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-xl text-center">
-          <div className="text-sm font-extrabold text-gray-900">
+          <div className="text-sm font-semibold text-gray-900">
             ยังไม่มีบัญชี หรือไม่พบผลลัพธ์
           </div>
           <div className="text-xs text-gray-800/60 font-bold mt-1">
@@ -1128,7 +1128,7 @@ const create = () => {
                     {groupIcon(t)}
                   </div>
                   <div>
-                    <div className="text-base font-black text-gray-900">{groupLabel(t)}</div>
+                    <div className="text-base font-semibold text-gray-900">{groupLabel(t)}</div>
                     <div className="text-[11px] text-gray-800/55 font-bold">
                       รวม {items.length} บัญชี • {formatByCurrency(totals)}
                     </div>
@@ -1156,16 +1156,16 @@ const create = () => {
 
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                            <div className="text-base font-black text-gray-900 truncate">{acc.name || "-"}</div>
-                            <div className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
+                            <div className="text-base font-semibold text-gray-900 truncate">{acc.name || "-"}</div>
+                            <div className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-semibold">
                               {typeIcon(acc.type)}
                               {typeLabel(acc.type)}
                             </div>
-                            <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
+                            <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-semibold">
                               {currencyLabel(acc.currency)}
                             </div>
                             {acc.institutionId ? (
-                              <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-extrabold">
+                              <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-semibold">
                                 {getInstitutionChipLabel(getInstitutionPresetById(acc.institutionId))}
                               </div>
                             ) : null}
@@ -1188,7 +1188,7 @@ const create = () => {
                             return (
                               <div className="text-[11px] text-gray-800/55 mt-1">
                                 <span className="font-bold">เลขช่วยจำ (map):</span>{" "}
-                                <span className="font-extrabold text-gray-900">{formatDigitsChip(primary)}</span>
+                                <span className="font-semibold text-gray-900">{formatDigitsChip(primary)}</span>
                                 {list.length > 1 ? (
                                   <span className="ml-2 text-gray-800/50">
                                     ({shortList.join(", ")}
@@ -1202,17 +1202,17 @@ const create = () => {
                           {acc.type === "credit" ? (
                             <div className="text-[11px] text-gray-800/55 mt-2 leading-relaxed">
                               <span className="font-bold">วงเงิน:</span>{" "}
-                              <span className="font-extrabold text-gray-900">
+                              <span className="font-semibold text-gray-900">
                                 {formatMoney(acc.creditLimit || 0, acc.currency)}
                               </span>
                               <span className="mx-2">•</span>
                               <span className="font-bold">ตัดรอบ:</span>{" "}
-                              <span className="font-extrabold text-gray-900">
+                              <span className="font-semibold text-gray-900">
                                 ทุกวันที่ {acc.statementDay || 20}
                               </span>
                               <span className="mx-2">•</span>
                               <span className="font-bold">ชำระภายใน:</span>{" "}
-                              <span className="font-extrabold text-gray-900">
+                              <span className="font-semibold text-gray-900">
                                 วันที่ {acc.dueDay || 5}
                               </span>
                             </div>
@@ -1221,7 +1221,7 @@ const create = () => {
                       </div>
 
                       <div className="flex flex-col items-end gap-2 shrink-0">
-                        <div className="text-sm font-black text-gray-900">
+                        <div className="text-sm font-semibold text-gray-900">
                           {String(acc.currency || "THB").toUpperCase() === "THB"
                             ? formatCurrency(acc.balance || 0)
                             : `${Number(acc.balance || 0).toLocaleString()} ${String(acc.currency || "").toUpperCase()}`}
@@ -1301,7 +1301,7 @@ const create = () => {
                       <button
                         type="button"
                         onClick={() => applyCreateInstitution("generic_bank")}
-                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-semibold flex items-center justify-center gap-2 ${
                           cType === "bank" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
                       >
@@ -1310,7 +1310,7 @@ const create = () => {
                       <button
                         type="button"
                         onClick={() => applyCreateInstitution("cash_wallet")}
-                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-semibold flex items-center justify-center gap-2 ${
                           cType === "cash" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
                       >
@@ -1319,7 +1319,7 @@ const create = () => {
                       <button
                         type="button"
                         onClick={() => applyCreateInstitution("generic_credit")}
-                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-semibold flex items-center justify-center gap-2 ${
                           cType === "credit" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
                       >
@@ -1368,7 +1368,7 @@ const create = () => {
             />
 
             <div className="mt-4 ui-card p-4">
-              <div className="text-sm font-black text-gray-900">รายละเอียดเพิ่มเติม</div>
+              <div className="text-sm font-semibold text-gray-900">รายละเอียดเพิ่มเติม</div>
 
               <div className="mt-3">
                 <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
@@ -1393,7 +1393,7 @@ const create = () => {
                       {list.map((d) => (
                         <span
                           key={d}
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
                             d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/70 text-gray-900 border-gray-900/10"
                           }`}
                           title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
@@ -1413,12 +1413,12 @@ const create = () => {
                 {cType === "credit" ? (
                   <div className="mt-2 ui-card-strong p-4">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="text-xs font-extrabold text-gray-800/70">เครื่องหมาย</div>
+                      <div className="text-xs font-semibold text-gray-800/70">เครื่องหมาย</div>
                       <div className="flex items-center rounded-2xl overflow-hidden border border-gray-900/10 bg-white/50">
                         <button
                           type="button"
                           onClick={() => setCInitialBalance(forceSignNumberString(cInitialBalance, +1))}
-                          className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                          className={`min-h-[40px] px-3 text-xs font-semibold ${
                             !String(cInitialBalance || "").trim().startsWith("-")
                               ? "bg-gray-900 text-white"
                               : "text-gray-900/80 hover:bg-white/60"
@@ -1429,7 +1429,7 @@ const create = () => {
                         <button
                           type="button"
                           onClick={() => setCInitialBalance(forceSignNumberString(cInitialBalance, -1))}
-                          className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                          className={`min-h-[40px] px-3 text-xs font-semibold ${
                             String(cInitialBalance || "").trim().startsWith("-")
                               ? "bg-gray-900 text-white"
                               : "text-gray-900/80 hover:bg-white/60"
@@ -1451,14 +1451,14 @@ const create = () => {
                           const next = abs ? (wantsNeg ? `-${abs}` : abs) : wantsNeg ? "-" : "";
                           setCInitialBalance(next);
                         }}
-                        className="ui-input text-lg font-extrabold tabular-nums"
+                        className="ui-input text-lg font-semibold tabular-nums"
                         placeholder="เช่น 5000.00"
                         inputMode="decimal"
                         autoComplete="off"
                       />
                       <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
                         <div className="ui-help">ใช้ “ติดลบ” สำหรับหนี้บัตรเครดิต/ยอดค้าง</div>
-                        <div className="text-xs font-black tabular-nums text-gray-900">
+                        <div className="text-xs font-semibold tabular-nums text-gray-900">
                           {(() => {
                             const v = String(cInitialBalance || "").trim();
                             if (!v || v === "-") return "—";
@@ -1480,14 +1480,14 @@ const create = () => {
                 )}
 
                 <div className="ui-help mt-1">
-                  ถ้ากรอก ระบบจะถามว่าจะบันทึกเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือไม่
+                  ถ้ากรอก ระบบจะถามว่าจะบันทึกเป็นรายการ <span className="font-semibold text-gray-900">ปรับยอดบัญชี</span> หรือไม่
                 </div>
               </div>
             </div>
 
             {cType === "credit" ? (
               <div className="mt-4 ui-card p-4">
-                <div className="text-sm font-black text-gray-900 flex items-center gap-2">
+                <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                   <CreditCard size={18} /> ตั้งค่าบัตรเครดิต
                 </div>
 
@@ -1547,17 +1547,17 @@ const create = () => {
 {openCreateAdjustConfirm && pendingCreateAdjust && pendingCreateAccount ? createPortal(
   <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden">
     <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl overflow-x-hidden">
-      <div className="text-lg font-black text-gray-900">ยอดตั้งต้นในบัญชี</div>
+      <div className="text-lg font-semibold text-gray-900">ยอดตั้งต้นในบัญชี</div>
       <div className="text-xs text-gray-800/70 font-bold mt-2 leading-relaxed">
         ยอดตั้งต้น{" "}
-        <span className="font-black text-gray-900">
+        <span className="font-semibold text-gray-900">
           {pendingCreateAdjust.currency === "THB"
             ? formatCurrency(pendingCreateAdjust.desired)
             : `${Number(pendingCreateAdjust.desired || 0).toLocaleString()} ${pendingCreateAdjust.currency}`}
         </span>{" "}
         ({pendingCreateAdjust.desired < 0 ? "ติดลบ/หนี้" : "บวก"})
         <br />
-        ต้องการให้บันทึกเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่?
+        ต้องการให้บันทึกเป็นรายการ <span className="font-semibold text-gray-900">ปรับยอดบัญชี</span> (Income/Expense) หรือไม่?
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-2">
@@ -1588,7 +1588,7 @@ const create = () => {
             resetCreate();
             notify("เพิ่มบัญชีแล้ว (มีรายการยอดตั้งต้น)");
           }}
-          className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
+          className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-semibold shadow-lg active:scale-[0.98]"
         >
           บันทึกยอดตั้งต้นเป็นรายการ (Income/Expense)
         </button>
@@ -1606,7 +1606,7 @@ const create = () => {
             resetCreate();
             notify("เพิ่มบัญชีแล้ว");
           }}
-          className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+          className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-semibold active:scale-[0.98]"
         >
           ไม่บันทึกเป็นรายการ (ปรับยอดเงียบๆ)
         </button>
@@ -1616,7 +1616,7 @@ const create = () => {
           onClick={() => {
             setOpenCreateAdjustConfirm(false);
           }}
-          className="w-full px-4 py-3 rounded-2xl bg-white/15 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+          className="w-full px-4 py-3 rounded-2xl bg-white/15 border border-white/20 text-gray-900 font-semibold active:scale-[0.98]"
         >
           ยกเลิก
         </button>
@@ -1634,7 +1634,7 @@ const create = () => {
         <AccountSheetModal
           open={openEdit}
           title="แก้ไขบัญชี"
-          description={<>รองรับเลขช่วยจำหลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span></>}
+          description={<>รองรับเลขช่วยจำหลายชุด เช่น <span className="font-semibold text-gray-900">6345, 4373</span></>}
           onClose={closeEditModal}
         >
           <div className="mt-4">
@@ -1665,7 +1665,7 @@ const create = () => {
                       <button
                         type="button"
                         onClick={() => applyEditInstitution("generic_bank")}
-                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-semibold flex items-center justify-center gap-2 ${
                           eType === "bank" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
                       >
@@ -1674,7 +1674,7 @@ const create = () => {
                       <button
                         type="button"
                         onClick={() => applyEditInstitution("cash_wallet")}
-                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-semibold flex items-center justify-center gap-2 ${
                           eType === "cash" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
                       >
@@ -1683,7 +1683,7 @@ const create = () => {
                       <button
                         type="button"
                         onClick={() => applyEditInstitution("generic_credit")}
-                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-extrabold flex items-center justify-center gap-2 ${
+                        className={`min-h-[44px] rounded-2xl border px-3 py-2 font-semibold flex items-center justify-center gap-2 ${
                           eType === "credit" ? "bg-white/90 border-gray-900/20" : "bg-white/50 border-gray-900/10"
                         }`}
                       >
@@ -1735,7 +1735,7 @@ const create = () => {
             />
 
             <div className="mt-4 ui-card p-4">
-              <div className="text-sm font-black text-gray-900">การจับคู่บัญชี + ปรับยอด</div>
+              <div className="text-sm font-semibold text-gray-900">การจับคู่บัญชี + ปรับยอด</div>
 
               <div className="mt-3">
                 <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
@@ -1760,7 +1760,7 @@ const create = () => {
                       {list.map((d) => (
                         <span
                           key={d}
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
                             d === primary ? "bg-gray-900/90 text-white border-white/20" : "bg-white/70 text-gray-900 border-gray-900/10"
                           }`}
                           title={d.length > 6 ? `เก็บทั้งชุด (${d.length} หลัก)` : "เลขช่วยจำ"}
@@ -1793,12 +1793,12 @@ const create = () => {
                   {eType === "credit" ? (
                     <div className="mt-2 ui-card-strong p-4">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="text-xs font-extrabold text-gray-800/70">เครื่องหมาย</div>
+                        <div className="text-xs font-semibold text-gray-800/70">เครื่องหมาย</div>
                         <div className="flex items-center rounded-2xl overflow-hidden border border-gray-900/10 bg-white/50">
                           <button
                             type="button"
                             onClick={() => setEDesiredBalance(forceSignNumberString(eDesiredBalance, +1))}
-                            className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                            className={`min-h-[40px] px-3 text-xs font-semibold ${
                               !String(eDesiredBalance || "").trim().startsWith("-")
                                 ? "bg-gray-900 text-white"
                                 : "text-gray-900/80 hover:bg-white/60"
@@ -1809,7 +1809,7 @@ const create = () => {
                           <button
                             type="button"
                             onClick={() => setEDesiredBalance(forceSignNumberString(eDesiredBalance, -1))}
-                            className={`min-h-[40px] px-3 text-xs font-extrabold ${
+                            className={`min-h-[40px] px-3 text-xs font-semibold ${
                               String(eDesiredBalance || "").trim().startsWith("-")
                                 ? "bg-gray-900 text-white"
                                 : "text-gray-900/80 hover:bg-white/60"
@@ -1831,7 +1831,7 @@ const create = () => {
                             const next = abs ? (wantsNeg ? `-${abs}` : abs) : wantsNeg ? "-" : "";
                             setEDesiredBalance(next);
                           }}
-                          className="ui-input text-lg font-extrabold tabular-nums"
+                          className="ui-input text-lg font-semibold tabular-nums"
                           placeholder="เช่น 5000.00"
                           inputMode="decimal"
                           autoComplete="off"
@@ -1839,7 +1839,7 @@ const create = () => {
 
                         <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
                           <div className="ui-help">ตั้งยอดติดลบเพื่อสะท้อนยอดหนี้บัตรเครดิต</div>
-                          <div className="text-xs font-black tabular-nums text-gray-900">
+                          <div className="text-xs font-semibold tabular-nums text-gray-900">
                             {(() => {
                               const v = String(eDesiredBalance || "").trim();
                               if (!v || v === "-") return "—";
@@ -1857,12 +1857,12 @@ const create = () => {
                           if (delta === 0) return <div className="mt-3 ui-help">ยอดใหม่เท่ากับยอดเดิม</div>;
                           return (
                             <div className="mt-3 ui-card p-3">
-                              <div className="text-xs font-extrabold text-gray-800/70">ส่วนต่างที่จะบันทึก</div>
-                              <div className="mt-1 text-sm font-black text-gray-900 tabular-nums">
+                              <div className="text-xs font-semibold text-gray-800/70">ส่วนต่างที่จะบันทึก</div>
+                              <div className="mt-1 text-sm font-semibold text-gray-900 tabular-nums">
                                 {formatCurrency(Math.abs(delta))} ({delta > 0 ? "เพิ่ม" : "ลด"})
                               </div>
                               <div className="mt-1 text-[11px] text-gray-800/60 font-bold leading-relaxed">
-                                กดบันทึกแล้วค่อยเลือกว่าจะเก็บเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือปรับเงียบๆ
+                                กดบันทึกแล้วค่อยเลือกว่าจะเก็บเป็นรายการ <span className="font-semibold text-gray-900">ปรับยอดบัญชี</span> หรือปรับเงียบๆ
                               </div>
                             </div>
                           );
@@ -1881,7 +1881,7 @@ const create = () => {
                   )}
 
                   <div className="ui-help mt-1">
-                    ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-black text-gray-900">ปรับยอดบัญชี</span> หรือไม่
+                    ถ้ากรอก ระบบจะถามว่าจะบันทึกส่วนต่างเป็นรายการ <span className="font-semibold text-gray-900">ปรับยอดบัญชี</span> หรือไม่
                   </div>
                 </div>
               </div>
@@ -1889,7 +1889,7 @@ const create = () => {
 
             {eType === "credit" ? (
               <div className="mt-4 ui-card p-4">
-                <div className="text-sm font-black text-gray-900 flex items-center gap-2">
+                <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
                   <CreditCard size={18} /> ตั้งค่าบัตรเครดิต
                 </div>
 
@@ -1971,19 +1971,19 @@ const create = () => {
       {openAdjustConfirm && pendingAdjust ? createPortal(
         <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center bg-black/35 p-3">
           <div className="w-full max-w-sm glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-2xl">
-            <div className="text-lg font-black text-gray-900">ปรับยอดบัญชี</div>
+            <div className="text-lg font-semibold text-gray-900">ปรับยอดบัญชี</div>
             <div className="text-xs text-gray-800/70 font-bold mt-2 leading-relaxed">
               ยอดจะเปลี่ยนจาก{" "}
-              <span className="font-black text-gray-900">
+              <span className="font-semibold text-gray-900">
                 {pendingAdjust.currency === "THB" ? formatCurrency(pendingAdjust.current) : `${Number(pendingAdjust.current || 0).toLocaleString()} ${pendingAdjust.currency}`}
               </span>{" "}
               เป็น{" "}
-              <span className="font-black text-gray-900">
+              <span className="font-semibold text-gray-900">
                 {pendingAdjust.currency === "THB" ? formatCurrency(pendingAdjust.desired) : `${Number(pendingAdjust.desired || 0).toLocaleString()} ${pendingAdjust.currency}`}
               </span>
               <br />
               ส่วนต่าง{" "}
-              <span className="font-black text-gray-900">
+              <span className="font-semibold text-gray-900">
                 {pendingAdjust.currency === "THB" ? formatCurrency(Math.abs(pendingAdjust.delta)) : `${Number(Math.abs(pendingAdjust.delta) || 0).toLocaleString()} ${pendingAdjust.currency}`}
               </span>{" "}
               ({pendingAdjust.delta > 0 ? "เพิ่ม" : "ลด"})
@@ -2004,7 +2004,7 @@ const create = () => {
                   closeEditModal();
                   notify("บันทึกแล้ว (มีรายการปรับยอด)");
                 }}
-                className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg active:scale-[0.98]"
+                className="w-full px-4 py-3 rounded-2xl bg-gray-900 text-white font-semibold shadow-lg active:scale-[0.98]"
               >
                 บันทึกส่วนต่างเป็นรายการ (Income/Expense)
               </button>
@@ -2022,7 +2022,7 @@ const create = () => {
                   closeEditModal();
                   notify("บันทึกแล้ว");
                 }}
-                className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+                className="w-full px-4 py-3 rounded-2xl bg-white/30 border border-white/20 text-gray-900 font-semibold active:scale-[0.98]"
               >
                 ไม่บันทึกเป็นรายการ (ปรับยอดเงียบๆ)
               </button>
@@ -2032,7 +2032,7 @@ const create = () => {
                 onClick={() => {
                   setOpenAdjustConfirm(false);
                 }}
-                className="w-full px-4 py-3 rounded-2xl bg-white/15 border border-white/20 text-gray-900 font-extrabold active:scale-[0.98]"
+                className="w-full px-4 py-3 rounded-2xl bg-white/15 border border-white/20 text-gray-900 font-semibold active:scale-[0.98]"
               >
                 ยกเลิก
               </button>
@@ -2047,12 +2047,12 @@ const create = () => {
 
       {/* Bottom helper */}
       <div className="mt-6 glass-card rounded-3xl p-4 bg-white/20 border border-white/20 shadow-xl">
-        <div className="text-sm font-black text-gray-900 flex items-center gap-2">
+        <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
           <ImageIcon size={18} />
           เลขช่วยจำสำหรับ map
         </div>
         <div className="text-xs text-gray-800/60 font-bold mt-2 leading-relaxed">
-          - ใส่ได้หลายชุด เช่น <span className="font-black text-gray-900">6345, 4373</span>
+          - ใส่ได้หลายชุด เช่น <span className="font-semibold text-gray-900">6345, 4373</span>
           <br />
           - ถ้ามีเลขบัญชีเต็ม (10+ หลัก) ใส่ได้เลยเพื่อช่วยจับคู่จากเลขท้าย
           <br />

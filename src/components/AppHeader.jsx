@@ -55,43 +55,34 @@ export default function AppHeader({
       <header
         ref={headerRef}
         className={cn(
-          "fixed inset-x-0 top-0 z-40",
+          "fixed inset-x-0 top-0 z-40 bg-white border-b",
           "pt-safe",
           className
         )}
-        style={{
-          background: "linear-gradient(180deg, color-mix(in srgb, var(--bg) 86%, white 14%) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 100%)",
-          borderBottom: "1px solid color-mix(in srgb, var(--border) 88%, white 12%)",
-          boxShadow: "0 18px 44px -34px rgba(15, 23, 42, 0.45)",
-          backdropFilter: "blur(24px)",
-          WebkitBackdropFilter: "blur(24px)",
-        }}
+        style={{ borderColor: "var(--border)" }}
       >
-        <div className="mx-auto max-w-[1180px] px-4 pb-3 pt-3 sm:px-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-2 min-w-0">
+        <div className="mx-auto max-w-[1180px] px-4 py-2.5 sm:px-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
               {left ? (
-                <div className="shrink-0 mt-0.5">{left}</div>
+                <div className="shrink-0">{left}</div>
               ) : onBack ? (
                 <button
                   type="button"
                   onClick={onBack}
                   aria-label="Back"
-                  className={
-                    "ui-icon-btn mt-0.5 shrink-0 " +
-                    "focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300/40"
-                  }
+                  className="ui-icon-btn shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/40"
                 >
                   <ChevronLeft size={18} />
                 </button>
               ) : null}
 
               <div className="min-w-0">
-                <h1 className="truncate text-[22px] leading-[1.1] font-bold tracking-[-0.01em]" style={{ color: "var(--text)" }}>
+                <h1 className="truncate text-lg leading-tight font-semibold" style={{ color: "var(--text)" }}>
                   {title || ""}
                 </h1>
                 {subtitle ? (
-                  <div className="mt-1 truncate text-[12px] font-medium tracking-normal" style={{ color: "color-mix(in srgb, var(--text) 58%, transparent)" }}>
+                  <div className="truncate text-[13px] font-normal" style={{ color: "var(--muted)" }}>
                     {subtitle}
                   </div>
                 ) : null}

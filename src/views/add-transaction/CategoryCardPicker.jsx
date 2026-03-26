@@ -62,7 +62,7 @@ function PickerRow({ category, active, caption, onClick }) {
           </div>
 
           <div className="min-w-0">
-            <div className="text-sm font-black truncate">{category?.name || "หมวด"}</div>
+            <div className="text-sm font-semibold truncate">{category?.name || "หมวด"}</div>
             {caption ? (
               <div className={cn("text-[11px] font-bold truncate mt-0.5", active ? "text-white/70" : "text-gray-900/55")}>
                 {caption}
@@ -94,8 +94,8 @@ function FieldCard({ label, value, icon, onClick, compact = false }) {
             {icon || "🏷️"}
           </div>
           <div className="min-w-0">
-            <div className="text-[11px] font-extrabold text-gray-900/55 uppercase tracking-wide">{label}</div>
-            <div className={cn("mt-1 font-black text-gray-900 truncate", compact ? "text-sm" : "text-base")}>
+            <div className="text-[11px] font-semibold text-gray-900/55 uppercase tracking-wide">{label}</div>
+            <div className={cn("mt-1 font-semibold text-gray-900 truncate", compact ? "text-sm" : "text-base")}>
               {value || "ยังไม่ได้เลือก"}
             </div>
           </div>
@@ -233,10 +233,10 @@ export default function CategoryCardPicker({
       <div className={cn("space-y-3", compact && "space-y-2")}>
         {!compact ? (
           <div className="rounded-3xl bg-white/45 border border-white/25 p-4">
-            <div className="text-sm font-black text-gray-900">{title}</div>
+            <div className="text-sm font-semibold text-gray-900">{title}</div>
             <div className="mt-1 text-[12px] font-bold text-gray-900/55">{helper}</div>
             {selectedPath ? (
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-gray-900/6 border border-slate-900/8 px-3 py-2 text-xs font-extrabold text-gray-900">
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-gray-900/6 border border-slate-900/8 px-3 py-2 text-xs font-semibold text-gray-900">
                 เลือกแล้ว: {selectedPath}
               </div>
             ) : null}
@@ -293,7 +293,7 @@ export default function CategoryCardPicker({
 
           {query ? (
             <div className="space-y-2">
-              <div className="text-[11px] font-extrabold text-gray-900/55 uppercase tracking-wide">
+              <div className="text-[11px] font-semibold text-gray-900/55 uppercase tracking-wide">
                 ผลการค้นหา
               </div>
               {searchResults.length ? (
@@ -310,7 +310,7 @@ export default function CategoryCardPicker({
                   />
                 ))
               ) : (
-                <div className="rounded-2xl bg-white/55 border border-slate-900/8 px-4 py-5 text-sm font-extrabold text-gray-900/55">
+                <div className="rounded-2xl bg-white/55 border border-slate-900/8 px-4 py-5 text-sm font-semibold text-gray-900/55">
                   ไม่พบหมวดที่ตรงกับคำค้น
                 </div>
               )}
@@ -336,7 +336,7 @@ export default function CategoryCardPicker({
             <button
               type="button"
               onClick={() => setStep("main")}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/55 border border-white/25 text-sm font-extrabold text-gray-900 active:scale-95"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white/55 border border-white/25 text-sm font-semibold text-gray-900 active:scale-95"
             >
               <ChevronLeft size={16} />
               กลับไปหมวดหลัก
@@ -352,7 +352,7 @@ export default function CategoryCardPicker({
                   : "bg-white/60 text-gray-900 border-slate-900/8 hover:bg-white"
               )}
             >
-              <div className="text-sm font-black">ใช้หมวดหลักนี้</div>
+              <div className="text-sm font-semibold">ใช้หมวดหลักนี้</div>
               <div className={cn("mt-1 text-[11px] font-bold", selectedId === activeMainId ? "text-white/70" : "text-gray-900/55")}>
                 {selectedMain?.icon || "🏷️"} {selectedMain?.name || "-"}
               </div>

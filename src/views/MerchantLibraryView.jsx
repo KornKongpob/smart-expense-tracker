@@ -178,43 +178,8 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
 
       <main className="ui-page pt-4 pb-6 view-flow">
 
-      <div className="view-hero">
-        <div className="view-hero-content">
-          <div>
-            <div className="view-eyebrow">Merchant memory</div>
-            <div className="view-hero-title">รวมร้านค้าและ preference ที่ระบบจะจำให้โดยอัตโนมัติ</div>
-            <div className="view-hero-copy">
-              ดู alias ของร้าน จัดการ mapping และ merge ร้านที่ซ้ำกันเพื่อให้ auto-fill แม่นขึ้น
-            </div>
-          </div>
-
-          <div className="view-hero-grid">
-            <div className="view-metric">
-              <div className="view-metric-label">ร้านที่พบ</div>
-              <div className="view-metric-value">{merchants.length}</div>
-              <div className="view-metric-hint">จำนวน canonical merchant ที่บันทึกใน library</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">ผลลัพธ์ปัจจุบัน</div>
-              <div className="view-metric-value">{filtered.length}</div>
-              <div className="view-metric-hint">จำนวนร้านที่ตรงกับคำค้นหาปัจจุบัน</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">คำค้นหา</div>
-              <div className="view-metric-value">{q ? "Active" : "All"}</div>
-              <div className="view-metric-hint">{q ? `กำลังกรองด้วย “${q}”` : "แสดงร้านทั้งหมดในระบบ"}</div>
-            </div>
-
-            <div className="view-metric">
-              <div className="view-metric-label">Workflow</div>
-              <div className="view-metric-value">Scan → Inbox</div>
-              <div className="view-metric-hint">ระบบเรียนรู้ merchant หลัง save scan หรือ approve ใน inbox</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Summary */}
+      <div className="text-[13px] text-slate-500">{merchants.length} ร้านค้า{q ? ` • แสดง ${filtered.length} ผลลัพธ์` : ""}</div>
 
       <div className="mt-4">
         <div className="relative">
@@ -258,9 +223,9 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <div className="text-lg font-black text-gray-900 truncate">{m.canonical}</div>
+                      <div className="text-lg font-semibold text-gray-900 truncate">{m.canonical}</div>
                       {m?.enabled === false ? (
-                        <div className="px-2.5 py-1 rounded-2xl bg-gray-900/10 border border-white/20 text-xs font-extrabold text-gray-900/70">
+                        <div className="px-2.5 py-1 rounded-2xl bg-gray-900/10 border border-white/20 text-xs font-semibold text-gray-900/70">
                           Disabled
                         </div>
                       ) : null}
@@ -274,11 +239,11 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
 
                     <div className="mt-2 text-xs text-gray-900/70 space-y-1">
                       <div className="truncate">
-                        <span className="font-extrabold">Expense</span>: {expCat || "(category?)"}
+                        <span className="font-semibold">Expense</span>: {expCat || "(category?)"}
                         {expAcc ? ` • ${expAcc}` : ""}
                       </div>
                       <div className="truncate">
-                        <span className="font-extrabold">Income</span>: {incCat || "(category?)"}
+                        <span className="font-semibold">Income</span>: {incCat || "(category?)"}
                         {incAcc ? ` • ${incAcc}` : ""}
                       </div>
                     </div>
@@ -307,7 +272,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                       type="button"
                       onClick={() => confirmDelete(m)}
                       data-testid={`merchant-delete-${m.id}`}
-                      className="px-4 py-2 rounded-2xl bg-red-600 text-white font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
+                      className="px-4 py-2 rounded-2xl bg-red-600 text-white font-semibold active:scale-95 inline-flex items-center justify-center gap-2"
                     >
                       <Trash2 size={16} />
                       Delete
@@ -326,7 +291,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-extrabold text-gray-900">{(merchants || []).some((m) => String(m?.id) === String(editing?.id)) ? "Edit" : "Add"} Merchant</h3>
+            <h3 className="text-lg font-semibold text-gray-900">{(merchants || []).some((m) => String(m?.id) === String(editing?.id)) ? "Edit" : "Add"} Merchant</h3>
             <p className="mt-1 text-sm text-gray-900/60">ตั้งชื่อหลัก + aliases + preference</p>
           </div>
           <button
@@ -347,11 +312,11 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
               onChange={(e) => setEditing((d) => ({ ...d, canonical: e.target.value }))}
               data-testid="merchant-name-input"
               placeholder="เช่น 7-ELEVEN"
-              className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+              className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
             />
           </label>
 
-          <label className="inline-flex items-center gap-2 text-sm font-extrabold text-gray-900/70">
+          <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900/70">
             <input
               type="checkbox"
               checked={editing?.enabled !== false}
@@ -367,7 +332,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
               onChange={(e) => setEditing((d) => ({ ...d, aliasesText: e.target.value }))}
               data-testid="merchant-aliases-input"
               rows={4}
-              className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+              className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
               placeholder="7-11\nSeven Eleven\n7eleven"
             />
           </label>
@@ -386,7 +351,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                 }
                 allowEmpty
                 emptyLabel="(not set)"
-                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
               />
             </label>
 
@@ -420,7 +385,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
                 }
                 allowEmpty
                 emptyLabel="(not set)"
-                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+                className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
               />
             </label>
 
@@ -444,7 +409,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             type="button"
             onClick={commitEdit}
             data-testid="merchant-save"
-            className="mt-1 px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold active:scale-95 inline-flex items-center justify-center gap-2"
+            className="mt-1 px-4 py-3 rounded-2xl bg-gray-900 text-white font-semibold active:scale-95 inline-flex items-center justify-center gap-2"
           >
             <Check size={18} />
             Save
@@ -455,7 +420,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
       <Modal open={!!mergeSource} onClose={() => setMergeSource(null)}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-extrabold text-gray-900">Merge merchant</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Merge merchant</h3>
             <p className="mt-1 text-sm text-gray-900/60">รวมร้านให้เป็นชื่อเดียว เพื่อ search และ auto-fill ที่แม่นขึ้น</p>
           </div>
           <button
@@ -469,7 +434,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
         </div>
 
         <div className="mt-4 grid gap-3">
-          <div className="text-sm font-extrabold text-gray-900/70">
+          <div className="text-sm font-semibold text-gray-900/70">
             Source: <span className="text-gray-900">{mergeSource?.canonical}</span>
           </div>
 
@@ -479,7 +444,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
               value={mergeTargetId}
               onChange={(e) => setMergeTargetId(e.target.value)}
               data-testid="merchant-merge-target"
-              className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-extrabold"
+              className="mt-1 w-full px-3 py-2 rounded-2xl bg-white/30 border border-white/20 outline-none font-semibold"
             >
               <option value="">เลือกปลายทาง</option>
               {merchants
@@ -498,7 +463,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
             onClick={commitMerge}
             data-testid="merchant-merge-save"
             disabled={!mergeTargetId}
-            className={`px-4 py-3 rounded-2xl font-extrabold active:scale-95 inline-flex items-center justify-center gap-2 ${
+            className={`px-4 py-3 rounded-2xl font-semibold active:scale-95 inline-flex items-center justify-center gap-2 ${
               mergeTargetId ? "bg-indigo-600 text-white" : "bg-white/20 text-gray-700/50 border border-white/20"
             }`}
           >

@@ -135,7 +135,7 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
     <div className="ui-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">{title}</div>
+          <div className="text-[11px] font-semibold text-gray-900/65 tracking-wide uppercase">{title}</div>
         </div>
         <div className={`shrink-0 w-11 h-11 rounded-2xl border flex items-center justify-center ${toneCls}`}>
           {icon}
@@ -144,7 +144,7 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
 
       <div className="mt-2">
         <div
-          className="text-[clamp(20px,6.5vw,26px)] leading-tight font-black text-gray-900 tabular-nums whitespace-nowrap overflow-x-auto no-scrollbar"
+          className="text-[clamp(20px,6.5vw,26px)] leading-tight font-semibold text-gray-900 tabular-nums whitespace-nowrap overflow-x-auto no-scrollbar"
           role="text"
           aria-label={String(title || "").trim() ? `${title}: ${value}` : String(value)}
           title={String(value)}
@@ -169,7 +169,7 @@ function TonePill({ tone, children }) {
 
   return (
     <span
-      className={"inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[12px] font-extrabold " + cls}
+      className={"inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[12px] font-semibold " + cls}
     >
       {children}
     </span>
@@ -212,7 +212,7 @@ function StatsEmptyState() {
   return (
     <div className="ui-card text-center py-12">
       <Activity size={48} className="mx-auto mb-3 opacity-25 text-gray-600" />
-      <p className="font-extrabold text-gray-800">ไม่มีข้อมูลในช่วงเวลานี้</p>
+      <p className="font-semibold text-gray-800">ไม่มีข้อมูลในช่วงเวลานี้</p>
       <p className="text-sm text-gray-800/60 mt-1">ลองเปลี่ยนช่วงเวลา หรือเพิ่มรายการก่อน</p>
     </div>
   );
@@ -241,12 +241,12 @@ const TxRow = memo(function TxRow({ tx, cat, account }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] text-gray-800/60 flex flex-wrap items-center gap-2">
-            <span className="font-extrabold">{dateText}</span>
-            <span className="text-gray-900/25 font-black">•</span>
+            <span className="font-semibold">{dateText}</span>
+            <span className="text-gray-900/25 font-semibold">•</span>
             <AccountPill account={account} fallbackName={account?.name} size="sm" showHint={false} />
           </div>
 
-          <div className="mt-1 font-extrabold text-gray-900 truncate">
+          <div className="mt-1 font-semibold text-gray-900 truncate">
             {cat?.icon ? `${cat.icon} ` : ""}
             {cat?.name || "ไม่ทราบหมวด"}
           </div>
@@ -261,7 +261,7 @@ const TxRow = memo(function TxRow({ tx, cat, account }) {
             const isDiscount = signed < 0;
             const absAmt = Math.abs(safeNumber(tx?._amt ?? tx?.amount));
             return (
-              <div className={`text-sm font-extrabold ${isDiscount ? "text-emerald-700" : "text-rose-700"}`}>
+              <div className={`text-sm font-semibold ${isDiscount ? "text-emerald-700" : "text-rose-700"}`}>
                 {isDiscount ? "+" : "-"}
                 {formatCurrency(absAmt)}
               </div>
@@ -534,7 +534,7 @@ export default function StatsView() {
           <button
             key={p.id}
             onClick={() => startTransition(() => setPeriod(p.id))}
-            className={`flex-1 py-2.5 text-xs font-extrabold rounded-xl transition-all ${
+            className={`flex-1 py-2.5 text-xs font-semibold rounded-xl transition-all ${
               period === p.id ? "bg-gray-900/90 text-white shadow-sm" : "text-gray-700 hover:bg-white/10"
             }`}
             type="button"
@@ -590,21 +590,21 @@ export default function StatsView() {
           <div className="ui-card-strong p-5 mb-6">
             <div className="flex items-center justify-between gap-3 mb-4">
               <div className="min-w-0">
-                <div className="font-extrabold text-gray-900 flex items-center gap-2">
+                <div className="font-semibold text-gray-900 flex items-center gap-2">
                   <span className="w-9 h-9 rounded-2xl glass-chip flex items-center justify-center text-gray-700">
                     <PieIcon size={18} />
                   </span>
                   สัดส่วนค่าใช้จ่าย
                 </div>
                 <div className="text-xs text-gray-800/60 mt-1">
-                  แตะที่หมวดเพื่อดูรายการในหมวดนั้น • ช่วงเวลา: <span className="font-extrabold">{periodLabel}</span>
+                  แตะที่หมวดเพื่อดูรายการในหมวดนั้น • ช่วงเวลา: <span className="font-semibold">{periodLabel}</span>
                 </div>
               </div>
 
               {topCategory ? (
                 <div className="text-right shrink-0">
                   <div className="text-[11px] text-gray-800/60">หมวดที่ใช้มากสุด</div>
-                  <div className="text-sm font-extrabold text-gray-900 truncate">
+                  <div className="text-sm font-semibold text-gray-900 truncate">
                     {topCategory.icon ? `${topCategory.icon} ` : ""}
                     {topCategory.name} • {topCategory.pct}%
                   </div>
@@ -657,7 +657,7 @@ export default function StatsView() {
                         <div className="flex items-center gap-3 min-w-0">
                           <CatIcon icon={it.icon} color={it.color} title={it.name} />
                           <div className="min-w-0">
-                            <div className="font-extrabold text-gray-900 truncate">{it.name}</div>
+                            <div className="font-semibold text-gray-900 truncate">{it.name}</div>
                             <div className="text-[12px] text-gray-800/60 mt-0.5">
                               {formatCurrency(it.value)} • {pct}%
                             </div>
@@ -682,7 +682,7 @@ export default function StatsView() {
                       </div>
 
                       {clickable ? (
-                        <div className="mt-2 text-[11px] text-indigo-700 font-extrabold">แตะเพื่อดูรายการในหมวดนี้</div>
+                        <div className="mt-2 text-[11px] text-indigo-700 font-semibold">แตะเพื่อดูรายการในหมวดนี้</div>
                       ) : null}
                     </button>
                   );
@@ -695,7 +695,7 @@ export default function StatsView() {
           <div className="ui-card-strong rounded-3xl p-5">
             <div className="flex items-center justify-between gap-3 mb-4">
               <div>
-                <div className="font-extrabold text-gray-900 flex items-center gap-2">
+                <div className="font-semibold text-gray-900 flex items-center gap-2">
                   <span className="w-9 h-9 rounded-2xl glass-chip flex items-center justify-center text-gray-700">
                     <BarChart3 size={18} />
                   </span>
@@ -706,7 +706,7 @@ export default function StatsView() {
 
               <div className="text-right">
                 <div className="text-[11px] text-gray-800/60">ช่วงเวลา</div>
-                <div className="text-sm font-extrabold text-gray-900">{periodLabel}</div>
+                <div className="text-sm font-semibold text-gray-900">{periodLabel}</div>
               </div>
             </div>
 
@@ -743,14 +743,14 @@ export default function StatsView() {
             {/* Quick insights */}
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="glass-panel border border-white/20 rounded-2xl p-4">
-                <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">เฉลี่ยรายจ่ายต่อวัน</div>
-                <div className="mt-1 text-xl font-extrabold text-gray-900">{formatCurrency(totals.avgSpendPerDay)}</div>
+                <div className="text-[11px] font-semibold text-gray-900/65 tracking-wide uppercase">เฉลี่ยรายจ่ายต่อวัน</div>
+                <div className="mt-1 text-xl font-semibold text-gray-900">{formatCurrency(totals.avgSpendPerDay)}</div>
                 <div className="text-[11px] text-gray-800/55 mt-1">คำนวณจากจำนวนวันในช่วง {periodLabel}</div>
               </div>
 
               <div className="glass-panel border border-white/20 rounded-2xl p-4">
-                <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">หมวดที่ใช้มากสุด</div>
-                <div className="mt-1 text-xl font-extrabold text-gray-900">
+                <div className="text-[11px] font-semibold text-gray-900/65 tracking-wide uppercase">หมวดที่ใช้มากสุด</div>
+                <div className="mt-1 text-xl font-semibold text-gray-900">
                   {topCategory ? `${topCategory.icon || ""} ${topCategory.name}`.trim() : "—"}
                 </div>
                 <div className="text-[11px] text-gray-800/55 mt-1">
@@ -771,8 +771,8 @@ export default function StatsView() {
           <div className="glass-panel border border-white/20 rounded-2xl p-4 mb-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[11px] font-extrabold text-gray-900/65 tracking-wide uppercase">รวมทั้งสิ้น</div>
-                <div className="mt-1 text-2xl font-extrabold text-rose-700">-{formatCurrency(Math.max(0, catTotal))}</div>
+                <div className="text-[11px] font-semibold text-gray-900/65 tracking-wide uppercase">รวมทั้งสิ้น</div>
+                <div className="mt-1 text-2xl font-semibold text-rose-700">-{formatCurrency(Math.max(0, catTotal))}</div>
                 <div className="text-[11px] text-gray-800/55 mt-1">
                   {catTxs.length} รายการ • ไม่รวม Transfer / Split parent • ช่วงเวลา {periodLabel}
                 </div>
@@ -797,7 +797,7 @@ export default function StatsView() {
               <div className="w-16 h-16 glass-chip rounded-full flex items-center justify-center mx-auto mb-3 text-gray-500">
                 <ReceiptText size={32} />
               </div>
-              <p className="text-gray-700 font-extrabold">ไม่มีรายการในหมวดนี้</p>
+              <p className="text-gray-700 font-semibold">ไม่มีรายการในหมวดนี้</p>
               <p className="text-xs text-gray-700/70 mt-1">ลองเปลี่ยนช่วงเวลา แล้วแตะหมวดอีกครั้ง</p>
             </div>
           )}

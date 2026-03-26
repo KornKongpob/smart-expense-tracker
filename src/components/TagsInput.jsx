@@ -56,7 +56,7 @@ export default function TagsInput({ value = [], onChange, allTags = [], placehol
         {tags.map((tag, i) => (
           <span
             key={`${tag}-${i}`}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-extrabold bg-indigo-600/12 text-indigo-800 border border-indigo-600/15"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold bg-indigo-600/12 text-indigo-800 border border-indigo-600/15"
           >
             <Tag size={11} />
             {tag}

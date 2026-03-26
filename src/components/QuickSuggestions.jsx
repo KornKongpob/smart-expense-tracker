@@ -22,8 +22,8 @@ export default function QuickSuggestions({
   return (
     <div className={`min-w-0 ${className}`.trim()}>
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[11px] font-extrabold text-gray-900/60 tracking-wide uppercase">
-          {title} <span className="normal-case font-black text-gray-900/50">(แตะครั้งเดียว)</span>
+        <div className="text-[11px] font-semibold text-gray-900/60 tracking-wide uppercase">
+          {title} <span className="normal-case font-semibold text-gray-900/50">(แตะครั้งเดียว)</span>
         </div>
       </div>
 
@@ -54,13 +54,13 @@ export default function QuickSuggestions({
                 )}
               </span>
 
-              <span className="text-xs font-extrabold whitespace-nowrap truncate max-w-[38vw]">
+              <span className="text-xs font-semibold whitespace-nowrap truncate max-w-[38vw]">
                 {label}
               </span>
 
               {badge ? (
                 <span
-                  className={`text-[10px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
                     isSelected ? "border-white/15 bg-white/10" : "border-white/20 bg-white/15"
                   }`}
                 >

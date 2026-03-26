@@ -251,18 +251,18 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
     subtitleNode = (
       <div className="flex flex-wrap items-center gap-2">
         <AccountPill account={transferMeta.fromAcc} size="sm" showHint={true} className="max-w-full" />
-        <span className="text-gray-900/35 font-black">→</span>
+        <span className="text-gray-900/35 font-semibold">→</span>
         <AccountPill account={transferMeta.toAcc} size="sm" showHint={true} className="max-w-full" />
-        <span className="text-gray-900/25 font-black">•</span>
-        <span className="font-extrabold">{safeDateLabel(transferMeta.date)}</span>
+        <span className="text-gray-900/25 font-semibold">•</span>
+        <span className="font-semibold">{safeDateLabel(transferMeta.date)}</span>
       </div>
     );
   } else {
     subtitleNode = (
       <div className="flex flex-wrap items-center gap-2">
         <AccountPill account={selfAcc} fallbackName={accountName} size="sm" showHint={true} className="max-w-full" />
-        <span className="text-gray-900/25 font-black">•</span>
-        <span className="font-extrabold">{safeDateLabel(tx?.date)}</span>
+        <span className="text-gray-900/25 font-semibold">•</span>
+        <span className="font-semibold">{safeDateLabel(tx?.date)}</span>
       </div>
     );
   }
@@ -291,11 +291,11 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="text-sm font-extrabold text-gray-900 whitespace-normal break-words">
+                <div className="text-sm font-semibold text-gray-900 whitespace-normal break-words">
                   {title}
                 </div>
                 {badgeText ? (
-                  <span className="shrink-0 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-white/30 border border-white/15 text-gray-900/80">
+                  <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/30 border border-white/15 text-gray-900/80">
                     {badgeText}
                   </span>
                 ) : null}
@@ -304,7 +304,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
             </div>
 
             <div className="shrink-0 flex items-center gap-2">
-              <div className={`text-sm font-extrabold tabular-nums ${amountClass}`}>
+              <div className={`text-sm font-semibold tabular-nums ${amountClass}`}>
                 {amountPrefix}
                 {amountText}
               </div>
@@ -320,7 +320,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
               {tx.tags.map((tag, i) => (
                 <span
                   key={`${tag}-${i}`}
-                  className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-indigo-600/10 text-indigo-700 border border-indigo-600/10"
+                  className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-indigo-600/10 text-indigo-700 border border-indigo-600/10"
                 >
                   #{tag}
                 </span>
@@ -334,7 +334,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
+              <div className="text-[10px] font-semibold text-gray-900/55 uppercase tracking-wide mb-2">
                 รายละเอียด ({splitLines.length})
               </div>
               <div className="space-y-2 pr-1">
@@ -350,14 +350,14 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                       className="flex items-start justify-between gap-3"
                     >
                       <div className="min-w-0">
-                        <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">
+                        <div className="text-xs font-semibold text-gray-900/85 break-words whitespace-normal">
                           {lineNote || cat?.name || "—"}
                         </div>
                         {lineNote ? (
                           <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{cat?.name || "—"}</div>
                         ) : null}
                       </div>
-                      <div className={`shrink-0 text-xs font-black ${isIncomeLine ? "text-emerald-700" : "text-red-700"}`}>
+                      <div className={`shrink-0 text-xs font-semibold ${isIncomeLine ? "text-emerald-700" : "text-red-700"}`}>
                         {prefix}
                         {amt}
                       </div>
@@ -375,7 +375,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              <div className="text-[10px] font-extrabold text-gray-900/55 uppercase tracking-wide mb-2">
+              <div className="text-[10px] font-semibold text-gray-900/55 uppercase tracking-wide mb-2">
                 ใบเสร็จ ({receiptLines.length})
               </div>
               <div className="space-y-2 pr-1">
@@ -394,7 +394,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-xs font-extrabold text-gray-900/85 break-words whitespace-normal">{lineTitle}</div>
+                          <div className="text-xs font-semibold text-gray-900/85 break-words whitespace-normal">{lineTitle}</div>
                           {subtitle && lineTitle !== subtitle ? (
                             <div className="text-[11px] text-gray-900/60 break-words whitespace-normal">{subtitle}</div>
                           ) : null}
@@ -411,7 +411,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                             </div>
                           ) : null}
                         </div>
-                        <div className="shrink-0 text-xs font-black text-gray-900">
+                        <div className="shrink-0 text-xs font-semibold text-gray-900">
                           {sign}
                           {amt}
                         </div>

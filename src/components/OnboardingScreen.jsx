@@ -74,7 +74,7 @@ export default function OnboardingScreen({ onComplete }) {
         </div>
 
         {/* Title */}
-        <h1 className="text-2xl font-black text-gray-900 tracking-tight">
+        <h1 className="text-2xl font-semibold text-gray-900 tracking-tight">
           {current.title}
         </h1>
         <div className="mt-1 text-sm font-bold text-gray-700/70">
@@ -93,7 +93,7 @@ export default function OnboardingScreen({ onComplete }) {
             <input
               type="text"
               inputMode="decimal"
-              className="ui-input text-center text-lg font-black"
+              className="ui-input text-center text-lg font-semibold"
               placeholder="เช่น 15000"
               value={budgetInput}
               onChange={(e) => setBudgetInput(sanitizeMoneyInput(e.target.value))}

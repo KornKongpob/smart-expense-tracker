@@ -100,7 +100,7 @@ export default function PinLockScreen({
               <Lock size={20} className="text-gray-900" />
             </div>
             <div className="min-w-0">
-              <div className="text-lg font-extrabold text-gray-900">{title}</div>
+              <div className="text-lg font-semibold text-gray-900">{title}</div>
               <div className="text-sm text-gray-800/70">กรอกรหัส 6 หลักเพื่อเข้าใช้งาน</div>
             </div>
           </div>
@@ -134,7 +134,7 @@ export default function PinLockScreen({
                 key={k}
                 type="button"
                 onClick={() => pressDigit(k)}
-                className="h-14 rounded-2xl ui-btn ui-btn-secondary text-lg font-black tabular-nums active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
+                className="h-14 rounded-2xl ui-btn ui-btn-secondary text-lg font-semibold tabular-nums active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
                 aria-label={`digit ${k}`}
               >
                 {k}
@@ -145,7 +145,7 @@ export default function PinLockScreen({
             <button
               type="button"
               onClick={clear}
-              className="h-14 rounded-2xl ui-btn ui-btn-secondary text-sm font-extrabold active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
+              className="h-14 rounded-2xl ui-btn ui-btn-secondary text-sm font-semibold active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
             >
               ล้าง
             </button>
@@ -154,7 +154,7 @@ export default function PinLockScreen({
             <button
               type="button"
               onClick={() => pressDigit("0")}
-              className="h-14 rounded-2xl ui-btn ui-btn-secondary text-lg font-black tabular-nums active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
+              className="h-14 rounded-2xl ui-btn ui-btn-secondary text-lg font-semibold tabular-nums active:scale-95 focus-visible:ring-4 focus-visible:ring-indigo-300/35"
               aria-label="digit 0"
             >
               0
