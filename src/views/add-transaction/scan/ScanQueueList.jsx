@@ -30,7 +30,7 @@ export default function ScanQueueList({
   const duplicateCount = list.filter((q) => q?.duplicate).length;
 
   return (
-    <div className="mb-28">
+    <div className="mb-28" data-testid="scan-review-queue">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-gray-900">

@@ -3650,6 +3650,7 @@ const handleClose = () => {
         <div className="view-segmented mb-5">
           <button
             onClick={() => setEntryMode("scan")}
+            data-testid="add-lane-scan"
             className={`view-segmented-btn ${entryMode === "scan" ? "is-active" : ""}`}
             type="button"
           >
@@ -3657,6 +3658,7 @@ const handleClose = () => {
           </button>
           <button
             onClick={() => setEntryMode("manual")}
+            data-testid="add-lane-manual"
             className={`view-segmented-btn ${entryMode === "manual" ? "is-active" : ""}`}
             type="button"
           >

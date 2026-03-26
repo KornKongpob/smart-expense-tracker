@@ -35,6 +35,8 @@ import {
   buildQueueTypeChangeItem,
   normalizeQueueItemType,
 } from '../src/views/add-transaction/helpers/queueTypeHelpers.js';
+import { createInitialState } from '../src/store/boot.js';
+import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
 
 function installBrowserGlobals(t, { getItem = () => null, setItem = () => {}, removeItem = () => {} } = {}) {
   const prevWindow = globalThis.window;
@@ -302,6 +304,97 @@ test('storage: saveAll emits a storage failure event when serialization fails', 
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0]?.type, STORAGE_SAVE_ERROR_EVENT);
   assert.equal(dispatched[0]?.detail?.message, 'serialize_failed');
+});
+
+test('boot: merchants survive initial boot and wrapped reload-shaped round trip', () => {
+  const seed = createSeedState();
+  const firstPass = createInitialState(seed);
+  const secondPass = createInitialState(createStorageRecord(firstPass));
+
+  assert.equal(firstPass.merchants.length, seed.merchants.length);
+  assert.equal(secondPass.merchants.length, seed.merchants.length);
+  assert.deepEqual(
+    secondPass.merchants.map((merchant) => merchant.id).sort(),
+    seed.merchants.map((merchant) => merchant.id).sort(),
+  );
+});
+
+test('boot: legacy baht backups convert nested inbox and receipt line amounts to satang', () => {
+  const state = createInitialState({
+    moneyUnit: 'baht',
+    transactions: [
+      {
+        id: 'tx_baht_nested',
+        type: 'expense',
+        amount: 265,
+        date: '2026-03-25',
+        categoryId: 'coffee',
+        accountId: 'acc_cash',
+        receiptLines: [
+          {
+            categoryId: 'coffee',
+            amount: 145,
+            children: [{ name: 'Iced latte', amount: 145 }],
+          },
+        ],
+      },
+    ],
+    inbox: [
+      {
+        id: 'inb_baht_nested',
+        type: 'expense',
+        txType: 'expense',
+        amount: 265,
+        date: '2026-03-25',
+        categoryId: 'coffee',
+        accountId: 'acc_cash',
+        groups: [
+          {
+            categoryId: 'coffee',
+            amount: 145,
+            children: [{ name: 'Iced latte', amount: 145 }],
+          },
+        ],
+        lines: [{ categoryId: 'bakery', amount: 120 }],
+      },
+    ],
+  });
+
+  assert.equal(state.transactions[0].amount, 26500);
+  assert.equal(state.transactions[0].receiptLines[0].amount, 14500);
+  assert.equal(state.transactions[0].receiptLines[0].children[0].amount, 14500);
+  assert.equal(state.inbox[0].amount, 26500);
+  assert.equal(state.inbox[0].groups[0].amount, 14500);
+  assert.equal(state.inbox[0].groups[0].children[0].amount, 14500);
+  assert.equal(state.inbox[0].lines[0].amount, 12000);
+});
+
+test('boot: category and categoryId stay mirrored for legacy and modern transactions', () => {
+  const state = createInitialState({
+    transactions: [
+      {
+        id: 'tx_category_id_only',
+        type: 'expense',
+        amount: 4999,
+        date: '2026-03-25',
+        categoryId: 'coffee',
+        accountId: 'acc_cash',
+      },
+      {
+        id: 'tx_category_legacy_only',
+        type: 'expense',
+        amount: 1899,
+        date: '2026-03-25',
+        category: 'food',
+        accountId: 'acc_cash',
+      },
+    ],
+  });
+
+  assert.equal(state.transactions[0].category, 'coffee');
+  assert.equal(state.transactions[0].categoryId, 'coffee');
+  assert.equal(state.transactions[1].category, 'food');
+  assert.equal(state.transactions[1].categoryId, 'food');
 });
 
 test('scan request parse: normalizes data-url mime aliases and filename fields', async () => {

@@ -9,7 +9,7 @@
  * - Provide fast lookup for auto-fill after scan
  */
 
-import { generateId } from "./id";
+import { generateId } from "./id.js";
 
 // ----------------------------
 // Normalization

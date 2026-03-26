@@ -6,18 +6,25 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
 
 import { ACTIONS } from "./actions";
+import {
+  DEFAULT_ACCOUNTS,
+  clampInt,
+  createInitialState,
+  normalizeAccount,
+  normalizeInboxItem,
+  normalizeRule,
+  normalizeRules,
+  safeSatang,
+  sanitizeHierarchyOneLevel,
+} from "./boot.js";
 
 import { loadAll, saveAll, clearAll } from "../services/storage";
 import { setHash } from "../utils/hashRouter";
 import { clearAllBlobs, deleteBlob } from "../services/blobStore";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
-import { ACCOUNT_ICONS } from "../constants/presets.jsx"; // ✅ for iconId validation + future UI usage
-import { THAI_INSTITUTION_PRESET_MAP } from "../constants/institutions";
 import { generateId } from "../utils/id";
-import { parseDigitsList as parseDigitsListUtil, choosePrimaryDigits } from "../utils/accountMatch";
 import { calcAccountBalance, parseDateSafe } from "./selectors";
 import { toISODate } from "../utils/format";
-import { parseMoneyToSatang, ensureSatangInt } from "../utils/money";
 import { advanceRecurringDate, getRecurringAnchorDay } from "../utils/recurring";
 import {
   normalizeMerchants,
@@ -27,181 +34,12 @@ import {
   normalizeMerchantKey,
 } from "../utils/merchantDictionary";
 
-/**
- * ✅ Default account
- * - icon: legacy emoji (still supported)
- * - iconId: new stable id for beautiful icon presets (preferred)
- */
-const DEFAULT_ACCOUNTS = [
-  {
-    id: "acc_cash",
-    name: "เงินสด",
-    type: "cash",
-    color: "#1DD1A1",
-    icon: "💵",
-    iconId: "cash",
-    institutionId: "cash_wallet",
-    openingBalance: 0,
-    accountNumber: "",
-    creditLimit: 0,
-    statementDay: 1,
-    dueDay: 25,
-    cardLast4: "",
-  },
-];
 const ONBOARDING_KEY = "onboarding_done_v1";
 const PIN_KEY = "privacy_pin_6";
 const RESET_ALL_EVENT = "app:after-reset-all";
 
 const AppStoreContext = createContext(null);
-
-// ---------- small helpers ----------
-const toArray = (v) => {
-  if (Array.isArray(v)) return v;
-  if (v && typeof v === "object") return Object.values(v);
-  return [];
-};
-
-const mergeCategoriesById = (existing, defaults) => {
-  const ex = toArray(existing).filter(Boolean);
-  const defs = toArray(defaults).filter(Boolean);
-
-  const defMap = new Map();
-  for (const d of defs) {
-    const id = String(d?.id || "").trim();
-    if (!id) continue;
-    defMap.set(id, { ...d, id });
-  }
-
-  const out = [];
-  const seen = new Set();
-
-  for (const c of ex) {
-    const id = String(c?.id || "").trim();
-    if (!id) continue;
-
-    const d = defMap.get(id);
-    const merged = d
-      ? {
-          ...d,
-          ...c, // user's overrides win (name/icon/color/keywords)
-          id,
-          // but keep new hierarchy fields if user doesn't have them
-          parentId: c?.parentId != null ? String(c.parentId || "").trim() : String(d?.parentId || "").trim(),
-        }
-      : {
-          ...c,
-          id,
-          parentId: String(c?.parentId || "").trim(),
-        };
-
-    out.push(merged);
-    seen.add(id);
-  }
-
-  // Add any missing defaults
-  for (const d of defs) {
-    const id = String(d?.id || "").trim();
-    if (!id) continue;
-    if (seen.has(id)) continue;
-    out.push({ ...d, id, parentId: String(d?.parentId || "").trim() });
-    seen.add(id);
-  }
-
-  return out;
-};
-
-const sanitizeHierarchyOneLevel = (list) => {
-  const arr = toArray(list).filter(Boolean);
-
-  const byId = new Map();
-  for (const c of arr) {
-    const id = String(c?.id || "").trim();
-    if (!id) continue;
-    byId.set(id, { ...c, id });
-  }
-
-  const isDeleted = (c) => !!(c?.isDeleted || c?.deletedAt);
-
-  const next = [];
-  for (const c of byId.values()) {
-    const id = c.id;
-    let parentId = String(c?.parentId || "").trim();
-
-    if (parentId === id) parentId = "";
-    if (parentId && !byId.has(parentId)) parentId = "";
-    if (parentId && isDeleted(byId.get(parentId))) parentId = "";
-
-    // prevent 3-level: parent itself must be root
-    if (parentId) {
-      const p = byId.get(parentId);
-      const ppid = String(p?.parentId || "").trim();
-      if (ppid) parentId = "";
-    }
-
-    next.push({ ...c, parentId });
-  }
-
-  return next;
-};
-
-const ensureCategories = (cats) => {
-  const expenseIn = toArray(cats?.expense);
-  const incomeIn = toArray(cats?.income);
-
-  const mergedExpense = expenseIn.length
-    ? mergeCategoriesById(expenseIn, DEFAULT_CATEGORIES.expense)
-    : DEFAULT_CATEGORIES.expense;
-
-  const mergedIncome = incomeIn.length
-    ? mergeCategoriesById(incomeIn, DEFAULT_CATEGORIES.income)
-    : DEFAULT_CATEGORIES.income;
-
-  const sanitizeAndMigrate = (type, merged) => {
-    const sanitized = sanitizeHierarchyOneLevel(merged);
-
-    // ✅ Lightweight migration: keep existing users tidy when we introduce new mains.
-    // Only apply when a category is still a root (parentId empty) and NOT deleted.
-    // (Users who intentionally reorganized categories won't be affected.)
-    const list = sanitized.map((c) => ({ ...c }));
-    const byId = new Map(list.map((c) => [String(c.id), c]));
-
-    const setParentIfRoot = (childId, newParentId) => {
-      const child = byId.get(String(childId));
-      const parent = byId.get(String(newParentId));
-      if (!child || !parent) return;
-      if (child.isDeleted || child.deletedAt) return;
-      if (parent.isDeleted || parent.deletedAt) return;
-      const pid = String(child.parentId || "").trim();
-      if (pid) return;
-      child.parentId = String(newParentId);
-    };
-
-    if (type === "expense") {
-      setParentIfRoot("rent", "housing");
-      setParentIfRoot("home", "housing");
-      setParentIfRoot("kids", "family");
-      setParentIfRoot("pets", "family");
-      setParentIfRoot("beauty", "personal_care");
-    }
-
-    return sanitizeHierarchyOneLevel(list);
-  };
-
-  // ✅ keep hierarchy valid (no self parent, no missing parent, no parent of parent)
-  return {
-    expense: sanitizeAndMigrate("expense", mergedExpense),
-    income: sanitizeAndMigrate("income", mergedIncome),
-  };
-};
-
-const digitsOnly = (s) => {
-  // support Thai digits ๐-๙ as well
-  const th = "๐๑๒๓๔๕๖๗๘๙";
-  return String(s || "")
-    .replace(/[๐-๙]/g, (ch) => String(th.indexOf(ch)))
-    .replace(/[^\d]/g, "");
-};
+export { createInitialState } from "./boot.js";
 
 const slugifyId = (s) =>
   String(s || "")
@@ -210,349 +48,6 @@ const slugifyId = (s) =>
     .replace(/\s+/g, "-")
     .replace(/[^\w\-ก-๙]/g, "")
     .slice(0, 40);
-
-const safeNum = (v, fallback = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-};
-
-const coerceSatang = (v, fallback = 0) => {
-  // We store money in **satang** (integer).
-  // However, older versions (or some edit flows) may have persisted "baht" strings like "125.25".
-  // Heuristic:
-  // - integer-like strings/numbers => satang
-  // - decimals / currency-formatted strings => treat as baht and convert
-  if (v == null || v === "") return fallback;
-
-  if (typeof v === "number") {
-    if (!Number.isFinite(v)) return fallback;
-    if (!Number.isInteger(v)) return parseMoneyToSatang(v); // baht number => satang
-    return Math.round(v);
-  }
-
-  const s = String(v).trim();
-  if (!s) return fallback;
-
-  // Pure integer string => satang
-  if (/^-?\d+$/.test(s)) {
-    const n = Number(s);
-    return Number.isFinite(n) ? Math.round(n) : fallback;
-  }
-
-  // Otherwise treat as THB major units (baht) string and convert
-  return parseMoneyToSatang(s);
-};
-
-const safeSatang = (v, fallback = 0) => {
-  const n = coerceSatang(v, NaN);
-  return Number.isFinite(n) ? ensureSatangInt(n, fallback) : fallback;
-};
-
-const normalizeMoneyFromUnit = (v, unit) => {
-  const u = String(unit || "").toLowerCase();
-  if (u === "satang") return safeSatang(v, 0);
-  // legacy: treat as THB major units
-  return parseMoneyToSatang(v);
-};
-
-
-const clampInt = (v, min, max, fallback) => {
-  const n = Math.trunc(safeNum(v, fallback));
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-};
-
-const hasValidIconId = (iconId) => {
-  const id = String(iconId || "").trim();
-  if (!id) return false;
-  return (ACCOUNT_ICONS || []).some((x) => String(x?.id || "") === id);
-};
-
-const hasValidInstitutionId = (institutionId) => {
-  const id = String(institutionId || "").trim();
-  if (!id) return false;
-  return !!THAI_INSTITUTION_PRESET_MAP[id];
-};
-
-/**
- * ✅ Normalize account shape with backward compatibility
- * - icon: emoji string (legacy)  ✅ still supported
- * - iconId: preset id (new)      ✅ preferred for "beautiful icon set"
- *
- * Why normalize here:
- * - Prevent crashes when older backups miss fields
- * - Keep types consistent (string/number)
- * - Make UI and scanners stable (accountNumber digits-only)
- */
-function normalizeAccount(a) {
-  const id = a?.id || generateId();
-  const name = String(a?.name || "").trim() || "บัญชีใหม่";
-  const type = String(a?.type || "cash").trim() || "cash";
-  const color = String(a?.color || "#1DD1A1");
-
-  // legacy emoji fallback (string only)
-  const icon = String(a?.icon || "💳");
-
-  // new icon id for preset icons (string only) + validate
-  // if invalid -> keep but also allow UI to fallback to emoji
-  const iconId = hasValidIconId(a?.iconId) ? String(a.iconId) : "";
-  const institutionId = hasValidInstitutionId(a?.institutionId) ? String(a.institutionId) : "";
-
-  const openingBalance = safeSatang(a?.openingBalance, 0);
-
-  // ✅ currency default
-  const currency = String(a?.currency || "THB").trim().toUpperCase() || "THB";
-
-  // ✅ unify digit fields for:
-  // - UI display (a.digits)
-  // - matching from OCR (digitsList / matchDigits)
-  const digitsInput = [
-    Array.isArray(a?.digitsList) ? a.digitsList.join(" ") : "",
-    Array.isArray(a?.matchDigits) ? a.matchDigits.join(" ") : "",
-    a?.digits || "",
-    a?.matchDigits || "",
-    a?.accountNumber || "",
-    a?.cardNumber || "",
-    a?.cardDigits || "",
-    a?.lastDigits || "",
-    a?.cardLast4 || "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const digitsList = parseDigitsListUtil(digitsInput);
-  const primaryDigits = choosePrimaryDigits(digitsList);
-  const digits = primaryDigits ? String(primaryDigits).slice(-4) : "";
-
-  // Prefer explicit accountNumber, otherwise derive from primary digits
-  let accountNumber = a?.accountNumber ? digitsOnly(a.accountNumber) : "";
-  if (!accountNumber && primaryDigits) accountNumber = digitsOnly(primaryDigits).slice(-16);
-
-  // Prefer explicit cardLast4, otherwise derive from digits for credit accounts
-  let cardLast4 = a?.cardLast4 ? digitsOnly(a.cardLast4) : "";
-  if (!cardLast4 && type === "credit" && digits) cardLast4 = digitsOnly(digits);
-
-  return {
-    ...a,
-    id,
-    name,
-    type,
-    color,
-    icon,
-    iconId,
-    institutionId,
-    openingBalance,
-    currency,
-
-    // ✅ matching-friendly fields (backward compatible)
-    digits,
-    digitsList,
-    matchDigits: digitsList,
-
-    accountNumber,
-    creditLimit: safeSatang(a?.creditLimit, 0),
-    statementDay: clampInt(a?.statementDay, 1, 31, 1),
-    dueDay: clampInt(a?.dueDay, 1, 31, 25),
-    cardLast4,
-  };
-}
-
-function normalizeBoot(boot) {
-  const root = boot && typeof boot === 'object' && boot.data && typeof boot.data === 'object' ? boot.data : boot;
-
-  const fromUnit = String(root?.moneyUnit || root?.amountUnit || '').toLowerCase() === 'baht' ? 'baht' : 'satang';
-
-  const convertAmount = (v) => normalizeMoneyFromUnit(v, fromUnit);
-
-  const transactions = toArray(root?.transactions).map((t) => ({
-    ...(t && typeof t === 'object' ? t : {}),
-    amount: convertAmount(t?.amount),
-  }));
-
-  const accountsRaw = toArray(root?.accounts);
-  const accountsSeed = accountsRaw.length ? accountsRaw : DEFAULT_ACCOUNTS;
-  const accounts = accountsSeed.map((a) =>
-    normalizeAccount({
-      ...(a && typeof a === 'object' ? a : {}),
-      openingBalance: convertAmount(a?.openingBalance),
-      creditLimit: convertAmount(a?.creditLimit),
-    })
-  );
-
-  const cats = root?.categories && typeof root.categories === "object" ? root.categories : DEFAULT_CATEGORIES;
-  const categories = ensureCategories(cats);
-
-  const budgets = toArray(root?.budgets).map((b) => ({
-    ...(b && typeof b === 'object' ? b : {}),
-    limit: convertAmount(b?.limit),
-  }));
-
-  const recurring = toArray(root?.recurring).map((r) => ({
-    ...(r && typeof r === 'object' ? r : {}),
-    amount: convertAmount(r?.amount),
-  }));
-
-  const convertInboxItem = (it) => {
-    const o = it && typeof it === 'object' ? { ...it } : {};
-    o.amount = convertAmount(o.amount);
-    // split/lines inside inbox items
-    if (Array.isArray(o.lines)) {
-      o.lines = o.lines.map((l) => ({
-        ...(l && typeof l === 'object' ? l : {}),
-        amount: convertAmount(l?.amount),
-      }));
-    }
-    return o;
-  };
-
-  const scanInbox = toArray(root?.scanInbox).map(convertInboxItem);
-  const inbox = toArray(root?.inbox).map(convertInboxItem);
-
-  const rules = toArray(root?.rules).map((r) => {
-    const rr = r && typeof r === 'object' ? { ...r } : {};
-    const c = rr.conditions && typeof rr.conditions === 'object' ? { ...rr.conditions } : {};
-    // amountMin/Max are stored as SATANG after migration
-    if (c.amountMin != null && String(c.amountMin).trim() !== "") c.amountMin = convertAmount(c.amountMin);
-    else c.amountMin = null;
-    if (c.amountMax != null && String(c.amountMax).trim() !== "") c.amountMax = convertAmount(c.amountMax);
-    else c.amountMax = null;
-    rr.conditions = c;
-    return rr;
-  });
-
-  const ui = root?.ui && typeof root.ui === "object" ? root.ui : undefined;
-
-  return {
-    transactions,
-    accounts,
-    categories,
-    budgets,
-    recurring,
-    inbox,
-    scanInbox,
-    rules,
-    ui,
-    // ✅ from now on, we store all money fields in satang
-    moneyUnit: 'satang',
-  };
-}
-
-// ---------- automation rules normalization ----------
-function normalizeRule(raw, fallbackPriority = 1000) {
-  const r = raw && typeof raw === "object" ? raw : {};
-  const id = r.id || generateId();
-  const name = String(r.name || "").trim() || "Automation Rule";
-  const enabled = r.enabled !== false;
-  const priority = clampInt(r.priority, 1, 9999, fallbackPriority);
-
-  const conditions = r.conditions && typeof r.conditions === "object" ? r.conditions : {};
-  const actions = r.actions && typeof r.actions === "object" ? r.actions : {};
-
-  return {
-    ...r,
-    id,
-    name,
-    enabled,
-    priority,
-    conditions: {
-      keywordContains: String(conditions.keywordContains || "").trim(),
-      regex: String(conditions.regex || "").trim(),
-      amountMin: conditions.amountMin != null && String(conditions.amountMin).trim() !== "" ? safeSatang(conditions.amountMin, NaN) : null,
-      amountMax: conditions.amountMax != null && String(conditions.amountMax).trim() !== "" ? safeSatang(conditions.amountMax, NaN) : null,
-      bankContains: String(conditions.bankContains || "").trim(),
-      refContains: String(conditions.refContains || "").trim(),
-      fromDigitsEndsWith: String(conditions.fromDigitsEndsWith || "").trim(),
-      toDigitsEndsWith: String(conditions.toDigitsEndsWith || "").trim(),
-    },
-    actions: {
-      setType: actions.setType ? String(actions.setType) : "",
-      setCategoryId: actions.setCategoryId ? String(actions.setCategoryId) : "",
-      setAccountId: actions.setAccountId ? String(actions.setAccountId) : "",
-      setFromAccountId: actions.setFromAccountId ? String(actions.setFromAccountId) : "",
-      setToAccountId: actions.setToAccountId ? String(actions.setToAccountId) : "",
-    },
-    updatedAt: Number(r.updatedAt || Date.now()),
-    createdAt: Number(r.createdAt || r.updatedAt || Date.now()),
-  };
-}
-
-function normalizeRules(list) {
-  const arr = toArray(list).filter(Boolean);
-  // Ensure stable order by priority; if missing priority, append
-  const withP = arr.map((r, idx) => normalizeRule(r, 1000 + idx));
-  withP.sort((a, b) => (a.priority || 0) - (b.priority || 0));
-  // Re-number priorities densely for predictable ordering
-  return withP.map((r, idx) => ({ ...r, priority: idx + 1 }));
-}
-
-// ---------- geolocation normalization ----------
-function normalizeLocation(raw) {
-  const loc = raw && typeof raw === "object" ? raw : null;
-  if (!loc) return null;
-
-  const lat = Number(loc.lat ?? loc.latitude);
-  const lng = Number(loc.lng ?? loc.lon ?? loc.longitude);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-
-  const round6 = (n) => Math.round(n * 1e6) / 1e6;
-  return { lat: round6(lat), lng: round6(lng) };
-}
-
-// ---------- transaction normalization ----------
-function normalizeTransaction(raw) {
-  const t = raw && typeof raw === "object" ? raw : {};
-  const id = String(t.id || generateId());
-  const amount = safeSatang(t.amount, 0);
-  const date = t?.date ? String(t.date).slice(0, 10) : toISODate(new Date());
-  // Prefer explicit createdAt/updatedAt, else fall back to date (midnight) for stable sorting
-  const dateMs = date ? parseDateSafe(date).getTime() : 0;
-  const createdAt = Number(t.createdAt || t.addedAt || t.updatedAt || dateMs || Date.now());
-  const updatedAt = Number(t.updatedAt || createdAt);
-  const location = normalizeLocation(t.location);
-
-  return {
-    ...t,
-    id,
-    amount,
-    date,
-    note: String(t.note || ""),
-    createdAt,
-    updatedAt,
-    isTransfer: !!t.isTransfer,
-    // optional GPS capture
-    location: location || null,
-  };
-}
-
-export function createInitialState(boot = {}) {
-  const tx = toArray(boot?.transactions).map(normalizeTransaction);
-  const acc = toArray(boot?.accounts);
-  const cats = ensureCategories(boot?.categories);
-  const moneyUnit = String(boot?.moneyUnit || 'satang').toLowerCase() === 'baht' ? 'baht' : 'satang';
-
-  // ✅ Always enforce normalized accounts (even if provided)
-  const normalizedAccounts = acc.length ? acc.map(normalizeAccount) : DEFAULT_ACCOUNTS.map(normalizeAccount);
-
-  return {
-    moneyUnit,
-    transactions: tx,
-    accounts: normalizedAccounts,
-    categories: cats,
-    budgets: toArray(boot?.budgets),
-    recurring: toArray(boot?.recurring),
-    merchants: normalizeMerchants(boot?.merchants),
-    inbox: toArray(boot?.inbox).length ? toArray(boot?.inbox).map(normalizeInboxItem) : migrateScanInboxToInbox(toArray(boot?.scanInbox)),
-    // backward compatibility: keep scanInbox mirrored
-    scanInbox: toArray(boot?.inbox).length ? toArray(boot?.inbox).map(normalizeInboxItem) : migrateScanInboxToInbox(toArray(boot?.scanInbox)),
-    rules: normalizeRules(boot?.rules),
-    ui: {
-      view: boot?.ui?.view || "dashboard",
-      editingId: boot?.ui?.editingId || null,
-    },
-  };
-}
 
 // ---------- reducer helpers ----------
 function upsertById(list, item) {
@@ -609,44 +104,6 @@ function rewriteMerchantAcrossInbox(inbox, aliasKeySet, targetCanonical) {
     return it;
   });
   return changed ? next : list;
-}
-
-
-// ---------- inbox migration/normalization ----------
-function normalizeInboxItem(raw) {
-  const it = raw && typeof raw === 'object' ? raw : {};
-  const id = it.id || generateId();
-  const createdAt = Number(it.createdAt || it.receivedAt || Date.now());
-  const status = (String(it.status || '') || '').toLowerCase() === 'approved' ? 'approved' : 'pending';
-
-  const type = String(it.type || it.txType || 'expense');
-  const amount = safeSatang(it.amount, 0);
-  const date = it.date ? String(it.date).slice(0, 10) : toISODate(new Date());
-
-  return {
-    ...it,
-    id,
-    createdAt,
-    status,
-    type,
-    amount,
-    date,
-    // normalized keys
-    categoryId: String(it.categoryId || it.category || ''),
-    accountId: String(it.accountId || ''),
-    fromAccountId: String(it.fromAccountId || ''),
-    toAccountId: String(it.toAccountId || ''),
-    merchant: String(it.merchant || ''),
-    note: String(it.note || ''),
-    referenceId: String(it.referenceId || it.ref || ''),
-    attachmentId: it.attachmentId || null,
-    fileHash: String(it.fileHash || '').trim() || null,
-  };
-}
-
-function migrateScanInboxToInbox(scanInbox) {
-  const list = Array.isArray(scanInbox) ? scanInbox : [];
-  return list.map((x) => normalizeInboxItem({ ...x, status: 'pending' }));
 }
 
 // ---------- recurring generation ----------
@@ -719,7 +176,7 @@ function generateDueTransactionsForRecurring(r, todayISO) {
 export function reducer(state, action) {
   switch (action.type) {
     case ACTIONS.INIT: {
-      return createInitialState(normalizeBoot(action.payload ?? {}));
+      return createInitialState(action.payload ?? {});
     }
 
     case ACTIONS.NAVIGATE: {
@@ -1234,7 +691,7 @@ export function reducer(state, action) {
 // ----- reset/import -----
     case ACTIONS.RESET_ALL:
     case ACTIONS.IMPORT_BACKUP: {
-      return createInitialState(normalizeBoot(action.payload ?? {}));
+      return createInitialState(action.payload ?? {});
     }
 
     default:
@@ -1257,7 +714,7 @@ export function AppStoreProvider({ children }) {
       defaultUI: { view: "dashboard", editingId: null },
     });
 
-    return createInitialState(normalizeBoot(boot));
+    return createInitialState(boot);
   });
 
   // ✅ persist (include ui to keep view/editingId stable)

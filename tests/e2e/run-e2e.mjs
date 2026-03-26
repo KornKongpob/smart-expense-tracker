@@ -527,7 +527,9 @@ async function openInbox(page) {
 async function openScan(page) {
   await ensureNavbar(page);
   await page.getByTestId("nav-scan").click();
-  await waitFor(page.getByTestId("add-lane-receipt"), "scan view");
+  await waitFor(page.getByTestId("add-lane-scan"), "scan view");
+  await page.getByTestId("add-lane-scan").click();
+  await waitFor(page.getByTestId("scan-kind-receipt"), "scan mode");
 }
 
 async function closeAddView(page) {
@@ -682,14 +684,15 @@ async function scenarioSeededCore({ context, page, baseURL }) {
   });
 
   await openToday(page);
-  await waitFor(page.getByText(/Today spend/i), "today metrics");
+  await waitFor(page.getByTestId("today-action-receipt"), "today metrics");
 
   await page.getByTestId("today-action-receipt").click();
   await waitFor(page.getByTestId("scan-kind-receipt"), "quick receipt flow");
   await closeAddView(page);
 
-  await page.getByTestId("today-action-slip").click();
+  await page.getByTestId("today-action-receipt").click();
   await waitFor(page.getByTestId("scan-kind-slip"), "quick slip flow");
+  await page.getByTestId("scan-kind-slip").click();
   await closeAddView(page);
 
   await page.getByTestId("today-action-manual").click();
@@ -795,18 +798,18 @@ async function scenarioSeededCore({ context, page, baseURL }) {
   txCount = await getCollectionCount(page, "transactions");
 
   await openScan(page);
-  await page.getByTestId("add-lane-receipt").click();
+  await page.getByTestId("scan-kind-receipt").click();
   await page.getByTestId("scan-file-input").setInputFiles(path.join(FIXTURES_DIR, "fixture-receipt.pdf"));
-  await waitFor(page.getByText(/Review Queue/i), "receipt queue");
+  await waitFor(page.getByTestId("scan-review-queue"), "receipt queue");
   await waitForButtonEnabled(page.getByTestId("scan-save-now"), "scan save now");
   await page.getByTestId("scan-save-now").click();
   await waitForState(page, (data) => (data?.transactions || []).length > txCount, "fixture receipt save", 25_000);
   txCount = await getCollectionCount(page, "transactions");
 
   await openScan(page);
-  await page.getByTestId("add-lane-slip").click();
+  await page.getByTestId("scan-kind-slip").click();
   await page.getByTestId("scan-slip-input").setInputFiles(path.join(FIXTURES_DIR, "fixture-slip.pdf"));
-  await waitFor(page.getByText(/Review Queue/i), "slip queue");
+  await waitFor(page.getByTestId("scan-review-queue"), "slip queue");
   await waitForButtonEnabled(page.getByTestId("scan-send-inbox"), "scan send inbox");
   await page.getByTestId("scan-send-inbox").click();
   await waitForState(page, (data) => (data?.inbox || []).length > inboxCount, "fixture slip inbox");
@@ -1049,9 +1052,9 @@ async function scenarioRealScan({ page, baseURL }) {
   const initialInboxCount = await getCollectionCount(page, "inbox");
 
   await openScan(page);
-  await page.getByTestId("add-lane-receipt").click();
+  await page.getByTestId("scan-kind-receipt").click();
   await page.getByTestId("scan-file-input").setInputFiles(path.join(FIXTURES_DIR, "real-receipt.pdf"));
-  await waitFor(page.getByText(/Review Queue/i), "real receipt queue", 60_000);
+  await waitFor(page.getByTestId("scan-review-queue"), "real receipt queue", 60_000);
   await waitForButtonEnabled(page.getByTestId("scan-save-now"), "real scan save now", 90_000);
   await page.getByTestId("scan-save-now").click();
   await waitForState(page, (data) => (data?.transactions || []).length > txCount, "real receipt save", 60_000);
@@ -1060,9 +1063,9 @@ async function scenarioRealScan({ page, baseURL }) {
   let slipSent = false;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     await openScan(page);
-    await page.getByTestId("add-lane-slip").click();
+    await page.getByTestId("scan-kind-slip").click();
     await page.getByTestId("scan-slip-input").setInputFiles(path.join(FIXTURES_DIR, "real-slip.pdf"));
-    await waitFor(page.getByText(/Review Queue/i), `real slip queue attempt ${attempt}`, 60_000);
+    await waitFor(page.getByTestId("scan-review-queue"), `real slip queue attempt ${attempt}`, 60_000);
 
     try {
       await waitForButtonEnabled(page.getByTestId("scan-send-inbox"), "real scan send inbox", 90_000);
