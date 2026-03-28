@@ -30,30 +30,30 @@ function MoreRow({ icon, title, subtitle, badge, onClick, danger, testId }) {
     <button
       onClick={onClick}
       data-testid={testId}
-      className={["ui-row", danger ? "text-red-700" : "text-gray-900"].join(" ")}
+      className={["ui-row group", danger ? "text-red-700" : "text-[color:var(--text)]"].join(" ")}
       type="button"
     >
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex min-w-0 items-center gap-3">
         <div
           className={[
-            "w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border",
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors",
             danger
-              ? "bg-red-500/10 border-red-500/15 text-red-700"
-              : "bg-white/65 border-slate-900/10 text-gray-900",
+              ? "border-red-500/15 bg-red-500/10 text-red-700"
+              : "border-white/70 bg-white/60 text-[color:var(--text)] group-hover:bg-white/80",
           ].join(" ")}
         >
           {icon}
         </div>
 
         <div className="min-w-0 text-left">
-          <div className="font-bold truncate">{title}</div>
-          {subtitle ? <div className="text-xs font-medium text-gray-700/65 mt-0.5 truncate">{subtitle}</div> : null}
+          <div className="truncate font-semibold">{title}</div>
+          {subtitle ? <div className="mt-0.5 truncate text-xs font-medium text-[color:var(--muted)]">{subtitle}</div> : null}
         </div>
       </div>
 
       <div className="flex items-center gap-2">
         {typeof badge === "number" && badge > 0 ? <div className="ui-badge">{badge}</div> : null}
-        <ChevronRight size={20} className={danger ? "text-red-300" : "text-gray-500"} />
+        <ChevronRight size={18} className={danger ? "text-red-300" : "text-[color:var(--muted)]"} />
       </div>
     </button>
   );
@@ -61,13 +61,26 @@ function MoreRow({ icon, title, subtitle, badge, onClick, danger, testId }) {
 
 function HubSection({ title, subtitle, children }) {
   return (
-    <section className="ui-card overflow-hidden rounded-3xl">
-      <div className="border-b border-slate-900/8 px-4 py-3">
-        <div className="text-sm font-semibold text-slate-950">{title}</div>
-        {subtitle ? <div className="mt-1 text-[12px] font-medium text-slate-600">{subtitle}</div> : null}
-      </div>
-      {children}
+    <section className="hub-section">
+      {title ? (
+        <div className="hub-section-head">
+          <div className="hub-section-title">{title}</div>
+          {subtitle ? <div className="hub-section-copy">{subtitle}</div> : null}
+        </div>
+      ) : null}
+
+      <div className="ui-card-strong overflow-hidden">{children}</div>
     </section>
+  );
+}
+
+function HubStatusCard({ label, value, copy }) {
+  return (
+    <div className="hub-status-card">
+      <div className="hub-status-label">{label}</div>
+      <div className="hub-status-value">{value}</div>
+      <div className="hub-status-copy">{copy}</div>
+    </div>
   );
 }
 
@@ -79,9 +92,9 @@ function PinModal({ isOpen, hasPin, pin, setPin, confirmPin, setConfirmPin, erro
       <div className="w-full max-w-sm ui-card-strong p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-lg font-semibold text-gray-900">Security / PIN</div>
-            <div className="mt-1 text-xs font-bold text-gray-700/70">
-              ใช้รหัส 6 หลักเพื่อบังคับล็อกแอพทุกครั้งที่เปิดใหม่
+            <div className="text-lg font-semibold text-[color:var(--text)]">Security / PIN</div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-[color:var(--muted)]">
+              ใช้รหัส 6 หลักเพื่อให้แอปถาม PIN ทุกครั้งที่เปิดใหม่
             </div>
           </div>
           <button type="button" onClick={onClose} className="ui-btn ui-btn-secondary px-3">
@@ -118,7 +131,7 @@ function PinModal({ isOpen, hasPin, pin, setPin, confirmPin, setConfirmPin, erro
             />
           </div>
 
-          {error ? <div className="text-sm font-bold text-red-700">{error}</div> : null}
+          {error ? <div className="text-sm font-semibold text-red-700">{error}</div> : null}
         </div>
 
         <div className="mt-5 flex items-center justify-between gap-2">
@@ -209,6 +222,8 @@ export default function MoreView({ showAlert, showConfirm }) {
   }, [state?.rules]);
 
   const merchantCount = Array.isArray(state?.merchants) ? state.merchants.length : 0;
+  const transactionCount = Array.isArray(state?.transactions) ? state.transactions.length : 0;
+  const accountCount = Array.isArray(state?.accounts) ? state.accounts.length : 0;
   const isDark = theme === "dark";
 
   const recurringHealth = useMemo(() => {
@@ -352,7 +367,7 @@ export default function MoreView({ showAlert, showConfirm }) {
 
     if (truncated) {
       showAlert?.(
-        `สร้างรายการ Recurring แล้ว ${count} รายการ (ถึงวันที่ ${today}) และยังมีบางกฎถูกจำกัดต่อครั้ง ${result.cap} รายการ`
+        `สร้างรายการ Recurring แล้ว ${count} รายการ (ถึงวันที่ ${today}) และยังมีกฎบางส่วนถูกจำกัดต่อครั้ง ${result.cap} รายการ`
       );
       return;
     }
@@ -362,16 +377,47 @@ export default function MoreView({ showAlert, showConfirm }) {
 
   return (
     <div className="min-h-dvh">
-      <AppHeader title="ตั้งค่า" />
+      <AppHeader title="ตั้งค่า" subtitle="ระบบ / ข้อมูล / ความปลอดภัย" />
 
-      <main className="ui-page pt-4 pb-6 view-flow">
-        <HubSection title="นำทาง">
+      <main className="ui-page pt-4 pb-8 view-flow">
+        <section className="hub-hero">
+          <div className="dashboard-kicker">Control Center</div>
+          <h2 className="hub-hero-title">จัดการระบบ งานอัตโนมัติ และข้อมูลสำรองจากที่เดียว</h2>
+          <p className="hub-hero-copy">
+            ใช้หน้านี้เพื่อตรวจสถานะ Inbox, เปิดกฎอัตโนมัติ, สลับธีม, ตั้ง PIN Lock และสำรองข้อมูลก่อนทำงานต่อ
+          </p>
+
+          <div className="hub-status-grid">
+            <HubStatusCard
+              label="Inbox"
+              value={inboxPendingCount ? `${inboxPendingCount} รอตรวจ` : "ไม่มีค้าง"}
+              copy={inboxPendingCount ? "เปิดเพื่อตรวจรายการก่อนบันทึก" : "พร้อมรับรายการใหม่"}
+            />
+            <HubStatusCard
+              label="Rules"
+              value={rulesStats.total ? `${rulesStats.enabled}/${rulesStats.total} เปิดใช้` : "ยังไม่มี"}
+              copy="กฎ auto-fill สำหรับหลังสแกน"
+            />
+            <HubStatusCard
+              label="Theme"
+              value={isDark ? "Dark mode" : "Light mode"}
+              copy={hasPin ? "PIN Lock เปิดอยู่" : "ยังไม่ตั้ง PIN Lock"}
+            />
+            <HubStatusCard
+              label="Data"
+              value={`${transactionCount} รายการ`}
+              copy={`${accountCount} บัญชี • ร้านค้า ${merchantCount}`}
+            />
+          </div>
+        </section>
+
+        <HubSection title="ทางลัด" subtitle="ไปยังหน้าที่ใช้บ่อยและมุมมองสรุปหลักของแอป">
           <MoreRow icon={<Home size={20} />} title="หน้าหลัก" subtitle="ภาพรวมรายรับรายจ่าย" onClick={() => navigate("dashboard")} testId="hub-dashboard" />
           <MoreRow icon={<BarChart3 size={20} />} title="สถิติ" subtitle="กราฟและ breakdown" onClick={() => navigate("stats")} testId="hub-analytics" />
-          <MoreRow icon={<Bell size={20} />} title="งบประมาณ" subtitle="ตั้งงบรายวัน/เดือน/หมวด" onClick={() => navigate("budgets")} testId="hub-budgets" />
+          <MoreRow icon={<Bell size={20} />} title="งบประมาณ" subtitle="ตั้งงบรายวัน รายเดือน และรายหมวด" onClick={() => navigate("budgets")} testId="hub-budgets" />
         </HubSection>
 
-        <HubSection title="ระบบอัตโนมัติ">
+        <HubSection title="ระบบอัตโนมัติ" subtitle="ตรวจงานที่ต้องอนุมัติ กฎประจำ และการทำงานอัตโนมัติของแอป">
           <MoreRow icon={<Settings size={20} />} title="หมวดหมู่" subtitle="จัดกลุ่มรายจ่ายและรายรับ" onClick={() => navigate("categories")} testId="hub-categories" />
           <MoreRow icon={<Inbox size={20} />} title="Inbox" subtitle={inboxSubtitle} badge={inboxPendingCount} onClick={() => navigate("inbox")} testId="hub-inbox" />
           <MoreRow icon={<Repeat size={20} />} title="รายการประจำ" subtitle={recurringHealth} onClick={() => navigate("recurring")} testId="hub-recurring" />
@@ -392,7 +438,7 @@ export default function MoreView({ showAlert, showConfirm }) {
           />
         </HubSection>
 
-        <HubSection title="ข้อมูลและความปลอดภัย">
+        <HubSection title="ข้อมูลและความปลอดภัย" subtitle="สลับธีม ตั้ง PIN และสำรองข้อมูลออกจากเครื่อง">
           <MoreRow
             icon={isDark ? <Moon size={20} /> : <Sun size={20} />}
             title={isDark ? "Dark mode (เปิดอยู่)" : "Dark mode"}
@@ -425,7 +471,7 @@ export default function MoreView({ showAlert, showConfirm }) {
           />
         </HubSection>
 
-        <HubSection title="">
+        <HubSection>
           <MoreRow icon={<Trash2 size={20} />} title="ลบข้อมูลทั้งหมด" subtitle="ย้อนกลับไม่ได้" danger onClick={onReset} testId="hub-reset" />
         </HubSection>
       </main>

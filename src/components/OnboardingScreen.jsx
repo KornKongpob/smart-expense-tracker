@@ -1,42 +1,53 @@
-// src/components/OnboardingScreen.jsx
-// Welcome screen shown to first-time users (no transactions yet).
-// 3 steps: Welcome → Set monthly budget → Start recording.
-
 import { useState } from "react";
-import { Sparkles, Wallet, Target, ChevronRight, Check } from "lucide-react";
+import { Check, ChevronRight, Sparkles, Target, Wallet } from "lucide-react";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../utils/money";
 
 const STEPS = [
   {
-    icon: <Sparkles size={40} className="text-indigo-600" />,
-    title: "ยินดีต้อนรับ!",
+    icon: <Sparkles size={38} className="text-[color:var(--accent-ink)]" />,
     subtitle: "Smart Expense Tracker",
-    description: "แอปจดบันทึกรายรับ-รายจ่ายอัจฉริยะ สแกนใบเสร็จ ตั้งงบ และวิเคราะห์การใช้จ่ายของคุณ",
+    title: "เริ่มบันทึกรายจ่ายให้เห็นภาพตั้งแต่วันแรก",
+    description: "สแกนใบเสร็จ กรอกเอง หรือเปิด Inbox เพื่อตรวจรายการที่ต้องยืนยันจากหน้าเดียวกัน",
+    points: [
+      "สแกนใบเสร็จแล้วแยกรายการได้เร็วขึ้น",
+      "ดูยอดวันนี้และยอดเดือนโดยไม่ต้องสลับหลายหน้า",
+      "เริ่มใช้งานได้ทันทีแม้มีแค่บัญชีเงินสด",
+    ],
   },
   {
-    icon: <Wallet size={40} className="text-emerald-600" />,
-    title: "บัญชีเริ่มต้น",
-    subtitle: "เงินสด",
-    description: "ระบบสร้างบัญชี \"เงินสด\" ให้แล้ว คุณสามารถเพิ่มบัญชีธนาคาร หรือบัตรเครดิตได้ภายหลังที่หน้า \"บัญชี\"",
+    icon: <Wallet size={38} className="text-emerald-600" />,
+    subtitle: "บัญชีเริ่มต้น",
+    title: "ระบบเตรียมบัญชีเงินสดไว้ให้แล้ว",
+    description: "เพิ่มบัญชีธนาคารหรือบัตรเครดิตทีหลังได้จากหน้า บัญชี โดยไม่ต้องตั้งค่าทุกอย่างก่อนเริ่ม",
+    points: [
+      "ใช้บันทึกรายการพื้นฐานได้ทันที",
+      "ค่อยเพิ่มบัญชีจริงเมื่อพร้อม",
+      "ช่วยให้เริ่มเก็บข้อมูลได้เร็วขึ้น",
+    ],
   },
   {
-    icon: <Target size={40} className="text-amber-600" />,
-    title: "ตั้งงบรายเดือน",
-    subtitle: "ไม่บังคับ — ข้ามได้",
-    description: "กำหนดงบรายเดือนเพื่อช่วยให้คุณเห็นภาพรวมการใช้จ่าย",
+    icon: <Target size={38} className="text-amber-600" />,
+    subtitle: "ตัวช่วยเพิ่มเติม",
+    title: "ตั้งงบรายเดือนเพื่อดูว่าใช้เกินเมื่อไร",
+    description: "ไม่บังคับ คุณข้ามขั้นตอนนี้ได้ แล้วกลับมาตั้งงบภายหลังในหน้า Budgets",
+    points: [
+      "ช่วยเทียบยอดใช้จริงกับงบรวมของเดือน",
+      "เหมาะกับการเช็กแนวโน้มก่อนยอดปลายเดือนพุ่ง",
+      "แก้ไขหรือตั้งเพิ่มทีหลังได้เสมอ",
+    ],
     hasBudgetInput: true,
   },
 ];
 
 function StepDots({ current, total }) {
   return (
-    <div className="flex items-center justify-center gap-2 mt-6">
-      {Array.from({ length: total }, (_, i) => (
-        <div
-          key={i}
+    <div className="flex items-center gap-1.5">
+      {Array.from({ length: total }, (_, index) => (
+        <span
+          key={index}
           className={[
             "h-2 rounded-full transition-all duration-300",
-            i === current ? "w-8 bg-indigo-600" : "w-2 bg-gray-900/15",
+            index === current ? "w-8 bg-[color:var(--accent)]" : "w-2 bg-slate-900/12",
           ].join(" ")}
         />
       ))}
@@ -55,9 +66,10 @@ export default function OnboardingScreen({ onComplete }) {
     if (isLast) {
       const budgetSatang = parseMoneyToSatang(budgetInput);
       onComplete({ monthlyBudget: budgetSatang > 0 ? budgetSatang : 0 });
-    } else {
-      setStep((s) => Math.min(s + 1, STEPS.length - 1));
+      return;
     }
+
+    setStep((value) => Math.min(value + 1, STEPS.length - 1));
   };
 
   const handleSkip = () => {
@@ -65,75 +77,74 @@ export default function OnboardingScreen({ onComplete }) {
   };
 
   return (
-    <div className="min-h-dvh flex flex-col items-center justify-center px-6 py-12">
-      {/* Card */}
-      <div className="w-full max-w-sm ui-card-strong p-8 text-center animate-fade-in-up">
-        {/* Icon */}
-        <div className="w-20 h-20 rounded-3xl bg-white/60 border border-white/30 shadow-lg mx-auto flex items-center justify-center mb-6">
-          {current.icon}
+    <div className="app-onboarding">
+      <div className="app-onboarding-panel">
+        <div className="app-onboarding-brand">
+          <Sparkles size={14} />
+          Smart Expense Tracker
         </div>
 
-        {/* Title */}
-        <h1 className="text-2xl font-semibold text-gray-900 tracking-tight">
-          {current.title}
-        </h1>
-        <div className="mt-1 text-sm font-bold text-gray-700/70">
-          {current.subtitle}
-        </div>
-
-        {/* Description */}
-        <p className="mt-4 text-sm text-gray-800/75 font-semibold leading-relaxed">
-          {current.description}
-        </p>
-
-        {/* Budget input (step 3 only) */}
-        {current.hasBudgetInput && (
-          <div className="mt-6">
-            <label className="ui-label text-left block mb-2">งบรายเดือน (บาท)</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              className="ui-input text-center text-lg font-semibold"
-              placeholder="เช่น 15000"
-              value={budgetInput}
-              onChange={(e) => setBudgetInput(sanitizeMoneyInput(e.target.value))}
-            />
-            <div className="mt-2 text-xs text-gray-600/70 font-bold">
-              ข้ามได้ — ตั้งทีหลังที่หน้า Budgets
-            </div>
+        <div className="app-onboarding-surface animate-fade-in-up">
+          <div className="app-onboarding-meta">
+            <div className="app-onboarding-step">Step {step + 1} / {STEPS.length}</div>
+            <StepDots current={step} total={STEPS.length} />
           </div>
-        )}
 
-        {/* Dots */}
-        <StepDots current={step} total={STEPS.length} />
+          <div className="app-onboarding-icon">{current.icon}</div>
 
-        {/* Actions */}
-        <div className="mt-8 flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={handleNext}
-            className="ui-btn ui-btn-primary w-full text-base"
-          >
-            {isLast ? (
-              <>
-                <Check size={18} /> เริ่มใช้งาน
-              </>
-            ) : (
-              <>
-                ต่อไป <ChevronRight size={18} />
-              </>
-            )}
-          </button>
+          <div className="app-onboarding-copy">
+            <div className="app-onboarding-subtitle">{current.subtitle}</div>
+            <h1 className="app-onboarding-title">{current.title}</h1>
+            <p className="app-onboarding-description">{current.description}</p>
+          </div>
 
-          {step > 0 && (
-            <button
-              type="button"
-              onClick={handleSkip}
-              className="ui-btn ui-btn-secondary w-full text-sm"
-            >
-              ข้ามทั้งหมด
+          <div className="app-onboarding-points">
+            {current.points.map((point) => (
+              <div key={point} className="app-onboarding-point">
+                <span className="app-onboarding-point-dot" aria-hidden="true" />
+                <div className="text-sm font-semibold leading-6 text-[color:var(--text)]">{point}</div>
+              </div>
+            ))}
+          </div>
+
+          {current.hasBudgetInput ? (
+            <div className="mt-5">
+              <label className="ui-label mb-2 block">งบรายเดือน (บาท)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="ui-input text-center text-lg font-semibold"
+                placeholder="เช่น 15000"
+                value={budgetInput}
+                onChange={(event) => setBudgetInput(sanitizeMoneyInput(event.target.value))}
+              />
+              <div className="mt-2 text-xs font-semibold text-[color:var(--muted)]">
+                ข้ามได้ แล้วกลับมาตั้งงบเพิ่มเติมภายหลังในหน้า Budgets
+              </div>
+            </div>
+          ) : null}
+
+          <div className="app-onboarding-actions">
+            <button type="button" onClick={handleNext} className="ui-btn ui-btn-primary w-full text-base">
+              {isLast ? (
+                <>
+                  <Check size={18} />
+                  เริ่มใช้งาน
+                </>
+              ) : (
+                <>
+                  ถัดไป
+                  <ChevronRight size={18} />
+                </>
+              )}
             </button>
-          )}
+
+            {step > 0 ? (
+              <button type="button" onClick={handleSkip} className="ui-btn ui-btn-secondary w-full text-sm">
+                ข้ามทั้งหมด
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

@@ -55,15 +55,13 @@ export default function AppHeader({
       <header
         ref={headerRef}
         className={cn(
-          "fixed inset-x-0 top-0 z-40 bg-white border-b",
-          "pt-safe",
+          "fixed inset-x-0 top-0 z-40 px-3 pt-safe pt-3 sm:px-5",
           className
         )}
-        style={{ borderColor: "var(--border)" }}
       >
-        <div className="mx-auto max-w-[1180px] px-4 py-2.5 sm:px-6">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
+        <div className="mx-auto max-w-[1100px]">
+          <div className="app-header-surface">
+            <div className="flex min-w-0 items-center gap-3">
               {left ? (
                 <div className="shrink-0">{left}</div>
               ) : onBack ? (
@@ -78,11 +76,11 @@ export default function AppHeader({
               ) : null}
 
               <div className="min-w-0">
-                <h1 className="truncate text-lg leading-tight font-semibold" style={{ color: "var(--text)" }}>
+                <h1 className="truncate text-[1.05rem] leading-tight font-semibold" style={{ color: "var(--text)" }}>
                   {title || ""}
                 </h1>
                 {subtitle ? (
-                  <div className="truncate text-[13px] font-normal" style={{ color: "var(--muted)" }}>
+                  <div className="truncate text-[0.78rem] font-medium tracking-[0.04em]" style={{ color: "var(--muted)" }}>
                     {subtitle}
                   </div>
                 ) : null}
