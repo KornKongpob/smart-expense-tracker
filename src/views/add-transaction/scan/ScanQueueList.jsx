@@ -5,6 +5,31 @@ import { formatCurrency } from "../../../utils/format";
 
 import ScanItemReviewModal from "./ScanItemReviewModal";
 
+function getQueueAccountMatchBadge(item) {
+  const match = item?.scanMeta && typeof item.scanMeta === "object" ? item.scanMeta.accountMatch : null;
+  if (!match || item?.status !== "ready") return null;
+
+  if (String(match?.kind || "") === "pair") {
+    const required = Array.isArray(match?.required) ? match.required : [];
+    const fromScore = Number(match?.from?.score || 0);
+    const toScore = Number(match?.to?.score || 0);
+    if (required.includes("fromAccountId") && required.includes("toAccountId")) {
+      return { label: "ขาดบัญชีต้นทาง/ปลายทาง", tone: "warn" };
+    }
+    if (required.includes("fromAccountId")) return { label: "ขาดบัญชีต้นทาง", tone: "warn" };
+    if (required.includes("toAccountId")) return { label: "ขาดบัญชีปลายทาง", tone: "warn" };
+    if (match?.ready && fromScore >= 4 && toScore >= 4) return { label: "จับคู่บัญชีคู่แม่น", tone: "ok" };
+    return { label: "ตรวจสอบคู่บัญชี", tone: "warn" };
+  }
+
+  const score = Number(match?.selected?.score || 0);
+  const source = String(match?.source || "").trim();
+  if (!match?.ready) return { label: "ยังไม่พบบัญชี", tone: "warn" };
+  if (source === "model" || score >= 4) return { label: "จับคู่บัญชีแม่น", tone: "ok" };
+  if (score >= 3) return { label: "จับคู่บัญชีปานกลาง", tone: "info" };
+  return { label: "ตรวจสอบบัญชี", tone: "warn" };
+}
+
 export default function ScanQueueList({
   queue,
   expandedId,
@@ -51,6 +76,7 @@ export default function ScanQueueList({
       <div className="space-y-3">
         {list.map((q) => {
           const canEditQueueItem = q.status === "ready";
+          const accountMatchBadge = getQueueAccountMatchBadge(q);
           const badge =
             q.txType === "credit_payment"
               ? "ชำระบัตร"
@@ -104,6 +130,21 @@ export default function ScanQueueList({
                     {q.duplicate ? (
                       <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-500/15 text-amber-800 inline-flex items-center gap-1 border border-amber-500/20">
                         <AlertTriangle size={12} /> {dupBadgeText}
+                      </span>
+                    ) : null}
+
+                    {accountMatchBadge ? (
+                      <span
+                        className={[
+                          "text-[11px] font-semibold px-2 py-1 rounded-full border",
+                          accountMatchBadge.tone === "ok"
+                            ? "bg-emerald-500/12 text-emerald-800 border-emerald-500/20"
+                            : accountMatchBadge.tone === "info"
+                              ? "bg-blue-500/12 text-blue-800 border-blue-500/20"
+                              : "bg-orange-500/12 text-orange-800 border-orange-500/20",
+                        ].join(" ")}
+                      >
+                        {accountMatchBadge.label}
                       </span>
                     ) : null}
                   </div>

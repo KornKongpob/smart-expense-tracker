@@ -448,8 +448,9 @@ test('queue type helpers: normalizeQueueItemType fixes credit payment account ro
   assert.equal(normalized.isInstallment, false);
   assert.deepEqual(normalized.items, []);
   assert.deepEqual(normalized.groups, []);
-  assert.equal(normalized.fromAccountId, 'bank-1');
-  assert.equal(normalized.toAccountId, 'card-1');
+  assert.equal(normalized.fromAccountId, '');
+  assert.equal(normalized.toAccountId, '');
+  assert.equal(normalized.accountId, '');
 });
 
 test('queue type helpers: buildQueueTypeChangeItem preserves expense groups and prefers suggested category plus matched account', () => {

@@ -1,7 +1,7 @@
 // src/views/AccountsView.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { parseDigitsList, choosePrimaryDigits } from "../utils/accountMatch";
+import { parseDigitsList, choosePrimaryDigits, digitsOnly } from "../utils/accountMatch";
 import { useAppStore } from "../store/store.jsx";
 import { calcAccountBalance } from "../store/selectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
@@ -242,13 +242,20 @@ function AccountSheetModal({ open, title, description, onClose, children }) {
   return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/35 p-3 overflow-x-hidden overscroll-none"
+      style={{
+        paddingTop: "calc(0.75rem + env(safe-area-inset-top))",
+        paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))",
+      }}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget) e.preventDefault();
       }}
     >
       <div
         className="w-full max-w-xl ui-card-strong shadow-2xl max-h-[92dvh] overflow-hidden flex flex-col"
-        style={{ touchAction: "pan-y" }}
+        style={{
+          touchAction: "pan-y",
+          maxHeight: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem - var(--keyboard-inset, 0px))",
+        }}
       >
         <div className="p-4 border-b border-slate-900/8 shrink-0">
           <div className="flex items-start justify-between gap-3">
@@ -479,8 +486,7 @@ function AccountVisualPicker({
               <div className="w-14 h-14 rounded-3xl overflow-hidden border border-gray-900/10 bg-white/70 shadow-sm">
                 <img src={String(image)} alt="" className="w-full h-full object-cover" draggable={false} />
               </div>
-              <button type="button" className="ui-btn ui-btn-secondary" onClick={() => setImage("")}
-              >
+              <button type="button" className="ui-btn ui-btn-secondary" onClick={() => setImage("")}>
                 ลบรูป
               </button>
             </div>
@@ -625,6 +631,20 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     return sign < 0 ? `-${abs}` : abs;
   };
 
+  const storedNumberLabel = (type) =>
+    type === "credit" ? "เลขบัตรจริง (ไม่บังคับ)" : "เลขบัญชีจริง (ไม่บังคับ)";
+
+  const storedNumberPlaceholder = (type) =>
+    type === "credit" ? "เช่น 1234 5678 9012 3456" : "เช่น 123-4-56789-0";
+
+  const sanitizeStoredNumber = (value, type) => digitsOnly(value).slice(0, type === "credit" ? 19 : 20);
+
+  const getStoredNumberForAccount = (acc) =>
+    sanitizeStoredNumber(
+      acc?.type === "credit" ? acc?.cardNumber || acc?.accountNumber || "" : acc?.accountNumber || acc?.cardNumber || "",
+      acc?.type
+    );
+
   // Create modal
   const [openCreate, setOpenCreate] = useState(false);
   const [cName, setCName] = useState("");
@@ -632,6 +652,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const [cInstitutionId, setCInstitutionId] = useState(defaultInstitutionIdForType("bank"));
   const [cCurrency, setCCurrency] = useState("THB");
   const [cAccountNumber, setCAccountNumber] = useState("");
+  const [cStoredNumber, setCStoredNumber] = useState("");
   // visual
   const [cIconMode, setCIconMode] = useState("preset"); // preset | emoji | image
   const [cIconId, setCIconId] = useState(defaultIconIdForType("bank"));
@@ -639,7 +660,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const [cImage, setCImage] = useState("");
   const [cColor, setCColor] = useState(randomColor());
 
-  // ✅ Opening balance (create)
+  // Opening balance (create)
   const [cInitialBalance, setCInitialBalance] = useState("");
   const [openCreateAdjustConfirm, setOpenCreateAdjustConfirm] = useState(false);
   const [pendingCreateAccount, setPendingCreateAccount] = useState(null);
@@ -656,6 +677,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     setCInstitutionId(defaultInstitutionIdForType("bank"));
     setCCurrency("THB");
     setCAccountNumber("");
+    setCStoredNumber("");
     setCInitialBalance("");
     setOpenCreateAdjustConfirm(false);
     setPendingCreateAccount(null);
@@ -707,58 +729,56 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     setCInstitutionId(defaultInstitutionIdForType(cType));
   }, [cInstitutionId, cType, openCreate]);
 
-const create = () => {
-  if (!cName.trim()) return notify("กรุณาใส่ชื่อบัญชี", "warn");
+  const create = () => {
+    if (!cName.trim()) return notify("กรุณาใส่ชื่อบัญชี", "warn");
 
-  const matchDigits = parseDigitsList(cAccountNumber);
-  const primaryDigits = choosePrimaryDigits(matchDigits);
+    const matchDigits = parseDigitsList(cAccountNumber);
+    const storedNumber = sanitizeStoredNumber(cStoredNumber, cType);
 
-  const baseAccount = {
-    id: generateId(),
-    name: cName.trim(),
-    institutionId: cInstitutionId,
-    // keep emoji as fallback for legacy rendering
-    icon: (String(cIcon || "").trim() || defaultEmojiForType(cType)).slice(0, 4),
-    iconId: cIconMode === "preset" ? String(cIconId || defaultIconIdForType(cType)) : "",
-    image: cIconMode === "image" && isImageSrc(cImage) ? String(cImage) : "",
-    color: cColor,
-    type: cType,
-    currency: cCurrency,
-    accountNumber: primaryDigits ? String(primaryDigits).slice(-16) : "",
-    matchDigits,
+    const baseAccount = {
+      id: generateId(),
+      name: cName.trim(),
+      institutionId: cInstitutionId,
+      // keep emoji as fallback for legacy rendering
+      icon: (String(cIcon || "").trim() || defaultEmojiForType(cType)).slice(0, 4),
+      iconId: cIconMode === "preset" ? String(cIconId || defaultIconIdForType(cType)) : "",
+      image: cIconMode === "image" && isImageSrc(cImage) ? String(cImage) : "",
+      color: cColor,
+      type: cType,
+      currency: cCurrency,
+      accountNumber: cType === "credit" ? "" : storedNumber,
+      cardNumber: cType === "credit" ? storedNumber : "",
+      matchDigits,
+      cardLast4: cType === "credit" && storedNumber.length >= 4 ? storedNumber.slice(-4) : undefined,
+      creditLimit: cType === "credit" ? parseMoneyToSatang(cCreditLimit) : undefined,
+      statementDay: cType === "credit" ? Number(cStatementDay || 1) : undefined,
+      dueDay: cType === "credit" ? Number(cDueDay || 1) : undefined,
+      openingBalance: 0,
+    };
 
-    // credit only
-    creditLimit: cType === "credit" ? parseMoneyToSatang(cCreditLimit) : undefined,
-    statementDay: cType === "credit" ? Number(cStatementDay || 1) : undefined,
-    dueDay: cType === "credit" ? Number(cDueDay || 1) : undefined,
-
-    // default openingBalance will be set based on user's choice
-    openingBalance: 0,
-  };
-
-  const initRaw = String(cInitialBalance || "").trim();
-  if (initRaw && initRaw !== "-") {
-    const desired = parseMoneyToSatang(initRaw);
-    if (desired !== 0) {
-      setPendingCreateAccount(baseAccount);
-      setPendingCreateAdjust({
-        accountId: baseAccount.id,
-        currency: cCurrency || "THB",
-        current: 0,
-        desired,
-        delta: desired,
-      });
-      setOpenCreateAdjustConfirm(true);
-      return;
+    const initRaw = String(cInitialBalance || "").trim();
+    if (initRaw && initRaw !== "-") {
+      const desired = parseMoneyToSatang(initRaw);
+      if (desired !== 0) {
+        setPendingCreateAccount(baseAccount);
+        setPendingCreateAdjust({
+          accountId: baseAccount.id,
+          currency: cCurrency || "THB",
+          current: 0,
+          desired,
+          delta: desired,
+        });
+        setOpenCreateAdjustConfirm(true);
+        return;
+      }
     }
-  }
 
-  addAccount(baseAccount);
+    addAccount(baseAccount);
 
-  resetCreate();
-  setOpenCreate(false);
-  notify("เพิ่มบัญชีแล้ว");
-};
+    resetCreate();
+    setOpenCreate(false);
+    notify("เพิ่มบัญชีแล้ว");
+  };
 
 
   // Edit modal
@@ -769,6 +789,7 @@ const create = () => {
   const [eInstitutionId, setEInstitutionId] = useState(defaultInstitutionIdForType("bank"));
   const [eCurrency, setECurrency] = useState("THB");
   const [eAccountNumber, setEAccountNumber] = useState("");
+  const [eStoredNumber, setEStoredNumber] = useState("");
   // visual
   const [eIconMode, setEIconMode] = useState("preset"); // preset | emoji | image
   const [eIconId, setEIconId] = useState("");
@@ -796,7 +817,8 @@ const create = () => {
     setEType(acc?.type || "bank");
     setEInstitutionId(acc?.institutionId || defaultInstitutionIdForType(acc?.type || "bank"));
     setECurrency(acc?.currency || "THB");
-    setEAccountNumber(Array.isArray(acc.matchDigits) && acc.matchDigits.length ? acc.matchDigits.join(", ") : String(acc.accountNumber || ""));
+    setEAccountNumber(Array.isArray(acc.matchDigits) && acc.matchDigits.length ? acc.matchDigits.join(", ") : "");
+    setEStoredNumber(getStoredNumberForAccount(acc));
     const hasImg = isImageSrc(acc?.image) || isImageSrc(acc?.icon);
     const hasPreset = String(acc?.iconId || "").trim();
     setEIconMode(hasImg ? "image" : hasPreset ? "preset" : "emoji");
@@ -825,6 +847,7 @@ const create = () => {
     setEInstitutionId(defaultInstitutionIdForType("bank"));
     setECurrency("THB");
     setEAccountNumber("");
+    setEStoredNumber("");
     setEIconMode("preset");
     setEIconId("");
     setEIcon("💳");
@@ -861,7 +884,7 @@ const create = () => {
     if (!eName.trim()) return notify("กรุณาใส่ชื่อบัญชี", "warn");
 
     const matchDigits = parseDigitsList(eAccountNumber);
-    const primaryDigits = choosePrimaryDigits(matchDigits);
+    const storedNumber = sanitizeStoredNumber(eStoredNumber, eType);
 
     const partial = {
       id: eEditing,
@@ -874,8 +897,10 @@ const create = () => {
       color: eColor,
       type: eType,
       currency: eCurrency,
-      accountNumber: primaryDigits ? String(primaryDigits).slice(-16) : "",
+      accountNumber: eType === "credit" ? "" : storedNumber,
+      cardNumber: eType === "credit" ? storedNumber : "",
       matchDigits,
+      cardLast4: eType === "credit" && storedNumber.length >= 4 ? storedNumber.slice(-4) : undefined,
 
       // credit only
       creditLimit: eType === "credit" ? parseMoneyToSatang(eCreditLimit) : undefined,
@@ -943,12 +968,14 @@ const create = () => {
       const type = String(a?.type || "").toLowerCase();
       const cur = String(a?.currency || "").toLowerCase();
       const accNo = String(a?.accountNumber || "").toLowerCase();
+      const cardNo = String(a?.cardNumber || "").toLowerCase();
       const md = Array.isArray(a?.matchDigits) ? a.matchDigits.join(",").toLowerCase() : "";
       return (
         name.includes(s) ||
         type.includes(s) ||
         cur.includes(s) ||
         accNo.includes(s) ||
+        cardNo.includes(s) ||
         md.includes(s)
       );
     });
@@ -1371,6 +1398,19 @@ const create = () => {
               <div className="text-sm font-semibold text-gray-900">รายละเอียดเพิ่มเติม</div>
 
               <div className="mt-3">
+                <label className="ui-label">{storedNumberLabel(cType)}</label>
+                <input
+                  value={cStoredNumber}
+                  onChange={(e) => setCStoredNumber(e.target.value)}
+                  className="ui-input"
+                  placeholder={storedNumberPlaceholder(cType)}
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+                <div className="ui-help mt-1">ระบบจะเก็บเลขจริงแยกจากเลขช่วยจำสำหรับ map</div>
+              </div>
+
+              <div className="mt-4">
                 <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
                 <input
                   value={cAccountNumber}
@@ -1738,6 +1778,19 @@ const create = () => {
               <div className="text-sm font-semibold text-gray-900">การจับคู่บัญชี + ปรับยอด</div>
 
               <div className="mt-3">
+                <label className="ui-label">{storedNumberLabel(eType)}</label>
+                <input
+                  value={eStoredNumber}
+                  onChange={(e) => setEStoredNumber(e.target.value)}
+                  className="ui-input"
+                  placeholder={storedNumberPlaceholder(eType)}
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+                <div className="ui-help mt-1">ระบบจะเก็บเลขจริงแยกจากเลขช่วยจำสำหรับ map</div>
+              </div>
+
+              <div className="mt-4">
                 <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
                 <input
                   value={eAccountNumber}

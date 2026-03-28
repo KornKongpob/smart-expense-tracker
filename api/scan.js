@@ -51,7 +51,7 @@ const RATE_LIMIT_PER_MINUTE = Number(process.env.SCAN_RATE_LIMIT_PER_MINUTE || 3
 const RATE_WINDOW_MS = 60_000;
 
 // OpenAI call timeout (ms)
-const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 35_000);
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 90_000);
 
 const enforceRateLimitModule = createRateLimiter({ limit: RATE_LIMIT_PER_MINUTE, windowMs: RATE_WINDOW_MS });
 
@@ -63,6 +63,21 @@ async function fetchWithTimeout(url, options, timeoutMs = OPENAI_TIMEOUT_MS) {
   } finally {
     clearTimeout(t);
   }
+}
+
+function isAbortError(err) {
+  const name = String(err?.name || "").trim();
+  const msg = String(err?.message || err || "").trim();
+  return name === "AbortError" || /operation was aborted/i.test(msg);
+}
+
+function buildScanTimeoutBody() {
+  return {
+    ok: false,
+    code: "scan_timeout",
+    message: `Scan request timed out after ${Math.round(OPENAI_TIMEOUT_MS / 1000)}s`,
+    retryable: true,
+  };
 }
 
 function _getContentType(req) {
@@ -1368,41 +1383,54 @@ ${accountsText}
   let usedModel = model;
   let usedSchema = true;
 
-  let { r, jj: json, requestId } = await doRequest({ m: model, useSchema: true });
+  let r;
+  let json;
+  let requestId;
+  try {
+    ({ r, jj: json, requestId } = await doRequest({ m: model, useSchema: true }));
 
-  if (!r.ok) {
-    const err1 = parseOpenAIError(r.status, json);
-    if (isModelNotFound(err1.message) && fallbackModel && fallbackModel !== model) {
-      const t2 = await doRequest({ m: fallbackModel, useSchema: true });
-      r = t2.r;
-      json = t2.jj;
-      requestId = t2.requestId;
-      usedModel = fallbackModel;
-      usedSchema = true;
+    if (!r.ok) {
+      const err1 = parseOpenAIError(r.status, json);
+      if (isModelNotFound(err1.message) && fallbackModel && fallbackModel !== model) {
+        const t2 = await doRequest({ m: fallbackModel, useSchema: true });
+        r = t2.r;
+        json = t2.jj;
+        requestId = t2.requestId;
+        usedModel = fallbackModel;
+        usedSchema = true;
+      }
     }
-  }
 
-  if (!r.ok) {
-    const err2 = parseOpenAIError(r.status, json);
-    if (isSchemaUnsupported(err2.message)) {
-      const t3 = await doRequest({ m: usedModel, useSchema: false });
-      r = t3.r;
-      json = t3.jj;
-      requestId = t3.requestId;
-      usedSchema = false;
+    if (!r.ok) {
+      const err2 = parseOpenAIError(r.status, json);
+      if (isSchemaUnsupported(err2.message)) {
+        const t3 = await doRequest({ m: usedModel, useSchema: false });
+        r = t3.r;
+        json = t3.jj;
+        requestId = t3.requestId;
+        usedSchema = false;
+      }
     }
-  }
 
-  if (!r.ok && fallbackModel && fallbackModel !== usedModel) {
-    const err3 = parseOpenAIError(r.status, json);
-    if (isModelNotFound(err3.message) || isSchemaUnsupported(err3.message)) {
-      const t4 = await doRequest({ m: fallbackModel, useSchema: false });
-      r = t4.r;
-      json = t4.jj;
-      requestId = t4.requestId;
-      usedModel = fallbackModel;
-      usedSchema = false;
+    if (!r.ok && fallbackModel && fallbackModel !== usedModel) {
+      const err3 = parseOpenAIError(r.status, json);
+      if (isModelNotFound(err3.message) || isSchemaUnsupported(err3.message)) {
+        const t4 = await doRequest({ m: fallbackModel, useSchema: false });
+        r = t4.r;
+        json = t4.jj;
+        requestId = t4.requestId;
+        usedModel = fallbackModel;
+        usedSchema = false;
+      }
     }
+  } catch (err) {
+    if (isAbortError(err)) {
+      return {
+        status: 504,
+        body: buildScanTimeoutBody(),
+      };
+    }
+    throw err;
   }
 
   if (!r.ok) {
@@ -2059,6 +2087,11 @@ export default async function handler(req, res) {
     res.status(normalizedOut.status).json(normalizedOut.body);
   } catch (e) {
     const msg = String(e?.message || e);
+    if (isAbortError(e)) {
+      res.status(504).json(buildScanTimeoutBody());
+      return;
+    }
+
     if (msg === "file_too_large") {
       res.status(413).json({ ok: false, code: "file_too_large", message: "File too large" });
       return;

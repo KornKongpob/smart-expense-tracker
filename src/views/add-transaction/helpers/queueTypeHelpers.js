@@ -26,7 +26,6 @@ export function applyAutomationToQueuePatch(basePatch, autoPatch, { accounts, en
   const next = { ...(basePatch || {}), ...(autoPatch || {}) };
   const txType = normalizeQueueTxType(next.txType);
   const accountList = Array.isArray(accounts) ? accounts : [];
-  const defaultAcc = accountList[0]?.id || "";
 
   next.txType = txType;
 
@@ -34,19 +33,23 @@ export function applyAutomationToQueuePatch(basePatch, autoPatch, { accounts, en
     next.categoryId = "transfer";
     next.splitByCategory = false;
     next.groups = [];
-    next.fromAccountId = next.fromAccountId || next.accountId || defaultAcc;
-    next.toAccountId = next.toAccountId || defaultAcc;
+    next.fromAccountId = String(next.fromAccountId || next.accountId || "").trim();
+    next.toAccountId = String(next.toAccountId || "").trim();
+    next.accountId = String(next.accountId || next.fromAccountId || "").trim();
 
     if (txType === "credit_payment") {
-      const credit = accountList.find((a) => a?.type === "credit");
-      const nonCredit = accountList.find((a) => a?.type !== "credit");
-      const toAcc = accountList.find((a) => a?.id === next.toAccountId);
-      const fromAcc = accountList.find((a) => a?.id === next.fromAccountId);
-      if (credit && toAcc?.type !== "credit") next.toAccountId = credit.id;
-      if (nonCredit && fromAcc?.type === "credit") next.fromAccountId = nonCredit.id;
+      const toAcc = accountList.find((a) => a?.id === next.toAccountId) || null;
+      const fromAcc = accountList.find((a) => a?.id === next.fromAccountId) || null;
+      if (next.toAccountId && (!toAcc || !isCreditAccount(toAcc))) next.toAccountId = "";
+      if (next.fromAccountId && (!fromAcc || isCreditAccount(fromAcc))) next.fromAccountId = "";
+      next.accountId = next.fromAccountId || "";
+    }
+
+    if (next.fromAccountId && next.toAccountId && next.fromAccountId === next.toAccountId) {
+      next.toAccountId = "";
     }
   } else {
-    next.accountId = next.accountId || defaultAcc;
+    next.accountId = String(next.accountId || next.fromAccountId || next.toAccountId || "").trim();
     if (txType === "income") {
       next.splitByCategory = false;
       next.groups = [];
@@ -65,7 +68,6 @@ export function normalizeQueueItemType(item, { accounts, ensureCategoryId } = {}
   const base = item && typeof item === "object" ? item : {};
   const txType = normalizeQueueTxType(base.txType || base.type);
   const accountList = Array.isArray(accounts) ? accounts : [];
-  const defaultAcc = accountList[0]?.id || "";
   const next = { ...base, txType };
 
   if (txType === "transfer" || txType === "credit_payment") {
@@ -74,27 +76,26 @@ export function normalizeQueueItemType(item, { accounts, ensureCategoryId } = {}
     next.isInstallment = false;
     next.items = [];
     next.groups = [];
-    next.fromAccountId = next.fromAccountId || next.accountId || defaultAcc;
-    next.toAccountId = next.toAccountId || defaultAcc;
-    next.accountId = next.accountId || next.fromAccountId || defaultAcc;
+    next.fromAccountId = String(next.fromAccountId || next.accountId || "").trim();
+    next.toAccountId = String(next.toAccountId || "").trim();
+    next.accountId = String(next.accountId || next.fromAccountId || "").trim();
 
     if (txType === "credit_payment") {
-      const credit = accountList.find((a) => isCreditAccount(a));
-      const nonCredit = accountList.find((a) => !isCreditAccount(a));
       const fromAcc = accountList.find((a) => a?.id === next.fromAccountId) || null;
       const toAcc = accountList.find((a) => a?.id === next.toAccountId) || null;
-      const fallbackFrom = nonCredit?.id || defaultAcc;
-      const fallbackTo = credit?.id || next.toAccountId || defaultAcc;
+      if (next.fromAccountId && (!fromAcc || isCreditAccount(fromAcc))) next.fromAccountId = "";
+      if (next.toAccountId && (!toAcc || !isCreditAccount(toAcc))) next.toAccountId = "";
+      next.accountId = next.fromAccountId || "";
+    }
 
-      if (!fromAcc || isCreditAccount(fromAcc)) next.fromAccountId = fallbackFrom;
-      if (!toAcc || !isCreditAccount(toAcc)) next.toAccountId = fallbackTo;
-      next.accountId = next.accountId || next.fromAccountId || fallbackFrom;
+    if (next.fromAccountId && next.toAccountId && next.fromAccountId === next.toAccountId) {
+      next.toAccountId = "";
     }
 
     return next;
   }
 
-  next.accountId = next.accountId || next.fromAccountId || next.toAccountId || defaultAcc;
+  next.accountId = String(next.accountId || next.fromAccountId || next.toAccountId || "").trim();
 
   if (txType === "income") {
     next.splitByCategory = false;
@@ -113,13 +114,11 @@ export function normalizeQueueItemType(item, { accounts, ensureCategoryId } = {}
 export function buildQueueTypeChangeItem(
   item,
   nextType,
-  { accounts, creditAccounts, nonCreditAccounts, ensureCategoryId, suggestCategoryId } = {}
+  { accounts, ensureCategoryId, suggestCategoryId } = {}
 ) {
   const base = item && typeof item === "object" ? item : {};
   const txType = normalizeQueueTxType(nextType);
   const accountList = Array.isArray(accounts) ? accounts : [];
-  const creditList = Array.isArray(creditAccounts) ? creditAccounts : accountList.filter((a) => isCreditAccount(a));
-  const nonCreditList = Array.isArray(nonCreditAccounts) ? nonCreditAccounts : accountList.filter((a) => !isCreditAccount(a));
   const fallbackAcc = accountList[0]?.id || "";
   const merchant = String(base.merchant || base.note || "").trim();
   const fromDigits = String(base.fromDigits || "").trim();
@@ -133,23 +132,26 @@ export function buildQueueTypeChangeItem(
       isInstallment: false,
       groups: [],
       categoryId: "transfer",
-      fromAccountId: base.fromAccountId || base.accountId || fallbackAcc,
-      toAccountId: base.toAccountId || fallbackAcc,
+      fromAccountId: String(base.fromAccountId || base.accountId || "").trim(),
+      toAccountId: String(base.toAccountId || "").trim(),
+      accountId: String(base.accountId || base.fromAccountId || "").trim(),
       suggestedCategoryId: "",
       suggestedReason: "",
     };
   }
 
   if (txType === "credit_payment") {
+    const baseFrom = accountList.find((a) => a?.id === base.fromAccountId) || null;
+    const baseTo = accountList.find((a) => a?.id === base.toAccountId) || null;
+    const baseAccount = accountList.find((a) => a?.id === base.accountId) || null;
     const pickedFrom =
-      (!base.fromAccountId || isCreditAccount(accountList.find((a) => a.id === base.fromAccountId))) && nonCreditList?.[0]?.id
-        ? nonCreditList[0].id
-        : base.fromAccountId || base.accountId || nonCreditList?.[0]?.id || fallbackAcc;
+      baseFrom && !isCreditAccount(baseFrom)
+        ? String(base.fromAccountId || "")
+        : baseAccount && !isCreditAccount(baseAccount)
+          ? String(base.accountId || "")
+          : "";
 
-    const pickedTo =
-      isCreditAccount(accountList.find((a) => a.id === base.toAccountId)) && base.toAccountId
-        ? base.toAccountId
-        : creditList?.[0]?.id || base.toAccountId || fallbackAcc;
+    const pickedTo = baseTo && isCreditAccount(baseTo) ? String(base.toAccountId || "") : "";
 
     return {
       ...base,
@@ -160,10 +162,10 @@ export function buildQueueTypeChangeItem(
       categoryId: "transfer",
       fromAccountId: pickedFrom,
       toAccountId: pickedTo,
-      accountId: base.accountId || pickedFrom || fallbackAcc,
+      accountId: pickedFrom || "",
       suggestedCategoryId: "",
       suggestedReason: "",
-      note: base.note || base.merchant ? base.note : "ชำระบัตรเครดิต",
+      note: base.note || "ชำระบัตรเครดิต",
     };
   }
 

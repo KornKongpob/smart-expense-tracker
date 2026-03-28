@@ -2,10 +2,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  bestMatchAccountCandidate,
-  bestMatchAccountId,
   isCreditAccount,
+  matchFromToAccounts,
 } from "../../utils/accountMatch";
+
 import {
   X,
   Trash2,
@@ -81,11 +81,6 @@ import ScanQueueList from "./scan/ScanQueueList";
 
 // Tombstone category helper (module-scope => safe for hooks deps)
 const isTombstoneCategory = (c) => !!(c?.deletedAt || c?.isDeleted);
-
-
-function isPositiveNumber(n) {
-  return typeof n === "number" && Number.isFinite(n) && n > 0;
-}
 
 // (Account dropdown UI is now shared: src/components/AccountPicker.jsx)
 
@@ -219,6 +214,10 @@ function looksLikeExpenseText(text) {
     t.includes("ซื้อ") ||
     t.includes("ถอน")
   );
+}
+
+function isPositiveNumber(n) {
+  return typeof n === "number" && Number.isFinite(n) && n > 0;
 }
 
 // ===== Slip Hunter helpers (Thai transfer slips) =====
@@ -707,7 +706,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   // scan batch
   const scanBatchIdRef = useRef(0);
   const scanAutoSendRef = useRef({ enabled: false, batchId: 0, triggered: false, fileCount: 0 });
-const existingRefSet = useMemo(() => {
+  const existingRefSet = useMemo(() => {
     const set = new Set();
     for (const t of state.transactions || []) {
       const r = normalizeRefKey(t.ref || t.referenceId || t.reference_id || "");
@@ -720,7 +719,7 @@ const existingRefSet = useMemo(() => {
   // but keep them in state for historical reports.
   const expenseCatsAll = useMemo(() => categories.expense || [], [categories.expense]);
   const incomeCatsAll = useMemo(() => categories.income || [], [categories.income]);
-  
+
   const expenseCats = useMemo(() => expenseCatsAll.filter((c) => !isTombstoneCategory(c)), [expenseCatsAll]);
   const incomeCats = useMemo(() => incomeCatsAll.filter((c) => !isTombstoneCategory(c)), [incomeCatsAll]);
 
@@ -774,8 +773,6 @@ const existingRefSet = useMemo(() => {
   }, [catsForTypeActive, catsForTypeAll, categoryId]);
 
   const catHierarchy = useMemo(() => buildCategoryHierarchy(catsForTypePicker), [catsForTypePicker]);
-
-
 
   const recentCatsForPicker = useMemo(() => {
     const txType = type === "income" ? "income" : type === "expense" ? "expense" : "";
@@ -896,7 +893,6 @@ const existingRefSet = useMemo(() => {
       income: pick("income"),
     };
   }, [state.transactions, accountById]);
-
 
   // ✅ กันการสร้าง category ซ้ำใน "batch scan" เดียวกัน
   const createdCatRef = useRef({ expense: new Map(), income: new Map() });
@@ -1310,7 +1306,6 @@ const existingRefSet = useMemo(() => {
     if (fallbackCatId) setCategoryId(fallbackCatId);
   }, [creditAccounts.length, expenseCats, incomeCats, setCategoryId, setIsSplitMode, showAlert, type, setType]);
 
-
   // ✅ เปลี่ยนประเภทใน Queue (หลัง scan)
   // ✅ รองรับ credit_payment
   const handleQueueTypeChange = useCallback((qid, nextType) => {
@@ -1486,9 +1481,9 @@ const existingRefSet = useMemo(() => {
             merchant: "",
             ref: "",
             categoryId: "",
-            accountId: accounts?.[0]?.id || "",
-            fromAccountId: accounts?.[0]?.id || "",
-            toAccountId: accounts?.[0]?.id || "",
+            accountId: "",
+            fromAccountId: "",
+            toAccountId: "",
             duplicate: false,
             includeDuplicate: true,
             evidence: "",
@@ -1544,199 +1539,217 @@ const existingRefSet = useMemo(() => {
           const fromDigits = digitsOnly(result?.from_account);
           const toDigits = digitsOnly(result?.to_account);
 
-          // map account ids by digits (support both account digits and card digits)
-          const fromMatch = bestMatchAccountCandidate(accounts, fromDigits, { minScore: 0 });
-          const toMatch = bestMatchAccountCandidate(accounts, toDigits, { minScore: 0 });
-          const matchedFromId = fromMatch.id || "";
-          const matchedToId = toMatch.id || "";
+          const strongAccountMatchScore = 4;
+          const pairedMatch = matchFromToAccounts(accounts, {
+            fromDigits,
+            toDigits,
+            minScore: strongAccountMatchScore,
+          });
+          const fromMatch = pairedMatch?.matched?.from || {
+            id: "",
+            score: 0,
+            matchedAccountDigits: "",
+            matchedSlipDigits: "",
+          };
+          const toMatch = pairedMatch?.matched?.to || {
+            id: "",
+            score: 0,
+            matchedAccountDigits: "",
+            matchedSlipDigits: "",
+          };
+          const matchedFromId = pairedMatch?.okFrom ? pairedMatch.fromId || "" : "";
+          const matchedToId = pairedMatch?.okTo ? pairedMatch.toId || "" : "";
           const matchedFromAcc = matchedFromId ? accounts.find((a) => a.id === matchedFromId) : null;
           const matchedToAcc = matchedToId ? accounts.find((a) => a.id === matchedToId) : null;
 
           const hasTwoSides = !!(matchedFromId && matchedToId && matchedFromId !== matchedToId);
-// ===== Robust doc type + tx type resolution (Hybrid Pipeline) =====
-const rawDocType = String(result?.doc_type ?? result?.docType ?? "").toLowerCase().trim();
 
-const hasLineItems =
-  Array.isArray(result?.items) &&
-  result.items.some((it) => {
-    const n = String(it?.name || it?.title || it?.desc || "").trim();
-    const amt =
-      Number(it?.line_total) ||
-      Number(it?.total) ||
-      Number(it?.amount) ||
-      Number(it?.lineTotal) ||
-      0;
-    return !!n && Number.isFinite(amt) && amt > 0;
-  });
+          // ===== Robust doc type + tx type resolution (Hybrid Pipeline) =====
+          const rawDocType = String(result?.doc_type ?? result?.docType ?? "").toLowerCase().trim();
 
-// Prefer model doc_type, but if we clearly see priced line items, treat it as a receipt.
-const docType = (() => {
-  if (hasLineItems) return "receipt";
-  if (rawDocType) return rawDocType;
-  if (aiTxType === "transfer" || aiTxType === "credit_payment") return "transfer_slip";
-  return "unknown";
-})();
+          const hasLineItems =
+            Array.isArray(result?.items) &&
+            result.items.some((it) => {
+              const n = String(it?.name || it?.title || it?.desc || "").trim();
+              const amt =
+                Number(it?.line_total) ||
+                Number(it?.total) ||
+                Number(it?.amount) ||
+                Number(it?.lineTotal) ||
+                0;
+              return !!n && Number.isFinite(amt) && amt > 0;
+            });
 
-// ===== Resolve final tx type (conservative; prevents misclassifying receipts as transfers) =====
-let finalTxType = aiTxType;
+          // Prefer model doc_type, but if we clearly see priced line items, treat it as a receipt.
+          const docType = (() => {
+            if (hasLineItems) return "receipt";
+            if (rawDocType) return rawDocType;
+            if (aiTxType === "transfer" || aiTxType === "credit_payment") return "transfer_slip";
+            return "unknown";
+          })();
 
-if (docType === "receipt") {
-  // Receipts are not internal transfers. Default to expense unless model strongly says income.
-  finalTxType = aiTxType === "income" ? "income" : "expense";
-} else if (docType === "transfer_slip" || docType === "bill_payment") {
-  // "transfer" is only for INTERNAL movement between user's accounts.
-  if (matchedFromId && matchedToId && matchedFromId !== matchedToId) {
-    const isCreditPay =
-      (matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) ||
-      looksLikeCreditPaymentText(contextText);
+          // ===== Resolve final tx type (conservative; prevents misclassifying receipts as transfers) =====
+          let finalTxType = aiTxType;
 
-    finalTxType = isCreditPay ? "credit_payment" : "transfer";
-  } else if (matchedFromId && !matchedToId) {
-    // outgoing payment to external counterparty
-    finalTxType = "expense";
-  } else if (!matchedFromId && matchedToId) {
-    // incoming money into a known account
-    finalTxType = "income";
-  } else {
-    // unknown accounts: slips are more likely to be expenses than internal transfers
-    finalTxType = aiTxType === "income" ? "income" : "expense";
-  }
-} else {
-  // Unknown: keep lightweight heuristics, but never allow transfer if we have line items.
-  let tmp = aiTxType;
+          if (docType === "receipt") {
+            // Receipts are not internal transfers. Default to expense unless model strongly says income.
+            finalTxType = aiTxType === "income" ? "income" : "expense";
+          } else if (docType === "transfer_slip" || docType === "bill_payment") {
+            const looksLikeCreditPay = looksLikeCreditPaymentText(contextText);
+            if (hasTwoSides) {
+              const isCreditPay =
+                (matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) ||
+                looksLikeCreditPay;
 
-  if (
-    looksLikeCreditPaymentText(contextText) &&
-    matchedToAcc &&
-    isCreditAccount(matchedToAcc) &&
-    matchedFromAcc &&
-    !isCreditAccount(matchedFromAcc)
-  ) {
-    tmp = "credit_payment";
-  } else if (aiTxType !== "income" && hasTwoSides && looksLikeTransferText(contextText)) {
-    tmp = "transfer";
-  }
+              finalTxType = isCreditPay ? "credit_payment" : "transfer";
+            } else if (looksLikeCreditPay && matchedToAcc && isCreditAccount(matchedToAcc)) {
+              finalTxType = "credit_payment";
+            } else if (matchedFromId && !matchedToId) {
+              finalTxType = "expense";
+            } else if (!matchedFromId && matchedToId) {
+              finalTxType = "income";
+            } else {
+              finalTxType = aiTxType === "income" ? "income" : "expense";
+            }
+          } else {
+            let tmp = aiTxType;
 
-  finalTxType = enhanceScannedTxType({
-    currentType: tmp,
-    aiTxType,
-    matchedFromId,
-    matchedToId,
-    matchedFromAcc,
-    matchedToAcc,
-    contextText,
-  });
+            if (
+              looksLikeCreditPaymentText(contextText) &&
+              matchedToAcc &&
+              isCreditAccount(matchedToAcc)
+            ) {
+              tmp = "credit_payment";
+            } else if (aiTxType !== "income" && hasTwoSides && looksLikeTransferText(contextText)) {
+              tmp = "transfer";
+            }
 
-  if (hasLineItems && (finalTxType === "transfer" || finalTxType === "credit_payment")) {
-    finalTxType = "expense";
-  }
-}
+            finalTxType = enhanceScannedTxType({
+              currentType: tmp,
+              aiTxType,
+              matchedFromId,
+              matchedToId,
+              matchedFromAcc,
+              matchedToAcc,
+              contextText,
+            });
 
-// ---- NEW: payment method + account_id returned from OpenAI ----
-const aiPaymentMethodRaw = String(result?.payment_method || result?.paymentMethod || "")
-  .trim()
-  .toLowerCase();
-const aiPaymentMethod = ["cash", "card", "promptpay"].includes(aiPaymentMethodRaw) ? aiPaymentMethodRaw : "cash";
-const aiAccountIdRaw = String(result?.account_id || result?.accountId || "").trim();
-const aiAccountId = aiAccountIdRaw && accounts.some((a) => String(a?.id || "") === aiAccountIdRaw) ? aiAccountIdRaw : "";
+            if (hasLineItems && (finalTxType === "transfer" || finalTxType === "credit_payment")) {
+              finalTxType = "expense";
+            }
+          }
 
-// ===== Decide which account fields to populate =====
-let detectedAccountId = "";
-let detectedFromId = "";
-let detectedToId = "";
+          // ---- NEW: payment method + account_id returned from OpenAI ----
+          const aiPaymentMethodRaw = String(result?.payment_method || result?.paymentMethod || "")
+            .trim()
+            .toLowerCase();
+          const aiPaymentMethod = ["cash", "card", "promptpay"].includes(aiPaymentMethodRaw) ? aiPaymentMethodRaw : "cash";
+          const aiAccountIdRaw = String(result?.account_id || result?.accountId || "").trim();
+          const aiAccountId = aiAccountIdRaw && accounts.some((a) => String(a?.id || "") === aiAccountIdRaw) ? aiAccountIdRaw : "";
 
-if (finalTxType === "transfer" || finalTxType === "credit_payment") {
-  detectedFromId = matchedFromId || nonCreditAccounts?.[0]?.id || accounts?.[0]?.id || "";
-  detectedToId = matchedToId || creditAccounts?.[0]?.id || accounts?.[0]?.id || "";
+          // ===== Decide which account fields to populate =====
+          let detectedAccountId = "";
+          let detectedFromId = "";
+          let detectedToId = "";
 
-  // If credit_payment but we couldn't match from/to properly, fallback to "best" kinds
-  if (finalTxType === "credit_payment") {
-    const fromAcc = accounts.find((a) => a.id === detectedFromId) || null;
-    const toAcc = accounts.find((a) => a.id === detectedToId) || null;
-    const fallbackFrom = nonCreditAccounts?.[0]?.id || accounts?.[0]?.id || "";
-    const fallbackTo = creditAccounts?.[0]?.id || detectedToId || "";
+          if (finalTxType === "transfer" || finalTxType === "credit_payment") {
+            detectedFromId = matchedFromId || "";
+            detectedToId = matchedToId || "";
 
-    if (!fromAcc || isCreditAccount(fromAcc)) detectedFromId = fallbackFrom;
-    if (!toAcc || !isCreditAccount(toAcc)) detectedToId = fallbackTo;
-  }
-} else {
-  // Prefer account_id chosen by OpenAI (it has access to the user's account metadata).
-  detectedAccountId = aiAccountId || matchedFromId || matchedToId || accountId || accounts?.[0]?.id || "";
+            if (finalTxType === "credit_payment") {
+              const fromAcc = accounts.find((a) => a.id === detectedFromId) || null;
+              const toAcc = accounts.find((a) => a.id === detectedToId) || null;
 
-  // If payment method is cash and we still don't have a confident match, default to the cash account if it exists.
-  if (!aiAccountId && aiPaymentMethod === "cash") {
-    const cashAcc = (accounts || []).find((a) => {
-      const type = String(a?.type || "").toLowerCase();
-      const id = String(a?.id || "").toLowerCase();
-      const name = String(a?.name || "");
-      const nameLow = name.toLowerCase();
-      const icon = String(a?.icon || a?.emoji || "");
-      return (
-        type === "cash" ||
-        id.includes("cash") ||
-        nameLow.includes("เงินสด") ||
-        nameLow.includes("cash") ||
-        icon.includes("💵") ||
-        icon.includes("💰")
-      );
-    });
-    if (cashAcc?.id) detectedAccountId = cashAcc.id;
-  }
-}
+              if (detectedFromId && (!fromAcc || isCreditAccount(fromAcc))) detectedFromId = "";
+              if (detectedToId && (!toAcc || !isCreditAccount(toAcc))) detectedToId = "";
+            }
 
-const serializeAccountMatch = (match, selectedId = "") => ({
-  id: String(selectedId || match?.id || "").trim(),
-  score: Number(match?.score || 0) || 0,
-  matchedAccountDigits: String(match?.matchedAccountDigits || "").trim(),
-  matchedSlipDigits: String(match?.matchedSlipDigits || "").trim(),
-});
+            if (detectedFromId && detectedToId && detectedFromId === detectedToId) {
+              detectedToId = "";
+            }
+          } else {
+            detectedAccountId = aiAccountId || matchedFromId || matchedToId || accountId || "";
 
-const scanAccountMatch =
-  finalTxType === "transfer" || finalTxType === "credit_payment"
-    ? {
-        kind: "pair",
-        ready: !!detectedFromId && !!detectedToId && detectedFromId !== detectedToId,
-        from: serializeAccountMatch(fromMatch, detectedFromId),
-        to: serializeAccountMatch(toMatch, detectedToId),
-      }
-    : (() => {
-        const selectedMatch =
-          detectedAccountId && detectedAccountId === matchedFromId
-            ? fromMatch
-            : detectedAccountId && detectedAccountId === matchedToId
-              ? toMatch
-              : aiAccountId && detectedAccountId === aiAccountId
-                ? { id: detectedAccountId, score: 6, matchedAccountDigits: "", matchedSlipDigits: "" }
-                : { id: detectedAccountId, score: 0, matchedAccountDigits: "", matchedSlipDigits: "" };
+            if (!aiAccountId && aiPaymentMethod === "cash") {
+              const cashAcc = (accounts || []).find((a) => {
+                const type = String(a?.type || "").toLowerCase();
+                const id = String(a?.id || "").toLowerCase();
+                const name = String(a?.name || "");
+                const nameLow = name.toLowerCase();
+                const icon = String(a?.icon || a?.emoji || "");
+                return (
+                  type === "cash" ||
+                  id.includes("cash") ||
+                  nameLow.includes("เงินสด") ||
+                  nameLow.includes("cash") ||
+                  icon.includes("💵") ||
+                  icon.includes("💰")
+                );
+              });
+              if (cashAcc?.id) detectedAccountId = cashAcc.id;
+            }
+          }
 
-        return {
-          kind: "single",
-          ready: !!detectedAccountId,
-          source:
-            aiAccountId && detectedAccountId === aiAccountId
-              ? "model"
-              : selectedMatch?.matchedSlipDigits
-                ? "digits"
-                : detectedAccountId
-                  ? "fallback"
-                  : "missing",
-          selected: serializeAccountMatch(selectedMatch, detectedAccountId),
-        };
-      })();
+          const serializeAccountMatch = (match, selectedId = "") => ({
+            id: String(selectedId || "").trim(),
+            candidateId: String(match?.id || "").trim(),
+            score: Number(match?.score || 0) || 0,
+            matchedAccountDigits: String(match?.matchedAccountDigits || "").trim(),
+            matchedSlipDigits: String(match?.matchedSlipDigits || "").trim(),
+            confident: Number(match?.score || 0) >= strongAccountMatchScore,
+          });
 
-// Hybrid guardrail:
-// - transfer slips / bill payments must NOT produce line-item breakdown
-// - receipts MAY produce line-item breakdown (items may still be empty)
-let scannedItems = Array.isArray(result?.items) ? result.items : [];
-if (
-  docType === "transfer_slip" ||
-  docType === "bill_payment" ||
-  finalTxType === "transfer" ||
-  finalTxType === "credit_payment"
-) {
-  scannedItems = [];
-}
+          const scanAccountMatch =
+            finalTxType === "transfer" || finalTxType === "credit_payment"
+              ? {
+                  kind: "pair",
+                  ready: !!detectedFromId && !!detectedToId && detectedFromId !== detectedToId,
+                  source: !!detectedFromId && !!detectedToId && detectedFromId !== detectedToId ? "digits" : "needs_review",
+                  required: [
+                    !detectedFromId ? "fromAccountId" : "",
+                    !detectedToId ? "toAccountId" : "",
+                    detectedFromId && detectedToId && detectedFromId === detectedToId ? "distinctAccounts" : "",
+                  ].filter(Boolean),
+                  from: serializeAccountMatch(fromMatch, detectedFromId),
+                  to: serializeAccountMatch(toMatch, detectedToId),
+                }
+              : (() => {
+                  const selectedMatch =
+                    detectedAccountId && detectedAccountId === matchedFromId
+                      ? fromMatch
+                      : detectedAccountId && detectedAccountId === matchedToId
+                        ? toMatch
+                        : aiAccountId && detectedAccountId === aiAccountId
+                          ? { id: detectedAccountId, score: 6, matchedAccountDigits: "", matchedSlipDigits: "" }
+                          : { id: detectedAccountId, score: 0, matchedAccountDigits: "", matchedSlipDigits: "" };
 
+                  return {
+                    kind: "single",
+                    ready: !!detectedAccountId,
+                    source:
+                      aiAccountId && detectedAccountId === aiAccountId
+                        ? "model"
+                        : selectedMatch?.matchedSlipDigits
+                          ? "digits"
+                          : detectedAccountId
+                            ? "fallback"
+                            : "missing",
+                    selected: serializeAccountMatch(selectedMatch, detectedAccountId),
+                  };
+                })();
+
+          // Hybrid guardrail:
+          // - transfer slips / bill payments must NOT produce line-item breakdown
+          // - receipts MAY produce line-item breakdown (items may still be empty)
+          let scannedItems = Array.isArray(result?.items) ? result.items : [];
+          if (
+            docType === "transfer_slip" ||
+            docType === "bill_payment" ||
+            finalTxType === "transfer" ||
+            finalTxType === "credit_payment"
+          ) {
+            scannedItems = [];
+          }
 
           let fallbackKey =
             sanitizeCategoryKey(result?.category) || sanitizeCategoryKey(result?.category_key) || "other";
@@ -1838,7 +1851,6 @@ if (
             if (diff >= 200) scanWarnings.push("TOTAL_MISMATCH");
           }
 
-
           let detectedCategoryId = "";
           if (finalTxType === "expense") detectedCategoryId = ensureCategory("expense", primaryKey || "other");
           if (finalTxType === "income") detectedCategoryId = ensureCategory("income", primaryKey || "other");
@@ -1874,30 +1886,29 @@ if (
             if (suggestedCategoryId) {
               // already filled by Merchant Library
             } else {
-            const sug =
-              categoryMemory?.suggestCategoryId?.(
-                finalTxType,
-                merchant || mergedNote,
-                fromDigits,
-                toDigits,
-                expenseCats,
-                incomeCats
-              ) || "";
-            if (sug) {
-              suggestedCategoryId = sug;
-              suggestedReason = merchant
-                ? `จำจากร้านเดิม: ${merchant}`
-                : toDigits || fromDigits
-                ? `จำจากเลขเดิม: ${String(toDigits || fromDigits).slice(-6)}`
-                : "จำจากประวัติ";
-              detectedCategoryId = sug;
-            }
+              const sug =
+                categoryMemory?.suggestCategoryId?.(
+                  finalTxType,
+                  merchant || mergedNote,
+                  fromDigits,
+                  toDigits,
+                  expenseCats,
+                  incomeCats
+                ) || "";
+              if (sug) {
+                suggestedCategoryId = sug;
+                suggestedReason = merchant
+                  ? `จำจากร้านเดิม: ${merchant}`
+                  : toDigits || fromDigits
+                    ? `จำจากเลขเดิม: ${String(toDigits || fromDigits).slice(-6)}`
+                    : "จำจากประวัติ";
+                detectedCategoryId = sug;
+              }
             }
           }
 
           const dupByRef = rrefKey ? (batchRefSet.has(rrefKey) || isDuplicateByRef(state.transactions || [], rref)) : false;
           if (rrefKey) batchRefSet.add(rrefKey);
-
 
           const pickedAmount = (() => {
             const a = amountSatang != null && amountSatang > 0 ? amountSatang : null;
@@ -1931,10 +1942,10 @@ if (
             merchant,
             ref: rref,
             categoryId: finalTxType === "transfer" || finalTxType === "credit_payment" ? "transfer" : detectedCategoryId,
-            accountId: detectedAccountId || (accounts?.[0]?.id || ""),
+            accountId: detectedAccountId || "",
             paymentMethod: aiPaymentMethod,
-            fromAccountId: detectedFromId || (accounts?.[0]?.id || ""),
-            toAccountId: detectedToId || (accounts?.[0]?.id || ""),
+            fromAccountId: detectedFromId || "",
+            toAccountId: detectedToId || "",
             duplicate: dupByRef,
             includeDuplicate: !dupByRef,
             evidence: evidenceText.slice(0, 240),
@@ -2017,14 +2028,12 @@ if (
             const canon = resolveMerchantCanonical(patch.merchant || merchant || mergedNote, merchants);
             if (canon) patch = { ...patch, merchant: canon };
 
-            // ✅ Prevent "Smart overwrite": if AI already confidently selected an account,
-            // do NOT allow merchant prefs to overwrite it.
-            const fallbackDefaultAccId = accounts?.[0]?.id || "";
             const hadStrongAccountMatch =
-              (!!detectedAccountId && detectedAccountId !== fallbackDefaultAccId) ||
-              !!bestMatchAccountId(accounts, fromDigits) ||
-              !!bestMatchAccountId(accounts, toDigits) ||
-              !!accountId;
+              String(scanAccountMatch?.kind || "") === "pair"
+                ? !!scanAccountMatch?.ready
+                : !!detectedAccountId &&
+                  (String(scanAccountMatch?.source || "") === "model" ||
+                    Number(scanAccountMatch?.selected?.score || 0) >= strongAccountMatchScore);
             const accountForAutofill = hadStrongAccountMatch ? patch.accountId : "";
 
             const mdPatch = deriveMerchantAutofillPatch(

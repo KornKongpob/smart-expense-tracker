@@ -103,6 +103,16 @@ function ViewFallback() {
   );
 }
 
+function isTextEntryElement(node) {
+  if (typeof HTMLElement === "undefined" || !(node instanceof HTMLElement)) return false;
+  if (node.isContentEditable) return true;
+  const tag = String(node.tagName || "").toLowerCase();
+  if (tag === "textarea" || tag === "select") return true;
+  if (tag !== "input") return false;
+  const type = String(node.getAttribute("type") || "text").toLowerCase();
+  return !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(type);
+}
+
 export default function App() {
   const store = useAppStore();
   const { state } = store;
@@ -118,39 +128,83 @@ export default function App() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   useEffect(() => {
-    // Default
-    try {
-      document.documentElement.style.setProperty("--keyboard-inset", "0px");
-    } catch {
-      // ignore
-    }
-
+    let focusTimer = 0;
+    let maxWindowHeight = window.innerHeight || 0;
     const vv = window.visualViewport;
-    if (!vv) return;
 
-    const update = () => {
-      const inset = Math.max(0, (window.innerHeight || 0) - (vv.height || 0));
+    const applyKeyboardDomState = (open, inset = 0) => {
+      const nextInset = open ? Math.max(0, Math.round(inset)) : 0;
       try {
-        document.documentElement.style.setProperty("--keyboard-inset", `${inset}px`);
+        document.documentElement.style.setProperty("--keyboard-inset", `${nextInset}px`);
       } catch {
         // ignore
       }
-      // threshold: keyboard usually takes > 200px on phones, but keep it conservative
-      setKeyboardOpen(inset > 120);
+      try {
+        if (open) document.body.setAttribute("data-keyboard-open", "true");
+        else document.body.removeAttribute("data-keyboard-open");
+      } catch {
+        // ignore
+      }
     };
 
+    const update = () => {
+      const winHeight = window.innerHeight || 0;
+      if (winHeight > maxWindowHeight) maxWindowHeight = winHeight;
+
+      const vvInset = vv
+        ? Math.max(0, winHeight - Math.max(0, (vv.height || 0) + (vv.offsetTop || 0)))
+        : 0;
+      const fallbackInset = Math.max(0, maxWindowHeight - winHeight);
+      const inset = Math.max(vvInset, fallbackInset);
+      const compactViewport = (window.innerWidth || 0) < 768;
+      const focusedEditable = isTextEntryElement(document.activeElement);
+      const open = inset > 110 || (compactViewport && focusedEditable);
+
+      applyKeyboardDomState(open, inset);
+      setKeyboardOpen(open);
+    };
+
+    const onFocusIn = (event) => {
+      if (!isTextEntryElement(event.target)) return;
+      clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
+        update();
+        if ((window.innerWidth || 0) < 768 && event.target instanceof HTMLElement) {
+          try {
+            event.target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+          } catch {
+            // ignore
+          }
+        }
+      }, 120);
+    };
+
+    const onFocusOut = () => {
+      clearTimeout(focusTimer);
+      window.setTimeout(update, 80);
+    };
+
+    applyKeyboardDomState(false, 0);
     update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
+
+    vv?.addEventListener("resize", update);
+    vv?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
 
     return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
+      clearTimeout(focusTimer);
+      vv?.removeEventListener("resize", update);
+      vv?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+      applyKeyboardDomState(false, 0);
     };
   }, []);
-
 
   // ---- Hash router: sync URL ↔ view ----
   useEffect(() => {
@@ -361,9 +415,10 @@ export default function App() {
 
   const reserveNavSpace = view !== "add";
   const showNavbar = reserveNavSpace && !keyboardOpen; // hide while keyboard is open
+  const rootSpacingClass = showNavbar ? "pb-nav" : "pb-safe";
 
   return (
-    <div className={reserveNavSpace ? "pb-nav" : "pb-safe"}>
+    <div className={rootSpacingClass}>
       <AlertToast message={alert} onClose={() => setAlert("")} />
       <ConfirmModal confirm={confirm} setConfirm={setConfirm} />
 

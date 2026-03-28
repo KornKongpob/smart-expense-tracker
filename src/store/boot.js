@@ -212,6 +212,33 @@ const hasValidInstitutionId = (institutionId) => {
   return !!THAI_INSTITUTION_PRESET_MAP[id];
 };
 
+const uniqueDigitsList = (list) => {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(list) ? list : []) {
+    const token = digitsOnly(value);
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+};
+
+const deriveFallbackMatchDigits = (...values) => {
+  const tokens = [];
+  for (const value of values) {
+    const token = digitsOnly(value);
+    if (!token) continue;
+    if (token.length <= 6) {
+      tokens.push(token);
+      continue;
+    }
+    tokens.push(token.slice(-6));
+    tokens.push(token.slice(-4));
+  }
+  return uniqueDigitsList(tokens);
+};
+
 export function normalizeAccount(a) {
   const id = a?.id || generateId();
   const name = String(a?.name || "").trim() || "บัญชีใหม่";
@@ -223,29 +250,38 @@ export function normalizeAccount(a) {
   const openingBalance = safeSatang(a?.openingBalance, 0);
   const currency = String(a?.currency || "THB").trim().toUpperCase() || "THB";
 
-  const digitsInput = [
+  let accountNumber = a?.accountNumber ? digitsOnly(a.accountNumber).slice(0, 20) : "";
+  let cardNumber = a?.cardNumber ? digitsOnly(a.cardNumber).slice(0, 19) : "";
+
+  if (type === "credit") {
+    if (!cardNumber && accountNumber) cardNumber = accountNumber;
+    accountNumber = "";
+  } else if (!accountNumber && cardNumber) {
+    accountNumber = cardNumber;
+    cardNumber = "";
+  }
+
+  const explicitDigitsInput = [
     Array.isArray(a?.digitsList) ? a.digitsList.join(" ") : "",
     Array.isArray(a?.matchDigits) ? a.matchDigits.join(" ") : "",
     a?.digits || "",
     a?.matchDigits || "",
-    a?.accountNumber || "",
-    a?.cardNumber || "",
     a?.cardDigits || "",
     a?.lastDigits || "",
-    a?.cardLast4 || "",
   ]
     .filter(Boolean)
     .join(" ");
 
-  const digitsList = parseDigitsListUtil(digitsInput);
+  const explicitDigitsList = parseDigitsListUtil(explicitDigitsInput);
+  const digitsList = explicitDigitsList.length
+    ? explicitDigitsList
+    : deriveFallbackMatchDigits(accountNumber, cardNumber, a?.cardLast4);
   const primaryDigits = choosePrimaryDigits(digitsList);
-  const digits = primaryDigits ? String(primaryDigits).slice(-4) : "";
+  const digits = primaryDigits ? digitsOnly(primaryDigits).slice(-4) : "";
 
-  let accountNumber = a?.accountNumber ? digitsOnly(a.accountNumber) : "";
-  if (!accountNumber && primaryDigits) accountNumber = digitsOnly(primaryDigits).slice(-16);
-
-  let cardLast4 = a?.cardLast4 ? digitsOnly(a.cardLast4) : "";
-  if (!cardLast4 && type === "credit" && digits) cardLast4 = digitsOnly(digits);
+  let cardLast4 = a?.cardLast4 ? digitsOnly(a.cardLast4).slice(-4) : "";
+  if (!cardLast4 && cardNumber) cardLast4 = cardNumber.slice(-4);
+  if (!cardLast4 && type === "credit" && digits) cardLast4 = digitsOnly(digits).slice(-4);
 
   return {
     ...a,
@@ -262,6 +298,7 @@ export function normalizeAccount(a) {
     digitsList,
     matchDigits: digitsList,
     accountNumber,
+    cardNumber,
     creditLimit: safeSatang(a?.creditLimit, 0),
     statementDay: clampInt(a?.statementDay, 1, 31, 1),
     dueDay: clampInt(a?.dueDay, 1, 31, 25),

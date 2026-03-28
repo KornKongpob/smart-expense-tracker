@@ -114,19 +114,25 @@ function getAccountMatchBadge(item) {
     const fromScore = Number(match?.from?.score || 0);
     const toScore = Number(match?.to?.score || 0);
     const ready = !!match?.ready;
-    if (ready && fromScore >= 4 && toScore >= 4) return { label: "Account pair high", tone: "ok" };
-    if (ready && fromScore >= 3 && toScore >= 3) return { label: "Account pair medium", tone: "info" };
-    return { label: ready ? "Check account pair" : "Fix transfer accounts", tone: "warn" };
+    const required = Array.isArray(match?.required) ? match.required : [];
+    if (required.includes("fromAccountId") && required.includes("toAccountId")) {
+      return { label: "ขาดบัญชีต้นทางและปลายทาง", tone: "warn" };
+    }
+    if (required.includes("fromAccountId")) return { label: "ขาดบัญชีต้นทาง", tone: "warn" };
+    if (required.includes("toAccountId")) return { label: "ขาดบัญชีปลายทาง", tone: "warn" };
+    if (ready && fromScore >= 4 && toScore >= 4) return { label: "จับคู่บัญชีคู่แม่น", tone: "ok" };
+    if (ready && fromScore >= 3 && toScore >= 3) return { label: "จับคู่บัญชีคู่ปานกลาง", tone: "info" };
+    return { label: ready ? "ตรวจสอบคู่บัญชี" : "ตรวจสอบบัญชีคู่" , tone: "warn" };
   }
 
   const score = Number(match?.selected?.score || 0);
   const ready = !!match?.ready;
   const source = String(match?.source || "").trim();
 
-  if (!ready) return { label: "Need account", tone: "warn" };
-  if (source === "model" || score >= 4) return { label: "Account match high", tone: "ok" };
-  if (score >= 3) return { label: "Account match medium", tone: "info" };
-  return { label: "Check account", tone: "warn" };
+  if (!ready) return { label: "ยังไม่พบบัญชี", tone: "warn" };
+  if (source === "model" || score >= 4) return { label: "จับคู่บัญชีแม่น", tone: "ok" };
+  if (score >= 3) return { label: "จับคู่บัญชีปานกลาง", tone: "info" };
+  return { label: "ตรวจสอบบัญชี", tone: "warn" };
 }
 
 function getRequiredFixes(item) {

@@ -757,7 +757,7 @@ function isPdfFileLike(file) {
 async function postMultipart(
   url,
   { file, imageDataUrl, imageDataUrls, fileName, accounts },
-  { timeoutMs = 45000 } = {}
+  { timeoutMs = 95_000 } = {}
 ) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -788,8 +788,6 @@ async function postMultipart(
     }
 
     const form = new FormData();
-    // Support multi-view uploads by repeating the same field name.
-    // Backend will treat them as crops/enhancements of the same document.
     for (const f of blobs.slice(0, 3)) {
       form.append("file", f.blob, f.name);
     }
@@ -818,7 +816,7 @@ async function postMultipart(
   }
 }
 
-async function _postJson(url, body, { timeoutMs = 45000 } = {}) {
+async function _postJson(url, body, { timeoutMs = 95_000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
 

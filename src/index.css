@@ -244,12 +244,21 @@ body {
 }
 
 .pb-bottom-dock {
-  padding-bottom: calc(6rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
+  padding-bottom: calc(7rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
 }
 
 /* Hide Navbar when a modal/overlay is open (set by useLockBodyScroll) */
 body[data-modal-open="true"] .app-navbar {
   display: none !important;
+}
+
+body[data-keyboard-open="true"] .app-navbar {
+  display: none !important;
+}
+
+body[data-keyboard-open="true"] .ui-page {
+  scroll-padding-top: calc(var(--app-header-h, 76px) + 1rem);
+  scroll-padding-bottom: calc(7rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
 }
 
 /* Hide scrollbars */
@@ -315,6 +324,7 @@ summary::-webkit-details-marker {
   max-width: 1180px;
   margin-left: auto;
   margin-right: auto;
+  scroll-padding-top: calc(var(--app-header-h, 76px) + 1rem);
 }
 
 .ui-card {

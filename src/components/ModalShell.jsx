@@ -36,7 +36,11 @@ export default function ModalShell({
   return createPortal(
     <div
       className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center animate-fade-in-up overscroll-none"
-      style={{ zIndex }}
+      style={{
+        zIndex,
+        paddingTop: "calc(0.75rem + env(safe-area-inset-top))",
+        paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))",
+      }}
       onTouchMove={(e) => {
         // Allow scrolling inside the modal card, block background scroll on backdrop only
         if (e.target === e.currentTarget) e.preventDefault();
@@ -44,7 +48,10 @@ export default function ModalShell({
     >
       <div
         className={`w-full ${maxWidth} glass-card rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 ${maxHeight} overflow-hidden relative flex flex-col`}
-        style={{ touchAction: "pan-y" }}
+        style={{
+          touchAction: "pan-y",
+          maxHeight: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem - var(--keyboard-inset, 0px))",
+        }}
       >
         <div className="flex items-center justify-between mb-4 shrink-0">
           <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
