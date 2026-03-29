@@ -57,6 +57,33 @@ async function getBlob(id) {
   return await txRequestToPromise(store.get(id));
 }
 
+async function getAllBlobIds() {
+  const db = await getDb();
+  if (!db) return [];
+  const tx = db.transaction(STORE_NAME, "readonly");
+  const store = tx.objectStore(STORE_NAME);
+
+  if (typeof store.getAllKeys === "function") {
+    const keys = await txRequestToPromise(store.getAllKeys());
+    return Array.isArray(keys) ? keys.map((key) => String(key || "")).filter(Boolean) : [];
+  }
+
+  return await new Promise((resolve, reject) => {
+    const ids = [];
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) {
+        resolve(ids);
+        return;
+      }
+      ids.push(String(cursor.key || ""));
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error || new Error("Failed to list blob ids"));
+  });
+}
+
 function revokeCachedUrl(id) {
   const url = urlCache.get(id);
   if (url) {
@@ -120,6 +147,15 @@ export async function getBlobInfo(id) {
   }
 
   return { url, mimeType: String(blob.type || ""), size: Number(blob.size || 0) };
+}
+
+export async function getStoredBlob(id) {
+  const blob = await getBlob(id);
+  return blob instanceof Blob ? blob : null;
+}
+
+export async function listBlobIds() {
+  return await getAllBlobIds();
 }
 
 
