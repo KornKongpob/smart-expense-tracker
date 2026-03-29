@@ -1,24 +1,25 @@
 import { useMemo, useState } from "react";
-import { CreditCard, Landmark, Wallet } from "lucide-react";
+import { Check, CreditCard, Landmark, Wallet } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
-import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
+import { EmptyPanel, ScreenShell, Sheet } from "../ui.jsx";
 import { formatCurrency } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
-import { getInstitutionChipLabel } from "../../../constants/institutions.js";
 import {
   applyPresetToAccountDraft,
   coerceInstitutionPreset,
   getDefaultAccountIcon,
   getDefaultPresetIdForAccountType,
-  getPresetOptionsForAccountType,
+  getPresetBadgeText,
+  getPresetLabel,
+  getPresetOptionsForCreateFlow,
   resolvePresetForAccount,
 } from "../accountPresetUtils.js";
 
 const ACCOUNT_TYPE_OPTIONS = [
-  { id: "cash", label: "เงินสด", detail: "Cash or wallet", icon: Wallet },
-  { id: "bank", label: "ธนาคาร", detail: "Bank account", icon: Landmark },
-  { id: "credit", label: "บัตรเครดิต", detail: "Credit card", icon: CreditCard },
+  { id: "bank", label: "บัญชีธนาคาร", icon: Landmark },
+  { id: "credit", label: "บัตรเครดิต", icon: CreditCard },
+  { id: "cash", label: "เงินสด", icon: Wallet },
 ];
 
 function createDraft(account = null) {
@@ -32,7 +33,7 @@ function createDraft(account = null) {
     statementDay: account?.statement_day ? String(account.statement_day) : "",
     dueDay: account?.due_day ? String(account.due_day) : "",
     digits: "",
-    color: account?.color || "#0f766e",
+    color: account?.color || "#0b84ff",
     icon: account?.icon || getDefaultAccountIcon(account?.type || "bank"),
     presetId: "",
   };
@@ -57,43 +58,10 @@ function toMoneyInput(satang, allowEmpty = false) {
   return amount.toFixed(2);
 }
 
-function getTypeLabel(type) {
-  if (type === "credit") return "Card";
-  if (type === "cash") return "Cash";
-  return "Bank";
-}
-
-function getPresetDisplayName(preset, type) {
-  if (!preset) return getTypeLabel(type);
-  if (preset.id === "cash_wallet") return "Cash wallet";
-  if (preset.id === "generic_bank") return "Other bank";
-  if (preset.id === "generic_credit") return "Other card";
-  return String(preset.displayName || preset.shortName || getTypeLabel(type)).trim();
-}
-
-function getPresetBadgeText(preset) {
-  const chip = String(getInstitutionChipLabel(preset) || preset?.displayName || "").trim();
-  if (!chip) return "Acct";
-  if (chip.length <= 4 && chip === chip.toUpperCase()) return chip;
-  const compact = chip.replace(/[^A-Za-z0-9]/g, "").slice(0, 3).toUpperCase();
-  return compact || chip.slice(0, 2).toUpperCase();
-}
-
-function getAccountChipText(account, preset) {
-  if (preset) {
-    return getPresetBadgeText(preset);
-  }
-  const fallback = String(account?.icon || getDefaultAccountIcon(account?.type)).trim();
-  if (!fallback) return "Acct";
-  return fallback.length <= 4 ? fallback : fallback.slice(0, 1).toUpperCase();
-}
-
 function getAccountMeta(account, preset) {
   const parts = [];
-  if (account?.institution_label || preset?.displayName) {
-    parts.push(account.institution_label || preset.displayName);
-  }
-  parts.push(getTypeLabel(account?.type));
+  const presetLabel = getPresetLabel(preset, account?.type);
+  if (presetLabel && String(presetLabel).trim() !== String(account?.name || "").trim()) parts.push(presetLabel);
   if (account?.digits_masked) parts.push(account.digits_masked);
   return parts.filter(Boolean).join(" / ");
 }
@@ -118,7 +86,7 @@ export default function AccountsScreen() {
     return coerceInstitutionPreset(draft.presetId || draft.institutionLabel, draft.type);
   }, [draft.institutionLabel, draft.presetId, draft.type]);
 
-  const presetOptions = useMemo(() => getPresetOptionsForAccountType(draft.type), [draft.type]);
+  const presetOptions = useMemo(() => getPresetOptionsForCreateFlow(draft.type), [draft.type]);
 
   const syncMoneyInputs = (nextDraft) => {
     setOpeningBalanceInput(toMoneyInput(nextDraft.openingBalanceSatang));
@@ -129,7 +97,7 @@ export default function AccountsScreen() {
     const nextDraft = createDraft(account);
     setDraft(nextDraft);
     syncMoneyInputs(nextDraft);
-    setShowMore(Boolean(account?.digits_masked));
+    setShowMore(false);
     setEditorOpen(true);
   };
 
@@ -173,9 +141,7 @@ export default function AccountsScreen() {
 
   return (
     <ScreenShell
-      eyebrow="Accounts"
-      title="Accounts"
-      subtitle="Choose a preset first, then fill only what matters."
+      title="บัญชี"
       actions={
         <button
           type="button"
@@ -183,7 +149,7 @@ export default function AccountsScreen() {
           onClick={() => openEditor()}
           data-testid="new-account"
         >
-          New account
+          สร้างบัญชี
         </button>
       }
     >
@@ -193,7 +159,7 @@ export default function AccountsScreen() {
             {accounts.map((account) => {
               const preset = resolvePresetForAccount(account);
               const balance = balanceMap.get(Number(account.id)) ?? Number(account.opening_balance_satang || 0);
-              const color = account.color || preset?.brandColor || "#0f766e";
+              const color = account.color || preset?.brandColor || "#0b84ff";
 
               return (
                 <button
@@ -207,9 +173,9 @@ export default function AccountsScreen() {
                     <div className="finance-row-main">
                       <span
                         className="finance-category-icon finance-account-chip"
-                        style={{ backgroundColor: `${color}18`, color }}
+                        style={{ backgroundColor: `${color}14`, color }}
                       >
-                        {getAccountChipText(account, preset)}
+                        {getPresetBadgeText(preset, account.type)}
                       </span>
                       <div className="finance-account-copy">
                         <div className="finance-row-title">{account.name}</div>
@@ -219,14 +185,8 @@ export default function AccountsScreen() {
                     <div className="finance-row-side finance-account-side">
                       <div className="finance-row-amount">{formatCurrency(balance)}</div>
                       {account.type === "credit" && Number(account.credit_limit_satang || 0) > 0 ? (
-                        <div className="finance-account-limit">
-                          Limit {formatCurrency(account.credit_limit_satang)}
-                        </div>
-                      ) : (
-                        <div className="finance-account-limit finance-account-limit-muted">
-                          {getPresetDisplayName(preset, account.type)}
-                        </div>
-                      )}
+                        <div className="finance-account-limit">วงเงิน {formatCurrency(account.credit_limit_satang)}</div>
+                      ) : null}
                     </div>
                   </div>
                 </button>
@@ -235,13 +195,8 @@ export default function AccountsScreen() {
           </div>
         ) : (
           <EmptyPanel
-            title="No accounts yet"
-            copy="Start with cash, a bank account, or a credit card."
-            action={
-              <button type="button" className="ui-btn ui-btn-primary" onClick={() => openEditor()}>
-                Add your first account
-              </button>
-            }
+            title="ยังไม่มีบัญชี"
+            copy="แตะสร้างบัญชีเพื่อเริ่ม"
           />
         )}
       </section>
@@ -249,12 +204,11 @@ export default function AccountsScreen() {
       <Sheet
         open={editorOpen}
         onClose={closeEditor}
-        title={draft.id ? "Edit account" : "Create account"}
-        subtitle="Preset first. Details only when you need them."
+        title={draft.id ? "แก้ไขบัญชี" : "บัญชีใหม่"}
         footer={
           <div className="finance-sheet-actions finance-sheet-actions-sticky">
             <button type="button" className="ui-btn ui-btn-secondary" onClick={closeEditor}>
-              Cancel
+              ยกเลิก
             </button>
             <button
               type="button"
@@ -263,14 +217,14 @@ export default function AccountsScreen() {
               onClick={submit}
               data-testid="save-account"
             >
-              {draft.id ? "Save changes" : "Save account"}
+              {draft.id ? "บันทึก" : "สร้างบัญชี"}
             </button>
           </div>
         }
       >
         <div className="finance-form finance-account-form">
-          <section className="finance-form-section">
-            <div className="finance-panel-title">1. Choose type</div>
+          <section className="finance-form-section finance-form-section-compact">
+            <div className="finance-section-label">ประเภท</div>
             <div className="finance-type-grid">
               {ACCOUNT_TYPE_OPTIONS.map((option) => {
                 const Icon = option.icon;
@@ -286,20 +240,18 @@ export default function AccountsScreen() {
                     <span className="finance-type-chip-icon">
                       <Icon size={16} />
                     </span>
-                    <span>
-                      <span className="finance-type-chip-label">{option.label}</span>
-                      <span className="finance-type-chip-detail">{option.detail}</span>
-                    </span>
+                    <span className="finance-type-chip-label">{option.label}</span>
                   </button>
                 );
               })}
             </div>
           </section>
 
-          <section className="finance-form-section">
-            <div className="finance-panel-title">2. Pick a preset</div>
-            <div className="finance-panel-copy">Thai banks and common cards are ready to use.</div>
-            <div className="finance-preset-grid">
+          <section className="finance-form-section finance-form-section-compact">
+            <div className="finance-section-label">
+              {draft.type === "credit" ? "เลือกบัตร" : draft.type === "cash" ? "เลือกกระเป๋า" : "เลือกธนาคาร"}
+            </div>
+            <div className="finance-preset-grid finance-preset-grid-compact">
               {presetOptions.map((preset) => {
                 const active = String(draft.presetId || "") === String(preset.id || "");
                 return (
@@ -312,46 +264,39 @@ export default function AccountsScreen() {
                   >
                     <span
                       className="finance-preset-badge"
-                      style={{ backgroundColor: `${preset.brandColor}18`, color: preset.brandColor }}
+                      style={{ backgroundColor: `${preset.brandColor}14`, color: preset.brandColor }}
                     >
-                      {getPresetBadgeText(preset)}
+                      {getPresetBadgeText(preset, draft.type)}
                     </span>
                     <span className="finance-preset-copy">
-                      <span className="finance-preset-name">{getPresetDisplayName(preset, draft.type)}</span>
-                      <span className="finance-preset-meta">{(preset.accountTypes || []).join(" / ")}</span>
+                      <span className="finance-preset-name">{getPresetLabel(preset, draft.type)}</span>
                     </span>
+                    {active ? (
+                      <span className="finance-preset-check">
+                        <Check size={14} />
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
             </div>
           </section>
 
-          <section className="finance-form-section finance-form-section-compact">
-            <div className="finance-account-preview" style={{ "--account-color": draft.color }}>
-              <div className="finance-account-preview-kicker">{getTypeLabel(draft.type)}</div>
-              <div className="finance-account-preview-title">{draft.name || getPresetDisplayName(selectedPreset, draft.type)}</div>
-              <div className="finance-account-preview-meta">
-                {draft.institutionLabel || getPresetDisplayName(selectedPreset, draft.type)}
-              </div>
-            </div>
-          </section>
-
           <section className="finance-form-section">
-            <div className="finance-panel-title">3. Basics</div>
             <div className="finance-grid finance-grid-2">
               <label className="finance-field">
-                <span className="ui-label">Account name</span>
+                <span className="ui-label">ชื่อบัญชี</span>
                 <input
                   className="ui-input"
                   value={draft.name}
                   onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-                  placeholder={getPresetDisplayName(selectedPreset, draft.type)}
+                  placeholder={getPresetLabel(selectedPreset, draft.type)}
                   data-testid="account-name"
                 />
               </label>
 
               <label className="finance-field">
-                <span className="ui-label">Opening balance (THB)</span>
+                <span className="ui-label">ยอดตั้งต้น</span>
                 <input
                   className="ui-input"
                   inputMode="decimal"
@@ -372,7 +317,7 @@ export default function AccountsScreen() {
             {draft.type === "credit" ? (
               <div className="finance-grid finance-grid-3">
                 <label className="finance-field">
-                  <span className="ui-label">Credit limit (THB)</span>
+                  <span className="ui-label">วงเงิน</span>
                   <input
                     className="ui-input"
                     inputMode="decimal"
@@ -390,7 +335,7 @@ export default function AccountsScreen() {
                 </label>
 
                 <label className="finance-field">
-                  <span className="ui-label">Statement day</span>
+                  <span className="ui-label">วันตัดรอบ</span>
                   <input
                     className="ui-input"
                     type="number"
@@ -403,7 +348,7 @@ export default function AccountsScreen() {
                 </label>
 
                 <label className="finance-field">
-                  <span className="ui-label">Due day</span>
+                  <span className="ui-label">วันครบกำหนด</span>
                   <input
                     className="ui-input"
                     type="number"
@@ -426,46 +371,37 @@ export default function AccountsScreen() {
                 setShowMore((current) => !current);
               }}
             >
-              <span>More details</span>
-              <span className="finance-details-caret">{showMore ? "Hide" : "Show"}</span>
+              <span>รายละเอียดเพิ่มเติม</span>
+              <span className="finance-details-caret">{showMore ? "ซ่อน" : "แสดง"}</span>
             </summary>
             {showMore ? (
               <div className="finance-details-body">
                 <div className="finance-grid finance-grid-2">
                   <label className="finance-field">
-                    <span className="ui-label">Institution label</span>
+                    <span className="ui-label">ชื่อธนาคาร/บัตร</span>
                     <input
                       className="ui-input"
                       value={draft.institutionLabel}
                       onChange={(event) => setDraft((current) => ({ ...current, institutionLabel: event.target.value }))}
-                      placeholder="KBank, SCB, Visa"
+                      placeholder="ใช้ชื่อเฉพาะของคุณได้"
                     />
                   </label>
 
                   <label className="finance-field">
-                    <span className="ui-label">Matching digits</span>
+                    <span className="ui-label">เลขช่วยจำ</span>
                     <input
                       className="ui-input"
                       inputMode="numeric"
                       value={draft.digits}
                       onChange={(event) => setDraft((current) => ({ ...current, digits: event.target.value }))}
-                      placeholder={draft.id ? "Leave blank to keep current" : "Last 4-6 digits"}
+                      placeholder="เช่น 1234"
                       data-testid="account-digits"
                     />
                   </label>
                 </div>
-                <div className="finance-panel-copy">
-                  Digits are sent through the secure server route and stored masked or encrypted.
-                </div>
               </div>
             ) : null}
           </details>
-
-          {draft.type === "credit" ? (
-            <StatusPill tone="default">
-              {draft.statementDay || "--"}/{draft.dueDay || "--"} billing cycle
-            </StatusPill>
-          ) : null}
         </div>
       </Sheet>
     </ScreenShell>

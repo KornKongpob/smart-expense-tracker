@@ -1,10 +1,14 @@
 // Service Worker for Smart Expense Tracker PWA
 // Caches static assets for offline support
 
-const CACHE_NAME = "smart-expense-v1";
+const CACHE_NAME = "smart-expense-ios-v2";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
+  "/manifest.json",
+  "/apple-touch-icon.png",
+  "/icon-192.png",
+  "/icon-512.png",
 ];
 
 // Install: cache static assets

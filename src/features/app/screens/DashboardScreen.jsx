@@ -1,7 +1,8 @@
-import { AlertTriangle, ArrowUpRight, Wallet } from "lucide-react";
+import { ArrowUpRight, CreditCard, Inbox, PlusCircle } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
-import { AmountText, EmptyPanel, MetricCard, MiniCashflowChart, ScreenShell, StatusPill } from "../ui.jsx";
+import { AmountText, ScreenShell, StatusPill } from "../ui.jsx";
+import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
 import { formatCurrency } from "../../../utils/format.js";
 
 function percentOf(value, total) {
@@ -11,26 +12,67 @@ function percentOf(value, total) {
   return Math.max(0, Math.min(100, Math.round((numerator / denominator) * 100)));
 }
 
+function hasValue(value) {
+  return Math.abs(Number(value || 0)) > 0;
+}
+
+function navigateTo(hash) {
+  window.location.hash = hash;
+}
+
+function getAccountMeta(account) {
+  const presetLabel = getPresetLabel(resolvePresetForAccount(account), account.type);
+  if (presetLabel && String(presetLabel).trim() !== String(account?.name || "").trim()) {
+    return presetLabel;
+  }
+  return "";
+}
+
 export default function DashboardScreen() {
-  const {
-    dashboardSnapshot,
-    cashflowSeries,
-    loading,
-    selectedMonth,
-    setSelectedMonth,
-  } = useExpenseApp();
+  const { dashboardSnapshot, cashflowSeries, loading, selectedMonth, setSelectedMonth } = useExpenseApp();
 
   const snapshot = dashboardSnapshot || {};
   const progress = percentOf(snapshot.expense_satang, snapshot.monthly_target_satang);
+  const pendingReviewCount = Number(snapshot.pending_review_count || 0);
+  const unmatchedCount = Number(snapshot.unmatched_count || 0);
+  const topCategories = Array.isArray(snapshot.top_categories) ? snapshot.top_categories : [];
+  const accounts = Array.isArray(snapshot.accounts) ? snapshot.accounts : [];
+  const hasAccounts = accounts.length > 0;
+  const hasCategories = topCategories.length > 0;
+  const rawCashflow = Array.isArray(cashflowSeries) ? cashflowSeries : [];
+  const hasCashflow = rawCashflow.some(
+    (row) => hasValue(row?.income_satang) || hasValue(row?.expense_satang),
+  );
+  const chartPoints = hasCashflow ? rawCashflow : [];
+  const chartMax = hasCashflow
+    ? Math.max(
+        ...chartPoints.flatMap((row) => [Number(row?.income_satang || 0), Number(row?.expense_satang || 0)]),
+        1,
+      )
+    : 1;
+  const hasActivity =
+    hasCashflow ||
+    hasCategories ||
+    hasValue(snapshot.expense_satang) ||
+    hasValue(snapshot.income_satang) ||
+    hasValue(snapshot.net_satang) ||
+    pendingReviewCount > 0 ||
+    unmatchedCount > 0;
+
+  const buildChartPath = (key) =>
+    chartPoints
+      .map((point, index) => {
+        const x = (index / Math.max(chartPoints.length - 1, 1)) * (320 - 8) + 4;
+        const y = 160 - (Number(point?.[key] || 0) / chartMax) * (160 - 24) - 8;
+        return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+      })
+      .join(" ");
 
   return (
     <ScreenShell
-      eyebrow="Dashboard"
-      title="See the month at a glance."
-      subtitle="Spend, target, inbox, and balances."
+      title="ภาพรวม"
       actions={
         <label className="finance-month-picker">
-          <span className="ui-label">Month</span>
           <input
             className="ui-input"
             type="month"
@@ -40,164 +82,154 @@ export default function DashboardScreen() {
         </label>
       }
     >
-      <section className="dashboard-hero">
-        <div className="dashboard-hero-grid">
+      <article className="ui-card finance-panel finance-dashboard-hero">
+        <div className="finance-dashboard-hero-head">
           <div>
-            <div className="dashboard-kicker">Month in motion</div>
-            <h2 className="dashboard-hero-heading">{formatCurrency(snapshot.expense_satang || 0)} spent so far.</h2>
-            <p className="dashboard-hero-copy">Income {formatCurrency(snapshot.income_satang || 0)}. Net {formatCurrency(snapshot.net_satang || 0)}.</p>
-
-            <div className="dashboard-hero-badges">
-              <span className="dashboard-hero-badge">
-                <AlertTriangle size={14} />
-                {Number(snapshot.pending_review_count || 0)} waiting in Inbox
-              </span>
-              <span className="dashboard-hero-badge">
-                <Wallet size={14} />
-                {Number(snapshot.unmatched_count || 0)} need account or category attention
-              </span>
-            </div>
+            <div className="finance-panel-title">ใช้ไป</div>
+            <div className="finance-dashboard-total">{formatCurrency(snapshot.expense_satang || 0)}</div>
           </div>
+          {loading ? <StatusPill tone="default">อัปเดต</StatusPill> : null}
+        </div>
 
-          <div className="dashboard-stat-grid">
-            <div className="dashboard-stat">
-              <div className="dashboard-stat-label">Monthly target</div>
-              <div className="dashboard-stat-value">{formatCurrency(snapshot.monthly_target_satang || 0)}</div>
-              <div className="dashboard-stat-hint">
-                {snapshot.monthly_target_satang
-                  ? `${progress}% used`
-                  : "Set a target in Settings"}
-              </div>
-              <div className={`dashboard-progress ${progress >= 85 ? "dashboard-progress--alert" : ""}`}>
-                <span style={{ width: `${progress || 0}%` }} />
-              </div>
-            </div>
+        <div className="finance-dashboard-mini-grid">
+          <div className="finance-dashboard-mini-card">
+            <span>รายรับ</span>
+            <strong>{formatCurrency(snapshot.income_satang || 0)}</strong>
+          </div>
+          <div className="finance-dashboard-mini-card">
+            <span>สุทธิ</span>
+            <strong>{formatCurrency(snapshot.net_satang || 0)}</strong>
           </div>
         </div>
-      </section>
 
-      <section className="finance-grid finance-grid-3">
-        <MetricCard
-          label="Pending review"
-          value={String(snapshot.pending_review_count || 0)}
-          hint="Waiting in Inbox."
-          tone="warning"
-        />
-        <MetricCard
-          label="Income"
-          value={formatCurrency(snapshot.income_satang || 0)}
-          hint="This month."
-          tone="success"
-        />
-        <MetricCard
-          label="Net"
-          value={formatCurrency(snapshot.net_satang || 0)}
-          hint="Income minus expense."
-          tone={Number(snapshot.net_satang || 0) < 0 ? "danger" : "default"}
-        />
-      </section>
-
-      <section className="finance-grid finance-grid-main">
-        <article className="ui-card finance-panel">
-          <div className="finance-panel-head">
-            <div>
-              <div className="finance-panel-title">Cashflow trend</div>
-              <p className="finance-panel-copy">Income vs expense.</p>
-            </div>
-            {loading ? <StatusPill tone="default">Refreshing</StatusPill> : null}
+        <div className="finance-dashboard-goal">
+          <div className="finance-dashboard-goal-copy">
+            <span>เป้าหมาย</span>
+            <strong>{formatCurrency(snapshot.monthly_target_satang || 0)}</strong>
           </div>
-          <MiniCashflowChart series={cashflowSeries} />
-        </article>
-
-        <article className="ui-card finance-panel">
-          <div className="finance-panel-head">
-            <div>
-              <div className="finance-panel-title">Needs attention</div>
-              <p className="finance-panel-copy">What to clear next.</p>
-            </div>
+          <div className={`dashboard-progress finance-progress-bar ${progress >= 85 ? "dashboard-progress--alert" : ""}`}>
+            <span style={{ width: `${progress || 0}%` }} />
           </div>
-          <div className="finance-chip-grid">
-            <StatusPill tone={Number(snapshot.pending_review_count || 0) ? "warning" : "success"}>
-              {Number(snapshot.pending_review_count || 0)} scans in review
-            </StatusPill>
-            <StatusPill tone={Number(snapshot.unmatched_count || 0) ? "warning" : "success"}>
-              {Number(snapshot.unmatched_count || 0)} unmatched hints
-            </StatusPill>
-            <StatusPill tone={progress >= 100 ? "danger" : progress >= 85 ? "warning" : "default"}>
-              {progress}% of target used
-            </StatusPill>
+          {(pendingReviewCount || unmatchedCount) ? (
+            <div className="finance-chip-grid">
+              {pendingReviewCount ? <StatusPill tone="warning">รอตรวจ {pendingReviewCount}</StatusPill> : null}
+              {unmatchedCount ? <StatusPill tone="warning">ยังไม่จับคู่ {unmatchedCount}</StatusPill> : null}
+            </div>
+          ) : null}
+        </div>
+      </article>
+
+      {!hasActivity ? (
+        <article className="ui-card finance-panel finance-dashboard-next">
+          <div className="finance-panel-head">
+            <div className="finance-panel-title">{hasAccounts ? "เริ่มบันทึก" : "เริ่มต้น"}</div>
+          </div>
+          <div className="finance-dashboard-next-copy">
+            {hasAccounts ? "เพิ่มรายการแรกได้เลย" : "สร้างบัญชีก่อนเริ่มใช้งาน"}
+          </div>
+          <div className="finance-dashboard-actions">
+            {hasAccounts ? (
+              <>
+                <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#add")}>
+                  <PlusCircle size={16} />
+                  เพิ่มรายการ
+                </button>
+                <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateTo("#inbox")}>
+                  <Inbox size={16} />
+                  กล่องรับ
+                </button>
+              </>
+            ) : (
+              <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#accounts")}>
+                <CreditCard size={16} />
+                สร้างบัญชี
+              </button>
+            )}
           </div>
         </article>
-      </section>
+      ) : null}
 
-      <section className="finance-grid finance-grid-main">
+      {hasCashflow ? (
         <article className="ui-card finance-panel">
           <div className="finance-panel-head">
-            <div>
-              <div className="finance-panel-title">Top categories</div>
-              <p className="finance-panel-copy">Where the month is going.</p>
+            <div className="finance-panel-title">กระแสเงิน</div>
+          </div>
+          <div className="finance-chart">
+            <svg viewBox="0 0 320 160" className="finance-chart-svg" aria-hidden="true">
+              <path d={buildChartPath("expense_satang")} className="finance-chart-line finance-chart-line-expense" />
+              <path d={buildChartPath("income_satang")} className="finance-chart-line finance-chart-line-income" />
+            </svg>
+            <div className="finance-chart-legend">
+              <span>
+                <i className="finance-dot finance-dot-income" />
+                รายรับ
+              </span>
+              <span>
+                <i className="finance-dot finance-dot-expense" />
+                รายจ่าย
+              </span>
             </div>
           </div>
+        </article>
+      ) : null}
 
-          {Array.isArray(snapshot.top_categories) && snapshot.top_categories.length ? (
-            <div className="finance-list">
-              {snapshot.top_categories.map((category) => (
-                <div key={category.id} className="finance-row">
-                  <div className="finance-row-main">
-                    <span className="finance-category-icon" style={{ backgroundColor: `${category.color}22`, color: category.color }}>
-                      {category.icon || "•"}
-                    </span>
-                    <div>
+      {(hasCategories || hasAccounts) ? (
+        <section className="finance-grid finance-grid-main">
+          {hasCategories ? (
+            <article className="ui-card finance-panel">
+              <div className="finance-panel-head">
+                <div className="finance-panel-title">หมวด</div>
+              </div>
+
+              <div className="finance-list">
+                {topCategories.map((category) => (
+                  <div key={category.id} className="finance-row">
+                    <div className="finance-row-main">
+                      <span
+                        className="finance-category-icon"
+                        style={{ backgroundColor: `${category.color}18`, color: category.color }}
+                      >
+                        {category.icon || "•"}
+                      </span>
                       <div className="finance-row-title">{category.name}</div>
-                      <div className="finance-row-meta">{category.id}</div>
+                    </div>
+                    <AmountText value={category.total_satang} />
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
+
+          {hasAccounts ? (
+            <article className="ui-card finance-panel">
+              <div className="finance-panel-head">
+                <div className="finance-panel-title">บัญชี</div>
+              </div>
+
+              <div className="finance-list">
+                {accounts.map((account) => (
+                  <div key={account.id} className="finance-row">
+                    <div className="finance-row-main">
+                      <span className="finance-category-icon finance-account-icon">{account.icon || "•"}</span>
+                      <div>
+                        <div className="finance-row-title">{account.name}</div>
+                        {getAccountMeta(account) ? <div className="finance-row-meta">{getAccountMeta(account)}</div> : null}
+                      </div>
+                    </div>
+                    <div className="finance-balance">
+                      <AmountText
+                        value={account.balance_satang}
+                        tone={Number(account.balance_satang || 0) < 0 ? "danger" : "default"}
+                      />
+                      <ArrowUpRight size={14} />
                     </div>
                   </div>
-                  <AmountText value={category.total_satang} />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyPanel
-              title="No category movement yet"
-              copy="Categories appear after your first posted transactions."
-            />
-          )}
-        </article>
-
-        <article className="ui-card finance-panel">
-          <div className="finance-panel-head">
-            <div>
-              <div className="finance-panel-title">Account health</div>
-              <p className="finance-panel-copy">Balances across your accounts.</p>
-            </div>
-          </div>
-
-          {Array.isArray(snapshot.accounts) && snapshot.accounts.length ? (
-            <div className="finance-list">
-              {snapshot.accounts.map((account) => (
-                <div key={account.id} className="finance-row">
-                  <div className="finance-row-main">
-                    <span className="finance-category-icon finance-account-icon">{account.icon || "•"}</span>
-                    <div>
-                      <div className="finance-row-title">{account.name}</div>
-                      <div className="finance-row-meta">{account.type}</div>
-                    </div>
-                  </div>
-                  <div className="finance-balance">
-                    <AmountText value={account.balance_satang} tone={Number(account.balance_satang || 0) < 0 ? "danger" : "default"} />
-                    <ArrowUpRight size={14} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyPanel
-              title="No accounts yet"
-              copy="Add an account to start tracking balances."
-            />
-          )}
-        </article>
-      </section>
+                ))}
+              </div>
+            </article>
+          ) : null}
+        </section>
+      ) : null}
     </ScreenShell>
   );
 }

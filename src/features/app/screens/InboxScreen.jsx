@@ -1,18 +1,26 @@
 import { useDeferredValue, useEffect, useState } from "react";
-import { CheckCircle2, Search, XCircle } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Repeat2, Search, XCircle } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { formatCurrency, formatDateLong } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
 
+const REVIEW_KIND_OPTIONS = [
+  { id: "expense", label: "รายจ่าย", icon: ArrowDownLeft },
+  { id: "income", label: "รายรับ", icon: ArrowUpRight },
+  { id: "transfer", label: "โอน", icon: Repeat2 },
+];
+
 function lineItemsFromDraft(draft) {
   return Array.isArray(draft?.lineItems) ? draft.lineItems : [];
 }
 
-function toInputAmount(satang) {
+function toInputAmount(satang, allowEmpty = true) {
   const amount = Number(satang || 0) / 100;
-  return Number.isFinite(amount) ? amount.toFixed(2) : "0.00";
+  if (!Number.isFinite(amount)) return allowEmpty ? "" : "0.00";
+  if (!amount && allowEmpty) return "";
+  return amount.toFixed(2);
 }
 
 export default function InboxScreen() {
@@ -30,10 +38,25 @@ export default function InboxScreen() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState(null);
+  const [amountInput, setAmountInput] = useState("");
+  const [showMore, setShowMore] = useState(false);
+  const [showLines, setShowLines] = useState(false);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
-    setDraft(selected ? scanToDraft(selected) : null);
+    if (!selected) {
+      setDraft(null);
+      setAmountInput("");
+      setShowMore(false);
+      setShowLines(false);
+      return;
+    }
+
+    const nextDraft = scanToDraft(selected);
+    setDraft(nextDraft);
+    setAmountInput(toInputAmount(nextDraft?.amountSatang));
+    setShowMore(false);
+    setShowLines(false);
   }, [scanToDraft, selected]);
 
   const rows = (Array.isArray(scanDocuments) ? scanDocuments : []).filter((scan) => {
@@ -54,18 +77,43 @@ export default function InboxScreen() {
   });
 
   const kindCategories =
-    draft?.kind === "income"
-      ? categories.income
-      : draft?.kind === "transfer"
-      ? []
-      : categories.expense;
+    draft?.kind === "income" ? categories.income : draft?.kind === "transfer" ? [] : categories.expense;
+
+  const hasAccounts = accounts.length > 0;
+  const canApprove =
+    Number(draft?.amountSatang || 0) > 0 &&
+    (draft?.kind === "transfer"
+      ? Boolean(draft?.fromAccountId && draft?.toAccountId && draft?.fromAccountId !== draft?.toAccountId)
+      : Boolean(draft?.accountId));
+
+  const lineItemsTotal = lineItemsFromDraft(draft).reduce((sum, item) => sum + Number(item.amountSatang || 0), 0);
+
+  const applyKind = (kind) => {
+    const firstAccountId = accounts[0] ? String(accounts[0].id) : "";
+
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            kind,
+            categoryId: kind === "transfer" ? "" : current.categoryId,
+            accountId:
+              kind === "transfer" ? current.accountId : current.accountId || current.fromAccountId || firstAccountId,
+            fromAccountId:
+              kind === "transfer"
+                ? current.fromAccountId || current.accountId || firstAccountId
+                : current.fromAccountId,
+            toAccountId: kind === "transfer" ? current.toAccountId : "",
+            lineItems: kind === "transfer" ? [] : lineItemsFromDraft(current),
+          }
+        : current,
+    );
+
+    if (kind === "transfer") setShowLines(false);
+  };
 
   return (
-    <ScreenShell
-      eyebrow="Inbox"
-      title="Review before posting."
-      subtitle="Receipts and slips land here first."
-    >
+    <ScreenShell title="กล่องรับ">
       <section className="ui-card finance-panel">
         <div className="finance-toolbar">
           <label className="finance-search">
@@ -74,14 +122,15 @@ export default function InboxScreen() {
               className="ui-input"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search merchant or note"
+              placeholder="ค้นหา"
             />
           </label>
+
           <div className="view-segmented finance-filter">
             {[
-              { id: "pending_review", label: "Pending" },
-              { id: "approved", label: "Approved" },
-              { id: "all", label: "All" },
+              { id: "pending_review", label: "รอตรวจ" },
+              { id: "approved", label: "อนุมัติ" },
+              { id: "all", label: "ทั้งหมด" },
             ].map((item) => (
               <button
                 key={item.id}
@@ -100,6 +149,7 @@ export default function InboxScreen() {
             {rows.map((scan) => {
               const suggestion = scan?.normalized_suggestion || {};
               const amount = suggestion?.amount || 0;
+
               return (
                 <button
                   key={scan.id}
@@ -111,16 +161,15 @@ export default function InboxScreen() {
                     <div className="finance-row-main">
                       <div>
                         <div className="finance-row-title">
-                          {suggestion?.merchant || scan.file_name || "Untitled scan"}
+                          {suggestion?.merchant || scan.file_name || "รายการสแกน"}
                         </div>
-                        <div className="finance-row-meta">
-                          {formatDateLong(suggestion?.date || scan.created_at)} • {scan.mime_type || "file"}
-                        </div>
+                        <div className="finance-row-meta">{formatDateLong(suggestion?.date || scan.created_at)}</div>
                       </div>
                     </div>
+
                     <div className="finance-row-side">
                       <StatusPill tone={scan.status === "approved" ? "success" : "warning"}>
-                        {scan.status === "approved" ? "Approved" : "Pending"}
+                        {scan.status === "approved" ? "อนุมัติ" : "รอตรวจ"}
                       </StatusPill>
                       <div className="finance-row-amount">{formatCurrency(amount)}</div>
                     </div>
@@ -130,259 +179,179 @@ export default function InboxScreen() {
             })}
           </div>
         ) : (
-          <EmptyPanel
-            title="Inbox is clean"
-            copy="New scans will appear here automatically."
-          />
+          <EmptyPanel title="ยังไม่มีรายการ" copy="รายการสแกนจะขึ้นที่นี่" />
         )}
       </section>
 
       <Sheet
         open={!!selected && !!draft}
         onClose={() => setSelected(null)}
-        title={selected?.normalized_suggestion?.merchant || selected?.file_name || "Review scan"}
-        subtitle="Adjust it before posting."
+        title={selected?.normalized_suggestion?.merchant || selected?.file_name || "ตรวจรายการ"}
         footer={
           <div className="finance-sheet-actions">
             <button
               type="button"
               className="ui-btn ui-btn-secondary"
               onClick={async () => {
+                if (!selected) return;
                 await rejectScanDocument(selected.id);
                 setSelected(null);
               }}
               disabled={saving}
             >
               <XCircle size={16} />
-              Reject
+              ไม่ใช้
             </button>
+
             <button
               type="button"
               className="ui-btn ui-btn-primary"
               onClick={async () => {
+                if (!selected || !draft) return;
                 await approveScanDocument(selected, draft);
                 setSelected(null);
               }}
-              disabled={saving}
+              disabled={saving || !hasAccounts || !canApprove}
             >
               <CheckCircle2 size={16} />
-              Approve
+              บันทึก
             </button>
           </div>
         }
       >
         {draft ? (
           <div className="finance-form">
-            <div className="finance-grid finance-grid-2">
-              <label className="finance-field">
-                <span className="ui-label">Kind</span>
-                <select
-                  className="ui-select"
-                  value={draft.kind}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      kind: event.target.value,
-                      categoryId: event.target.value === "transfer" ? "" : current.categoryId,
-                    }))
-                  }
-                >
-                  <option value="expense">Expense</option>
-                  <option value="income">Income</option>
-                  <option value="transfer">Transfer</option>
-                </select>
-              </label>
-              <label className="finance-field">
-                <span className="ui-label">Amount (THB)</span>
-                <input
-                  className="ui-input"
-                  inputMode="decimal"
-                  value={toInputAmount(draft.amountSatang)}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      amountSatang: parseMoneyToSatang(event.target.value),
-                    }))
-                  }
-                />
-              </label>
-            </div>
+            <section className="finance-form-section finance-form-section-compact">
+              <div className="finance-section-label">ประเภท</div>
+              <div className="finance-type-grid">
+                {REVIEW_KIND_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  const active = draft.kind === option.id;
 
-            <div className="finance-grid finance-grid-2">
-              <label className="finance-field">
-                <span className="ui-label">Date</span>
-                <input
-                  className="ui-input"
-                  type="date"
-                  value={draft.date}
-                  onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))}
-                />
-              </label>
-              <label className="finance-field">
-                <span className="ui-label">Merchant</span>
-                <input
-                  className="ui-input"
-                  value={draft.merchant}
-                  onChange={(event) => setDraft((current) => ({ ...current, merchant: event.target.value }))}
-                />
-              </label>
-            </div>
-
-            <label className="finance-field">
-              <span className="ui-label">Note</span>
-              <textarea
-                className="ui-input finance-textarea"
-                value={draft.note}
-                onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))}
-              />
-            </label>
-
-            {draft.kind === "transfer" ? (
-              <div className="finance-grid finance-grid-2">
-                <label className="finance-field">
-                  <span className="ui-label">From account</span>
-                  <select
-                    className="ui-select"
-                    value={draft.fromAccountId}
-                    onChange={(event) => setDraft((current) => ({ ...current, fromAccountId: event.target.value }))}
-                  >
-                    <option value="">Select account</option>
-                    {accounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="finance-field">
-                  <span className="ui-label">To account</span>
-                  <select
-                    className="ui-select"
-                    value={draft.toAccountId}
-                    onChange={(event) => setDraft((current) => ({ ...current, toAccountId: event.target.value }))}
-                  >
-                    <option value="">Select account</option>
-                    {accounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={["finance-type-chip", active ? "is-active" : ""].join(" ")}
+                      onClick={() => applyKind(option.id)}
+                    >
+                      <span className="finance-type-chip-icon">
+                        <Icon size={16} />
+                      </span>
+                      <span className="finance-type-chip-label">{option.label}</span>
+                    </button>
+                  );
+                })}
               </div>
-            ) : (
-              <div className="finance-grid finance-grid-2">
-                <label className="finance-field">
-                  <span className="ui-label">Account</span>
-                  <select
-                    className="ui-select"
-                    value={draft.accountId}
-                    onChange={(event) => setDraft((current) => ({ ...current, accountId: event.target.value }))}
-                  >
-                    <option value="">Select account</option>
-                    {accounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="finance-field">
-                  <span className="ui-label">Category</span>
-                  <select
-                    className="ui-select"
-                    value={draft.categoryId}
-                    disabled={draft.kind === "transfer"}
-                    onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}
-                  >
-                    <option value="">{draft.kind === "transfer" ? "Transfer has no category" : "Select category"}</option>
-                    {kindCategories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
+            </section>
 
-            <div className="finance-line-items">
-              <div className="finance-line-items-head">
-                <div>
-                  <div className="finance-panel-title">Line items</div>
-                  <p className="finance-panel-copy">Split if needed.</p>
-                </div>
+            {!hasAccounts ? (
+              <div className="ui-toast ui-toast--info finance-inline-note">
+                <div className="finance-toast-copy">เพิ่มบัญชีก่อนอนุมัติรายการ</div>
                 <button
                   type="button"
                   className="ui-btn ui-btn-secondary"
-                  onClick={() =>
-                    setDraft((current) => ({
-                      ...current,
-                      lineItems: [
-                        ...lineItemsFromDraft(current),
-                        { name: "", amountSatang: 0, categoryId: current.categoryId || "" },
-                      ],
-                    }))
-                  }
+                  onClick={() => {
+                    setSelected(null);
+                    window.location.hash = "#accounts";
+                  }}
                 >
-                  Add line
+                  ไปที่บัญชี
                 </button>
               </div>
+            ) : (
+              <>
+                <section className="finance-form-section">
+                  <div className="finance-grid finance-grid-2">
+                    <label className="finance-field">
+                      <span className="ui-label">จำนวนเงิน</span>
+                      <input
+                        className="ui-input"
+                        inputMode="decimal"
+                        value={amountInput}
+                        onChange={(event) => {
+                          setAmountInput(event.target.value);
+                          setDraft((current) => ({
+                            ...current,
+                            amountSatang: parseMoneyToSatang(event.target.value),
+                          }));
+                        }}
+                      />
+                    </label>
 
-              {lineItemsFromDraft(draft).length ? (
-                lineItemsFromDraft(draft).map((item, index) => (
-                  <div key={`${selected.id}-${index}`} className="finance-line-item-card">
+                    <label className="finance-field">
+                      <span className="ui-label">วันที่</span>
+                      <input
+                        className="ui-input"
+                        type="date"
+                        value={draft.date}
+                        onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))}
+                      />
+                    </label>
+                  </div>
+
+                  {draft.kind === "transfer" ? (
                     <div className="finance-grid finance-grid-2">
                       <label className="finance-field">
-                        <span className="ui-label">Name</span>
-                        <input
-                          className="ui-input"
-                          value={item.name || ""}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                rowIndex === index ? { ...row, name: event.target.value } : row,
-                              ),
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="finance-field">
-                        <span className="ui-label">Amount (THB)</span>
-                        <input
-                          className="ui-input"
-                          inputMode="decimal"
-                          value={toInputAmount(item.amountSatang)}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                rowIndex === index
-                                  ? { ...row, amountSatang: parseMoneyToSatang(event.target.value) }
-                                  : row,
-                              ),
-                            }))
-                          }
-                        />
-                      </label>
-                    </div>
-                    {draft.kind !== "transfer" ? (
-                      <label className="finance-field">
-                        <span className="ui-label">Category</span>
+                        <span className="ui-label">จากบัญชี</span>
                         <select
                           className="ui-select"
-                          value={item.categoryId || ""}
+                          value={draft.fromAccountId}
                           onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                rowIndex === index ? { ...row, categoryId: event.target.value } : row,
-                              ),
-                            }))
+                            setDraft((current) => ({ ...current, fromAccountId: event.target.value }))
                           }
                         >
-                          <option value="">Use parent category</option>
+                          <option value="">เลือกบัญชี</option>
+                          {accounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="finance-field">
+                        <span className="ui-label">ไปบัญชี</span>
+                        <select
+                          className="ui-select"
+                          value={draft.toAccountId}
+                          onChange={(event) => setDraft((current) => ({ ...current, toAccountId: event.target.value }))}
+                        >
+                          <option value="">เลือกบัญชี</option>
+                          {accounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="finance-grid finance-grid-2">
+                      <label className="finance-field">
+                        <span className="ui-label">บัญชี</span>
+                        <select
+                          className="ui-select"
+                          value={draft.accountId}
+                          onChange={(event) => setDraft((current) => ({ ...current, accountId: event.target.value }))}
+                        >
+                          <option value="">เลือกบัญชี</option>
+                          {accounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="finance-field">
+                        <span className="ui-label">หมวดหมู่</span>
+                        <select
+                          className="ui-select"
+                          value={draft.categoryId}
+                          onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}
+                        >
+                          <option value="">{draft.kind === "transfer" ? "ไม่ใช้หมวดหมู่" : "เลือกหมวดหมู่"}</option>
                           {kindCategories.map((category) => (
                             <option key={category.id} value={category.id}>
                               {category.name}
@@ -390,32 +359,190 @@ export default function InboxScreen() {
                           ))}
                         </select>
                       </label>
-                    ) : null}
-                  </div>
-                ))
-              ) : (
-                <div className="finance-line-items-empty">
-                  No split lines yet.
-                </div>
-              )}
-            </div>
+                    </div>
+                  )}
 
-            <div className="finance-review-summary">
-              <div>
-                <span className="ui-label">Current total</span>
-                <div className="finance-row-title">{formatCurrency(draft.amountSatang)}</div>
-              </div>
-              {lineItemsFromDraft(draft).length ? (
-                <div>
-                  <span className="ui-label">Lines sum</span>
-                  <div className="finance-row-title">
-                    {formatCurrency(
-                      lineItemsFromDraft(draft).reduce((sum, item) => sum + Number(item.amountSatang || 0), 0),
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
+                  <label className="finance-field">
+                    <span className="ui-label">รายการ</span>
+                    <input
+                      className="ui-input"
+                      value={draft.merchant}
+                      onChange={(event) => setDraft((current) => ({ ...current, merchant: event.target.value }))}
+                    />
+                  </label>
+                </section>
+
+                <details className="finance-details" open={showMore}>
+                  <summary
+                    className="finance-details-summary bento-summary"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      setShowMore((current) => !current);
+                    }}
+                  >
+                    <span>รายละเอียดเพิ่ม</span>
+                    <span className="finance-details-caret">{showMore ? "ซ่อน" : "แสดง"}</span>
+                  </summary>
+
+                  {showMore ? (
+                    <div className="finance-details-body">
+                      <div className="finance-grid finance-grid-2">
+                        <label className="finance-field">
+                          <span className="ui-label">อ้างอิง</span>
+                          <input
+                            className="ui-input"
+                            value={draft.reference}
+                            onChange={(event) =>
+                              setDraft((current) => ({ ...current, reference: event.target.value }))
+                            }
+                          />
+                        </label>
+
+                        <label className="finance-field">
+                          <span className="ui-label">วิธีจ่าย</span>
+                          <input
+                            className="ui-input"
+                            value={draft.paymentMethod}
+                            onChange={(event) =>
+                              setDraft((current) => ({ ...current, paymentMethod: event.target.value }))
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <label className="finance-field">
+                        <span className="ui-label">บันทึกเพิ่ม</span>
+                        <textarea
+                          className="ui-input finance-textarea"
+                          value={draft.note}
+                          onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </details>
+
+                {draft.kind !== "transfer" ? (
+                  <details className="finance-details" open={showLines}>
+                    <summary
+                      className="finance-details-summary bento-summary"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setShowLines((current) => !current);
+                      }}
+                    >
+                      <span>แยกรายการ</span>
+                      <span className="finance-details-caret">{showLines ? "ซ่อน" : "แสดง"}</span>
+                    </summary>
+
+                    {showLines ? (
+                      <div className="finance-details-body">
+                        <div className="finance-line-items">
+                          <div className="finance-line-items-head">
+                            <button
+                              type="button"
+                              className="ui-btn ui-btn-secondary"
+                              onClick={() =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  lineItems: [
+                                    ...lineItemsFromDraft(current),
+                                    { name: "", amountSatang: 0, categoryId: current.categoryId || "" },
+                                  ],
+                                }))
+                              }
+                            >
+                              เพิ่มบรรทัด
+                            </button>
+                          </div>
+
+                          {lineItemsFromDraft(draft).length ? (
+                            lineItemsFromDraft(draft).map((item, index) => (
+                              <div key={`${selected.id}-${index}`} className="finance-line-item-card">
+                                <div className="finance-grid finance-grid-2">
+                                  <label className="finance-field">
+                                    <span className="ui-label">ชื่อรายการ</span>
+                                    <input
+                                      className="ui-input"
+                                      value={item.name || ""}
+                                      onChange={(event) =>
+                                        setDraft((current) => ({
+                                          ...current,
+                                          lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
+                                            rowIndex === index ? { ...row, name: event.target.value } : row,
+                                          ),
+                                        }))
+                                      }
+                                    />
+                                  </label>
+
+                                  <label className="finance-field">
+                                    <span className="ui-label">จำนวนเงิน</span>
+                                    <input
+                                      className="ui-input"
+                                      inputMode="decimal"
+                                      value={toInputAmount(item.amountSatang)}
+                                      onChange={(event) =>
+                                        setDraft((current) => ({
+                                          ...current,
+                                          lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
+                                            rowIndex === index
+                                              ? { ...row, amountSatang: parseMoneyToSatang(event.target.value) }
+                                              : row,
+                                          ),
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                </div>
+
+                                <label className="finance-field">
+                                  <span className="ui-label">หมวดหมู่</span>
+                                  <select
+                                    className="ui-select"
+                                    value={item.categoryId || ""}
+                                    onChange={(event) =>
+                                      setDraft((current) => ({
+                                        ...current,
+                                        lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
+                                          rowIndex === index ? { ...row, categoryId: event.target.value } : row,
+                                        ),
+                                      }))
+                                    }
+                                  >
+                                    <option value="">ใช้หมวดหลัก</option>
+                                    {kindCategories.map((category) => (
+                                      <option key={category.id} value={category.id}>
+                                        {category.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="finance-line-items-empty">ยังไม่มีบรรทัด</div>
+                          )}
+
+                          {lineItemsFromDraft(draft).length ? (
+                            <div className="finance-review-summary">
+                              <div>
+                                <span className="ui-label">ยอดหลัก</span>
+                                <div className="finance-row-title">{formatCurrency(draft.amountSatang)}</div>
+                              </div>
+                              <div>
+                                <span className="ui-label">รวมบรรทัด</span>
+                                <div className="finance-row-title">{formatCurrency(lineItemsTotal)}</div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </details>
+                ) : null}
+              </>
+            )}
           </div>
         ) : null}
       </Sheet>

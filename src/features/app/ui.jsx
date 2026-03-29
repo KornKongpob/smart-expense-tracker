@@ -12,11 +12,11 @@ import { formatCurrency } from "../../utils/format.js";
 import { useLockBodyScroll } from "../../utils/useLockBodyScroll.js";
 
 const NAV_ITEMS = [
-  { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-  { id: "inbox", label: "Inbox", icon: Inbox },
-  { id: "add", label: "Add", icon: PlusCircle, primary: true },
-  { id: "accounts", label: "Accounts", icon: CreditCard },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "dashboard", label: "ภาพรวม", icon: BarChart3 },
+  { id: "inbox", label: "กล่องรับ", icon: Inbox },
+  { id: "add", label: "เพิ่ม", icon: PlusCircle },
+  { id: "accounts", label: "บัญชี", icon: CreditCard },
+  { id: "settings", label: "ตั้งค่า", icon: Settings },
 ];
 
 function isTextEntryElement(node) {
@@ -50,13 +50,7 @@ export function BottomNav({ view, onChange }) {
             <button
               key={item.id}
               type="button"
-              className={[
-                "app-nav-item",
-                item.primary ? "app-nav-item--primary" : "",
-                active ? "app-nav-item--active" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
+              className={["app-nav-item", active ? "app-nav-item--active" : ""].filter(Boolean).join(" ")}
               onClick={() => onChange(item.id)}
               aria-current={active ? "page" : undefined}
               data-testid={`nav-${item.id}`}
@@ -74,13 +68,19 @@ export function BottomNav({ view, onChange }) {
 }
 
 export function ToastBar({ toast, onClose }) {
+  useEffect(() => {
+    if (!toast?.message) return undefined;
+    const timer = window.setTimeout(() => onClose?.(), 2400);
+    return () => window.clearTimeout(timer);
+  }, [onClose, toast?.message, toast?.tone]);
+
   if (!toast?.message) return null;
 
   return (
     <div className="finance-toast-wrap">
-      <div className={["ui-toast", `finance-toast-${toast.tone || "info"}`].join(" ")}>
+      <div className={["ui-toast", "finance-toast-card", `finance-toast-${toast.tone || "info"}`].join(" ")}>
         <div>
-          <div className="finance-toast-label">{toast.tone === "error" ? "Needs attention" : "Synced"}</div>
+          <div className="finance-toast-label">{toast.tone === "error" ? "ต้องตรวจ" : "บันทึกแล้ว"}</div>
           <div className="finance-toast-copy">{toast.message}</div>
         </div>
         <button type="button" className="ui-icon-btn" onClick={onClose} aria-label="Close message">
@@ -218,7 +218,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }) {
         data-testid="app-sheet"
       >
         <div className="finance-sheet-head">
-          <div>
+          <div className="finance-sheet-head-copy">
             <h2 className="finance-sheet-title">{title}</h2>
             {subtitle ? <p className="finance-sheet-subtitle">{subtitle}</p> : null}
           </div>
@@ -236,7 +236,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }) {
 export function MiniCashflowChart({ series }) {
   const points = Array.isArray(series) ? series : [];
   if (!points.length) {
-    return <div className="finance-chart-empty">No activity yet</div>;
+    return <div className="finance-chart-empty">ยังไม่มีข้อมูล</div>;
   }
 
   const values = points.flatMap((point) => [Number(point?.income_satang || 0), Number(point?.expense_satang || 0)]);
@@ -260,8 +260,8 @@ export function MiniCashflowChart({ series }) {
         <path d={buildPath("income_satang")} className="finance-chart-line finance-chart-line-income" />
       </svg>
       <div className="finance-chart-legend">
-        <span><i className="finance-dot finance-dot-income" />Income</span>
-        <span><i className="finance-dot finance-dot-expense" />Expense</span>
+        <span><i className="finance-dot finance-dot-income" />รายรับ</span>
+        <span><i className="finance-dot finance-dot-expense" />รายจ่าย</span>
       </div>
     </div>
   );

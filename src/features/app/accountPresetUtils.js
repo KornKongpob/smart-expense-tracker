@@ -24,6 +24,34 @@ const DEFAULT_PRESET_ID_BY_TYPE = Object.freeze({
   other: "generic_bank",
 });
 
+const PRESET_UI_BY_ID = Object.freeze({
+  cash_wallet: { label: "เงินสด", badge: "฿" },
+  generic_bank: { label: "ธนาคารอื่น", badge: "อื่น" },
+  generic_credit: { label: "บัตรอื่น", badge: "อื่น" },
+  bbl: { label: "กรุงเทพ", badge: "BBL" },
+  kbank: { label: "กสิกรไทย", badge: "KB" },
+  ktb: { label: "กรุงไทย", badge: "KTB" },
+  scb: { label: "ไทยพาณิชย์", badge: "SCB" },
+  bay: { label: "กรุงศรี", badge: "BAY" },
+  ttb: { label: "ttb", badge: "ttb" },
+  uob: { label: "UOB", badge: "UOB" },
+  cimb_thai: { label: "CIMB Thai", badge: "CIMB" },
+  gsb: { label: "ออมสิน", badge: "GSB" },
+  baac: { label: "ธ.ก.ส.", badge: "BAAC" },
+  ghb: { label: "ธอส.", badge: "GHB" },
+  kkp: { label: "KKP", badge: "KKP" },
+  lh_bank: { label: "LH Bank", badge: "LH" },
+  icbc_thai: { label: "ICBC Thai", badge: "ICBC" },
+  truemoney: { label: "TrueMoney", badge: "TRUE" },
+  line_bk: { label: "LINE BK", badge: "LINE" },
+});
+
+const PRESET_ORDER_BY_TYPE = Object.freeze({
+  cash: ["cash_wallet", "truemoney"],
+  bank: ["kbank", "scb", "bbl", "ktb", "bay", "ttb", "uob", "cimb_thai", "gsb", "baac", "ghb", "line_bk", "kkp", "lh_bank", "icbc_thai", "generic_bank"],
+  credit: ["scb", "kbank", "bbl", "ktb", "bay", "ttb", "uob", "cimb_thai", "line_bk", "kkp", "generic_credit"],
+});
+
 function normalizeKey(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -47,6 +75,18 @@ function matchesPresetToken(preset, query) {
   return tokens.some((token) => token.includes(query) || query.includes(token));
 }
 
+function sortPresets(options, type) {
+  const order = PRESET_ORDER_BY_TYPE[normalizeKey(type)] || [];
+  const orderMap = new Map(order.map((id, index) => [id, index]));
+
+  return [...options].sort((left, right) => {
+    const leftRank = orderMap.has(left.id) ? orderMap.get(left.id) : 999;
+    const rightRank = orderMap.has(right.id) ? orderMap.get(right.id) : 999;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return String(getPresetLabel(left)).localeCompare(String(getPresetLabel(right)), "th");
+  });
+}
+
 export function getDefaultAccountIcon(type) {
   const key = normalizeKey(type);
   return DEFAULT_ICON_BY_TYPE[key] || DEFAULT_ICON_BY_TYPE.bank;
@@ -62,13 +102,14 @@ export function getPresetOptionsForAccountType(type) {
   return options.length ? options : THAI_INSTITUTION_PRESETS;
 }
 
+export function getPresetOptionsForCreateFlow(type) {
+  return sortPresets(getPresetOptionsForAccountType(type), type);
+}
+
 export function coerceInstitutionPreset(presetLike, preferredType = "") {
   if (!presetLike) return null;
   if (typeof presetLike === "string") {
-    return (
-      getInstitutionPresetById(presetLike) ||
-      findInstitutionPresetByLabel(presetLike, preferredType)
-    );
+    return getInstitutionPresetById(presetLike) || findInstitutionPresetByLabel(presetLike, preferredType);
   }
   return presetLike;
 }
@@ -91,6 +132,25 @@ export function findInstitutionPresetByLabel(label, preferredType = "") {
   );
 }
 
+export function getPresetLabel(presetLike, preferredType = "") {
+  const preset = coerceInstitutionPreset(presetLike, preferredType);
+  if (!preset) return "";
+  return PRESET_UI_BY_ID[preset.id]?.label || String(preset.displayName || preset.shortName || "").trim();
+}
+
+export function getPresetBadgeText(presetLike, preferredType = "") {
+  const preset = coerceInstitutionPreset(presetLike, preferredType);
+  if (!preset) return "AC";
+  return PRESET_UI_BY_ID[preset.id]?.badge || String(preset.shortName || preset.displayName || "AC").trim().slice(0, 4);
+}
+
+export function getDefaultAccountNameFromPreset(presetLike, preferredType = "") {
+  const preset = coerceInstitutionPreset(presetLike, preferredType);
+  if (!preset) return "";
+  const nextType = inferInstitutionAccountType(preset, preferredType);
+  return getPresetLabel(preset, nextType) || getInstitutionDefaultName(preset, nextType);
+}
+
 export function resolvePresetForAccount(account) {
   if (!account || typeof account !== "object") return null;
   return findInstitutionPresetByLabel(
@@ -109,9 +169,9 @@ export function applyPresetToAccountDraft(draft, presetLike, preferredType = "")
     presetId: preset.id,
     type: nextType,
     institutionLabel: String(preset.displayName || preset.shortName || "").trim(),
-    name: getInstitutionDefaultName(preset, nextType),
+    name: getDefaultAccountNameFromPreset(preset, nextType),
     color: preset.brandColor || draft?.color || "#0f766e",
-    icon: getDefaultAccountIcon(nextType),
+    icon: draft?.icon || getDefaultAccountIcon(nextType),
   };
 
   if (nextType === "credit") {

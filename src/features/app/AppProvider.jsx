@@ -399,7 +399,7 @@ export function AppProvider({ children }) {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      pushToast("success", "Signed in to Smart Expense");
+      pushToast("success", "เข้าใช้แล้ว");
     } finally {
       setSaving(false);
     }
@@ -416,7 +416,7 @@ export function AppProvider({ children }) {
         options: Object.keys(metadata).length ? { data: metadata } : undefined,
       });
       if (error) throw error;
-      pushToast("success", "Check your email to verify your account");
+      pushToast("success", "เช็กอีเมลเพื่อยืนยัน");
     } finally {
       setSaving(false);
     }
@@ -435,7 +435,7 @@ export function AppProvider({ children }) {
         },
       });
       if (error) throw error;
-      pushToast("success", "Signed in as guest");
+      pushToast("success", "เข้าใช้แบบ Guest แล้ว");
     } finally {
       setSaving(false);
     }
@@ -445,7 +445,7 @@ export function AppProvider({ children }) {
     if (!supabase) return;
     await supabase.auth.signOut();
     migrationAttemptedRef.current = false;
-    pushToast("success", "Signed out");
+    pushToast("success", "ออกจากระบบแล้ว");
   }
 
   async function saveProfile(patch) {
@@ -470,7 +470,7 @@ export function AppProvider({ children }) {
       if (error) throw error;
       setProfile(data);
       await refreshAll(data);
-      pushToast("success", "Profile updated");
+      pushToast("success", "บันทึกโปรไฟล์แล้ว");
     } finally {
       setSaving(false);
     }
@@ -485,7 +485,7 @@ export function AppProvider({ children }) {
         body: JSON.stringify(payload),
       });
       await refreshAll();
-      pushToast("success", payload?.id ? "Account updated" : "Account added");
+      pushToast("success", payload?.id ? "อัปเดตบัญชีแล้ว" : "เพิ่มบัญชีแล้ว");
     } finally {
       setSaving(false);
     }
@@ -549,7 +549,7 @@ export function AppProvider({ children }) {
     if (!isOnline && !options.skipQueue) {
       const nextQueue = enqueueManualDraft(draft);
       setQueue(nextQueue);
-      pushToast("info", "Saved to offline queue. It will sync automatically.");
+      pushToast("info", "บันทึกออฟไลน์แล้ว");
       return;
     }
 
@@ -557,7 +557,7 @@ export function AppProvider({ children }) {
     try {
       await saveTransactionDraft(draft, { source: "manual" });
       await refreshAll();
-      pushToast("success", "Transaction saved");
+      pushToast("success", "บันทึกรายการแล้ว");
     } finally {
       setSaving(false);
     }
@@ -577,7 +577,7 @@ export function AppProvider({ children }) {
 
       if (error) throw error;
       await refreshAll();
-      pushToast("success", "Scan moved out of review");
+      pushToast("success", "ย้ายออกจากคิวแล้ว");
     } finally {
       setSaving(false);
     }
@@ -652,7 +652,7 @@ export function AppProvider({ children }) {
       }
 
       await refreshAll();
-      pushToast("success", "Scan approved and posted");
+      pushToast("success", "บันทึกรายการแล้ว");
     } finally {
       setSaving(false);
     }
@@ -664,7 +664,7 @@ export function AppProvider({ children }) {
     if (!isOnline && !options.skipQueue) {
       const nextQueue = await enqueueScanDraft(file);
       setQueue(nextQueue);
-      pushToast("info", "Receipt saved offline. It will upload when you are back online.");
+      pushToast("info", "เก็บไฟล์ไว้แล้ว");
       return null;
     }
 
@@ -672,7 +672,7 @@ export function AppProvider({ children }) {
     try {
       const result = await uploadScanWithSession(session, accounts, file);
       await refreshAll();
-      pushToast("success", "Scan added to Inbox");
+      pushToast("success", "เพิ่มเข้า Inbox แล้ว");
       return result;
     } finally {
       setSaving(false);
@@ -703,11 +703,11 @@ export function AppProvider({ children }) {
       await refreshAll();
 
       if (result.skipped) {
-        if (!automatic) pushToast("info", "This legacy snapshot was already imported.");
+        if (!automatic) pushToast("info", "เคยย้ายข้อมูลชุดนี้แล้ว");
       } else if (result.failures?.length) {
-        pushToast("error", "Legacy data imported with some attachment failures. Review Settings for details.");
+        pushToast("error", "ย้ายข้อมูลแล้วแต่ยังมีไฟล์บางส่วนผิดพลาด");
       } else {
-        pushToast("success", "Legacy local data imported successfully");
+        pushToast("success", "ย้ายข้อมูลเดิมแล้ว");
       }
     } catch (error) {
       setMigrationState({
@@ -802,7 +802,7 @@ export function AppProvider({ children }) {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      pushToast("success", "Backup exported");
+      pushToast("success", "ส่งออกข้อมูลแล้ว");
     } finally {
       setSaving(false);
     }
@@ -822,7 +822,7 @@ export function AppProvider({ children }) {
         body: JSON.stringify({ snapshot, attachments }),
       });
       await refreshAll();
-      pushToast("success", "Backup imported");
+      pushToast("success", "นำเข้าข้อมูลแล้ว");
     } finally {
       setSaving(false);
     }

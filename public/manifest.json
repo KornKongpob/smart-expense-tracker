@@ -1,11 +1,11 @@
 {
-  "name": "Smart Expense Tracker",
-  "short_name": "Expense",
-  "description": "แอปจดบันทึกรายรับ-รายจ่ายอัจฉริยะ สแกนใบเสร็จ ตั้งงบ วิเคราะห์การใช้จ่าย",
+  "name": "Smart Expense",
+  "short_name": "Smart Expense",
+  "description": "บันทึกรายรับรายจ่ายและจัดการบัญชีบนมือถือ",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f7f7fb",
-  "theme_color": "#4f46e5",
+  "background_color": "#f5f7fb",
+  "theme_color": "#f5f7fb",
   "orientation": "portrait",
   "icons": [
     {
@@ -19,6 +19,11 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
     }
   ],
   "categories": ["finance", "productivity"],

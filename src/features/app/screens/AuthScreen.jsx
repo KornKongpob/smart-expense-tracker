@@ -37,54 +37,49 @@ export default function AuthScreen() {
 
   return (
     <main className="finance-auth">
-      <section className="finance-auth-hero">
+      <section className="ui-card-strong finance-auth-panel finance-auth-panel-single">
         <div className="finance-auth-brand">Smart Expense</div>
-        <h1 className="finance-auth-title">Money, without the clutter.</h1>
-        <p className="finance-auth-copy">Sign in with email, or start with guest mode first.</p>
-      </section>
+        <h1 className="finance-auth-title">{mode === "signup" ? "สมัคร" : "เข้าใช้"}</h1>
 
-      <section className="ui-card-strong finance-auth-panel">
-        <div className="view-segmented">
+        <div className="view-segmented finance-auth-switch">
           <button
             type="button"
             className={["view-segmented-btn", mode === "signin" ? "is-active" : ""].join(" ")}
             onClick={() => setMode("signin")}
           >
-            Sign in
+            เข้าสู่ระบบ
           </button>
           <button
             type="button"
             className={["view-segmented-btn", mode === "signup" ? "is-active" : ""].join(" ")}
             onClick={() => setMode("signup")}
           >
-            Create account
+            สมัคร
           </button>
         </div>
 
         {!hasSupabaseConfig ? (
           <div className="ui-toast ui-toast--error">
-            <div className="finance-toast-copy">
-              Missing `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY`. Add the browser env vars before using the redesigned app.
-            </div>
+            <div className="finance-toast-copy">ยังไม่ได้ตั้งค่า Supabase สำหรับฝั่งเว็บ</div>
           </div>
         ) : null}
 
         <form className="finance-form" onSubmit={submit}>
           {mode === "signup" ? (
             <label className="finance-field">
-              <span className="ui-label">Display name</span>
+              <span className="ui-label">ชื่อที่แสดง</span>
               <input
                 className="ui-input"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Teera"
+                placeholder="ชื่อของคุณ"
                 autoComplete="name"
               />
             </label>
           ) : null}
 
           <label className="finance-field">
-            <span className="ui-label">Email</span>
+            <span className="ui-label">อีเมล</span>
             <input
               className="ui-input"
               type="email"
@@ -97,27 +92,27 @@ export default function AuthScreen() {
           </label>
 
           <label className="finance-field">
-            <span className="ui-label">Password</span>
-            <input
-              className="ui-input"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 6 characters"
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-              minLength={6}
-              required
-            />
+            <span className="ui-label">รหัสผ่าน</span>
+              <input
+                className="ui-input"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="อย่างน้อย 6 ตัว"
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                minLength={6}
+                required
+              />
           </label>
 
           {error ? <div className="ui-error">{error}</div> : null}
 
           <button type="submit" className="ui-btn ui-btn-primary finance-submit" disabled={!hasSupabaseConfig || saving}>
-            {saving ? "Please wait..." : mode === "signup" ? "Create account" : "Sign in"}
+            {saving ? "กำลังดำเนินการ..." : mode === "signup" ? "สร้างบัญชี" : "เข้าสู่ระบบ"}
           </button>
 
           <div className="finance-auth-divider" aria-hidden="true">
-            or
+            หรือ
           </div>
 
           <button
@@ -127,13 +122,9 @@ export default function AuthScreen() {
             onClick={continueAsGuest}
             data-testid="guest-login"
           >
-            {saving ? "Please wait..." : "Continue as guest"}
+            {saving ? "กำลังดำเนินการ..." : "ใช้แบบ Guest"}
           </button>
-
-          <p className="finance-auth-copy finance-auth-alt-copy">Guest mode creates an anonymous Supabase session.</p>
         </form>
-
-        <p className="finance-auth-footnote">Personal workspace, one owner, one monthly target.</p>
       </section>
     </main>
   );

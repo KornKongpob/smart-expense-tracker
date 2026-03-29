@@ -1,4 +1,4 @@
-export default function LoadingScreen({ label = "Preparing your finance workspace" }) {
+export default function LoadingScreen({ label = "กำลังโหลด" }) {
   return (
     <main className="finance-loading">
       <div className="ui-card-strong finance-loading-card">
