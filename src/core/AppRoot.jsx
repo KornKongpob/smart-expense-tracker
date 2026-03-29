@@ -7,6 +7,7 @@ import DashboardScreen from "../features/app/screens/DashboardScreen.jsx";
 import InboxScreen from "../features/app/screens/InboxScreen.jsx";
 import AddScreen from "../features/app/screens/AddScreen.jsx";
 import AccountsScreen from "../features/app/screens/AccountsScreen.jsx";
+import CategoriesScreen from "../features/app/screens/CategoriesScreen.jsx";
 import SettingsScreen from "../features/app/screens/SettingsScreen.jsx";
 import { BottomNav, ToastBar } from "../features/app/ui.jsx";
 import { useHashView } from "../features/app/useHashView.js";
@@ -69,6 +70,7 @@ function SignedInApp() {
         {view === "inbox" ? <InboxScreen /> : null}
         {view === "add" ? <AddScreen /> : null}
         {view === "accounts" ? <AccountsScreen /> : null}
+        {view === "categories" ? <CategoriesScreen /> : null}
         {view === "settings" ? <SettingsScreen /> : null}
       </main>
 

@@ -176,14 +176,14 @@ export default function DashboardScreen() {
       {(hasCategories || hasAccounts) ? (
         <section className="finance-grid finance-grid-main">
           {hasCategories ? (
-            <article className="ui-card finance-panel">
+            <article className="ui-card finance-panel" data-testid="dashboard-top-categories">
               <div className="finance-panel-head">
                 <div className="finance-panel-title">หมวด</div>
               </div>
 
               <div className="finance-list">
                 {topCategories.map((category) => (
-                  <div key={category.id} className="finance-row">
+                  <div key={category.id} className="finance-row" data-testid={`dashboard-category-${category.id}`}>
                     <div className="finance-row-main">
                       <span
                         className="finance-category-icon"

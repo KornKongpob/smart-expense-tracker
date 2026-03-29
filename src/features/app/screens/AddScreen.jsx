@@ -70,8 +70,9 @@ export default function AddScreen() {
 
   const hasAccounts = accounts.length > 0;
   const queueCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
-  const kindCategories =
-    draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense;
+  const kindCategories = (
+    draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense
+  ).filter((category) => category?.isHidden !== true);
 
   useEffect(() => {
     setDraft((current) =>
@@ -142,6 +143,7 @@ export default function AddScreen() {
           type="button"
           className={["view-segmented-btn", mode === "manual" ? "is-active" : ""].join(" ")}
           onClick={() => setMode("manual")}
+          data-testid="add-mode-manual"
         >
           กรอกเอง
         </button>
@@ -238,6 +240,7 @@ export default function AddScreen() {
                         inputMode="decimal"
                         placeholder="0.00"
                         value={amountInput}
+                        data-testid="manual-amount-input"
                         onChange={(event) => {
                           setAmountInput(event.target.value);
                           setDraft((current) => ({
@@ -302,6 +305,7 @@ export default function AddScreen() {
                         <select
                           className="ui-select"
                           value={draft.accountId}
+                          data-testid="manual-account-select"
                           onChange={(event) => setDraft((current) => ({ ...current, accountId: event.target.value }))}
                         >
                           <option value="">เลือกบัญชี</option>
@@ -318,6 +322,7 @@ export default function AddScreen() {
                         <select
                           className="ui-select"
                           value={draft.categoryId}
+                          data-testid="manual-category-select"
                           onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}
                         >
                           <option value="">เลือกหมวดหมู่</option>
@@ -336,6 +341,7 @@ export default function AddScreen() {
                     <input
                       className="ui-input"
                       value={draft.merchant}
+                      data-testid="manual-merchant-input"
                       onChange={(event) => setDraft((current) => ({ ...current, merchant: event.target.value }))}
                       placeholder="เช่น ค่าอาหาร"
                     />
@@ -522,6 +528,7 @@ export default function AddScreen() {
                     type="button"
                     className="ui-btn ui-btn-primary"
                     disabled={saving || !canSave}
+                    data-testid="manual-save"
                     onClick={async () => {
                       await createManualTransaction(draft);
                       resetDraft();

@@ -9,6 +9,18 @@ import {
 } from "react";
 
 import { buildLegacyMigrationPayload, clearQueuedScanBlob, consumeOfflineQueueItem, enqueueManualDraft, enqueueScanDraft, readOfflineQueue, readQueuedScanBlob, writeOfflineQueue, hasLegacySnapshot } from "./clientState.js";
+import {
+  applyCategoryPresentationToSnapshot,
+  buildNextCustomCategoryId,
+  flattenCategoryGroups,
+  getNextCategorySortOrder,
+  mergeCategoryState,
+} from "./categoryState.js";
+import {
+  clearStoredCategoryPreference,
+  readStoredCategoryPreferences,
+  upsertStoredCategoryPreference,
+} from "./categoryPreferenceStorage.js";
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/supabase/client.js";
 import { canonicalizeCategoryId } from "../../utils/categoryIds.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
@@ -46,17 +58,6 @@ function toInt(value, fallback = 0) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.trunc(number);
-}
-
-function groupCategories(rows) {
-  const expense = [];
-  const income = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
-    const kind = String(row?.kind || "").trim().toLowerCase();
-    if (kind === "income") income.push(row);
-    else expense.push(row);
-  }
-  return { expense, income };
 }
 
 function buildAuthMetadata(displayName) {
@@ -337,6 +338,103 @@ export function AppProvider({ children }) {
     setToast(null);
   }
 
+  function toCategoryErrorMessage(error) {
+    const message = String(error?.message || error || "").trim();
+
+    if (message === "category_name_required") return "กรุณาใส่ชื่อหมวดหมู่";
+    if (message === "category_parent_required") return "กรุณาเลือกหมวดหลัก";
+    if (message === "category_preferences_missing") return "ยังไม่พบตารางตั้งค่าหมวดหมู่ในฐานข้อมูล";
+    if (message === "category_write_failed") return "บันทึกหมวดหมู่ไม่สำเร็จ";
+    if (message === "category_preferences_write_failed") return "บันทึกการตั้งค่าหมวดหมู่ไม่สำเร็จ";
+    if (message === "category_preferences_delete_failed") return "กู้คืนหมวดหมู่ไม่สำเร็จ";
+    return message || "บันทึกหมวดหมู่ไม่สำเร็จ";
+  }
+
+  function shouldUseLocalCategoryPreferenceFallback(error) {
+    if (error?.unavailable === true) return true;
+    const code = String(error?.code || "").trim();
+    const message = String(error?.message || error || "").trim();
+    return code.includes("category_preferences_missing") || message.includes("category_preferences_missing");
+  }
+
+  async function fetchCategoryPreferencesSafe() {
+    if (!session) return { data: [], error: null };
+
+    try {
+      const json = await fetchWithSession(session, "/api/category-preferences", {
+        method: "GET",
+      });
+      if (shouldUseLocalCategoryPreferenceFallback(json)) {
+        return {
+          data: readStoredCategoryPreferences(session.user.id),
+          error: null,
+          localFallback: true,
+        };
+      }
+      return { data: Array.isArray(json?.preferences) ? json.preferences : [], error: null };
+    } catch (error) {
+      if (shouldUseLocalCategoryPreferenceFallback(error)) {
+        return {
+          data: readStoredCategoryPreferences(session.user.id),
+          error: null,
+          localFallback: true,
+        };
+      }
+      return {
+        data: [],
+        error: new Error(String(error?.message || error || "category_preferences_read_failed")),
+      };
+    }
+  }
+
+  async function upsertCategoryPreference(row) {
+    if (!session) return null;
+
+    const payload = {
+      categoryId: String(row?.category_id || row?.categoryId || "").trim(),
+      name: row?.name != null ? String(row.name || "").trim() || null : null,
+      icon: row?.icon != null ? String(row.icon || "").trim() || null : null,
+      color: row?.color != null ? String(row.color || "").trim() || null : null,
+      hidden: row?.hidden === true,
+    };
+
+    try {
+      const json = await fetchWithSession(session, "/api/category-preferences", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (shouldUseLocalCategoryPreferenceFallback(json)) {
+        return upsertStoredCategoryPreference(session.user.id, payload);
+      }
+      return json?.preference || null;
+    } catch (error) {
+      if (shouldUseLocalCategoryPreferenceFallback(error)) {
+        return upsertStoredCategoryPreference(session.user.id, payload);
+      }
+      throw new Error(String(error?.message || error || "category_preferences_write_failed"));
+    }
+  }
+
+  async function clearCategoryPreference(categoryId) {
+    if (!session) return;
+
+    try {
+      const json = await fetchWithSession(session, "/api/category-preferences", {
+        method: "DELETE",
+        body: JSON.stringify({ categoryId: String(categoryId || "").trim() }),
+      });
+      if (shouldUseLocalCategoryPreferenceFallback(json)) {
+        clearStoredCategoryPreference(session.user.id, categoryId);
+      }
+    } catch (error) {
+      if (shouldUseLocalCategoryPreferenceFallback(error)) {
+        clearStoredCategoryPreference(session.user.id, categoryId);
+        return;
+      }
+      throw new Error(String(error?.message || error || "category_preferences_delete_failed"));
+    }
+  }
+
   async function refreshAll(nextProfile = null) {
     if (!supabase || !session) return;
 
@@ -346,6 +444,7 @@ export function AppProvider({ children }) {
       const [
         profileResult,
         categoriesResult,
+        categoryPreferencesResult,
         accountsResult,
         scansResult,
         snapshotResult,
@@ -358,6 +457,7 @@ export function AppProvider({ children }) {
           .from("categories")
           .select("id, user_id, is_system, kind, name, icon, color, parent_id, sort_order")
           .order("sort_order", { ascending: true }),
+        fetchCategoryPreferencesSafe(),
         supabase
           .from("accounts")
           .select(
@@ -375,16 +475,23 @@ export function AppProvider({ children }) {
 
       if (profileResult.error) throw profileResult.error;
       if (categoriesResult.error) throw categoriesResult.error;
+      if (categoryPreferencesResult.error) throw categoryPreferencesResult.error;
       if (accountsResult.error) throw accountsResult.error;
       if (scansResult.error) throw scansResult.error;
       if (snapshotResult.error) throw snapshotResult.error;
       if (cashflowResult.error) throw cashflowResult.error;
 
+      const nextCategories = mergeCategoryState(
+        categoriesResult.data || [],
+        categoryPreferencesResult.data || [],
+      );
+      const nextSnapshot = applyCategoryPresentationToSnapshot(snapshotResult.data || null, nextCategories);
+
       setProfile(profileResult.data || nextProfile || null);
-      setCategories(groupCategories(categoriesResult.data || []));
+      setCategories(nextCategories);
       setAccounts(Array.isArray(accountsResult.data) ? accountsResult.data : []);
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
-      setDashboardSnapshot(snapshotResult.data || null);
+      setDashboardSnapshot(nextSnapshot);
       setCashflowSeries(Array.isArray(cashflowResult.data) ? cashflowResult.data : []);
       setLegacyAvailable(hasLegacySnapshot());
       setQueue(readOfflineQueue());
@@ -486,6 +593,137 @@ export function AppProvider({ children }) {
       });
       await refreshAll();
       pushToast("success", payload?.id ? "อัปเดตบัญชีแล้ว" : "เพิ่มบัญชีแล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCategory(payload) {
+    if (!supabase || !session) return null;
+
+    const allCategories = flattenCategoryGroups(categories);
+    const categoryId = String(payload?.id || "").trim();
+    const existing = categoryId
+      ? allCategories.find((row) => String(row?.id || "").trim() === categoryId) || null
+      : null;
+    const kind = String(payload?.kind || existing?.kind || "expense").trim().toLowerCase() === "income"
+      ? "income"
+      : "expense";
+    const name = String(payload?.name || "").trim();
+    const icon = String(payload?.icon || existing?.icon || "🏷️").trim() || "🏷️";
+    const color = String(payload?.color || existing?.color || "#0b84ff").trim() || "#0b84ff";
+    const isSystem = payload?.isSystem === true || existing?.isSystem === true;
+
+    if (!name) {
+      throw new Error("category_name_required");
+    }
+
+    setSaving(true);
+    try {
+      if (isSystem) {
+        const targetId = categoryId || String(existing?.id || "").trim();
+        if (!targetId) throw new Error("category_write_failed");
+
+        await upsertCategoryPreference({
+          categoryId: targetId,
+          name,
+          icon,
+          color,
+          hidden: false,
+        });
+      } else {
+        const wantsSub = String(payload?.level || "").trim() === "sub" || String(payload?.parentId || "").trim() !== "";
+        const requestedParentId = String(payload?.parentId || "").trim();
+        const parentCategory = requestedParentId
+          ? allCategories.find((row) => String(row?.id || "").trim() === requestedParentId) || null
+          : null;
+        const hasChildren = categoryId
+          ? allCategories.some((row) => String(row?.parentId || "").trim() === categoryId)
+          : false;
+
+        if (wantsSub && !requestedParentId) {
+          throw new Error("category_parent_required");
+        }
+
+        const safeParentId =
+          hasChildren
+            ? ""
+            : parentCategory && !String(parentCategory?.parentId || "").trim() && !parentCategory?.isHidden
+            ? String(parentCategory.id)
+            : "";
+
+        if (wantsSub && !safeParentId) {
+          throw new Error("category_parent_required");
+        }
+
+        const nextId = categoryId || buildNextCustomCategoryId({
+          userId: session.user.id,
+          kind,
+          name,
+          existingIds: allCategories.map((row) => row.id),
+        });
+
+        const categoryRow = {
+          id: nextId,
+          user_id: session.user.id,
+          is_system: false,
+          kind,
+          name,
+          icon,
+          color,
+          parent_id: safeParentId || null,
+          sort_order: existing?.sortOrder ?? getNextCategorySortOrder(categories, kind),
+        };
+
+        if (categoryId) {
+          const { error } = await supabase
+            .from("categories")
+            .update(categoryRow)
+            .eq("id", nextId)
+            .eq("user_id", session.user.id);
+
+          if (error) throw new Error(String(error.message || "category_write_failed"));
+        } else {
+          const { error } = await supabase.from("categories").insert(categoryRow);
+          if (error) throw new Error(String(error.message || "category_write_failed"));
+        }
+      }
+
+      await refreshAll();
+      pushToast("success", categoryId ? "บันทึกหมวดหมู่แล้ว" : "เพิ่มหมวดหมู่แล้ว");
+      return true;
+    } catch (error) {
+      const message = toCategoryErrorMessage(error);
+      pushToast("error", message);
+      throw new Error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function setCategoryHidden(categoryId, hidden) {
+    if (!supabase || !session) return null;
+
+    const targetId = String(categoryId || "").trim();
+    const allCategories = flattenCategoryGroups(categories);
+    const target = allCategories.find((row) => String(row?.id || "").trim() === targetId) || null;
+    if (!target || target.isSystem) return null;
+
+    setSaving(true);
+    try {
+      if (hidden) {
+        await upsertCategoryPreference({ categoryId: targetId, hidden: true });
+      } else {
+        await clearCategoryPreference(targetId);
+      }
+
+      await refreshAll();
+      pushToast("success", hidden ? "ซ่อนหมวดหมู่แล้ว" : "กู้คืนหมวดหมู่แล้ว");
+      return true;
+    } catch (error) {
+      const message = toCategoryErrorMessage(error);
+      pushToast("error", message);
+      throw new Error(message);
     } finally {
       setSaving(false);
     }
@@ -869,6 +1107,8 @@ export function AppProvider({ children }) {
     refreshAll,
     saveProfile,
     saveAccount,
+    saveCategory,
+    setCategoryHidden,
     createManualTransaction,
     uploadScanFile,
     approveScanDocument,

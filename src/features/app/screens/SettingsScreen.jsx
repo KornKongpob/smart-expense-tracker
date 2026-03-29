@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, LogOut, RefreshCcw, Upload } from "lucide-react";
+import { ChevronRight, Download, FolderTree, LogOut, RefreshCcw, Upload } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import { ScreenShell, StatusPill } from "../ui.jsx";
@@ -79,6 +79,33 @@ export default function SettingsScreen() {
             {legacyAvailable ? (
               <StatusPill tone={migrationTone}>{profile?.migrated_at ? "ย้ายแล้ว" : "มีข้อมูลเก่า"}</StatusPill>
             ) : null}
+          </div>
+
+          <div className="finance-list">
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => {
+                window.location.hash = "#categories";
+              }}
+              data-testid="open-categories"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <FolderTree size={18} />
+                  </span>
+                  <div>
+                    <div className="finance-row-title">หมวดหมู่</div>
+                    <div className="finance-row-meta">จัดการหมวดหลักและหมวดย่อย</div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  <ChevronRight size={16} />
+                </div>
+              </div>
+            </button>
           </div>
 
           <div className="finance-inline-actions">

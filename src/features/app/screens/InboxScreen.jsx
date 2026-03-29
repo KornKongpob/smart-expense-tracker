@@ -76,8 +76,9 @@ export default function InboxScreen() {
     return haystack.includes(String(deferredSearch || "").trim().toLowerCase());
   });
 
-  const kindCategories =
-    draft?.kind === "income" ? categories.income : draft?.kind === "transfer" ? [] : categories.expense;
+  const kindCategories = (
+    draft?.kind === "income" ? categories.income : draft?.kind === "transfer" ? [] : categories.expense
+  ).filter((category) => category?.isHidden !== true);
 
   const hasAccounts = accounts.length > 0;
   const canApprove =

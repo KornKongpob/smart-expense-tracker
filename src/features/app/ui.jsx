@@ -45,7 +45,7 @@ export function BottomNav({ view, onChange }) {
       <div className="app-nav-surface finance-nav">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const active = view === item.id;
+          const active = item.id === "settings" ? view === "settings" || view === "categories" : view === item.id;
           return (
             <button
               key={item.id}

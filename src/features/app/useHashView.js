@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const ALLOWED_VIEWS = new Set(["dashboard", "inbox", "add", "accounts", "settings"]);
+const ALLOWED_VIEWS = new Set(["dashboard", "inbox", "add", "accounts", "categories", "settings"]);
 
 function readHashView() {
   if (typeof window === "undefined") return "dashboard";

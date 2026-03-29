@@ -35,7 +35,14 @@ import {
   buildQueueTypeChangeItem,
   normalizeQueueItemType,
 } from '../src/views/add-transaction/helpers/queueTypeHelpers.js';
+import { canonicalizeCategoryId } from '../src/utils/categoryIds.js';
+import { buildCustomCategoryId } from '../src/utils/categoryCustomId.js';
 import { createInitialState } from '../src/store/boot.js';
+import {
+  applyCategoryPresentationToSnapshot,
+  mergeCategoryState,
+} from '../src/features/app/categoryState.js';
+import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
 
 function installBrowserGlobals(t, { getItem = () => null, setItem = () => {}, removeItem = () => {} } = {}) {
@@ -306,6 +313,62 @@ test('storage: saveAll emits a storage failure event when serialization fails', 
   assert.equal(dispatched[0]?.detail?.message, 'serialize_failed');
 });
 
+test('categories: custom ids are user-scoped and deterministic', () => {
+  const first = buildCustomCategoryId('user-1234-5678', 'expense:coffee');
+  const second = buildCustomCategoryId('user-1234-5678', 'expense:coffee');
+  const third = buildCustomCategoryId('another-user', 'expense:coffee');
+
+  assert.equal(first, second);
+  assert.notEqual(first, third);
+  assert.match(first, /^cat_/);
+});
+
+test('categories: mergeCategoryState applies system overrides and cascades hidden custom parents', () => {
+  const merged = mergeCategoryState(
+    [
+      { id: 'food', is_system: true, kind: 'expense', name: 'Food', icon: '🍜', color: '#ff6b6b', parent_id: null, sort_order: 0 },
+      { id: 'cat_user_cafe', user_id: 'user-1', is_system: false, kind: 'expense', name: 'Cafe', icon: '☕', color: '#0b84ff', parent_id: null, sort_order: 90 },
+      { id: 'cat_user_pastry', user_id: 'user-1', is_system: false, kind: 'expense', name: 'Pastry', icon: '🥐', color: '#f59e0b', parent_id: 'cat_user_cafe', sort_order: 91 },
+    ],
+    [
+      { user_id: 'user-1', category_id: 'food', name: 'อาหาร', icon: '🍲', color: '#16a34a', hidden: false },
+      { user_id: 'user-1', category_id: 'cat_user_cafe', hidden: true },
+    ],
+  );
+
+  const food = merged.expense.find((category) => category.id === 'food');
+  const cafe = merged.expense.find((category) => category.id === 'cat_user_cafe');
+  const pastry = merged.expense.find((category) => category.id === 'cat_user_pastry');
+
+  assert.equal(food?.name, 'อาหาร');
+  assert.equal(food?.icon, '🍲');
+  assert.equal(food?.color, '#16a34a');
+  assert.equal(cafe?.isHidden, true);
+  assert.equal(pastry?.isHidden, true);
+});
+
+test('categories: dashboard snapshot picks merged category presentation by id', () => {
+  const grouped = mergeCategoryState(
+    [{ id: 'food', is_system: true, kind: 'expense', name: 'Food', icon: '🍜', color: '#ff6b6b', parent_id: null, sort_order: 0 }],
+    [{ user_id: 'user-1', category_id: 'food', name: 'อาหาร', icon: '🍲', color: '#16a34a', hidden: false }],
+  );
+
+  const snapshot = applyCategoryPresentationToSnapshot(
+    {
+      top_categories: [{ id: 'food', name: 'Food', icon: '🍜', color: '#ff6b6b', total_satang: 5000 }],
+    },
+    grouped,
+  );
+
+  assert.deepEqual(snapshot.top_categories[0], {
+    id: 'food',
+    name: 'อาหาร',
+    icon: '🍲',
+    color: '#16a34a',
+    total_satang: 5000,
+  });
+});
+
 test('boot: merchants survive initial boot and wrapped reload-shaped round trip', () => {
   const seed = createSeedState();
   const firstPass = createInitialState(seed);
@@ -547,4 +610,21 @@ test('scan result helpers: normalize Thai BE dates and parse response text/objec
 
   assert.equal(extractResponsesOutputText(resp), 'line 1\nline 2');
   assert.deepEqual(findFirstParsedObject(resp), { amount: 2500, merchant: 'Cafe' });
+});
+
+test('categories: duplicate income ids are canonicalized for Supabase storage', () => {
+  assert.equal(canonicalizeCategoryId('expense', 'interest'), 'interest');
+  assert.equal(canonicalizeCategoryId('income', 'interest'), 'interest_income');
+  assert.equal(canonicalizeCategoryId('expense', 'adjust_balance'), 'adjust_balance');
+  assert.equal(canonicalizeCategoryId('income', 'adjust_balance'), 'adjust_balance_income');
+});
+
+test('system categories: generated rows stay globally unique', () => {
+  const rows = getSystemCategoryRows();
+  const ids = rows.map((row) => row.id);
+  const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+
+  assert.deepEqual(duplicates, []);
+  assert.ok(ids.includes('interest_income'));
+  assert.ok(ids.includes('adjust_balance_income'));
 });
