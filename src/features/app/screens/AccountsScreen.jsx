@@ -5,6 +5,7 @@ import { useExpenseApp } from "../AppProvider.jsx";
 import { EmptyPanel, ScreenShell, Sheet } from "../ui.jsx";
 import { formatCurrency } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
+import { buildAccountAdjustmentSummary, buildAccountBalanceMap } from "../accountBalanceState.js";
 import {
   applyPresetToAccountDraft,
   coerceInstitutionPreset,
@@ -68,36 +69,56 @@ function getAccountMeta(account, preset) {
 }
 
 export default function AccountsScreen() {
-  const { accounts, dashboardSnapshot, saveAccount, saving } = useExpenseApp();
+  const { accounts, accountBalanceSnapshot, saveAccount, adjustAccountBalance, saving, isOnline } = useExpenseApp();
   const [draft, setDraft] = useState(createDraft());
   const [editorOpen, setEditorOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [openingBalanceInput, setOpeningBalanceInput] = useState(toMoneyInput(0));
   const [creditLimitInput, setCreditLimitInput] = useState("");
+  const [desiredBalanceInput, setDesiredBalanceInput] = useState("");
+  const [adjustMode, setAdjustMode] = useState("transaction");
+  const [adjustDate, setAdjustDate] = useState(new Date().toISOString().slice(0, 10));
 
   const balanceMap = useMemo(() => {
-    const next = new Map();
-    for (const row of Array.isArray(dashboardSnapshot?.accounts) ? dashboardSnapshot.accounts : []) {
-      next.set(Number(row.id), Number(row.balance_satang || 0));
-    }
-    return next;
-  }, [dashboardSnapshot]);
+    return buildAccountBalanceMap(accountBalanceSnapshot);
+  }, [accountBalanceSnapshot]);
 
   const selectedPreset = useMemo(() => {
     return coerceInstitutionPreset(draft.presetId || draft.institutionLabel, draft.type);
   }, [draft.institutionLabel, draft.presetId, draft.type]);
 
   const presetOptions = useMemo(() => getPresetOptionsForCreateFlow(draft.type), [draft.type]);
+  const currentBalanceSatang = draft.id
+    ? balanceMap.get(Number(draft.id)) ?? Number(draft.openingBalanceSatang || 0)
+    : Number(draft.openingBalanceSatang || 0);
+  const adjustmentSummary = useMemo(
+    () =>
+      buildAccountAdjustmentSummary({
+        currentBalanceSatang,
+        desiredBalanceSatang: parseMoneyToSatang(desiredBalanceInput || "0"),
+      }),
+    [currentBalanceSatang, desiredBalanceInput],
+  );
 
   const syncMoneyInputs = (nextDraft) => {
     setOpeningBalanceInput(toMoneyInput(nextDraft.openingBalanceSatang));
     setCreditLimitInput(toMoneyInput(nextDraft.creditLimitSatang, true));
   };
 
+  const syncAdjustmentInputs = (nextDraft) => {
+    const currentBalance = nextDraft?.id
+      ? balanceMap.get(Number(nextDraft.id)) ?? Number(nextDraft.openingBalanceSatang || 0)
+      : Number(nextDraft?.openingBalanceSatang || 0);
+    setDesiredBalanceInput(toMoneyInput(currentBalance));
+    setAdjustMode("transaction");
+    setAdjustDate(new Date().toISOString().slice(0, 10));
+  };
+
   const openEditor = (account = null) => {
     const nextDraft = createDraft(account);
     setDraft(nextDraft);
     syncMoneyInputs(nextDraft);
+    syncAdjustmentInputs(nextDraft);
     setShowMore(false);
     setEditorOpen(true);
   };
@@ -106,6 +127,7 @@ export default function AccountsScreen() {
     const nextDraft = createDraft();
     setDraft(nextDraft);
     syncMoneyInputs(nextDraft);
+    syncAdjustmentInputs(nextDraft);
     setShowMore(false);
     setEditorOpen(false);
   };
@@ -120,6 +142,21 @@ export default function AccountsScreen() {
     const nextDraft = applyPresetToAccountDraft(draft, presetLike, draft.type);
     setDraft(nextDraft);
     setCreditLimitInput(toMoneyInput(nextDraft.creditLimitSatang, true));
+  };
+
+  const submitAdjustment = async () => {
+    if (!draft.id) return;
+
+    const result = await adjustAccountBalance({
+      accountId: draft.id,
+      desiredBalanceSatang: parseMoneyToSatang(desiredBalanceInput || "0"),
+      mode: adjustMode,
+      date: adjustMode === "transaction" ? adjustDate : undefined,
+    });
+
+    if (result && !result.noop) {
+      closeEditor();
+    }
   };
 
   const submit = async () => {
@@ -224,6 +261,22 @@ export default function AccountsScreen() {
         }
       >
         <div className="finance-form finance-account-form">
+          <section
+            className="finance-account-preview"
+            style={{ "--account-color": draft.color || selectedPreset?.brandColor || "#0b84ff" }}
+          >
+            <div className="finance-account-preview-kicker">
+              {draft.id ? "Current balance" : "Opening balance"}
+            </div>
+            <div className="finance-account-preview-title">
+              {formatCurrency(draft.id ? currentBalanceSatang : draft.openingBalanceSatang)}
+            </div>
+            <div className="finance-account-preview-meta">
+              {draft.id
+                ? "Use balance adjustment when you want this account to match the amount in real life."
+                : "This amount becomes the starting point for future balance calculations."}
+            </div>
+          </section>
           <section className="finance-form-section finance-form-section-compact">
             <div className="finance-section-label">ประเภท</div>
             <div className="finance-type-grid finance-type-grid-accounts">
@@ -363,6 +416,88 @@ export default function AccountsScreen() {
               </div>
             ) : null}
           </section>
+
+          {draft.id ? (
+            <section className="finance-form-section finance-account-adjust-section">
+              <div className="finance-section-label">Adjust balance</div>
+              <div className="ui-card finance-account-adjust-card">
+                <div className="finance-account-adjust-head">
+                  <div>
+                    <div className="finance-panel-title">Bring this account in sync</div>
+                    <div className="finance-panel-copy">
+                      Current {formatCurrency(currentBalanceSatang)}
+                    </div>
+                  </div>
+                  <div className="finance-account-adjust-delta">
+                    {adjustmentSummary.noop ? (
+                      <span className="finance-account-adjust-delta-label">No change</span>
+                    ) : (
+                      <>
+                        <span className="finance-account-adjust-delta-label">
+                          {adjustmentSummary.kind === "income" ? "Will add as income" : "Will add as expense"}
+                        </span>
+                        <strong>{formatCurrency(adjustmentSummary.amountSatang)}</strong>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="finance-grid finance-grid-2">
+                  <label className="finance-field">
+                    <span className="ui-label">Desired balance</span>
+                    <input
+                      className="ui-input"
+                      inputMode="decimal"
+                      value={desiredBalanceInput}
+                      onChange={(event) => setDesiredBalanceInput(event.target.value)}
+                      placeholder="0.00"
+                      data-testid="account-adjust-desired-balance"
+                    />
+                  </label>
+
+                  <label className="finance-field">
+                    <span className="ui-label">Adjustment mode</span>
+                    <select
+                      className="ui-select"
+                      value={adjustMode}
+                      onChange={(event) => setAdjustMode(event.target.value === "silent" ? "silent" : "transaction")}
+                      data-testid="account-adjust-mode"
+                    >
+                      <option value="transaction">Record income / expense</option>
+                      <option value="silent">Adjust balance only</option>
+                    </select>
+                  </label>
+                </div>
+
+                {adjustMode === "transaction" ? (
+                  <label className="finance-field">
+                    <span className="ui-label">Transaction date</span>
+                    <input
+                      className="ui-input"
+                      type="date"
+                      value={adjustDate}
+                      onChange={(event) => setAdjustDate(event.target.value)}
+                      data-testid="account-adjust-date"
+                    />
+                  </label>
+                ) : (
+                  <div className="finance-account-adjust-copy">
+                    Silent mode updates only the account baseline and does not create a transaction entry.
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-secondary"
+                  disabled={saving || !isOnline || !String(desiredBalanceInput || "").trim()}
+                  onClick={submitAdjustment}
+                  data-testid="account-adjust-submit"
+                >
+                  Apply balance adjustment
+                </button>
+              </div>
+            </section>
+          ) : null}
 
           <details className="finance-details" open={showMore}>
             <summary

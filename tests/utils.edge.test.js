@@ -23,6 +23,7 @@ import {
 } from '../src/utils/scanPostprocess.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
 import { parseScanRequest, assertAllowedInputMime, assertBase64UnderLimit } from '../lib/scan/requestParse.js';
+import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from '../lib/scan/openaiModel.js';
 import {
   extractResponsesOutputText,
   findFirstParsedObject,
@@ -48,6 +49,11 @@ import {
   getGoalProgressPercent,
   getNextDebtDueDateISO,
 } from '../src/features/app/plannerState.js';
+import {
+  buildAccountAdjustmentSummary,
+  buildAccountBalanceMap,
+  normalizeAccountBalanceRows,
+} from '../src/features/app/accountBalanceState.js';
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
 
@@ -723,6 +729,71 @@ test('planner helpers: reminders surface due debts and near-deadline goals', () 
   assert.equal(reminders[0].title, 'Visa Platinum');
   assert.equal(reminders[1].type, 'goal');
   assert.equal(reminders[1].title, 'Vacation');
+});
+
+test('scan model helpers: normalize GPT-5.4 aliases and keep GPT-5.4 as the default', () => {
+  assert.equal(OPENAI_SCAN_DEFAULT_MODEL, 'gpt-5.4');
+  assert.equal(normalizeOpenAIModel(''), 'gpt-5.4');
+  assert.equal(normalizeOpenAIModel('5.4'), 'gpt-5.4');
+  assert.equal(normalizeOpenAIModel('chatgpt 5.4'), 'gpt-5.4');
+  assert.equal(normalizeOpenAIModel('gpt-5.4'), 'gpt-5.4');
+  assert.equal(normalizeOpenAIModel('5'), 'gpt-5-chat-latest');
+  assert.equal(normalizeOpenAIModel('gpt-5.1'), 'gpt-5.1');
+});
+
+test('account balance helpers: normalize rows and build full balance maps', () => {
+  const rows = normalizeAccountBalanceRows([
+    { id: '1', balance_satang: '1200' },
+    { id: 2, balance_satang: -5000 },
+    { id: null, balance_satang: 100 },
+  ]);
+
+  assert.deepEqual(rows, [
+    { id: 1, balance_satang: 1200 },
+    { id: 2, balance_satang: -5000 },
+  ]);
+
+  const balanceMap = buildAccountBalanceMap(rows);
+  assert.equal(balanceMap.get(1), 1200);
+  assert.equal(balanceMap.get(2), -5000);
+});
+
+test('account balance helpers: summarize positive, negative, and noop adjustments', () => {
+  assert.deepEqual(
+    buildAccountAdjustmentSummary({ currentBalanceSatang: 10000, desiredBalanceSatang: 13500 }),
+    {
+      currentBalanceSatang: 10000,
+      desiredBalanceSatang: 13500,
+      deltaSatang: 3500,
+      amountSatang: 3500,
+      kind: 'income',
+      noop: false,
+    },
+  );
+
+  assert.deepEqual(
+    buildAccountAdjustmentSummary({ currentBalanceSatang: 10000, desiredBalanceSatang: 8500 }),
+    {
+      currentBalanceSatang: 10000,
+      desiredBalanceSatang: 8500,
+      deltaSatang: -1500,
+      amountSatang: 1500,
+      kind: 'expense',
+      noop: false,
+    },
+  );
+
+  assert.deepEqual(
+    buildAccountAdjustmentSummary({ currentBalanceSatang: -5000, desiredBalanceSatang: -5000 }),
+    {
+      currentBalanceSatang: -5000,
+      desiredBalanceSatang: -5000,
+      deltaSatang: 0,
+      amountSatang: 0,
+      kind: null,
+      noop: true,
+    },
+  );
 });
 
 test('system categories: generated rows stay globally unique', () => {

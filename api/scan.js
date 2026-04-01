@@ -12,6 +12,7 @@ import {
 } from "../lib/scan/requestParse.js";
 import { scanWithProvider } from "../lib/scan/providers/index.js";
 import { normalizeErrorResponse, safeJsonParseMaybe } from "../lib/scan/normalize.js";
+import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from "../lib/scan/openaiModel.js";
 import {
   clamp01 as clamp01Helper,
   extractResponsesOutputText as extractResponsesOutputTextHelper,
@@ -26,6 +27,11 @@ import {
   extractMerchantFromScanText,
   normalizeScanText,
 } from "../src/utils/scanPostprocess.js";
+import { getSupabaseAdmin, hasSupabaseServerConfig } from "../lib/supabase/admin.js";
+import { getRequestUser } from "../lib/supabase/auth.js";
+import { uploadUserDocument } from "../lib/supabase/documents.js";
+import { ensureSystemCategories } from "../lib/supabase/systemCategories.js";
+import { normalizeMerchantKey } from "../src/utils/merchantDictionary.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
@@ -894,44 +900,6 @@ async function callOpenAI({ base64, mimeType, filename, accounts = [], images = 
     };
   }
 
-  // Users sometimes set OPENAI_MODEL to informal names like "chatgpt 5.0".
-  // Normalize to valid model IDs.
-  const normalizeOpenAIModel = (raw) => {
-    const s = String(raw || "").trim();
-    // Default to GPT-5.1 (vision-capable) if caller provides an empty value.
-    if (!s) return "gpt-5.1";
-
-    const low = s.toLowerCase();
-
-    // Common informal variants → ChatGPT snapshot model id
-    if (
-      low === "5" ||
-      low === "5.0" ||
-      low === "gpt5" ||
-      low === "gpt-5.0" ||
-      low === "gpt-5.0.0" ||
-      low === "chatgpt-5" ||
-      low === "chatgpt-5.0" ||
-      low === "chat gpt 5" ||
-      low === "chat gpt 5.0" ||
-      low === "chatgpt 5" ||
-      low === "chatgpt 5.0"
-    ) {
-      return "gpt-5-chat-latest";
-    }
-
-    // Prefer explicit 5.1 when requested
-    if (low === "5.1" || low === "gpt5.1" || low === "gpt-5.1" || low === "chatgpt 5.1" || low === "chatgpt-5.1") {
-      return "gpt-5.1";
-    }
-
-    // Normalize dotted version to the stable id
-    if (low === "gpt-5.0") return "gpt-5";
-
-    // Otherwise trust caller value
-    return s;
-  };
-
   const normalizePaymentMethod = (raw) => {
     const s = String(raw || "").trim().toLowerCase();
     if (!s) return "unknown";
@@ -966,10 +934,10 @@ async function callOpenAI({ base64, mimeType, filename, accounts = [], images = 
         if (!id) return null;
         const name = cleanOneLine(a?.name || "", 80);
         const type = cleanOneLine(a?.type || "", 30).toLowerCase();
-        const cardLast4 = digitsOnly(a?.cardLast4 || a?.digits || "").slice(-4);
+        const cardLast4 = digitsOnly(a?.cardLast4 || a?.last4 || a?.digits || "").slice(-4);
         const accDigits = digitsOnly(a?.accountNumber || a?.account_number || "");
-        const accountLast6 = accDigits ? accDigits.slice(-6) : "";
-        const accountLast4 = accDigits ? accDigits.slice(-4) : "";
+        const accountLast6 = digitsOnly(a?.last6 || "").slice(-6) || (accDigits ? accDigits.slice(-6) : "");
+        const accountLast4 = digitsOnly(a?.last4 || "").slice(-4) || (accDigits ? accDigits.slice(-4) : "");
         return {
           id,
           name: name || id,
@@ -1003,10 +971,11 @@ async function callOpenAI({ base64, mimeType, filename, accounts = [], images = 
       const last6 = c.slice(-6);
       const last4 = c.slice(-4);
       const hit = list.find((a) => {
-        const acc = digitsOnly(a?.accountNumber);
-        if (!acc) return false;
-        if (last6 && acc.endsWith(last6)) return true;
-        if (last4 && acc.endsWith(last4)) return true;
+        const acc = digitsOnly(a?.accountNumber || a?.account_number || "");
+        const accLast6 = digitsOnly(a?.accountLast6 || a?.last6 || "").slice(-6) || (acc ? acc.slice(-6) : "");
+        const accLast4 = digitsOnly(a?.accountLast4 || a?.last4 || "").slice(-4) || (acc ? acc.slice(-4) : "");
+        if (last6 && accLast6 && accLast6 === last6) return true;
+        if (last4 && accLast4 && accLast4 === last4) return true;
         return false;
       });
       if (hit?.id) return String(hit.id);
@@ -1015,10 +984,10 @@ async function callOpenAI({ base64, mimeType, filename, accounts = [], images = 
     return "";
   };
 
-  // Default to GPT-5.1 (vision input) and Structured Outputs-capable models.
-  // Override with OPENAI_MODEL. Optionally set OPENAI_FALLBACK_MODEL for retries (model-not-found / access issues).
-  const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || "gpt-5.1");
-  const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_FALLBACK_MODEL || "gpt-5.1");
+  // Default to GPT-5.4 across the OpenAI receipt pipeline.
+  // Override with OPENAI_MODEL / OPENAI_FALLBACK_MODEL when needed.
+  const model = normalizeOpenAIModel(process.env.OPENAI_MODEL || OPENAI_SCAN_DEFAULT_MODEL);
+  const fallbackModel = normalizeOpenAIModel(process.env.OPENAI_FALLBACK_MODEL || OPENAI_SCAN_DEFAULT_MODEL);
   // Allow multi-view images (crops/tiles of the same doc) for better OCR.
   const imageList = Array.isArray(images) && images.length
     ? images
@@ -1439,10 +1408,10 @@ ${accountsText}
 
     let tip = null;
     if (isModelNotFound(msg)) {
-      tip = "Set OPENAI_MODEL to a model your key can access (recommended: gpt-5.1).";
+      tip = "Set OPENAI_MODEL to a model your key can access (recommended: gpt-5.4).";
     } else if (isSchemaUnsupported(msg)) {
       tip =
-        "This model may not support Structured Outputs (json_schema). Use a supported model (e.g. gpt-5.1 or gpt-4o-mini) or let the server fall back to JSON mode.";
+        "This model may not support Structured Outputs (json_schema). Use a supported model (e.g. gpt-5.4 or gpt-4o-mini) or let the server fall back to JSON mode.";
     } else if (/api key|incorrect api key|unauthorized/i.test(msg) || r.status === 401) {
       tip = "Check OPENAI_API_KEY in Vercel Project Settings → Environment Variables (and redeploy).";
     } else if (/quota|insufficient|billing|payment/i.test(msg) || r.status === 402) {
@@ -1548,7 +1517,7 @@ ${accountsText}
     (positiveItemCount < 2 || needsReviewFlag || (itemsConfFlag != null && itemsConfFlag < 0.75));
 
   if (shouldItemsFallback) {
-    const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || usedModel || "gpt-5.1");
+    const itemsModel = normalizeOpenAIModel(process.env.OPENAI_ITEMS_MODEL || usedModel || OPENAI_SCAN_DEFAULT_MODEL);
 
     const itemsText = {
       format: {
@@ -1932,6 +1901,150 @@ Output JSON schema:
   };
 }
 
+function matchScanAccountId(accounts, suggestion) {
+  const list = Array.isArray(accounts) ? accounts : [];
+  if (!list.length || !suggestion || typeof suggestion !== "object") return null;
+
+  const explicitId = safeString(suggestion.account_id || suggestion.accountId);
+  if (explicitId && list.some((account) => String(account?.id || "") === explicitId)) {
+    return explicitId;
+  }
+
+  const candidateDigits = [];
+  for (const value of [
+    suggestion.from_account,
+    suggestion.to_account,
+    suggestion.account_last4,
+    suggestion.account_last6,
+  ]) {
+    const digits = normalizeDigits(value);
+    if (digits) candidateDigits.push(digits);
+  }
+
+  for (const candidate of Array.isArray(suggestion.account_candidates) ? suggestion.account_candidates : []) {
+    const digits = normalizeDigits(candidate?.digits || candidate?.raw || "");
+    if (digits) candidateDigits.push(digits);
+  }
+
+  for (const candidate of candidateDigits) {
+    const last6 = candidate.slice(-6);
+    const last4 = candidate.slice(-4);
+    const hit = list.find((account) => {
+      const accountLast6 = normalizeDigits(account?.last6 || account?.accountLast6 || "").slice(-6);
+      const accountLast4 = normalizeDigits(
+        account?.last4 || account?.cardLast4 || account?.accountLast4 || account?.digits_masked || "",
+      ).slice(-4);
+
+      if (last6 && accountLast6 && accountLast6 === last6) return true;
+      if (last4 && accountLast4 && accountLast4 === last4) return true;
+      return false;
+    });
+
+    if (hit?.id != null) return String(hit.id);
+  }
+
+  return null;
+}
+
+async function buildScanResponseBody({ auth, out, accounts, firstFile }) {
+  const suggestion = out?.body?.data && typeof out.body.data === "object" ? out.body.data : null;
+  const baseBody = {
+    ...(out?.body && typeof out.body === "object" ? out.body : {}),
+    scanDocumentId: null,
+    suggestion,
+    confidence: suggestion?.confidence?.overall ?? null,
+    matchedAccountId: null,
+    matchedCategoryId: null,
+    items: Array.isArray(suggestion?.items) ? suggestion.items : [],
+    attachment: null,
+  };
+
+  if (!auth?.user || !hasSupabaseServerConfig() || !out?.body?.ok || !suggestion) {
+    return baseBody;
+  }
+
+  const buffer =
+    firstFile?.base64 && typeof firstFile.base64 === "string"
+      ? Buffer.from(firstFile.base64, "base64")
+      : null;
+
+  if (!buffer?.length) {
+    throw new Error("scan_attachment_missing");
+  }
+
+  const admin = getSupabaseAdmin();
+  await ensureSystemCategories(admin);
+
+  const uploaded = await uploadUserDocument({
+    admin,
+    userId: auth.user.id,
+    buffer,
+    mimeType: firstFile?.mimeType || "application/octet-stream",
+    filename: firstFile?.filename || "scan-upload",
+    prefix: "scans",
+  });
+
+  const matchedAccountId = matchScanAccountId(accounts, suggestion);
+  const matchedCategoryId =
+    suggestion?.tx_type === "transfer"
+      ? null
+      : safeString(suggestion?.category_key || suggestion?.category) || null;
+
+  const { data, error } = await admin
+    .from("scan_documents")
+    .insert({
+      user_id: auth.user.id,
+      source_type: "upload",
+      status: "pending_review",
+      storage_bucket: uploaded.bucket,
+      file_path: uploaded.filePath,
+      file_name: uploaded.fileName,
+      mime_type: uploaded.mimeType,
+      file_hash: uploaded.fileHash,
+      raw_scan_payload: {
+        rawText: safeString(out?.body?.rawText),
+        model: safeString(out?.body?.model),
+      },
+      normalized_suggestion: suggestion,
+      confidence:
+        suggestion?.confidence?.overall != null ? Number(clamp01(suggestion.confidence.overall)) : null,
+      matched_account_id:
+        matchedAccountId != null && Number.isFinite(Number(matchedAccountId))
+          ? Number(matchedAccountId)
+          : null,
+      matched_category_id: matchedCategoryId,
+      merchant_key: normalizeMerchantKey(suggestion?.merchant || ""),
+    })
+    .select("id, file_path, file_name, mime_type, file_hash, matched_account_id, matched_category_id")
+    .single();
+
+  if (error) {
+    throw new Error(error.message || "scan_document_insert_failed");
+  }
+
+  return {
+    ...baseBody,
+    scanDocumentId: Number(data?.id || 0) || null,
+    matchedAccountId:
+      data?.matched_account_id != null ? Number(data.matched_account_id) : matchedAccountId || null,
+    matchedCategoryId: data?.matched_category_id || matchedCategoryId || null,
+    attachment: data?.file_path
+      ? {
+          bucket: uploaded.bucket,
+          path: data.file_path,
+          fileName: data.file_name || uploaded.fileName,
+          mimeType: data.mime_type || uploaded.mimeType,
+          fileHash: data.file_hash || uploaded.fileHash,
+        }
+      : null,
+  };
+}
+
+async function sendScanResponse({ res, auth, out, accounts, firstFile }) {
+  const body = await buildScanResponseBody({ auth, out, accounts, firstFile });
+  res.status(out.status).json(body);
+}
+
 export default async function handler(req, res) {
   try {
     setSecurityHeadersModule(res);
@@ -1943,6 +2056,7 @@ export default async function handler(req, res) {
       return;
     }
 
+    const auth = hasSupabaseServerConfig() ? await getRequestUser(req) : { user: null, token: "", error: "" };
     const ct = _getContentType(req);
 
     // 1) multipart/form-data
@@ -1989,7 +2103,13 @@ export default async function handler(req, res) {
       const out = pdf
         ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
         : await callOpenAI({ images: normalized, accounts });
-      res.status(out.status).json(out.body);
+      await sendScanResponse({
+        res,
+        auth,
+        out,
+        accounts,
+        firstFile: pdf || normalized[0] || null,
+      });
       return;
     }
 
@@ -2033,7 +2153,13 @@ export default async function handler(req, res) {
         const out = pdf
           ? await callOpenAI({ base64: pdf.base64, mimeType: pdf.mimeType, filename: pdf.filename, accounts })
           : await callOpenAI({ images: normalized, accounts });
-        res.status(out.status).json(out.body);
+        await sendScanResponse({
+          res,
+          auth,
+          out,
+          accounts,
+          firstFile: pdf || normalized[0] || null,
+        });
         return;
       }
     }
@@ -2084,7 +2210,13 @@ export default async function handler(req, res) {
       scanOpenAI: callOpenAI,
     });
     const normalizedOut = normalizeErrorResponse(out);
-    res.status(normalizedOut.status).json(normalizedOut.body);
+    await sendScanResponse({
+      res,
+      auth,
+      out: normalizedOut,
+      accounts,
+      firstFile: { base64: b64, mimeType: mt, filename: filename || "scan-upload" },
+    });
   } catch (e) {
     const msg = String(e?.message || e);
     if (isAbortError(e)) {

@@ -29,6 +29,7 @@ import {
   normalizeDebtPlans,
   normalizeFinancialGoals,
 } from "./plannerState.js";
+import { normalizeAccountBalanceRows } from "./accountBalanceState.js";
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/supabase/client.js";
 import { canonicalizeCategoryId } from "../../utils/categoryIds.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
@@ -243,6 +244,29 @@ async function fetchOptionalPlannerRows(queryPromise, relationName) {
   return { data: Array.isArray(data) ? data : [], error: null, unavailable: false };
 }
 
+function isMissingRpcError(error, functionName) {
+  const message = String(error?.message || error || "").toLowerCase();
+  const rpcName = String(functionName || "").toLowerCase();
+  if (!message || !rpcName || !message.includes(rpcName)) return false;
+  return (
+    message.includes("does not exist") ||
+    message.includes("could not find") ||
+    message.includes("schema cache") ||
+    message.includes("function")
+  );
+}
+
+async function fetchOptionalRpcRows(queryPromise, functionName) {
+  const { data, error } = await queryPromise;
+  if (error) {
+    if (isMissingRpcError(error, functionName)) {
+      return { data: [], error: null, unavailable: true };
+    }
+    return { data: [], error };
+  }
+  return { data: Array.isArray(data) ? data : [], error: null, unavailable: false };
+}
+
 export function AppProvider({ children }) {
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -257,6 +281,7 @@ export function AppProvider({ children }) {
   const [debtPlans, setDebtPlans] = useState([]);
   const [scanDocuments, setScanDocuments] = useState([]);
   const [dashboardSnapshot, setDashboardSnapshot] = useState(null);
+  const [accountBalanceSnapshot, setAccountBalanceSnapshot] = useState([]);
   const [cashflowSeries, setCashflowSeries] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(todayMonth());
   const [toast, setToast] = useState(null);
@@ -319,6 +344,7 @@ export function AppProvider({ children }) {
       setDebtPlans([]);
       setScanDocuments([]);
       setDashboardSnapshot(null);
+      setAccountBalanceSnapshot([]);
       setCashflowSeries([]);
       return;
     }
@@ -485,6 +511,7 @@ export function AppProvider({ children }) {
         debtPlansResult,
         scansResult,
         snapshotResult,
+        accountBalanceResult,
         cashflowResult,
       ] = await Promise.all([
         nextProfile
@@ -525,6 +552,10 @@ export function AppProvider({ children }) {
           .order("created_at", { ascending: false })
           .limit(30),
         supabase.rpc("dashboard_snapshot", { target_month: monthDate }),
+        fetchOptionalRpcRows(
+          supabase.rpc("account_balance_snapshot", { target_user: session.user.id }),
+          "account_balance_snapshot",
+        ),
         supabase.rpc("dashboard_cashflow_series", { target_month: monthDate }),
       ]);
 
@@ -536,6 +567,7 @@ export function AppProvider({ children }) {
       if (debtPlansResult.error) throw debtPlansResult.error;
       if (scansResult.error) throw scansResult.error;
       if (snapshotResult.error) throw snapshotResult.error;
+      if (accountBalanceResult.error) throw accountBalanceResult.error;
       if (cashflowResult.error) throw cashflowResult.error;
 
       const nextCategories = mergeCategoryState(
@@ -551,6 +583,7 @@ export function AppProvider({ children }) {
       setDebtPlans(normalizeDebtPlans(debtPlansResult.data || []));
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
       setDashboardSnapshot(nextSnapshot);
+      setAccountBalanceSnapshot(normalizeAccountBalanceRows(accountBalanceResult.data || []));
       setCashflowSeries(Array.isArray(cashflowResult.data) ? cashflowResult.data : []);
       setLegacyAvailable(hasLegacySnapshot());
       setQueue(readOfflineQueue());
@@ -652,6 +685,37 @@ export function AppProvider({ children }) {
       });
       await refreshAll();
       pushToast("success", payload?.id ? "อัปเดตบัญชีแล้ว" : "เพิ่มบัญชีแล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function adjustAccountBalance(payload) {
+    if (!session) return null;
+    if (!isOnline) {
+      pushToast("error", "ต้องออนไลน์เพื่อปรับยอดบัญชี");
+      return null;
+    }
+
+    setSaving(true);
+    try {
+      const json = await fetchWithSession(session, "/api/account-adjustments", {
+        method: "POST",
+        body: JSON.stringify(payload || {}),
+      });
+
+      await refreshAll();
+
+      if (json?.noop) {
+        pushToast("info", "ยอดบัญชีตรงอยู่แล้ว");
+        return json;
+      }
+
+      pushToast(
+        "success",
+        String(json?.mode || "").trim() === "silent" ? "ปรับยอดบัญชีแล้ว" : "บันทึกการปรับยอดแล้ว",
+      );
+      return json;
     } finally {
       setSaving(false);
     }
@@ -1274,6 +1338,7 @@ export function AppProvider({ children }) {
     debtPlans,
     scanDocuments,
     dashboardSnapshot,
+    accountBalanceSnapshot,
     cashflowSeries,
     plannerSummary,
     plannerReminders,
@@ -1290,6 +1355,7 @@ export function AppProvider({ children }) {
     refreshAll,
     saveProfile,
     saveAccount,
+    adjustAccountBalance,
     saveFinancialGoal,
     deleteFinancialGoal,
     saveDebtPlan,

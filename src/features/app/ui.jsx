@@ -126,9 +126,9 @@ export function ToastBar({ toast, onClose }) {
   );
 }
 
-export function ScreenShell({ eyebrow, title, subtitle, actions, children }) {
+export function ScreenShell({ eyebrow, title, subtitle, actions, children, fillViewport = true }) {
   return (
-    <section className="finance-screen">
+    <section className={["finance-screen", fillViewport ? "finance-screen-fill" : ""].filter(Boolean).join(" ")}>
       <header className="finance-screen-head">
         <div className="finance-screen-copy">
           {eyebrow ? <div className="view-eyebrow">{eyebrow}</div> : null}

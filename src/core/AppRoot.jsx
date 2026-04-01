@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { AppProvider, useExpenseApp } from "../features/app/AppProvider.jsx";
 import AuthScreen from "../features/app/screens/AuthScreen.jsx";
@@ -37,8 +37,40 @@ function SignedInApp() {
   const { authReady, session, bootstrapping, queue, toast, clearToast, isOnline } = useExpenseApp();
   const [view, setView] = useHashView();
   const pendingCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
+  const headerRef = useRef(null);
 
   useStandaloneMode();
+
+  useLayoutEffect(() => {
+    const node = headerRef.current;
+    if (!node || typeof document === "undefined") return undefined;
+
+    const updateHeight = () => {
+      const nextHeight = Math.ceil(node.getBoundingClientRect().height || 0);
+      if (nextHeight > 0) {
+        document.documentElement.style.setProperty("--finance-app-header-h", `${nextHeight}px`);
+      }
+    };
+
+    updateHeight();
+
+    let observer;
+    try {
+      observer = new ResizeObserver(() => updateHeight());
+      observer.observe(node);
+    } catch {
+      // Ignore browsers without ResizeObserver support.
+    }
+
+    window.addEventListener("resize", updateHeight);
+    window.addEventListener("orientationchange", updateHeight);
+
+    return () => {
+      window.removeEventListener("resize", updateHeight);
+      window.removeEventListener("orientationchange", updateHeight);
+      observer?.disconnect?.();
+    };
+  }, [isOnline, pendingCount, view]);
 
   if (!authReady) {
     return <LoadingScreen label="กำลังเข้าใช้" />;
@@ -56,7 +88,7 @@ function SignedInApp() {
     <div className="finance-app-shell">
       <ToastBar toast={toast} onClose={clearToast} />
 
-      <header className="finance-app-page finance-app-header">
+      <header ref={headerRef} className="finance-app-page finance-app-header">
         <div className="finance-app-header-surface">
           <div className="finance-brand">Smart Expense</div>
           <div className="finance-header-state">

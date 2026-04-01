@@ -135,8 +135,11 @@ If you continue refactoring there, prefer extracting pure helper logic or narrow
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+  - Defaults to `gpt-5.4` for the main OpenAI receipt pass
 - `OPENAI_FALLBACK_MODEL`
+  - Defaults to `gpt-5.4` and does not silently downgrade to GPT-5.1
 - `OPENAI_ITEMS_MODEL`
+  - Defaults to `gpt-5.4` for the line-item extraction pass
 - `OPENAI_TIMEOUT_MS`
 - `SCAN_PROVIDER`
 - `SCAN_MAX_JSON_BODY_BYTES`
