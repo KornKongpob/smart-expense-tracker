@@ -76,10 +76,13 @@ export default function DashboardScreen() {
       .join(" ");
 
   return (
-    <ScreenShell
-      title="ภาพรวม"
-      actions={
-        <label className="finance-month-picker">
+    <ScreenShell title="ภาพรวม">
+      <article className="ui-card finance-panel finance-month-card">
+        <div className="finance-month-card-copy">
+          <div className="finance-panel-title">เดือนที่กำลังดู</div>
+          <div className="finance-panel-copy">เลือกเดือนที่ต้องการสรุปและติดตามแผน</div>
+        </div>
+        <label className="finance-month-picker finance-month-picker-card">
           <input
             className="ui-input"
             type="month"
@@ -87,8 +90,8 @@ export default function DashboardScreen() {
             onChange={(event) => setSelectedMonth(event.target.value)}
           />
         </label>
-      }
-    >
+      </article>
+
       <article className="ui-card finance-panel finance-dashboard-hero">
         <div className="finance-dashboard-hero-head">
           <div>

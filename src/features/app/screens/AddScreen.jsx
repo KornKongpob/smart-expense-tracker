@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
+import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import { ScreenShell, StatusPill } from "../ui.jsx";
 import { formatCurrency } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
@@ -317,22 +318,12 @@ export default function AddScreen() {
                         </select>
                       </label>
 
-                      <label className="finance-field">
-                        <span className="ui-label">หมวดหมู่</span>
-                        <select
-                          className="ui-select"
-                          value={draft.categoryId}
-                          data-testid="manual-category-select"
-                          onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}
-                        >
-                          <option value="">เลือกหมวดหมู่</option>
-                          {kindCategories.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <CategoryPresetChooser
+                        categories={kindCategories}
+                        value={draft.categoryId}
+                        fallbackTestId="manual-category-select"
+                        onChange={(categoryId) => setDraft((current) => ({ ...current, categoryId }))}
+                      />
                     </div>
                   )}
 

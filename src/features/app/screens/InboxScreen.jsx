@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Repeat2, Search, XCircle } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
+import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { formatCurrency, formatDateLong } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
@@ -390,21 +391,12 @@ export default function InboxScreen() {
                         </select>
                       </label>
 
-                      <label className="finance-field">
-                        <span className="ui-label">หมวดหมู่</span>
-                        <select
-                          className="ui-select"
-                          value={draft.categoryId}
-                          onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}
-                        >
-                          <option value="">{draft.kind === "transfer" ? "ไม่ใช้หมวดหมู่" : "เลือกหมวดหมู่"}</option>
-                          {kindCategories.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <CategoryPresetChooser
+                        categories={kindCategories}
+                        value={draft.categoryId}
+                        fallbackTestId="review-category-select"
+                        onChange={(categoryId) => setDraft((current) => ({ ...current, categoryId }))}
+                      />
                     </div>
                   )}
 
