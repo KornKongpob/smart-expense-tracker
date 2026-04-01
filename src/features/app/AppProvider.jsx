@@ -21,6 +21,14 @@ import {
   readStoredCategoryPreferences,
   upsertStoredCategoryPreference,
 } from "./categoryPreferenceStorage.js";
+import {
+  buildDebtPlanPayload,
+  buildFinancialGoalPayload,
+  buildPlannerReminders,
+  buildPlannerSnapshot,
+  normalizeDebtPlans,
+  normalizeFinancialGoals,
+} from "./plannerState.js";
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/supabase/client.js";
 import { canonicalizeCategoryId } from "../../utils/categoryIds.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
@@ -212,6 +220,29 @@ async function uploadScanWithSession(session, accounts, file) {
   return json;
 }
 
+function isMissingPlannerRelationError(error, relationName) {
+  const message = String(error?.message || error || "").toLowerCase();
+  const relation = String(relationName || "").toLowerCase();
+  if (!message || !relation || !message.includes(relation)) return false;
+  return (
+    message.includes("does not exist") ||
+    message.includes("could not find") ||
+    message.includes("schema cache") ||
+    message.includes("relation")
+  );
+}
+
+async function fetchOptionalPlannerRows(queryPromise, relationName) {
+  const { data, error } = await queryPromise;
+  if (error) {
+    if (isMissingPlannerRelationError(error, relationName)) {
+      return { data: [], error: null, unavailable: true };
+    }
+    return { data: [], error };
+  }
+  return { data: Array.isArray(data) ? data : [], error: null, unavailable: false };
+}
+
 export function AppProvider({ children }) {
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -222,6 +253,8 @@ export function AppProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState({ expense: [], income: [] });
+  const [financialGoals, setFinancialGoals] = useState([]);
+  const [debtPlans, setDebtPlans] = useState([]);
   const [scanDocuments, setScanDocuments] = useState([]);
   const [dashboardSnapshot, setDashboardSnapshot] = useState(null);
   const [cashflowSeries, setCashflowSeries] = useState([]);
@@ -282,6 +315,8 @@ export function AppProvider({ children }) {
       setProfile(null);
       setAccounts([]);
       setCategories({ expense: [], income: [] });
+      setFinancialGoals([]);
+      setDebtPlans([]);
       setScanDocuments([]);
       setDashboardSnapshot(null);
       setCashflowSeries([]);
@@ -446,6 +481,8 @@ export function AppProvider({ children }) {
         categoriesResult,
         categoryPreferencesResult,
         accountsResult,
+        goalsResult,
+        debtPlansResult,
         scansResult,
         snapshotResult,
         cashflowResult,
@@ -464,6 +501,24 @@ export function AppProvider({ children }) {
             "id, legacy_id, name, type, institution_label, currency, color, icon, opening_balance_satang, credit_limit_satang, last4, last6, digits_masked, statement_day, due_day, created_at",
           )
           .order("created_at", { ascending: true }),
+        fetchOptionalPlannerRows(
+          supabase
+            .from("financial_goals")
+            .select(
+              "id, legacy_id, name, target_amount_satang, current_amount_satang, target_date, monthly_contribution_satang, linked_account_id, status, created_at",
+            )
+            .order("target_date", { ascending: true, nullsFirst: false }),
+          "financial_goals",
+        ),
+        fetchOptionalPlannerRows(
+          supabase
+            .from("debt_plans")
+            .select(
+              "id, legacy_id, account_id, current_balance_satang, target_payment_satang, due_day, payoff_target_date, status, note, created_at",
+            )
+            .order("created_at", { ascending: true }),
+          "debt_plans",
+        ),
         supabase
           .from("scan_documents")
           .select("*")
@@ -477,6 +532,8 @@ export function AppProvider({ children }) {
       if (categoriesResult.error) throw categoriesResult.error;
       if (categoryPreferencesResult.error) throw categoryPreferencesResult.error;
       if (accountsResult.error) throw accountsResult.error;
+      if (goalsResult.error) throw goalsResult.error;
+      if (debtPlansResult.error) throw debtPlansResult.error;
       if (scansResult.error) throw scansResult.error;
       if (snapshotResult.error) throw snapshotResult.error;
       if (cashflowResult.error) throw cashflowResult.error;
@@ -490,6 +547,8 @@ export function AppProvider({ children }) {
       setProfile(profileResult.data || nextProfile || null);
       setCategories(nextCategories);
       setAccounts(Array.isArray(accountsResult.data) ? accountsResult.data : []);
+      setFinancialGoals(normalizeFinancialGoals(goalsResult.data || []));
+      setDebtPlans(normalizeDebtPlans(debtPlansResult.data || []));
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
       setDashboardSnapshot(nextSnapshot);
       setCashflowSeries(Array.isArray(cashflowResult.data) ? cashflowResult.data : []);
@@ -593,6 +652,108 @@ export function AppProvider({ children }) {
       });
       await refreshAll();
       pushToast("success", payload?.id ? "อัปเดตบัญชีแล้ว" : "เพิ่มบัญชีแล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveFinancialGoal(payload) {
+    if (!supabase || !session) return;
+
+    const goal = buildFinancialGoalPayload(payload);
+    setSaving(true);
+    try {
+      const row = {
+        user_id: session.user.id,
+        legacy_id: goal.legacy_id,
+        name: goal.name,
+        target_amount_satang: goal.target_amount_satang,
+        current_amount_satang: goal.current_amount_satang,
+        target_date: goal.target_date,
+        monthly_contribution_satang: goal.monthly_contribution_satang,
+        linked_account_id: goal.linked_account_id,
+        status: goal.status,
+      };
+
+      const query = goal.id
+        ? supabase.from("financial_goals").update(row).eq("id", goal.id).eq("user_id", session.user.id)
+        : supabase.from("financial_goals").insert(row);
+
+      const { error } = await query;
+      if (error) throw error;
+
+      await refreshAll();
+      pushToast("success", goal.id ? "อัปเดตเป้าหมายแล้ว" : "เพิ่มเป้าหมายแล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteFinancialGoal(goalId) {
+    if (!supabase || !session || !goalId) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("financial_goals")
+        .delete()
+        .eq("id", Number(goalId))
+        .eq("user_id", session.user.id);
+
+      if (error) throw error;
+
+      await refreshAll();
+      pushToast("success", "ลบเป้าหมายแล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveDebtPlan(payload) {
+    if (!supabase || !session) return;
+
+    const plan = buildDebtPlanPayload(payload);
+    setSaving(true);
+    try {
+      const row = {
+        user_id: session.user.id,
+        legacy_id: plan.legacy_id,
+        account_id: plan.account_id,
+        current_balance_satang: plan.current_balance_satang,
+        target_payment_satang: plan.target_payment_satang,
+        due_day: plan.due_day,
+        payoff_target_date: plan.payoff_target_date,
+        status: plan.status,
+        note: plan.note,
+      };
+
+      const query = plan.id
+        ? supabase.from("debt_plans").update(row).eq("id", plan.id).eq("user_id", session.user.id)
+        : supabase.from("debt_plans").insert(row);
+
+      const { error } = await query;
+      if (error) throw error;
+
+      await refreshAll();
+      pushToast("success", plan.id ? "อัปเดตแผนชำระแล้ว" : "เพิ่มแผนชำระแล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteDebtPlan(planId) {
+    if (!supabase || !session || !planId) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("debt_plans")
+        .delete()
+        .eq("id", Number(planId))
+        .eq("user_id", session.user.id);
+
+      if (error) throw error;
+
+      await refreshAll();
+      pushToast("success", "ลบแผนชำระแล้ว");
     } finally {
       setSaving(false);
     }
@@ -1020,6 +1181,8 @@ export function AppProvider({ children }) {
           moneyUnit: "satang",
           accounts,
           categories,
+          financialGoals,
+          debtPlans,
           inbox: scanDocuments,
           merchants: mappingRows || [],
           budgets: profile?.monthly_target_satang
@@ -1066,6 +1229,22 @@ export function AppProvider({ children }) {
     }
   }
 
+  const accountsById = new Map(
+    (Array.isArray(accounts) ? accounts : []).map((account) => [Number(account.id), account]),
+  );
+  const plannerSummary = buildPlannerSnapshot({
+    goals: financialGoals,
+    debts: debtPlans,
+    monthValue: selectedMonth,
+    today: todayDate(),
+  });
+  const plannerReminders = buildPlannerReminders({
+    goals: financialGoals,
+    debts: debtPlans,
+    today: todayDate(),
+    accountsById,
+  });
+
   const refreshAllEvent = useEffectEvent((nextProfile = null) => {
     void refreshAll(nextProfile);
   });
@@ -1091,9 +1270,13 @@ export function AppProvider({ children }) {
     profile,
     accounts,
     categories,
+    financialGoals,
+    debtPlans,
     scanDocuments,
     dashboardSnapshot,
     cashflowSeries,
+    plannerSummary,
+    plannerReminders,
     selectedMonth,
     queue,
     toast,
@@ -1107,6 +1290,10 @@ export function AppProvider({ children }) {
     refreshAll,
     saveProfile,
     saveAccount,
+    saveFinancialGoal,
+    deleteFinancialGoal,
+    saveDebtPlan,
+    deleteDebtPlan,
     saveCategory,
     setCategoryHidden,
     createManualTransaction,

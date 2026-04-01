@@ -1,7 +1,7 @@
-import { ArrowUpRight, CreditCard, Inbox, PlusCircle } from "lucide-react";
+import { ArrowUpRight, CreditCard, PlusCircle, Target } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
-import { AmountText, ScreenShell, StatusPill } from "../ui.jsx";
+import { AmountText, MetricCard, ScreenShell, StatusPill } from "../ui.jsx";
 import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
 import { formatCurrency } from "../../../utils/format.js";
 
@@ -29,7 +29,14 @@ function getAccountMeta(account) {
 }
 
 export default function DashboardScreen() {
-  const { dashboardSnapshot, cashflowSeries, loading, selectedMonth, setSelectedMonth } = useExpenseApp();
+  const {
+    dashboardSnapshot,
+    cashflowSeries,
+    loading,
+    plannerSummary,
+    selectedMonth,
+    setSelectedMonth,
+  } = useExpenseApp();
 
   const snapshot = dashboardSnapshot || {};
   const progress = percentOf(snapshot.expense_satang, snapshot.monthly_target_satang);
@@ -119,35 +126,61 @@ export default function DashboardScreen() {
         </div>
       </article>
 
-      {!hasActivity ? (
-        <article className="ui-card finance-panel finance-dashboard-next">
-          <div className="finance-panel-head">
-            <div className="finance-panel-title">{hasAccounts ? "เริ่มบันทึก" : "เริ่มต้น"}</div>
-          </div>
-          <div className="finance-dashboard-next-copy">
-            {hasAccounts ? "เพิ่มรายการแรกได้เลย" : "สร้างบัญชีก่อนเริ่มใช้งาน"}
-          </div>
-          <div className="finance-dashboard-actions">
-            {hasAccounts ? (
-              <>
-                <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#add")}>
-                  <PlusCircle size={16} />
-                  เพิ่มรายการ
-                </button>
-                <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateTo("#inbox")}>
-                  <Inbox size={16} />
-                  กล่องรับ
-                </button>
-              </>
-            ) : (
-              <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#accounts")}>
-                <CreditCard size={16} />
-                สร้างบัญชี
+      <section className="finance-grid finance-dashboard-planner-grid">
+        <MetricCard
+          label="จ่ายตามแผนเดือนนี้"
+          value={formatCurrency(plannerSummary.monthlyPlannedPaymentSatang)}
+          hint={`${plannerSummary.activeDebtCount} แผนที่กำลังติดตาม`}
+        />
+        <MetricCard
+          label="หนี้คงเหลือ"
+          value={formatCurrency(plannerSummary.totalDebtBalanceSatang)}
+          hint={`${plannerSummary.dueSoonCount} รายการใกล้ถึงกำหนด`}
+          tone={plannerSummary.totalDebtBalanceSatang > 0 ? "danger" : "success"}
+        />
+        <MetricCard
+          label="ความคืบหน้าเป้าหมาย"
+          value={`${plannerSummary.goalProgressPercent}%`}
+          hint={
+            plannerSummary.activeGoalCount
+              ? `${plannerSummary.activeGoalCount} เป้าหมาย · เก็บแล้ว ${formatCurrency(plannerSummary.totalGoalCurrentSatang)}`
+              : "ยังไม่มีเป้าหมายที่กำลังติดตาม"
+          }
+          tone={plannerSummary.goalProgressPercent >= 100 ? "success" : "default"}
+        />
+      </section>
+
+      <article className="ui-card finance-panel finance-dashboard-next">
+        <div className="finance-panel-head">
+          <div className="finance-panel-title">{hasAccounts ? (hasActivity ? "ทางลัด" : "เริ่มบันทึก") : "เริ่มต้น"}</div>
+        </div>
+        <div className="finance-dashboard-next-copy">
+          {hasAccounts
+            ? hasActivity
+              ? "เพิ่มรายการวันนี้หรือเปิด planner เพื่อดูแผนหนี้และเป้าหมาย"
+              : "เริ่มบันทึกรายการแรกหรือวางเป้าหมายการเงินได้เลย"
+            : "สร้างบัญชีก่อนเพื่อเริ่มวางแผนและติดตามการเงิน"}
+        </div>
+        <div className="finance-dashboard-actions">
+          {hasAccounts ? (
+            <>
+              <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#add")}>
+                <PlusCircle size={16} />
+                เพิ่มรายการ
               </button>
-            )}
-          </div>
-        </article>
-      ) : null}
+              <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateTo("#planner")}>
+                <Target size={16} />
+                เปิด Planner
+              </button>
+            </>
+          ) : (
+            <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#accounts")}>
+              <CreditCard size={16} />
+              สร้างบัญชี
+            </button>
+          )}
+        </div>
+      </article>
 
       {hasCashflow ? (
         <article className="ui-card finance-panel">

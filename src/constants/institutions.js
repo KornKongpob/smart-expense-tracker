@@ -227,6 +227,18 @@ const PRESETS = [
     defaultVisual: "institution",
     defaultName: "LINE BK",
   },
+  {
+    id: "generic_loan",
+    displayName: "Loan Account",
+    shortName: "Loan",
+    accountTypes: ["loan"],
+    brandColor: "#7c3aed",
+    logoSrc: "/institutions/generic-bank.svg",
+    aliases: ["loan", "debt", "สินเชื่อ", "หนี้"],
+    iconId: "bank",
+    defaultVisual: "institution",
+    defaultName: "สินเชื่อ",
+  },
 ];
 
 export const THAI_INSTITUTION_PRESETS = PRESETS;

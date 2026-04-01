@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Download, FolderTree, LogOut, RefreshCcw, Upload } from "lucide-react";
+import {
+  ChevronRight,
+  Download,
+  FolderTree,
+  LogOut,
+  RefreshCcw,
+  Target,
+  Upload,
+} from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import { ScreenShell, StatusPill } from "../ui.jsx";
 import { parseMoneyToSatang } from "../../../utils/money.js";
+
+function navigateTo(hash) {
+  window.location.hash = hash;
+}
 
 export default function SettingsScreen() {
   const {
@@ -11,6 +23,7 @@ export default function SettingsScreen() {
     queue,
     legacyAvailable,
     migrationState,
+    plannerSummary,
     saving,
     saveProfile,
     exportBackup,
@@ -32,6 +45,7 @@ export default function SettingsScreen() {
 
   const pendingCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
   const migrationTone = profile?.migrated_at ? "success" : "warning";
+  const plannerCount = Number(plannerSummary.activeGoalCount || 0) + Number(plannerSummary.activeDebtCount || 0);
 
   return (
     <ScreenShell title="ตั้งค่า">
@@ -85,9 +99,30 @@ export default function SettingsScreen() {
             <button
               type="button"
               className="finance-list-button"
-              onClick={() => {
-                window.location.hash = "#categories";
-              }}
+              onClick={() => navigateTo("#planner")}
+              data-testid="open-planner"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <Target size={18} />
+                  </span>
+                  <div>
+                    <div className="finance-row-title">วางแผนการเงิน</div>
+                    <div className="finance-row-meta">ติดตามเป้าหมายออมเงินและแผนชำระหนี้</div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  {plannerCount ? <StatusPill tone="default">{plannerCount} แผน</StatusPill> : <ChevronRight size={16} />}
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => navigateTo("#categories")}
               data-testid="open-categories"
             >
               <div className="finance-row">

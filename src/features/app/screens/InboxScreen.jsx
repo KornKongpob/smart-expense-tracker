@@ -28,6 +28,7 @@ export default function InboxScreen() {
     scanDocuments,
     accounts,
     categories,
+    plannerReminders,
     approveScanDocument,
     rejectScanDocument,
     scanToDraft,
@@ -115,6 +116,50 @@ export default function InboxScreen() {
 
   return (
     <ScreenShell title="กล่องรับ">
+      {plannerReminders.length ? (
+        <section className="ui-card finance-panel">
+          <div className="finance-panel-head">
+            <div>
+              <div className="finance-panel-title">เตือนจาก Planner</div>
+              <div className="finance-panel-copy">รายการที่ใกล้ถึงกำหนดภายใน 7 วัน</div>
+            </div>
+            <StatusPill tone="warning">{plannerReminders.length} รายการ</StatusPill>
+          </div>
+
+          <div className="finance-list finance-reminder-list">
+            {plannerReminders.map((reminder) => (
+              <button
+                key={reminder.id}
+                type="button"
+                className="finance-list-button"
+                onClick={() => {
+                  setSelected(null);
+                  window.location.hash = "#planner";
+                }}
+              >
+                <div className="finance-row finance-reminder-row">
+                  <div className="finance-row-main">
+                    <div>
+                      <div className="finance-row-title">{reminder.title}</div>
+                      <div className="finance-row-meta">
+                        {reminder.copy} · {formatDateLong(reminder.due_date)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="finance-row-side">
+                    <StatusPill tone={reminder.type === "debt" ? "warning" : "default"}>
+                      {reminder.type === "debt" ? "หนี้" : "เป้าหมาย"}
+                    </StatusPill>
+                    <div className="finance-row-amount">{formatCurrency(reminder.amount_satang || 0)}</div>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="ui-card finance-panel">
         <div className="finance-toolbar">
           <label className="finance-search">

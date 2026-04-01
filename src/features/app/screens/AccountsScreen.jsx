@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, CreditCard, Landmark, Wallet } from "lucide-react";
+import { Check, CreditCard, HandCoins, Landmark, Wallet } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import { EmptyPanel, ScreenShell, Sheet } from "../ui.jsx";
@@ -17,6 +17,7 @@ import {
 } from "../accountPresetUtils.js";
 
 const ACCOUNT_TYPE_OPTIONS = [
+  { id: "loan", label: "สินเชื่อ", icon: HandCoins },
   { id: "bank", label: "บัญชีธนาคาร", icon: Landmark },
   { id: "credit", label: "บัตรเครดิต", icon: CreditCard },
   { id: "cash", label: "เงินสด", icon: Wallet },
@@ -225,7 +226,7 @@ export default function AccountsScreen() {
         <div className="finance-form finance-account-form">
           <section className="finance-form-section finance-form-section-compact">
             <div className="finance-section-label">ประเภท</div>
-            <div className="finance-type-grid">
+            <div className="finance-type-grid finance-type-grid-accounts">
               {ACCOUNT_TYPE_OPTIONS.map((option) => {
                 const Icon = option.icon;
                 const active = draft.type === option.id;

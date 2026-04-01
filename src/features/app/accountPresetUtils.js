@@ -10,6 +10,7 @@ const DEFAULT_ICON_BY_TYPE = Object.freeze({
   cash: "💵",
   bank: "🏦",
   credit: "💳",
+  loan: "🧾",
   ewallet: "📱",
   investment: "📈",
   other: "💼",
@@ -19,6 +20,7 @@ const DEFAULT_PRESET_ID_BY_TYPE = Object.freeze({
   cash: "cash_wallet",
   bank: "generic_bank",
   credit: "generic_credit",
+  loan: "generic_loan",
   ewallet: "truemoney",
   investment: "generic_bank",
   other: "generic_bank",
@@ -28,6 +30,7 @@ const PRESET_UI_BY_ID = Object.freeze({
   cash_wallet: { label: "เงินสด", badge: "฿" },
   generic_bank: { label: "ธนาคารอื่น", badge: "อื่น" },
   generic_credit: { label: "บัตรอื่น", badge: "อื่น" },
+  generic_loan: { label: "สินเชื่อ", badge: "LOAN" },
   bbl: { label: "กรุงเทพ", badge: "BBL" },
   kbank: { label: "กสิกรไทย", badge: "KB" },
   ktb: { label: "กรุงไทย", badge: "KTB" },
@@ -50,6 +53,7 @@ const PRESET_ORDER_BY_TYPE = Object.freeze({
   cash: ["cash_wallet", "truemoney"],
   bank: ["kbank", "scb", "bbl", "ktb", "bay", "ttb", "uob", "cimb_thai", "gsb", "baac", "ghb", "line_bk", "kkp", "lh_bank", "icbc_thai", "generic_bank"],
   credit: ["scb", "kbank", "bbl", "ktb", "bay", "ttb", "uob", "cimb_thai", "line_bk", "kkp", "generic_credit"],
+  loan: ["generic_loan", "kbank", "scb", "bbl", "ktb", "bay", "ttb", "uob", "cimb_thai", "line_bk", "kkp", "generic_bank"],
 });
 
 function normalizeKey(value) {
@@ -98,6 +102,12 @@ export function getDefaultPresetIdForAccountType(type) {
 }
 
 export function getPresetOptionsForAccountType(type) {
+  if (normalizeKey(type) === "loan") {
+    const base = getInstitutionOptionsByType("bank");
+    const loanPreset = getInstitutionPresetById("generic_loan");
+    return loanPreset ? [loanPreset, ...base] : base;
+  }
+
   const options = getInstitutionOptionsByType(type);
   return options.length ? options : THAI_INSTITUTION_PRESETS;
 }
@@ -147,7 +157,7 @@ export function getPresetBadgeText(presetLike, preferredType = "") {
 export function getDefaultAccountNameFromPreset(presetLike, preferredType = "") {
   const preset = coerceInstitutionPreset(presetLike, preferredType);
   if (!preset) return "";
-  const nextType = inferInstitutionAccountType(preset, preferredType);
+  const nextType = normalizeKey(preferredType) === "loan" ? "loan" : inferInstitutionAccountType(preset, preferredType);
   return getPresetLabel(preset, nextType) || getInstitutionDefaultName(preset, nextType);
 }
 
@@ -163,7 +173,8 @@ export function applyPresetToAccountDraft(draft, presetLike, preferredType = "")
   const preset = coerceInstitutionPreset(presetLike, preferredType || draft?.type);
   if (!preset) return draft;
 
-  const nextType = inferInstitutionAccountType(preset, preferredType || draft?.type);
+  const requestedType = normalizeKey(preferredType || draft?.type);
+  const nextType = requestedType === "loan" ? "loan" : inferInstitutionAccountType(preset, requestedType);
   const normalized = {
     ...draft,
     presetId: preset.id,

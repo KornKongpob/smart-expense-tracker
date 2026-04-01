@@ -42,6 +42,12 @@ import {
   applyCategoryPresentationToSnapshot,
   mergeCategoryState,
 } from '../src/features/app/categoryState.js';
+import {
+  buildPlannerReminders,
+  buildPlannerSnapshot,
+  getGoalProgressPercent,
+  getNextDebtDueDateISO,
+} from '../src/features/app/plannerState.js';
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
 
@@ -617,6 +623,106 @@ test('categories: duplicate income ids are canonicalized for Supabase storage', 
   assert.equal(canonicalizeCategoryId('income', 'interest'), 'interest_income');
   assert.equal(canonicalizeCategoryId('expense', 'adjust_balance'), 'adjust_balance');
   assert.equal(canonicalizeCategoryId('income', 'adjust_balance'), 'adjust_balance_income');
+});
+
+test('planner helpers: goal progress and next debt due date stay bounded', () => {
+  assert.equal(
+    getGoalProgressPercent({ target_amount_satang: 200000, current_amount_satang: 100000 }),
+    50,
+  );
+  assert.equal(
+    getGoalProgressPercent({ target_amount_satang: 100000, current_amount_satang: 180000 }),
+    100,
+  );
+  assert.equal(
+    getNextDebtDueDateISO({ due_day: 5 }, '2026-04-01'),
+    '2026-04-05',
+  );
+  assert.equal(
+    getNextDebtDueDateISO({ due_day: 5 }, '2026-04-20'),
+    '2026-05-05',
+  );
+});
+
+test('planner helpers: snapshot aggregates active debt and goal totals for the selected month', () => {
+  const summary = buildPlannerSnapshot({
+    monthValue: '2026-04',
+    today: '2026-04-01',
+    goals: [
+      {
+        id: 1,
+        name: 'Emergency fund',
+        target_amount_satang: 200000,
+        current_amount_satang: 50000,
+        status: 'active',
+      },
+      {
+        id: 2,
+        name: 'Paused goal',
+        target_amount_satang: 100000,
+        current_amount_satang: 25000,
+        status: 'paused',
+      },
+    ],
+    debts: [
+      {
+        id: 10,
+        account_id: 1,
+        current_balance_satang: 300000,
+        target_payment_satang: 25000,
+        due_day: 5,
+        status: 'active',
+      },
+      {
+        id: 11,
+        account_id: 2,
+        current_balance_satang: 150000,
+        target_payment_satang: 10000,
+        due_day: 25,
+        status: 'paused',
+      },
+    ],
+  });
+
+  assert.equal(summary.activeGoalCount, 1);
+  assert.equal(summary.activeDebtCount, 1);
+  assert.equal(summary.totalGoalCurrentSatang, 50000);
+  assert.equal(summary.totalDebtBalanceSatang, 300000);
+  assert.equal(summary.monthlyPlannedPaymentSatang, 25000);
+  assert.equal(summary.goalProgressPercent, 25);
+});
+
+test('planner helpers: reminders surface due debts and near-deadline goals', () => {
+  const reminders = buildPlannerReminders({
+    today: '2026-04-01',
+    goals: [
+      {
+        id: 1,
+        name: 'Vacation',
+        target_amount_satang: 90000,
+        current_amount_satang: 20000,
+        target_date: '2026-04-04',
+        status: 'active',
+      },
+    ],
+    debts: [
+      {
+        id: 2,
+        account_id: 88,
+        current_balance_satang: 150000,
+        target_payment_satang: 12000,
+        due_day: 3,
+        status: 'active',
+      },
+    ],
+    accountsById: new Map([[88, { id: 88, name: 'Visa Platinum' }]]),
+  });
+
+  assert.equal(reminders.length, 2);
+  assert.equal(reminders[0].type, 'debt');
+  assert.equal(reminders[0].title, 'Visa Platinum');
+  assert.equal(reminders[1].type, 'goal');
+  assert.equal(reminders[1].title, 'Vacation');
 });
 
 test('system categories: generated rows stay globally unique', () => {

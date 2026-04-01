@@ -2722,7 +2722,11 @@ html[data-theme="dark"] .view-segmented {
   --app-header-h: 4.5rem;
   --app-nav-h: 5rem;
   --finance-app-gutter: clamp(0.95rem, 4vw, 1.2rem);
-  --finance-app-max-width: 38rem;
+  --finance-content-max-width: 38rem;
+  --finance-app-max-width: var(--finance-content-max-width);
+  --finance-section-gap: 0.95rem;
+  --finance-panel-padding: 1rem;
+  --finance-action-gap: 0.7rem;
 }
 
 :focus-visible {
@@ -2780,9 +2784,18 @@ body[data-standalone="true"] {
 .finance-app-main > *,
 .finance-screen,
 .finance-screen-body,
-.finance-screen-actions {
+.finance-screen-actions,
+.finance-grid,
+.finance-panel,
+.finance-dashboard-hero,
+.finance-dashboard-next,
+.finance-dashboard-planner-grid,
+.finance-planner-list,
+.finance-planner-item {
   min-width: 0;
   max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .finance-app-header {
@@ -2856,14 +2869,14 @@ body[data-standalone="true"] {
 .finance-screen {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: var(--finance-section-gap);
   padding-bottom: 0.35rem;
 }
 
 .finance-screen-head {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: calc(var(--finance-section-gap) - 0.2rem);
   align-items: stretch;
 }
 
@@ -2890,7 +2903,7 @@ body[data-standalone="true"] {
 .finance-screen-actions {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--finance-action-gap);
 }
 
 .finance-screen-actions > * {
@@ -2900,7 +2913,7 @@ body[data-standalone="true"] {
 .finance-screen-body {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: var(--finance-section-gap);
 }
 
 .finance-panel,
@@ -2913,7 +2926,7 @@ body[data-standalone="true"] {
 }
 
 .finance-panel {
-  padding: 1rem;
+  padding: var(--finance-panel-padding);
 }
 
 .view-empty {
@@ -3277,7 +3290,7 @@ body[data-standalone="true"] {
 
 .finance-grid {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--finance-action-gap);
 }
 
 .finance-grid-2,
@@ -3289,6 +3302,10 @@ body[data-standalone="true"] {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.65rem;
+}
+
+.finance-type-grid-accounts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .finance-type-chip {
@@ -4060,10 +4077,14 @@ body[data-standalone="true"] .finance-toast-wrap {
   color: var(--muted);
 }
 
+.finance-dashboard-planner-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .finance-dashboard-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
+  gap: var(--finance-action-gap);
 }
 
 .finance-dashboard-actions .ui-btn {
@@ -4074,9 +4095,84 @@ body[data-standalone="true"] .finance-toast-wrap {
   grid-column: 1 / -1;
 }
 
+.finance-planner-summary-grid,
+.finance-planner-columns {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.finance-planner-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin-bottom: 0.9rem;
+}
+
+.finance-planner-section-copy {
+  min-width: 0;
+}
+
+.finance-planner-section-head .ui-btn {
+  flex: 0 0 auto;
+}
+
+.finance-planner-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.finance-planner-button + .finance-planner-button,
+.finance-reminder-list .finance-list-button + .finance-list-button {
+  margin-top: 0.55rem;
+}
+
+.finance-planner-item {
+  padding: 0.95rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(248, 250, 252, 0.94);
+}
+
+.finance-planner-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.finance-planner-item-copy {
+  min-width: 0;
+}
+
+.finance-planner-item-progress {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.48rem;
+}
+
+.finance-planner-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.55rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.finance-planner-progress-meta-wide {
+  margin-top: 0.85rem;
+}
+
+.finance-reminder-row {
+  background: rgba(255, 247, 237, 0.88);
+  border-color: rgba(245, 158, 11, 0.12);
+}
+
 @media (min-width: 760px) {
   :root {
-    --finance-app-max-width: 58rem;
+    --finance-content-max-width: 58rem;
   }
 
   .ui-page {
@@ -4106,8 +4202,21 @@ body[data-standalone="true"] .finance-toast-wrap {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .finance-type-grid-accounts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .finance-grid-main {
-    grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-dashboard-planner-grid,
+  .finance-planner-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .finance-planner-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .finance-preset-grid-compact {
