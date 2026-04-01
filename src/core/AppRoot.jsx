@@ -55,7 +55,7 @@ function SignedInApp() {
     <div className="finance-app-shell">
       <ToastBar toast={toast} onClose={clearToast} />
 
-      <header className="ui-page finance-app-header">
+      <header className="finance-app-page finance-app-header">
         <div className="finance-app-header-surface">
           <div className="finance-brand">Smart Expense</div>
           <div className="finance-header-state">
@@ -65,7 +65,7 @@ function SignedInApp() {
         </div>
       </header>
 
-      <main className="ui-page pb-nav finance-app-main">
+      <main className="finance-app-page finance-app-main">
         {view === "dashboard" ? <DashboardScreen /> : null}
         {view === "inbox" ? <InboxScreen /> : null}
         {view === "add" ? <AddScreen /> : null}

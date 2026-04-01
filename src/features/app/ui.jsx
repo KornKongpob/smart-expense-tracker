@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   BarChart3,
   CreditCard,
@@ -40,9 +40,42 @@ function applyKeyboardDomState(open, inset = 0) {
 }
 
 export function BottomNav({ view, onChange }) {
+  const navRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const node = navRef.current;
+    if (!node || typeof document === "undefined") return undefined;
+
+    const updateHeight = () => {
+      const nextHeight = Math.ceil(node.getBoundingClientRect().height || 0);
+      if (nextHeight > 0) {
+        document.documentElement.style.setProperty("--app-nav-h", `${nextHeight}px`);
+      }
+    };
+
+    updateHeight();
+
+    let observer;
+    try {
+      observer = new ResizeObserver(() => updateHeight());
+      observer.observe(node);
+    } catch {
+      // Ignore browsers without ResizeObserver support.
+    }
+
+    window.addEventListener("resize", updateHeight);
+    window.addEventListener("orientationchange", updateHeight);
+
+    return () => {
+      window.removeEventListener("resize", updateHeight);
+      window.removeEventListener("orientationchange", updateHeight);
+      observer?.disconnect?.();
+    };
+  }, []);
+
   return (
-    <nav className="finance-nav-wrap app-navbar">
-      <div className="app-nav-surface finance-nav">
+    <nav ref={navRef} className="finance-bottom-nav-wrap" aria-label="Bottom navigation">
+      <div className="finance-bottom-nav-surface">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = item.id === "settings" ? view === "settings" || view === "categories" : view === item.id;
@@ -50,15 +83,15 @@ export function BottomNav({ view, onChange }) {
             <button
               key={item.id}
               type="button"
-              className={["app-nav-item", active ? "app-nav-item--active" : ""].filter(Boolean).join(" ")}
+              className={["finance-bottom-nav-item", active ? "finance-bottom-nav-item--active" : ""].filter(Boolean).join(" ")}
               onClick={() => onChange(item.id)}
               aria-current={active ? "page" : undefined}
               data-testid={`nav-${item.id}`}
             >
-              <span className="app-nav-icon">
+              <span className="finance-bottom-nav-icon">
                 <Icon size={18} />
               </span>
-              <span className="finance-nav-label">{item.label}</span>
+              <span className="finance-bottom-nav-label">{item.label}</span>
             </button>
           );
         })}
