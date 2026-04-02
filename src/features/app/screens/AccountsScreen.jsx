@@ -4,8 +4,14 @@ import { Check, CreditCard, HandCoins, Landmark, Wallet } from "lucide-react";
 import { useExpenseApp } from "../AppProvider.jsx";
 import { EmptyPanel, ScreenShell, Sheet } from "../ui.jsx";
 import { formatCurrency } from "../../../utils/format.js";
-import { parseMoneyToSatang } from "../../../utils/money.js";
-import { buildAccountAdjustmentSummary, buildAccountBalanceMap } from "../accountBalanceState.js";
+import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
+import {
+  buildAccountAdjustmentSummary,
+  buildAccountBalanceMap,
+  getEditableAccountBalanceSatang,
+  isLiabilityAccountType,
+  normalizeAccountBalanceForType,
+} from "../accountBalanceState.js";
 import {
   applyPresetToAccountDraft,
   coerceInstitutionPreset,
@@ -60,6 +66,14 @@ function toMoneyInput(satang, allowEmpty = false) {
   return amount.toFixed(2);
 }
 
+function toAccountMoneyInput(accountType, satang, allowEmpty = false) {
+  return toMoneyInput(getEditableAccountBalanceSatang(accountType, satang), allowEmpty);
+}
+
+function parseAccountBalanceInput(accountType, rawValue) {
+  return normalizeAccountBalanceForType(accountType, parseMoneyToSatang(rawValue));
+}
+
 function getAccountMeta(account, preset) {
   const parts = [];
   const presetLabel = getPresetLabel(preset, account?.type);
@@ -88,6 +102,7 @@ export default function AccountsScreen() {
   }, [draft.institutionLabel, draft.presetId, draft.type]);
 
   const presetOptions = useMemo(() => getPresetOptionsForCreateFlow(draft.type), [draft.type]);
+  const isDraftLiability = isLiabilityAccountType(draft.type);
   const currentBalanceSatang = draft.id
     ? balanceMap.get(Number(draft.id)) ?? Number(draft.openingBalanceSatang || 0)
     : Number(draft.openingBalanceSatang || 0);
@@ -95,21 +110,21 @@ export default function AccountsScreen() {
     () =>
       buildAccountAdjustmentSummary({
         currentBalanceSatang,
-        desiredBalanceSatang: parseMoneyToSatang(desiredBalanceInput || "0"),
+        desiredBalanceSatang: parseAccountBalanceInput(draft.type, desiredBalanceInput || "0"),
       }),
-    [currentBalanceSatang, desiredBalanceInput],
+    [currentBalanceSatang, desiredBalanceInput, draft.type],
   );
 
   const syncMoneyInputs = (nextDraft) => {
-    setOpeningBalanceInput(toMoneyInput(nextDraft.openingBalanceSatang));
-    setCreditLimitInput(toMoneyInput(nextDraft.creditLimitSatang, true));
+    setOpeningBalanceInput(toAccountMoneyInput(nextDraft.type, nextDraft.openingBalanceSatang));
+    setCreditLimitInput(toMoneyInput(Math.abs(nextDraft.creditLimitSatang), true));
   };
 
   const syncAdjustmentInputs = (nextDraft) => {
     const currentBalance = nextDraft?.id
       ? balanceMap.get(Number(nextDraft.id)) ?? Number(nextDraft.openingBalanceSatang || 0)
       : Number(nextDraft?.openingBalanceSatang || 0);
-    setDesiredBalanceInput(toMoneyInput(currentBalance));
+    setDesiredBalanceInput(toAccountMoneyInput(nextDraft?.type, currentBalance));
     setAdjustMode("transaction");
     setAdjustDate(new Date().toISOString().slice(0, 10));
   };
@@ -135,13 +150,15 @@ export default function AccountsScreen() {
   const applyTypePreset = (type) => {
     const nextDraft = applyPresetToAccountDraft(draft, getDefaultPresetIdForAccountType(type), type);
     setDraft(nextDraft);
-    setCreditLimitInput(toMoneyInput(nextDraft.creditLimitSatang, true));
+    syncMoneyInputs(nextDraft);
+    syncAdjustmentInputs(nextDraft);
   };
 
   const applyInstitutionPreset = (presetLike) => {
     const nextDraft = applyPresetToAccountDraft(draft, presetLike, draft.type);
     setDraft(nextDraft);
-    setCreditLimitInput(toMoneyInput(nextDraft.creditLimitSatang, true));
+    syncMoneyInputs(nextDraft);
+    syncAdjustmentInputs(nextDraft);
   };
 
   const submitAdjustment = async () => {
@@ -149,7 +166,7 @@ export default function AccountsScreen() {
 
     const result = await adjustAccountBalance({
       accountId: draft.id,
-      desiredBalanceSatang: parseMoneyToSatang(desiredBalanceInput || "0"),
+      desiredBalanceSatang: parseAccountBalanceInput(draft.type, desiredBalanceInput || "0"),
       mode: adjustMode,
       date: adjustMode === "transaction" ? adjustDate : undefined,
     });
@@ -167,8 +184,8 @@ export default function AccountsScreen() {
       name: String(draft.name || "").trim(),
       institutionLabel: String(draft.institutionLabel || "").trim(),
       icon: draft.icon || getDefaultAccountIcon(draft.type),
-      openingBalanceSatang: parseMoneyToSatang(openingBalanceInput),
-      creditLimitSatang: draft.type === "credit" ? parseMoneyToSatang(creditLimitInput || "0") : 0,
+      openingBalanceSatang: parseAccountBalanceInput(draft.type, openingBalanceInput),
+      creditLimitSatang: draft.type === "credit" ? Math.abs(parseMoneyToSatang(creditLimitInput || "0")) : 0,
       statementDay: draft.type === "credit" ? draft.statementDay : "",
       dueDay: draft.type === "credit" ? draft.dueDay : "",
       digits: String(draft.digits || "").trim(),
@@ -198,6 +215,7 @@ export default function AccountsScreen() {
               const preset = resolvePresetForAccount(account);
               const balance = balanceMap.get(Number(account.id)) ?? Number(account.opening_balance_satang || 0);
               const color = account.color || preset?.brandColor || "#0b84ff";
+              const isLiability = isLiabilityAccountType(account.type);
 
               return (
                 <button
@@ -221,7 +239,14 @@ export default function AccountsScreen() {
                       </div>
                     </div>
                     <div className="finance-row-side finance-account-side">
-                      <div className="finance-row-amount">{formatCurrency(balance)}</div>
+                      <div
+                        className={[
+                          "finance-row-amount",
+                          isLiability && Number(balance || 0) < 0 ? "finance-account-liability-amount" : "",
+                        ].filter(Boolean).join(" ")}
+                      >
+                        {formatCurrency(balance)}
+                      </div>
                       {account.type === "credit" && Number(account.credit_limit_satang || 0) > 0 ? (
                         <div className="finance-account-limit">วงเงิน {formatCurrency(account.credit_limit_satang)}</div>
                       ) : null}
@@ -262,17 +287,28 @@ export default function AccountsScreen() {
       >
         <div className="finance-form finance-account-form">
           <section
-            className="finance-account-preview"
+            className={[
+              "finance-account-preview",
+              isDraftLiability ? "finance-account-preview-liability" : "",
+            ].filter(Boolean).join(" ")}
             style={{ "--account-color": draft.color || selectedPreset?.brandColor || "#0b84ff" }}
           >
             <div className="finance-account-preview-kicker">
-              {draft.id ? "Current balance" : "Opening balance"}
+              {draft.id
+                ? isDraftLiability
+                  ? "Current liability"
+                  : "Current balance"
+                : isDraftLiability
+                ? "Opening liability"
+                : "Opening balance"}
             </div>
             <div className="finance-account-preview-title">
               {formatCurrency(draft.id ? currentBalanceSatang : draft.openingBalanceSatang)}
             </div>
             <div className="finance-account-preview-meta">
-              {draft.id
+              {isDraftLiability
+                ? "Enter the debt amount normally. We keep credit and loan accounts stored as negative balances."
+                : draft.id
                 ? "Use balance adjustment when you want this account to match the amount in real life."
                 : "This amount becomes the starting point for future balance calculations."}
             </div>
@@ -353,18 +389,24 @@ export default function AccountsScreen() {
                 <span className="ui-label">ยอดตั้งต้น</span>
                 <input
                   className="ui-input"
-                  inputMode="decimal"
+                  inputMode={isDraftLiability ? "text" : "decimal"}
                   value={openingBalanceInput}
                   onChange={(event) => {
-                    setOpeningBalanceInput(event.target.value);
+                    const nextValue = sanitizeMoneyInput(event.target.value);
+                    setOpeningBalanceInput(nextValue);
                     setDraft((current) => ({
                       ...current,
-                      openingBalanceSatang: parseMoneyToSatang(event.target.value),
+                      openingBalanceSatang: parseAccountBalanceInput(current.type, nextValue),
                     }));
                   }}
-                  placeholder="0.00"
+                  placeholder={isDraftLiability ? "2336.75" : "0.00"}
                   data-testid="account-opening-balance"
                 />
+                {isDraftLiability ? (
+                  <span className="finance-field-helper">
+                    Enter the debt amount and we will save this account as a negative balance.
+                  </span>
+                ) : null}
               </label>
             </div>
 
@@ -374,13 +416,14 @@ export default function AccountsScreen() {
                   <span className="ui-label">วงเงิน</span>
                   <input
                     className="ui-input"
-                    inputMode="decimal"
-                    value={creditLimitInput}
-                    onChange={(event) => {
-                      setCreditLimitInput(event.target.value);
+                  inputMode="decimal"
+                  value={creditLimitInput}
+                  onChange={(event) => {
+                      const nextValue = sanitizeMoneyInput(event.target.value);
+                      setCreditLimitInput(nextValue);
                       setDraft((current) => ({
                         ...current,
-                        creditLimitSatang: parseMoneyToSatang(event.target.value),
+                        creditLimitSatang: Math.abs(parseMoneyToSatang(nextValue)),
                       }));
                     }}
                     placeholder="0.00"
@@ -425,7 +468,8 @@ export default function AccountsScreen() {
                   <div>
                     <div className="finance-panel-title">Bring this account in sync</div>
                     <div className="finance-panel-copy">
-                      Current {formatCurrency(currentBalanceSatang)}
+                      {isDraftLiability ? "Current liability " : "Current "}
+                      {formatCurrency(currentBalanceSatang)}
                     </div>
                   </div>
                   <div className="finance-account-adjust-delta">
@@ -444,13 +488,13 @@ export default function AccountsScreen() {
 
                 <div className="finance-grid finance-grid-2">
                   <label className="finance-field">
-                    <span className="ui-label">Desired balance</span>
+                    <span className="ui-label">{isDraftLiability ? "Desired debt balance" : "Desired balance"}</span>
                     <input
                       className="ui-input"
-                      inputMode="decimal"
+                      inputMode={isDraftLiability ? "text" : "decimal"}
                       value={desiredBalanceInput}
-                      onChange={(event) => setDesiredBalanceInput(event.target.value)}
-                      placeholder="0.00"
+                      onChange={(event) => setDesiredBalanceInput(sanitizeMoneyInput(event.target.value))}
+                      placeholder={isDraftLiability ? "2336.75" : "0.00"}
                       data-testid="account-adjust-desired-balance"
                     />
                   </label>
@@ -482,7 +526,9 @@ export default function AccountsScreen() {
                   </label>
                 ) : (
                   <div className="finance-account-adjust-copy">
-                    Silent mode updates only the account baseline and does not create a transaction entry.
+                    {isDraftLiability
+                      ? "Enter the debt amount and we will keep the stored balance negative. Silent mode only updates the account baseline."
+                      : "Silent mode updates only the account baseline and does not create a transaction entry."}
                   </div>
                 )}
 

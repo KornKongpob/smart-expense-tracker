@@ -4,6 +4,22 @@ function toInt(value, fallback = 0) {
   return Math.trunc(number);
 }
 
+const LIABILITY_ACCOUNT_TYPES = new Set(["credit", "loan"]);
+
+export function isLiabilityAccountType(accountType) {
+  return LIABILITY_ACCOUNT_TYPES.has(String(accountType || "").trim().toLowerCase());
+}
+
+export function normalizeAccountBalanceForType(accountType, balanceSatang) {
+  const balance = toInt(balanceSatang, 0);
+  return isLiabilityAccountType(accountType) ? -Math.abs(balance) : balance;
+}
+
+export function getEditableAccountBalanceSatang(accountType, balanceSatang) {
+  const balance = toInt(balanceSatang, 0);
+  return isLiabilityAccountType(accountType) ? Math.abs(balance) : balance;
+}
+
 export function normalizeAccountBalanceRows(rows) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => ({

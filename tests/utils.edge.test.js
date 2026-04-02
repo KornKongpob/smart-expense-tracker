@@ -52,6 +52,9 @@ import {
 import {
   buildAccountAdjustmentSummary,
   buildAccountBalanceMap,
+  getEditableAccountBalanceSatang,
+  isLiabilityAccountType,
+  normalizeAccountBalanceForType,
   normalizeAccountBalanceRows,
 } from '../src/features/app/accountBalanceState.js';
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
@@ -794,6 +797,21 @@ test('account balance helpers: summarize positive, negative, and noop adjustment
       noop: true,
     },
   );
+});
+
+test('account balance helpers: liability account types normalize stored and editable signs', () => {
+  assert.equal(isLiabilityAccountType('credit'), true);
+  assert.equal(isLiabilityAccountType('loan'), true);
+  assert.equal(isLiabilityAccountType('bank'), false);
+
+  assert.equal(normalizeAccountBalanceForType('credit', 233675), -233675);
+  assert.equal(normalizeAccountBalanceForType('credit', -233675), -233675);
+  assert.equal(normalizeAccountBalanceForType('loan', 500000), -500000);
+  assert.equal(normalizeAccountBalanceForType('bank', 125000), 125000);
+
+  assert.equal(getEditableAccountBalanceSatang('credit', -233675), 233675);
+  assert.equal(getEditableAccountBalanceSatang('credit', 233675), 233675);
+  assert.equal(getEditableAccountBalanceSatang('bank', 125000), 125000);
 });
 
 test('system categories: generated rows stay globally unique', () => {

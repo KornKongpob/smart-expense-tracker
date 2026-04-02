@@ -2,6 +2,7 @@ import { getSupabaseAdmin, hasSupabaseServerConfig } from "../lib/supabase/admin
 import { requireRequestUser } from "../lib/supabase/auth.js";
 import { ensureSystemCategories } from "../lib/supabase/systemCategories.js";
 import { parseJsonBody } from "../lib/scan/requestParse.js";
+import { normalizeAccountBalanceForType } from "../src/features/app/accountBalanceState.js";
 import { canonicalizeCategoryId } from "../src/utils/categoryIds.js";
 
 export const config = { api: { bodyParser: false } };
@@ -85,7 +86,7 @@ export default async function handler(req, res) {
 
   const body = await parseJsonBody(req, 1024 * 1024);
   const accountId = Number(body.accountId ?? body.account_id);
-  const desiredBalanceSatang = toSafeMoney(
+  const rawDesiredBalanceSatang = toSafeMoney(
     body.desiredBalanceSatang ?? body.desired_balance_satang,
     Number.NaN,
   );
@@ -97,7 +98,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (!Number.isFinite(desiredBalanceSatang)) {
+  if (!Number.isFinite(rawDesiredBalanceSatang)) {
     res.status(400).json({ ok: false, code: "desired_balance_required", message: "desired_balance_required" });
     return;
   }
@@ -108,7 +109,7 @@ export default async function handler(req, res) {
 
     const { data: account, error: accountError } = await admin
       .from("accounts")
-      .select("id, user_id, name, opening_balance_satang")
+      .select("id, user_id, name, type, opening_balance_satang")
       .eq("id", accountId)
       .eq("user_id", auth.user.id)
       .single();
@@ -117,6 +118,7 @@ export default async function handler(req, res) {
       throw new Error(accountError?.message || "account_not_found");
     }
 
+    const desiredBalanceSatang = normalizeAccountBalanceForType(account.type, rawDesiredBalanceSatang);
     const currentBalanceSatang = await computeCurrentBalance(admin, auth.user.id, account);
     const deltaSatang = desiredBalanceSatang - currentBalanceSatang;
 

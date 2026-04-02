@@ -3,6 +3,7 @@ import { requireRequestUser } from "../lib/supabase/auth.js";
 import { encryptAccountDigits, normalizeDigits } from "../lib/security/encryption.js";
 import { ensureSystemCategories } from "../lib/supabase/systemCategories.js";
 import { parseJsonBody } from "../lib/scan/requestParse.js";
+import { normalizeAccountBalanceForType } from "../src/features/app/accountBalanceState.js";
 
 export const config = { api: { bodyParser: false } };
 
@@ -20,6 +21,10 @@ function cleanText(value, fallback = "") {
 function cleanNullableText(value) {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function normalizeAccountType(value, fallback = "bank") {
+  return cleanText(value, fallback).toLowerCase();
 }
 
 export default async function handler(req, res) {
@@ -43,6 +48,7 @@ export default async function handler(req, res) {
 
   const body = await parseJsonBody(req, 1024 * 1024);
   const id = Number(body.id);
+  const accountType = normalizeAccountType(body.type, "bank");
   const digits = normalizeDigits(body.digits || body.accountNumber || body.cardNumber || "");
   const encrypted = digits ? encryptAccountDigits(digits) : null;
 
@@ -50,13 +56,16 @@ export default async function handler(req, res) {
     user_id: auth.user.id,
     legacy_id: cleanNullableText(body.legacyId),
     name: cleanText(body.name, "บัญชีใหม่"),
-    type: cleanText(body.type, "bank"),
+    type: accountType,
     institution_label: cleanNullableText(body.institutionLabel),
     currency: cleanText(body.currency, "THB"),
     color: cleanText(body.color, "#0f766e"),
     icon: cleanText(body.icon, "🏦"),
-    opening_balance_satang: toSafeMoney(body.openingBalanceSatang ?? body.opening_balance_satang, 0),
-    credit_limit_satang: toSafeMoney(body.creditLimitSatang ?? body.credit_limit_satang, 0),
+    opening_balance_satang: normalizeAccountBalanceForType(
+      accountType,
+      toSafeMoney(body.openingBalanceSatang ?? body.opening_balance_satang, 0),
+    ),
+    credit_limit_satang: Math.max(0, toSafeMoney(body.creditLimitSatang ?? body.credit_limit_satang, 0)),
     statement_day:
       body.statementDay != null && body.statementDay !== ""
         ? Math.max(1, Math.min(31, Math.trunc(Number(body.statementDay) || 1)))

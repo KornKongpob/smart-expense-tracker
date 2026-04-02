@@ -2459,6 +2459,17 @@ html[data-theme="dark"] .view-segmented {
   color: rgba(255, 255, 255, 0.76);
 }
 
+.finance-account-preview-liability {
+  background: linear-gradient(135deg, #a63a1f 0%, #3f1d19 160%);
+  box-shadow: 0 24px 40px -30px rgba(86, 29, 23, 0.5);
+}
+
+.finance-field-helper {
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 .finance-account-adjust-section {
   gap: 0.65rem;
 }
@@ -2504,6 +2515,10 @@ html[data-theme="dark"] .view-segmented {
   font-size: 0.8rem;
   line-height: 1.5;
   color: var(--muted);
+}
+
+.finance-account-liability-amount {
+  color: var(--danger);
 }
 
 @media (max-width: 520px) {
