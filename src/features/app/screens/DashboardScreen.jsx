@@ -253,9 +253,16 @@ export default function DashboardScreen() {
                       </div>
                     </div>
                     <div className="finance-balance">
+                      {account.type === "credit" || account.type === "loan" ? (
+                        <span className="finance-account-liability-label">ยอดหนี้</span>
+                      ) : null}
                       <AmountText
                         value={account.balance_satang}
-                        tone={Number(account.balance_satang || 0) < 0 ? "danger" : "default"}
+                        tone={
+                          Number(account.balance_satang || 0) < 0 || account.type === "credit" || account.type === "loan"
+                            ? "danger"
+                            : "default"
+                        }
                       />
                       <ArrowUpRight size={14} />
                     </div>

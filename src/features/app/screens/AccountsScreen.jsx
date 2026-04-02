@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, CreditCard, HandCoins, Landmark, Wallet } from "lucide-react";
+import { Check, CreditCard, HandCoins, Landmark, Trash2, Wallet } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import { EmptyPanel, ScreenShell, Sheet } from "../ui.jsx";
@@ -83,7 +83,7 @@ function getAccountMeta(account, preset) {
 }
 
 export default function AccountsScreen() {
-  const { accounts, accountBalanceSnapshot, saveAccount, adjustAccountBalance, saving, isOnline } = useExpenseApp();
+  const { accounts, accountBalanceSnapshot, saveAccount, deleteAccount, adjustAccountBalance, saving, isOnline } = useExpenseApp();
   const [draft, setDraft] = useState(createDraft());
   const [editorOpen, setEditorOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
@@ -194,6 +194,13 @@ export default function AccountsScreen() {
     closeEditor();
   };
 
+  const handleDeleteAccount = async () => {
+    if (!draft.id) return;
+    if (!window.confirm("ลบบัญชีนี้ใช่ไหม รายการเดิมจะยังอยู่ แต่จะไม่ผูกกับบัญชีนี้อีก")) return;
+    const deleted = await deleteAccount(draft.id);
+    if (deleted) closeEditor();
+  };
+
   return (
     <ScreenShell
       title="บัญชี"
@@ -239,6 +246,7 @@ export default function AccountsScreen() {
                       </div>
                     </div>
                     <div className="finance-row-side finance-account-side">
+                      {isLiability ? <div className="finance-account-liability-label">ยอดหนี้</div> : null}
                       <div
                         className={[
                           "finance-row-amount",
@@ -296,21 +304,21 @@ export default function AccountsScreen() {
             <div className="finance-account-preview-kicker">
               {draft.id
                 ? isDraftLiability
-                  ? "Current liability"
-                  : "Current balance"
+                  ? "ยอดหนี้ปัจจุบัน"
+                  : "ยอดปัจจุบัน"
                 : isDraftLiability
-                ? "Opening liability"
-                : "Opening balance"}
+                ? "หนี้ตั้งต้น"
+                : "ยอดตั้งต้น"}
             </div>
             <div className="finance-account-preview-title">
               {formatCurrency(draft.id ? currentBalanceSatang : draft.openingBalanceSatang)}
             </div>
             <div className="finance-account-preview-meta">
               {isDraftLiability
-                ? "Enter the debt amount normally. We keep credit and loan accounts stored as negative balances."
+                ? "กรอกยอดหนี้ตามจริงได้เลย ระบบจะเก็บบัญชีบัตรเครดิตและสินเชื่อเป็นยอดติดลบให้อัตโนมัติ"
                 : draft.id
-                ? "Use balance adjustment when you want this account to match the amount in real life."
-                : "This amount becomes the starting point for future balance calculations."}
+                ? "ถ้าต้องการให้ยอดบัญชีตรงกับยอดจริง ให้ใช้ส่วนปรับยอดด้านล่าง"
+                : "ยอดนี้จะเป็นฐานเริ่มต้นสำหรับการคำนวณยอดคงเหลือในครั้งต่อไป"}
             </div>
           </section>
           <section className="finance-form-section finance-form-section-compact">
@@ -404,7 +412,7 @@ export default function AccountsScreen() {
                 />
                 {isDraftLiability ? (
                   <span className="finance-field-helper">
-                    Enter the debt amount and we will save this account as a negative balance.
+                    กรอกยอดหนี้ตามปกติได้เลย ระบบจะบันทึกบัญชีนี้เป็นยอดติดลบ
                   </span>
                 ) : null}
               </label>
@@ -462,23 +470,23 @@ export default function AccountsScreen() {
 
           {draft.id ? (
             <section className="finance-form-section finance-account-adjust-section">
-              <div className="finance-section-label">Adjust balance</div>
+              <div className="finance-section-label">ปรับยอดบัญชี</div>
               <div className="ui-card finance-account-adjust-card">
                 <div className="finance-account-adjust-head">
                   <div>
-                    <div className="finance-panel-title">Bring this account in sync</div>
+                    <div className="finance-panel-title">ทำให้ยอดตรงกับยอดจริง</div>
                     <div className="finance-panel-copy">
-                      {isDraftLiability ? "Current liability " : "Current "}
+                      {isDraftLiability ? "ยอดหนี้ตอนนี้ " : "ยอดตอนนี้ "}
                       {formatCurrency(currentBalanceSatang)}
                     </div>
                   </div>
                   <div className="finance-account-adjust-delta">
                     {adjustmentSummary.noop ? (
-                      <span className="finance-account-adjust-delta-label">No change</span>
+                      <span className="finance-account-adjust-delta-label">ยังไม่ต้องเปลี่ยน</span>
                     ) : (
                       <>
                         <span className="finance-account-adjust-delta-label">
-                          {adjustmentSummary.kind === "income" ? "Will add as income" : "Will add as expense"}
+                          {adjustmentSummary.kind === "income" ? "จะบันทึกเป็นรายรับ" : "จะบันทึกเป็นรายจ่าย"}
                         </span>
                         <strong>{formatCurrency(adjustmentSummary.amountSatang)}</strong>
                       </>
@@ -488,7 +496,7 @@ export default function AccountsScreen() {
 
                 <div className="finance-grid finance-grid-2">
                   <label className="finance-field">
-                    <span className="ui-label">{isDraftLiability ? "Desired debt balance" : "Desired balance"}</span>
+                    <span className="ui-label">{isDraftLiability ? "ยอดหนี้ที่ต้องการ" : "ยอดที่ต้องการ"}</span>
                     <input
                       className="ui-input"
                       inputMode={isDraftLiability ? "text" : "decimal"}
@@ -500,22 +508,22 @@ export default function AccountsScreen() {
                   </label>
 
                   <label className="finance-field">
-                    <span className="ui-label">Adjustment mode</span>
+                    <span className="ui-label">วิธีปรับยอด</span>
                     <select
                       className="ui-select"
                       value={adjustMode}
                       onChange={(event) => setAdjustMode(event.target.value === "silent" ? "silent" : "transaction")}
                       data-testid="account-adjust-mode"
                     >
-                      <option value="transaction">Record income / expense</option>
-                      <option value="silent">Adjust balance only</option>
+                      <option value="transaction">บันทึกเป็นรายรับ / รายจ่าย</option>
+                      <option value="silent">ปรับยอดอย่างเดียว</option>
                     </select>
                   </label>
                 </div>
 
                 {adjustMode === "transaction" ? (
                   <label className="finance-field">
-                    <span className="ui-label">Transaction date</span>
+                    <span className="ui-label">วันที่ของรายการ</span>
                     <input
                       className="ui-input"
                       type="date"
@@ -527,8 +535,8 @@ export default function AccountsScreen() {
                 ) : (
                   <div className="finance-account-adjust-copy">
                     {isDraftLiability
-                      ? "Enter the debt amount and we will keep the stored balance negative. Silent mode only updates the account baseline."
-                      : "Silent mode updates only the account baseline and does not create a transaction entry."}
+                      ? "กรอกยอดหนี้ตามจริงได้เลย โหมดปรับยอดอย่างเดียวจะอัปเดตฐานยอดบัญชีโดยไม่สร้างรายการ"
+                      : "โหมดปรับยอดอย่างเดียวจะอัปเดตฐานยอดบัญชีโดยไม่สร้างรายการ"}
                   </div>
                 )}
 
@@ -539,7 +547,7 @@ export default function AccountsScreen() {
                   onClick={submitAdjustment}
                   data-testid="account-adjust-submit"
                 >
-                  Apply balance adjustment
+                  ปรับยอดบัญชี
                 </button>
               </div>
             </section>
@@ -584,6 +592,18 @@ export default function AccountsScreen() {
               </div>
             ) : null}
           </details>
+
+          {draft.id ? (
+            <button
+              type="button"
+              className="ui-btn ui-btn-danger finance-account-delete-btn"
+              disabled={saving}
+              onClick={handleDeleteAccount}
+            >
+              <Trash2 size={16} />
+              ลบบัญชี
+            </button>
+          ) : null}
         </div>
       </Sheet>
     </ScreenShell>

@@ -690,6 +690,22 @@ export function AppProvider({ children }) {
     }
   }
 
+  async function deleteAccount(accountId) {
+    if (!session || !accountId) return false;
+    setSaving(true);
+    try {
+      await fetchWithSession(session, "/api/accounts", {
+        method: "DELETE",
+        body: JSON.stringify({ id: Number(accountId) }),
+      });
+      await refreshAll();
+      pushToast("success", "ลบบัญชีแล้ว");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function adjustAccountBalance(payload) {
     if (!session) return null;
     if (!isOnline) {
@@ -1355,6 +1371,7 @@ export function AppProvider({ children }) {
     refreshAll,
     saveProfile,
     saveAccount,
+    deleteAccount,
     adjustAccountBalance,
     saveFinancialGoal,
     deleteFinancialGoal,

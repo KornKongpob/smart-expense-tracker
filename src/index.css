@@ -2521,6 +2521,10 @@ html[data-theme="dark"] .view-segmented {
   color: var(--danger);
 }
 
+.finance-account-delete-btn {
+  width: 100%;
+}
+
 @media (max-width: 520px) {
   .finance-account-adjust-head {
     flex-direction: column;
@@ -2843,6 +2847,7 @@ body[data-standalone="true"] {
   min-height: var(--finance-viewport-h);
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -2851,6 +2856,7 @@ body[data-standalone="true"] {
   overscroll-behavior-x: none;
   touch-action: pan-y;
   position: relative;
+  padding-bottom: 0;
 }
 
 .finance-app-page {
@@ -2939,13 +2945,14 @@ body[data-standalone="true"] {
 }
 
 .finance-app-main {
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
-  min-height: calc(var(--finance-viewport-h) - var(--finance-app-header-h, var(--app-header-h)));
+  min-height: calc(var(--finance-viewport-h) - var(--finance-app-header-h, var(--app-header-h)) - 0.8rem);
   overflow-x: hidden;
   overflow-x: clip;
   overscroll-behavior-x: none;
@@ -2963,7 +2970,7 @@ body[data-standalone="true"] {
 
 .finance-screen-fill {
   flex: 1 1 auto;
-  min-height: calc(var(--finance-viewport-h) - var(--finance-app-header-h, var(--app-header-h)));
+  min-height: calc(var(--finance-viewport-h) - var(--finance-app-header-h, var(--app-header-h)) - 0.8rem);
   padding-bottom: var(--finance-nav-reserve);
 }
 
@@ -3312,8 +3319,24 @@ body[data-standalone="true"] {
 .finance-balance {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.3rem;
   color: var(--muted);
+}
+
+.finance-account-liability-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+  font-size: 0.68rem;
+  line-height: 1;
+  font-weight: 700;
 }
 
 .finance-category-icon,

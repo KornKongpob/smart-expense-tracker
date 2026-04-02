@@ -28,9 +28,9 @@ function normalizeAccountType(value, fallback = "bank") {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    res.status(405).json({ ok: false, code: "method_not_allowed", message: "Use POST" });
+  if (!["POST", "DELETE"].includes(req.method)) {
+    res.setHeader("Allow", "POST, DELETE");
+    res.status(405).json({ ok: false, code: "method_not_allowed", message: "Use POST or DELETE" });
     return;
   }
 
@@ -47,6 +47,39 @@ export default async function handler(req, res) {
   if (!auth) return;
 
   const body = await parseJsonBody(req, 1024 * 1024);
+
+  if (req.method === "DELETE") {
+    const id = Number(body.id ?? body.accountId ?? body.account_id);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ ok: false, code: "account_required", message: "account_required" });
+      return;
+    }
+
+    try {
+      const admin = getSupabaseAdmin();
+      const { data, error } = await admin
+        .from("accounts")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", auth.user.id)
+        .select("id")
+        .single();
+
+      if (error || !data) {
+        throw new Error(error?.message || "account_delete_failed");
+      }
+
+      res.status(200).json({ ok: true, deletedId: Number(data.id) });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        code: "account_delete_failed",
+        message: String(error?.message || error || "account_delete_failed"),
+      });
+    }
+    return;
+  }
+
   const id = Number(body.id);
   const accountType = normalizeAccountType(body.type, "bank");
   const digits = normalizeDigits(body.digits || body.accountNumber || body.cardNumber || "");
