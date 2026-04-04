@@ -57,3 +57,58 @@ export function summarizeDraftLineItems(draft) {
     hasAdjustments: adjustmentCount > 0,
   };
 }
+
+function buildCategoryLookup(categories) {
+  return new Map(
+    (Array.isArray(categories) ? categories : [])
+      .map((category) => {
+        const id = String(category?.id || "").trim();
+        return id ? [id, category] : null;
+      })
+      .filter(Boolean),
+  );
+}
+
+function resolveCategoryLabel(categoryId, categoryLookup) {
+  const normalizedId = String(categoryId || "").trim();
+  if (!normalizedId) return "";
+
+  const category = categoryLookup.get(normalizedId);
+  if (!category) return "";
+
+  const categoryName = String(category?.name || "").trim();
+  const parentId = String(category?.parentId ?? category?.parent_id ?? "").trim();
+  if (!parentId) return categoryName;
+
+  const parent = categoryLookup.get(parentId);
+  const parentName = String(parent?.name || "").trim();
+  if (!parentName) return categoryName;
+  return categoryName ? `${parentName} / ${categoryName}` : parentName;
+}
+
+export function buildDraftLineItemSummaries(draft, categories) {
+  const categoryLookup = buildCategoryLookup(categories);
+
+  return lineItemsFromDraft(draft).map((item, index) => {
+    const isAdjustment = item?.receiptLineType === "adjustment";
+    const adjustmentLabel = isAdjustment
+      ? item?.adjustmentEffect === "subtract"
+        ? "ปรับยอดลด"
+        : "ปรับยอดเพิ่ม"
+      : "";
+    const categoryLabel = resolveCategoryLabel(item?.categoryId, categoryLookup);
+
+    return {
+      index,
+      name: String(item?.name || "").trim() || (isAdjustment ? "รายการปรับยอด" : `รายการ ${index + 1}`),
+      amountSatang: Number(item?.amountSatang || 0),
+      amountPrefix: isAdjustment && item?.adjustmentEffect === "subtract" ? "-" : "",
+      isAdjustment,
+      adjustmentLabel,
+      categoryLabel,
+      metaLabel: isAdjustment
+        ? [adjustmentLabel, categoryLabel].filter(Boolean).join(" · ") || "รายการปรับยอด"
+        : categoryLabel || "ยังไม่เลือกหมวด",
+    };
+  });
+}

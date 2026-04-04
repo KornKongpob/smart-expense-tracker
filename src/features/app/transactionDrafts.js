@@ -33,6 +33,16 @@ function normalizeAmountUnit(value, fallback = "satang") {
   return fallback;
 }
 
+function getScanSuggestion(scan) {
+  if (scan?.normalized_suggestion && typeof scan.normalized_suggestion === "object") {
+    return scan.normalized_suggestion;
+  }
+  if (scan?.suggestion && typeof scan.suggestion === "object") {
+    return scan.suggestion;
+  }
+  return {};
+}
+
 function toSatangAmount(value, unit = "satang", fallback = 0) {
   if (normalizeAmountUnit(unit, "satang") === "baht") {
     return Math.max(0, parseMoneyToSatang(value));
@@ -557,12 +567,7 @@ function buildSuggestionGroupsForStorage(groups) {
 
 export function buildApprovedSuggestion(scan, draft) {
   const sanitized = sanitizeTransactionDraft(draft);
-  const baseSuggestion =
-    scan?.normalized_suggestion && typeof scan.normalized_suggestion === "object"
-      ? scan.normalized_suggestion
-      : scan?.suggestion && typeof scan.suggestion === "object"
-      ? scan.suggestion
-      : {};
+  const baseSuggestion = getScanSuggestion(scan);
   const groups = Array.isArray(sanitized.receiptGroups) ? sanitized.receiptGroups : [];
   const items = groups.filter((group) => group.receiptLineType !== "adjustment");
   const adjustments = groups.filter((group) => group.receiptLineType === "adjustment");
@@ -599,13 +604,21 @@ export function buildApprovedSuggestion(scan, draft) {
   };
 }
 
+export function getScanDisplayAmountSatang(scan) {
+  const suggestion = getScanSuggestion(scan);
+  const normalizedDraftAmountSatang = Number(scanToDraft(scan)?.amountSatang || 0);
+  const amountUnit = normalizeAmountUnit(suggestion?.amount_unit || suggestion?.amountUnit, "");
+
+  if (!amountUnit || suggestion?.amount == null || suggestion?.amount === "") {
+    return normalizedDraftAmountSatang;
+  }
+
+  const convertedAmountSatang = toSatangAmount(suggestion.amount, amountUnit, normalizedDraftAmountSatang);
+  return convertedAmountSatang === normalizedDraftAmountSatang ? convertedAmountSatang : normalizedDraftAmountSatang;
+}
+
 export function scanToDraft(scan) {
-  const suggestion =
-    scan?.normalized_suggestion && typeof scan.normalized_suggestion === "object"
-      ? scan.normalized_suggestion
-      : scan?.suggestion && typeof scan.suggestion === "object"
-      ? scan.suggestion
-      : {};
+  const suggestion = getScanSuggestion(scan);
   const kind = normalizeRuntimeKind(suggestion?.tx_type || suggestion?.kind || suggestion?.type);
   const amountUnit = normalizeAmountUnit(suggestion?.amount_unit || suggestion?.amountUnit, "baht");
   const receiptGroups = kind === "transfer" ? [] : buildScanReceiptGroups(suggestion, kind, amountUnit);

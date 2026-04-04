@@ -284,10 +284,10 @@ export default function AccountsScreen() {
         title={draft.id ? "แก้ไขบัญชี" : "บัญชีใหม่"}
         footer={
           draft.id ? (
-            <div className="finance-sheet-actions-stack finance-sheet-actions-sticky">
+            <div className="finance-sheet-actions-compact">
               <button
                 type="button"
-                className="ui-btn ui-btn-danger"
+                className="ui-btn ui-btn-danger-outline ui-btn-compact finance-sheet-danger-trigger"
                 disabled={saving}
                 onClick={openDeleteConfirm}
                 data-testid="account-delete-trigger"
@@ -295,7 +295,7 @@ export default function AccountsScreen() {
                 <Trash2 size={16} />
                 ลบบัญชี
               </button>
-              <div className="finance-sheet-action-row">
+              <div className="finance-sheet-actions-end">
                 <button type="button" className="ui-btn ui-btn-secondary" onClick={closeEditor}>
                   ยกเลิก
                 </button>

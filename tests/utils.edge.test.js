@@ -61,9 +61,11 @@ import {
 } from '../src/features/app/accountBalanceState.js';
 import {
   buildTransactionSavePlan,
+  getScanDisplayAmountSatang,
   scanToDraft,
 } from '../src/features/app/transactionDrafts.js';
 import {
+  buildDraftLineItemSummaries,
   replaceDraftLineItems,
   summarizeDraftLineItems,
 } from '../src/features/app/lineItemDraftState.js';
@@ -703,6 +705,36 @@ test('runtime transaction drafts: scanToDraft converts baht scans into satang an
   assert.equal(draft.receiptGroups[2].adjustmentEffect, 'subtract');
 });
 
+test('runtime transaction drafts: inbox amount display follows canonical scan draft normalization', () => {
+  const explicitBahtScan = {
+    normalized_suggestion: {
+      tx_type: 'expense',
+      amount_unit: 'baht',
+      amount: 60,
+      merchant: 'Cafe Amazon',
+    },
+  };
+
+  const legacyScan = {
+    normalized_suggestion: {
+      tx_type: 'expense',
+      amount: 60,
+      merchant: 'Cafe Amazon',
+      items: [{ name: 'Tw Choco', total: 60, category_key: 'food' }],
+    },
+  };
+
+  assert.equal(
+    getScanDisplayAmountSatang(explicitBahtScan),
+    scanToDraft(explicitBahtScan).amountSatang,
+  );
+  assert.equal(getScanDisplayAmountSatang(explicitBahtScan), 6000);
+  assert.equal(
+    getScanDisplayAmountSatang(legacyScan),
+    scanToDraft(legacyScan).amountSatang,
+  );
+});
+
 test('runtime transaction drafts: split save plans create one parent plus ordered child rows', () => {
   const plan = buildTransactionSavePlan({
     userId: 'user-1',
@@ -813,6 +845,36 @@ test('runtime line item editor state: signed summaries reconcile receipt adjustm
   assert.equal(summary.hasAdjustments, true);
 });
 
+test('runtime line item editor state: summary rows stay compact and distinguish adjustments', () => {
+  const rows = buildDraftLineItemSummaries(
+    {
+      lineItems: [
+        { name: 'Iced latte', amountSatang: 6000, categoryId: 'coffee' },
+        {
+          name: 'Member discount',
+          amountSatang: 500,
+          categoryId: 'discount',
+          receiptLineType: 'adjustment',
+          adjustmentEffect: 'subtract',
+        },
+      ],
+    },
+    [
+      { id: 'food', name: 'Food' },
+      { id: 'coffee', name: 'Coffee', parentId: 'food' },
+      { id: 'discount', name: 'Discount' },
+    ],
+  );
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].metaLabel, 'Food / Coffee');
+  assert.equal(rows[0].amountPrefix, '');
+  assert.equal(rows[1].isAdjustment, true);
+  assert.equal(rows[1].adjustmentLabel, 'ปรับยอดลด');
+  assert.equal(rows[1].amountPrefix, '-');
+  assert.match(rows[1].metaLabel, /ปรับยอดลด/);
+});
+
 test('runtime category preset state: starts on main cards and only opens the chosen parent subcategories', () => {
   const categories = [
     { id: 'food', name: 'Food' },
@@ -876,7 +938,7 @@ test('runtime scan upload state: error keeps prior stage progress instead of jum
   assert.match(failed.detailText, /3\/5/);
 });
 
-test('runtime source: category picker no longer renders a fallback dropdown and account edit exposes a delete footer trigger', () => {
+test('runtime source: category picker keeps card flow, account edit uses a compact delete trigger, and split editing uses a nested sheet', () => {
   const chooserSource = readFileSync(
     new URL('../src/features/app/CategoryPresetChooser.jsx', import.meta.url),
     'utf8',
@@ -885,11 +947,18 @@ test('runtime source: category picker no longer renders a fallback dropdown and 
     new URL('../src/features/app/screens/AccountsScreen.jsx', import.meta.url),
     'utf8',
   );
+  const lineItemsSource = readFileSync(
+    new URL('../src/features/app/LineItemEditorSection.jsx', import.meta.url),
+    'utf8',
+  );
 
   assert.doesNotMatch(chooserSource, /finance-category-fallback/);
   assert.match(chooserSource, /finance-category-step-back/);
-  assert.match(accountsSource, /finance-sheet-actions-stack/);
+  assert.match(accountsSource, /finance-sheet-actions-compact/);
+  assert.match(accountsSource, /ui-btn-danger-outline/);
   assert.match(accountsSource, /data-testid="account-delete-trigger"/);
+  assert.match(lineItemsSource, /finance-line-item-summary-row/);
+  assert.match(lineItemsSource, /<Sheet/);
 });
 
 test('runtime styles: sheet review containers clamp width and hide horizontal overflow', () => {
@@ -903,6 +972,8 @@ test('runtime styles: sheet review containers clamp width and hide horizontal ov
     cssSource,
     /\.finance-sheet-scroll-root,\s*\.finance-sheet-scroll-root > \*,\s*\.finance-form,\s*\.finance-form-section,[\s\S]*?max-width:\s*100%;/s,
   );
+  assert.match(cssSource, /\.finance-sheet-actions-compact\s*\{[\s\S]*display:\s*flex;/s);
+  assert.match(cssSource, /\.finance-line-item-summary-row\s*\{[\s\S]*text-align:\s*left;/s);
 });
 
 test('categories: duplicate income ids are canonicalized for Supabase storage', () => {

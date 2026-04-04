@@ -5,6 +5,7 @@ import { useExpenseApp } from "../AppProvider.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import LineItemEditorSection from "../LineItemEditorSection.jsx";
 import { lineItemsFromDraft } from "../lineItemDraftState.js";
+import { getScanDisplayAmountSatang } from "../transactionDrafts.js";
 import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { formatCurrency, formatDateLong } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
@@ -210,7 +211,7 @@ export default function InboxScreen() {
           <div className="finance-list">
             {rows.map((scan) => {
               const suggestion = scan?.normalized_suggestion || {};
-              const amount = suggestion?.amount || 0;
+              const amountSatang = getScanDisplayAmountSatang(scan);
 
               return (
                 <button
@@ -233,7 +234,7 @@ export default function InboxScreen() {
                       <StatusPill tone={scan.status === "approved" ? "success" : "warning"}>
                         {scan.status === "approved" ? "อนุมัติ" : "รอตรวจ"}
                       </StatusPill>
-                      <div className="finance-row-amount">{formatCurrency(amount)}</div>
+                      <div className="finance-row-amount">{formatCurrency(amountSatang)}</div>
                     </div>
                   </div>
                 </button>
