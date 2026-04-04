@@ -2,8 +2,11 @@
   "name": "Smart Expense",
   "short_name": "Smart Expense",
   "description": "บันทึกรายรับรายจ่ายและจัดการบัญชีบนมือถือ",
-  "start_url": "/",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#f5f7fb",
   "theme_color": "#f5f7fb",
   "orientation": "portrait",
@@ -27,6 +30,7 @@
     }
   ],
   "categories": ["finance", "productivity"],
+  "prefer_related_applications": false,
   "lang": "th",
   "dir": "ltr"
 }

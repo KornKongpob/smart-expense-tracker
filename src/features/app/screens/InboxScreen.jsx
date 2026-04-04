@@ -3,6 +3,8 @@ import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Repeat2, Search, XCircle } f
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
+import LineItemEditorSection from "../LineItemEditorSection.jsx";
+import { lineItemsFromDraft } from "../lineItemDraftState.js";
 import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { formatCurrency, formatDateLong } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
@@ -13,15 +15,17 @@ const REVIEW_KIND_OPTIONS = [
   { id: "transfer", label: "โอน", icon: Repeat2 },
 ];
 
-function lineItemsFromDraft(draft) {
-  return Array.isArray(draft?.lineItems) ? draft.lineItems : [];
-}
-
 function toInputAmount(satang, allowEmpty = true) {
   const amount = Number(satang || 0) / 100;
   if (!Number.isFinite(amount)) return allowEmpty ? "" : "0.00";
   if (!amount && allowEmpty) return "";
   return amount.toFixed(2);
+}
+
+function splitGroupsFromDraft(draft) {
+  return lineItemsFromDraft(draft).filter(
+    (item) => Number(item?.amountSatang || 0) > 0 || String(item?.name || "").trim(),
+  );
 }
 
 export default function InboxScreen() {
@@ -89,26 +93,37 @@ export default function InboxScreen() {
       ? Boolean(draft?.fromAccountId && draft?.toAccountId && draft?.fromAccountId !== draft?.toAccountId)
       : Boolean(draft?.accountId));
 
-  const lineItemsTotal = lineItemsFromDraft(draft).reduce((sum, item) => sum + Number(item.amountSatang || 0), 0);
+  const splitGroups = splitGroupsFromDraft(draft);
+  const splitItemCount = splitGroups.filter((item) => item.receiptLineType !== "adjustment").length;
+  const splitAdjustmentCount = splitGroups.filter((item) => item.receiptLineType === "adjustment").length;
 
   const applyKind = (kind) => {
     const firstAccountId = accounts[0] ? String(accounts[0].id) : "";
 
     setDraft((current) =>
       current
-        ? {
-            ...current,
-            kind,
-            categoryId: kind === "transfer" ? "" : current.categoryId,
-            accountId:
-              kind === "transfer" ? current.accountId : current.accountId || current.fromAccountId || firstAccountId,
-            fromAccountId:
-              kind === "transfer"
-                ? current.fromAccountId || current.accountId || firstAccountId
-                : current.fromAccountId,
-            toAccountId: kind === "transfer" ? current.toAccountId : "",
-            lineItems: kind === "transfer" ? [] : lineItemsFromDraft(current),
-          }
+        ? (() => {
+            const nextLineItems = kind === "transfer" ? [] : lineItemsFromDraft(current);
+            const nextDraft = {
+              ...current,
+              kind,
+              categoryId: kind === "transfer" ? "" : current.categoryId,
+              accountId:
+                kind === "transfer" ? current.accountId : current.accountId || current.fromAccountId || firstAccountId,
+              fromAccountId:
+                kind === "transfer"
+                  ? current.fromAccountId || current.accountId || firstAccountId
+                  : current.fromAccountId,
+              toAccountId: kind === "transfer" ? current.toAccountId : "",
+              lineItems: nextLineItems,
+            };
+
+            if (Array.isArray(current?.receiptGroups)) {
+              nextDraft.receiptGroups = nextLineItems;
+            }
+
+            return nextDraft;
+          })()
         : current,
     );
 
@@ -394,7 +409,6 @@ export default function InboxScreen() {
                       <CategoryPresetChooser
                         categories={kindCategories}
                         value={draft.categoryId}
-                        fallbackTestId="review-category-select"
                         onChange={(categoryId) => setDraft((current) => ({ ...current, categoryId }))}
                       />
                     </div>
@@ -409,6 +423,44 @@ export default function InboxScreen() {
                     />
                   </label>
                 </section>
+
+                {draft.splitByCategory && draft.kind === "expense" && splitGroups.length ? (
+                  <section className="finance-form-section finance-review-split-section">
+                    <div className="finance-section-label">บันทึกแบบแยกรายการ</div>
+                    <div className="ui-card finance-review-split-card">
+                      <div className="finance-review-split-head">
+                        <div>
+                          <div className="finance-panel-title">ระบบจะสร้าง 1 รายการหลักและรายการย่อยตามใบเสร็จ</div>
+                          <div className="finance-panel-copy">
+                            {splitItemCount} รายการซื้อ
+                            {splitAdjustmentCount ? ` และ ${splitAdjustmentCount} รายการปรับยอด` : ""}
+                          </div>
+                        </div>
+                        <div className="finance-review-split-total">{formatCurrency(draft.amountSatang)}</div>
+                      </div>
+                      <div className="finance-review-split-list">
+                        {splitGroups.map((item, index) => (
+                          <div key={`${selected.id}-split-${index}`} className="finance-review-split-row">
+                            <div className="finance-review-split-copy">
+                              <div className="finance-row-title">{item.name || `รายการ ${index + 1}`}</div>
+                              <div className="finance-row-meta">
+                                {item.receiptLineType === "adjustment"
+                                  ? item.adjustmentEffect === "subtract"
+                                    ? "ปรับยอดลด"
+                                    : "ปรับยอดเพิ่ม"
+                                  : "รายการย่อย"}
+                              </div>
+                            </div>
+                            <div className="finance-review-split-amount">
+                              {item.receiptLineType === "adjustment" && item.adjustmentEffect === "subtract" ? "-" : ""}
+                              {formatCurrency(item.amountSatang)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
 
                 <details className="finance-details" open={showMore}>
                   <summary
@@ -430,9 +482,7 @@ export default function InboxScreen() {
                           <input
                             className="ui-input"
                             value={draft.reference}
-                            onChange={(event) =>
-                              setDraft((current) => ({ ...current, reference: event.target.value }))
-                            }
+                            onChange={(event) => setDraft((current) => ({ ...current, reference: event.target.value }))}
                           />
                         </label>
 
@@ -461,123 +511,15 @@ export default function InboxScreen() {
                 </details>
 
                 {draft.kind !== "transfer" ? (
-                  <details className="finance-details" open={showLines}>
-                    <summary
-                      className="finance-details-summary bento-summary"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        setShowLines((current) => !current);
-                      }}
-                    >
-                      <span>แยกรายการ</span>
-                      <span className="finance-details-caret">{showLines ? "ซ่อน" : "แสดง"}</span>
-                    </summary>
-
-                    {showLines ? (
-                      <div className="finance-details-body">
-                        <div className="finance-line-items">
-                          <div className="finance-line-items-head">
-                            <button
-                              type="button"
-                              className="ui-btn ui-btn-secondary"
-                              onClick={() =>
-                                setDraft((current) => ({
-                                  ...current,
-                                  lineItems: [
-                                    ...lineItemsFromDraft(current),
-                                    { name: "", amountSatang: 0, categoryId: current.categoryId || "" },
-                                  ],
-                                }))
-                              }
-                            >
-                              เพิ่มบรรทัด
-                            </button>
-                          </div>
-
-                          {lineItemsFromDraft(draft).length ? (
-                            lineItemsFromDraft(draft).map((item, index) => (
-                              <div key={`${selected.id}-${index}`} className="finance-line-item-card">
-                                <div className="finance-grid finance-grid-2">
-                                  <label className="finance-field">
-                                    <span className="ui-label">ชื่อรายการ</span>
-                                    <input
-                                      className="ui-input"
-                                      value={item.name || ""}
-                                      onChange={(event) =>
-                                        setDraft((current) => ({
-                                          ...current,
-                                          lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                            rowIndex === index ? { ...row, name: event.target.value } : row,
-                                          ),
-                                        }))
-                                      }
-                                    />
-                                  </label>
-
-                                  <label className="finance-field">
-                                    <span className="ui-label">จำนวนเงิน</span>
-                                    <input
-                                      className="ui-input"
-                                      inputMode="decimal"
-                                      value={toInputAmount(item.amountSatang)}
-                                      onChange={(event) =>
-                                        setDraft((current) => ({
-                                          ...current,
-                                          lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                            rowIndex === index
-                                              ? { ...row, amountSatang: parseMoneyToSatang(event.target.value) }
-                                              : row,
-                                          ),
-                                        }))
-                                      }
-                                    />
-                                  </label>
-                                </div>
-
-                                <label className="finance-field">
-                                  <span className="ui-label">หมวดหมู่</span>
-                                  <select
-                                    className="ui-select"
-                                    value={item.categoryId || ""}
-                                    onChange={(event) =>
-                                      setDraft((current) => ({
-                                        ...current,
-                                        lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                          rowIndex === index ? { ...row, categoryId: event.target.value } : row,
-                                        ),
-                                      }))
-                                    }
-                                  >
-                                    <option value="">ใช้หมวดหลัก</option>
-                                    {kindCategories.map((category) => (
-                                      <option key={category.id} value={category.id}>
-                                        {category.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="finance-line-items-empty">ยังไม่มีบรรทัด</div>
-                          )}
-
-                          {lineItemsFromDraft(draft).length ? (
-                            <div className="finance-review-summary">
-                              <div>
-                                <span className="ui-label">ยอดหลัก</span>
-                                <div className="finance-row-title">{formatCurrency(draft.amountSatang)}</div>
-                              </div>
-                              <div>
-                                <span className="ui-label">รวมบรรทัด</span>
-                                <div className="finance-row-title">{formatCurrency(lineItemsTotal)}</div>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                  </details>
+                  <LineItemEditorSection
+                    draft={draft}
+                    categories={kindCategories}
+                    open={showLines}
+                    onToggle={() => setShowLines((current) => !current)}
+                    onDraftChange={setDraft}
+                    addTestId="review-line-add"
+                    removeTestIdPrefix="review-line-remove"
+                  />
                 ) : null}
               </>
             )}

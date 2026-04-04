@@ -13,6 +13,7 @@ import {
 import { scanWithProvider } from "../lib/scan/providers/index.js";
 import { normalizeErrorResponse, safeJsonParseMaybe } from "../lib/scan/normalize.js";
 import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from "../lib/scan/openaiModel.js";
+import { validateReceiptLineExtraction } from "../lib/scan/receiptValidation.js";
 import {
   clamp01 as clamp01Helper,
   extractResponsesOutputText as extractResponsesOutputTextHelper,
@@ -1708,6 +1709,18 @@ Output JSON schema:
     }
   }
 
+  let receiptValidation = null;
+  if (doc_type === "receipt" || (Array.isArray(items) && items.some((it) => (safeNumber(it?.total) || 0) > 0))) {
+    receiptValidation = validateReceiptLineExtraction({
+      items,
+      adjustments,
+      amount,
+    });
+    items = receiptValidation.items;
+    adjustments = receiptValidation.adjustments;
+    if (doc_type !== "receipt" && items.length >= 2) doc_type = "receipt";
+  }
+
   if (!(Number.isFinite(amount) && amount > 0) && doc_type !== "transfer_slip" && doc_type !== "bill_payment") {
     const itemsSum = (items || []).reduce((sum, it) => sum + (safeNumber(it?.total) || 0), 0);
     const adjustmentsSigned = (adjustments || []).reduce((sum, adj) => {
@@ -1770,6 +1783,7 @@ Output JSON schema:
 
   let needsReview = false;
   if (confidence.overall != null && confidence.overall < 0.6) needsReview = true;
+  if (receiptValidation?.stats?.needsReview) needsReview = true;
   if (doc_type === "receipt" && amount != null && hasPositiveItems) {
     const itemsSum = finalItems.reduce((s, it) => s + (safeNumber(it?.total) || 0), 0);
     const adjSigned = (finalAdjustments || []).reduce((s, a) => {
@@ -1818,6 +1832,7 @@ Output JSON schema:
     evidence: evidence0,
     confidence,
     flags,
+    receipt_validation: receiptValidation?.stats || null,
   };
 
   // Enhancement: robust account mapping (prefer card last4 when credit card payment)
@@ -2040,6 +2055,36 @@ async function buildScanResponseBody({ auth, out, accounts, firstFile }) {
   };
 }
 
+export function normalizeProviderScanResult(result) {
+  const status = Math.max(100, Number(result?.status) || 500);
+  const body = result?.json && typeof result.json === "object" ? result.json : null;
+
+  if (body && (result?.ok === true || body.ok !== false)) {
+    return {
+      status,
+      body,
+    };
+  }
+
+  if (body) {
+    return {
+      status,
+      body: {
+        ok: false,
+        code: String(body.code || "scan_failed"),
+        message: String(body.message || "Scan failed"),
+        ...body,
+      },
+    };
+  }
+
+  return normalizeErrorResponse({
+    status,
+    code: "scan_failed",
+    message: "Scan failed",
+  });
+}
+
 async function sendScanResponse({ res, auth, out, accounts, firstFile }) {
   const body = await buildScanResponseBody({ auth, out, accounts, firstFile });
   res.status(out.status).json(body);
@@ -2209,7 +2254,7 @@ export default async function handler(req, res) {
       },
       scanOpenAI: callOpenAI,
     });
-    const normalizedOut = normalizeErrorResponse(out);
+    const normalizedOut = normalizeProviderScanResult(out);
     await sendScanResponse({
       res,
       auth,

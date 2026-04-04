@@ -99,21 +99,50 @@ export function hashString(str) {
   return h;
 }
 
+const SCAN_STAGE_INDEX = {
+  queued: 0,
+  encoding_image: 1,
+  preparing_file: 1,
+  uploading_files: 2,
+  calling_api: 3,
+  calling_api_fallback: 3,
+  parsing_response: 4,
+  validating_items: 5,
+  done: 6,
+  error: 6,
+};
+
+const SCAN_STAGE_LABEL = {
+  queued: "เตรียมคิวสแกน",
+  encoding_image: "เตรียมภาพเพื่อสแกน",
+  preparing_file: "เตรียมไฟล์ PDF",
+  uploading_files: "ส่งไฟล์ขึ้นเซิร์ฟเวอร์",
+  calling_api: "วิเคราะห์ใบเสร็จ",
+  calling_api_fallback: "วิเคราะห์ใบเสร็จ (fallback)",
+  parsing_response: "อ่านผลจาก AI",
+  validating_items: "ตรวจสอบราคาและรายการสินค้า",
+  done: "พร้อมให้ตรวจทาน",
+  error: "สแกนไม่สำเร็จ",
+};
+
+export function getScanStageMeta(status, fileName) {
+  const key = String(status || "").trim() || "queued";
+  const totalSteps = 6;
+  const stepIndex = SCAN_STAGE_INDEX[key] ?? 0;
+  const label = SCAN_STAGE_LABEL[key] || key;
+  const progress = Math.max(0, Math.min(100, Math.round((stepIndex / totalSteps) * 100)));
+  const prefix = String(fileName || "").trim();
+
+  return {
+    key,
+    label,
+    progress,
+    stepIndex,
+    totalSteps,
+    summary: prefix ? `${prefix} • ${label}` : label,
+  };
+}
+
 export function humanizeScanStatus(status, fileName) {
-  const s = String(status || "").trim();
-  if (!s) return `กำลังอ่าน: ${fileName || ""}`.trim();
-  switch (s) {
-    case "encoding_image":
-      return "กำลังเตรียมรูปเพื่อสแกน...";
-    case "preparing_file":
-      return "กำลังเตรียมไฟล์เพื่อสแกน...";
-    case "calling_api":
-      return "กำลังสแกน...";
-    case "calling_api_fallback":
-      return "กำลังสแกน... (fallback)";
-    case "done":
-      return "สแกนเสร็จแล้ว";
-    default:
-      return s;
-  }
+  return getScanStageMeta(status, fileName).summary;
 }

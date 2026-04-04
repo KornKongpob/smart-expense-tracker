@@ -86,6 +86,7 @@ export default function AccountsScreen() {
   const { accounts, accountBalanceSnapshot, saveAccount, deleteAccount, adjustAccountBalance, saving, isOnline } = useExpenseApp();
   const [draft, setDraft] = useState(createDraft());
   const [editorOpen, setEditorOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [openingBalanceInput, setOpeningBalanceInput] = useState(toMoneyInput(0));
   const [creditLimitInput, setCreditLimitInput] = useState("");
@@ -144,6 +145,7 @@ export default function AccountsScreen() {
     syncMoneyInputs(nextDraft);
     syncAdjustmentInputs(nextDraft);
     setShowMore(false);
+    setDeleteConfirmOpen(false);
     setEditorOpen(false);
   };
 
@@ -194,9 +196,13 @@ export default function AccountsScreen() {
     closeEditor();
   };
 
+  const openDeleteConfirm = () => {
+    if (!draft.id) return;
+    setDeleteConfirmOpen(true);
+  };
+
   const handleDeleteAccount = async () => {
     if (!draft.id) return;
-    if (!window.confirm("ลบบัญชีนี้ใช่ไหม รายการเดิมจะยังอยู่ แต่จะไม่ผูกกับบัญชีนี้อีก")) return;
     const deleted = await deleteAccount(draft.id);
     if (deleted) closeEditor();
   };
@@ -277,20 +283,49 @@ export default function AccountsScreen() {
         onClose={closeEditor}
         title={draft.id ? "แก้ไขบัญชี" : "บัญชีใหม่"}
         footer={
-          <div className="finance-sheet-actions finance-sheet-actions-sticky">
-            <button type="button" className="ui-btn ui-btn-secondary" onClick={closeEditor}>
-              ยกเลิก
-            </button>
-            <button
-              type="button"
-              className="ui-btn ui-btn-primary"
-              disabled={saving || !String(draft.name || "").trim()}
-              onClick={submit}
-              data-testid="save-account"
-            >
-              {draft.id ? "บันทึก" : "สร้างบัญชี"}
-            </button>
-          </div>
+          draft.id ? (
+            <div className="finance-sheet-actions-stack finance-sheet-actions-sticky">
+              <button
+                type="button"
+                className="ui-btn ui-btn-danger"
+                disabled={saving}
+                onClick={openDeleteConfirm}
+                data-testid="account-delete-trigger"
+              >
+                <Trash2 size={16} />
+                ลบบัญชี
+              </button>
+              <div className="finance-sheet-action-row">
+                <button type="button" className="ui-btn ui-btn-secondary" onClick={closeEditor}>
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-primary"
+                  disabled={saving || !String(draft.name || "").trim()}
+                  onClick={submit}
+                  data-testid="save-account"
+                >
+                  บันทึก
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="finance-sheet-actions finance-sheet-actions-sticky">
+              <button type="button" className="ui-btn ui-btn-secondary" onClick={closeEditor}>
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-primary"
+                disabled={saving || !String(draft.name || "").trim()}
+                onClick={submit}
+                data-testid="save-account"
+              >
+                สร้างบัญชี
+              </button>
+            </div>
+          )
         }
       >
         <div className="finance-form finance-account-form">
@@ -594,16 +629,62 @@ export default function AccountsScreen() {
           </details>
 
           {draft.id ? (
+            <section className="finance-form-section finance-account-danger-zone">
+              <div className="finance-section-label">โซนอันตราย</div>
+              <div className="ui-card finance-account-danger-card">
+                <div className="finance-account-danger-copy">
+                  <div className="finance-panel-title">ลบบัญชีนี้ออกจากแอป</div>
+                  <div className="finance-panel-copy">
+                    รายการเดิมจะยังอยู่ แต่จะถูกถอดออกจากบัญชีนี้และต้องจัดบัญชีใหม่ภายหลัง
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={editorOpen && deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        title="ยืนยันการลบบัญชี"
+        subtitle={draft.name ? `บัญชี ${draft.name}` : "บัญชีนี้จะถูกลบออกจากรายการบัญชี"}
+        footer={
+          <div className="finance-sheet-actions">
             <button
               type="button"
-              className="ui-btn ui-btn-danger finance-account-delete-btn"
+              className="ui-btn ui-btn-secondary"
+              onClick={() => setDeleteConfirmOpen(false)}
+            >
+              กลับไปแก้ไข
+            </button>
+            <button
+              type="button"
+              className="ui-btn ui-btn-danger"
               disabled={saving}
               onClick={handleDeleteAccount}
+              data-testid="account-delete-confirm"
             >
               <Trash2 size={16} />
-              ลบบัญชี
+              ยืนยันการลบ
             </button>
-          ) : null}
+          </div>
+        }
+      >
+        <div className="finance-form">
+          <section className="finance-account-danger-sheet">
+            <div className="finance-account-danger-sheet-copy">
+              <div className="finance-panel-title">สิ่งที่จะเกิดขึ้นหลังลบ</div>
+              <div className="finance-panel-copy">
+                ยอดและรายการเก่าจะไม่หาย แต่บัญชีนี้จะถูกถอดออกจากรายการทั้งหมด และต้องเลือกบัญชีใหม่หากต้องการจัดการต่อ
+              </div>
+            </div>
+            <div className="finance-account-danger-checklist">
+              <div className="finance-account-danger-check">รายการเดิมยังอยู่ในประวัติ</div>
+              <div className="finance-account-danger-check">การเชื่อมกับบัญชีนี้จะถูกล้างออก</div>
+              <div className="finance-account-danger-check">หากยังไม่แน่ใจ แนะนำให้กลับไปแก้ชื่อหรือยอดแทน</div>
+            </div>
+          </section>
         </div>
       </Sheet>
     </ScreenShell>

@@ -2,18 +2,8 @@ import { useState } from "react";
 import { CreditCard, PlusCircle, Target, Trash2 } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
-import {
-  EmptyPanel,
-  MetricCard,
-  ScreenShell,
-  Sheet,
-  StatusPill,
-} from "../ui.jsx";
-import {
-  getGoalProgressPercent,
-  getGoalRemainingSatang,
-  getNextDebtDueDateISO,
-} from "../plannerState.js";
+import { EmptyPanel, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
+import { getGoalProgressPercent, getGoalRemainingSatang, getNextDebtDueDateISO } from "../plannerState.js";
 import { formatCurrency, formatDateLong } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
 
@@ -91,27 +81,33 @@ export default function PlannerScreen() {
   const accountNameMap = new Map(accounts.map((account) => [Number(account.id), account.name]));
 
   const [goalEditorOpen, setGoalEditorOpen] = useState(false);
+  const [goalDeleteConfirmOpen, setGoalDeleteConfirmOpen] = useState(false);
   const [goalDraft, setGoalDraft] = useState(createGoalDraft());
   const [debtEditorOpen, setDebtEditorOpen] = useState(false);
+  const [debtDeleteConfirmOpen, setDebtDeleteConfirmOpen] = useState(false);
   const [debtDraft, setDebtDraft] = useState(createDebtDraft());
 
   const openGoalEditor = (goal = null) => {
     setGoalDraft(createGoalDraft(goal));
+    setGoalDeleteConfirmOpen(false);
     setGoalEditorOpen(true);
   };
 
   const closeGoalEditor = () => {
     setGoalDraft(createGoalDraft());
+    setGoalDeleteConfirmOpen(false);
     setGoalEditorOpen(false);
   };
 
   const openDebtEditor = (plan = null) => {
     setDebtDraft(createDebtDraft(plan));
+    setDebtDeleteConfirmOpen(false);
     setDebtEditorOpen(true);
   };
 
   const closeDebtEditor = () => {
     setDebtDraft(createDebtDraft());
+    setDebtDeleteConfirmOpen(false);
     setDebtEditorOpen(false);
   };
 
@@ -151,14 +147,12 @@ export default function PlannerScreen() {
 
   const handleDeleteGoal = async () => {
     if (!goalDraft.id) return;
-    if (!window.confirm("ลบเป้าหมายนี้ใช่ไหม")) return;
     await deleteFinancialGoal(goalDraft.id);
     closeGoalEditor();
   };
 
   const handleDeleteDebtPlan = async () => {
     if (!debtDraft.id) return;
-    if (!window.confirm("ลบแผนชำระนี้ใช่ไหม")) return;
     await deleteDebtPlan(debtDraft.id);
     closeDebtEditor();
   };
@@ -478,10 +472,27 @@ export default function PlannerScreen() {
           </label>
 
           {goalDraft.id ? (
-            <button type="button" className="ui-btn ui-btn-danger" disabled={saving} onClick={handleDeleteGoal}>
-              <Trash2 size={16} />
-              ลบเป้าหมาย
-            </button>
+            <section className="finance-danger-zone">
+              <div className="finance-section-label">โซนอันตราย</div>
+              <div className="ui-card finance-danger-card">
+                <div className="finance-danger-copy">
+                  <div className="finance-panel-title">ลบเป้าหมายนี้ออกจาก Planner</div>
+                  <div className="finance-panel-copy">
+                    ความคืบหน้าและยอดติดตามของเป้าหมายนี้จะถูกลบออกจากรายการเป้าหมาย
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-danger"
+                  disabled={saving}
+                  onClick={() => setGoalDeleteConfirmOpen(true)}
+                  data-testid="planner-goal-delete-trigger"
+                >
+                  <Trash2 size={16} />
+                  ลบเป้าหมาย
+                </button>
+              </div>
+            </section>
           ) : null}
         </div>
       </Sheet>
@@ -599,11 +610,116 @@ export default function PlannerScreen() {
           </label>
 
           {debtDraft.id ? (
-            <button type="button" className="ui-btn ui-btn-danger" disabled={saving} onClick={handleDeleteDebtPlan}>
-              <Trash2 size={16} />
-              ลบแผนชำระ
-            </button>
+            <section className="finance-danger-zone">
+              <div className="finance-section-label">โซนอันตราย</div>
+              <div className="ui-card finance-danger-card">
+                <div className="finance-danger-copy">
+                  <div className="finance-panel-title">ลบแผนชำระนี้ออกจาก Planner</div>
+                  <div className="finance-panel-copy">
+                    ระบบจะลบแผนติดตามงวดนี้ออก แต่บัญชีหนี้และรายการที่เคยบันทึกไว้จะยังอยู่
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-danger"
+                  disabled={saving}
+                  onClick={() => setDebtDeleteConfirmOpen(true)}
+                  data-testid="planner-debt-delete-trigger"
+                >
+                  <Trash2 size={16} />
+                  ลบแผนชำระ
+                </button>
+              </div>
+            </section>
           ) : null}
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={goalEditorOpen && goalDeleteConfirmOpen}
+        onClose={() => setGoalDeleteConfirmOpen(false)}
+        title="ยืนยันการลบเป้าหมาย"
+        subtitle={goalDraft.name ? `เป้าหมาย ${goalDraft.name}` : "เป้าหมายนี้จะถูกลบออกจาก Planner"}
+        footer={
+          <div className="finance-sheet-actions">
+            <button
+              type="button"
+              className="ui-btn ui-btn-secondary"
+              onClick={() => setGoalDeleteConfirmOpen(false)}
+            >
+              กลับไปแก้ไข
+            </button>
+            <button
+              type="button"
+              className="ui-btn ui-btn-danger"
+              disabled={saving}
+              onClick={handleDeleteGoal}
+              data-testid="planner-goal-delete-confirm"
+            >
+              <Trash2 size={16} />
+              ยืนยันการลบ
+            </button>
+          </div>
+        }
+      >
+        <div className="finance-form">
+          <section className="finance-danger-sheet">
+            <div className="finance-danger-sheet-copy">
+              <div className="finance-panel-title">สิ่งที่จะเกิดขึ้นหลังลบ</div>
+              <div className="finance-panel-copy">
+                เป้าหมายนี้จะหายจากหน้า Planner และจะไม่ถูกนับรวมใน progress summary อีกต่อไป
+              </div>
+            </div>
+            <div className="finance-danger-checklist">
+              <div className="finance-danger-check">ยอดสะสมของเป้าหมายนี้จะไม่ถูกนับรวมในความคืบหน้าแล้ว</div>
+              <div className="finance-danger-check">บัญชีที่เชื่อมไว้จะไม่ถูกลบตามไปด้วย</div>
+              <div className="finance-danger-check">หากยังไม่แน่ใจ แนะนำให้เปลี่ยนสถานะเป็นพักไว้แทน</div>
+            </div>
+          </section>
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={debtEditorOpen && debtDeleteConfirmOpen}
+        onClose={() => setDebtDeleteConfirmOpen(false)}
+        title="ยืนยันการลบแผนชำระ"
+        subtitle="แผนนี้จะถูกลบออกจากรายการติดตามหนี้"
+        footer={
+          <div className="finance-sheet-actions">
+            <button
+              type="button"
+              className="ui-btn ui-btn-secondary"
+              onClick={() => setDebtDeleteConfirmOpen(false)}
+            >
+              กลับไปแก้ไข
+            </button>
+            <button
+              type="button"
+              className="ui-btn ui-btn-danger"
+              disabled={saving}
+              onClick={handleDeleteDebtPlan}
+              data-testid="planner-debt-delete-confirm"
+            >
+              <Trash2 size={16} />
+              ยืนยันการลบ
+            </button>
+          </div>
+        }
+      >
+        <div className="finance-form">
+          <section className="finance-danger-sheet">
+            <div className="finance-danger-sheet-copy">
+              <div className="finance-panel-title">สิ่งที่จะเกิดขึ้นหลังลบ</div>
+              <div className="finance-panel-copy">
+                แผนชำระนี้จะหายจากหน้า Planner แต่บัญชีหนี้จริงและรายการธุรกรรมเดิมยังอยู่เหมือนเดิม
+              </div>
+            </div>
+            <div className="finance-danger-checklist">
+              <div className="finance-danger-check">บัญชีบัตรเครดิตหรือสินเชื่อจะไม่ถูกลบ</div>
+              <div className="finance-danger-check">รายการธุรกรรมเดิมจะยังอยู่ในระบบ</div>
+              <div className="finance-danger-check">หากยังอยากเก็บไว้ แนะนำให้เปลี่ยนสถานะเป็นพักไว้แทน</div>
+            </div>
+          </section>
         </div>
       </Sheet>
     </ScreenShell>

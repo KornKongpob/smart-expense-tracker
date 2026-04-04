@@ -26,3 +26,11 @@ dist-ssr
 .vercel
 .env*.local
 .codex-artifacts/
+.env.vercel-*
+.env*.check
+
+.env*.local
+.playwright-cli/
+output/
+supabase/.temp/
+eng.traineddata

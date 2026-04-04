@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   sanitizeMoneyInput,
@@ -22,6 +23,7 @@ import {
   extractMerchantFromScanText,
 } from '../src/utils/scanPostprocess.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
+import { normalizeProviderScanResult } from '../api/scan.js';
 import { parseScanRequest, assertAllowedInputMime, assertBase64UnderLimit } from '../lib/scan/requestParse.js';
 import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from '../lib/scan/openaiModel.js';
 import {
@@ -57,6 +59,20 @@ import {
   normalizeAccountBalanceForType,
   normalizeAccountBalanceRows,
 } from '../src/features/app/accountBalanceState.js';
+import {
+  buildTransactionSavePlan,
+  scanToDraft,
+} from '../src/features/app/transactionDrafts.js';
+import {
+  replaceDraftLineItems,
+  summarizeDraftLineItems,
+} from '../src/features/app/lineItemDraftState.js';
+import { buildCategoryPresetState } from '../src/features/app/categoryPresetState.js';
+import {
+  createScanUploadEntry,
+  getScanUploadMeta,
+  patchScanUploadEntry,
+} from '../src/features/app/scanUploadState.js';
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
 
@@ -499,6 +515,36 @@ test('scan request parse: enforces allowed mime types and base64 byte limits', (
   assert.deepEqual(assertBase64UnderLimit('QUJDRA==', 3), { ok: false, bytes: 4 });
 });
 
+test('scan api: provider fallback normalization keeps success and error contracts distinct', () => {
+  const success = normalizeProviderScanResult({
+    ok: true,
+    status: 200,
+    json: {
+      ok: true,
+      suggestion: { amount: 265, merchant: 'Cafe Bloom' },
+    },
+  });
+
+  assert.equal(success.status, 200);
+  assert.equal(success.body.ok, true);
+  assert.equal(success.body.suggestion.amount, 265);
+
+  const failure = normalizeProviderScanResult({
+    ok: false,
+    status: 502,
+    json: {
+      ok: false,
+      code: 'provider_unavailable',
+      message: 'Provider down',
+    },
+  });
+
+  assert.equal(failure.status, 502);
+  assert.equal(failure.body.ok, false);
+  assert.equal(failure.body.code, 'provider_unavailable');
+  assert.equal(failure.body.message, 'Provider down');
+});
+
 test('queue type helpers: normalizeQueueItemType fixes credit payment account roles and clears split-only fields', () => {
   const accounts = [
     { id: 'bank-1', type: 'bank', digits: '1234' },
@@ -625,6 +671,238 @@ test('scan result helpers: normalize Thai BE dates and parse response text/objec
 
   assert.equal(extractResponsesOutputText(resp), 'line 1\nline 2');
   assert.deepEqual(findFirstParsedObject(resp), { amount: 2500, merchant: 'Cafe' });
+});
+
+test('runtime transaction drafts: scanToDraft converts baht scans into satang and preserves grouped receipts', () => {
+  const draft = scanToDraft({
+    matched_account_id: 12,
+    matched_category_id: 'food',
+    normalized_suggestion: {
+      tx_type: 'expense',
+      amount_unit: 'baht',
+      amount: 255,
+      merchant: 'Cafe Bloom',
+      date: '2026-04-04',
+      items: [
+        { name: 'Iced latte', total: 145, category_key: 'food' },
+        { name: 'Croissant', total: 120, category_key: 'shopping' },
+      ],
+      adjustments: [
+        { name: 'Member discount', amount: 10, effect: 'subtract', type: 'discount' },
+      ],
+    },
+  });
+
+  assert.equal(draft.kind, 'expense');
+  assert.equal(draft.accountId, '12');
+  assert.equal(draft.amountSatang, 25500);
+  assert.equal(draft.splitByCategory, true);
+  assert.equal(draft.receiptGroups.length, 3);
+  assert.equal(draft.receiptGroups[0].amountSatang, 14500);
+  assert.equal(draft.receiptGroups[2].receiptLineType, 'adjustment');
+  assert.equal(draft.receiptGroups[2].adjustmentEffect, 'subtract');
+});
+
+test('runtime transaction drafts: split save plans create one parent plus ordered child rows', () => {
+  const plan = buildTransactionSavePlan({
+    userId: 'user-1',
+    source: 'scan_approval',
+    scanDocumentId: 44,
+    draft: {
+      kind: 'expense',
+      accountId: 'acc-1',
+      amountSatang: 25500,
+      merchant: 'Cafe Bloom',
+      date: '2026-04-04',
+      splitByCategory: true,
+      receiptGroups: [
+        { name: 'Iced latte', amountSatang: 14500, categoryId: 'food' },
+        { name: 'Croissant', amountSatang: 12000, categoryId: 'shopping' },
+        {
+          name: 'Member discount',
+          amountSatang: 1000,
+          categoryId: 'discount',
+          receiptLineType: 'adjustment',
+          adjustmentEffect: 'subtract',
+          adjustmentType: 'discount',
+        },
+      ],
+    },
+  });
+
+  assert.equal(plan.mode, 'split');
+  assert.equal(plan.parentRow.is_split_parent, true);
+  assert.equal(plan.parentRow.category_id, 'mixed');
+  assert.equal(plan.parentRow.amount_satang, 25500);
+  assert.equal(plan.childRows.length, 3);
+  assert.equal(plan.childRows[0].split_index, 1);
+  assert.equal(plan.childRows[1].split_index, 2);
+  assert.equal(plan.childRows[2].receipt_line_type, 'adjustment');
+  assert.equal(plan.childRows[2].adjustment_effect, 'subtract');
+  assert.ok(plan.childRows.every((row) => row.is_split_child === true));
+  assert.ok(plan.childRows.every((row) => row.split_group_id === plan.parentRow.split_group_id));
+});
+
+test('runtime transaction drafts: transfer-like scans stay on the single transfer path', () => {
+  const plan = buildTransactionSavePlan({
+    userId: 'user-1',
+    source: 'scan_approval',
+    draft: {
+      kind: 'credit_payment',
+      fromAccountId: 'card-1',
+      toAccountId: 'bank-1',
+      amountSatang: 120000,
+      merchant: 'Card payment',
+      date: '2026-04-04',
+      lineItems: [{ name: 'Should be ignored', amountSatang: 5000 }],
+    },
+  });
+
+  assert.equal(plan.mode, 'single');
+  assert.equal(plan.row.kind, 'transfer');
+  assert.equal(plan.row.account_id, null);
+  assert.equal(plan.row.from_account_id, 'card-1');
+  assert.equal(plan.row.to_account_id, 'bank-1');
+  assert.deepEqual(plan.lineItems, []);
+});
+
+test('runtime line item editor state: receipt-group edits stay in sync with line items', () => {
+  const nextDraft = replaceDraftLineItems(
+    {
+      kind: 'expense',
+      amountSatang: 25500,
+      splitByCategory: true,
+      lineItems: [
+        { name: 'Coffee', amountSatang: 14500, categoryId: 'food' },
+        { name: 'Snack', amountSatang: 12000, categoryId: 'shopping' },
+      ],
+      receiptGroups: [
+        { name: 'Coffee', amountSatang: 14500, categoryId: 'food' },
+        { name: 'Snack', amountSatang: 12000, categoryId: 'shopping' },
+      ],
+    },
+    [{ name: 'Coffee', amountSatang: 14500, categoryId: 'food' }],
+  );
+
+  assert.equal(nextDraft.lineItems.length, 1);
+  assert.equal(nextDraft.receiptGroups.length, 1);
+  assert.equal(nextDraft.receiptGroups[0].name, 'Coffee');
+  assert.equal(nextDraft.splitByCategory, false);
+});
+
+test('runtime line item editor state: signed summaries reconcile receipt adjustments', () => {
+  const summary = summarizeDraftLineItems({
+    amountSatang: 25500,
+    lineItems: [
+      { name: 'Coffee', amountSatang: 14500, categoryId: 'food' },
+      { name: 'Snack', amountSatang: 12000, categoryId: 'shopping' },
+      {
+        name: 'Member discount',
+        amountSatang: 1000,
+        categoryId: 'discount',
+        receiptLineType: 'adjustment',
+        adjustmentEffect: 'subtract',
+      },
+    ],
+  });
+
+  assert.equal(summary.grossTotalSatang, 27500);
+  assert.equal(summary.netTotalSatang, 25500);
+  assert.equal(summary.differenceSatang, 0);
+  assert.equal(summary.adjustmentCount, 1);
+  assert.equal(summary.hasAdjustments, true);
+});
+
+test('runtime category preset state: starts on main cards and only opens the chosen parent subcategories', () => {
+  const categories = [
+    { id: 'food', name: 'Food' },
+    { id: 'coffee', name: 'Coffee', parentId: 'food' },
+    { id: 'snack', name: 'Snack', parentId: 'food' },
+    { id: 'travel', name: 'Travel' },
+    { id: 'train', name: 'Train', parentId: 'travel' },
+    { id: 'salary', name: 'Salary' },
+  ];
+
+  const mainStage = buildCategoryPresetState(categories, 'coffee');
+  assert.equal(mainStage.showSubcategoryStage, false);
+  assert.equal(mainStage.activeMainId, 'food');
+  assert.equal(mainStage.subCategoryId, 'coffee');
+
+  const subStage = buildCategoryPresetState(categories, 'coffee', 'food');
+  assert.equal(subStage.showSubcategoryStage, true);
+  assert.equal(subStage.stageMainId, 'food');
+  assert.deepEqual(
+    subStage.stageChildren.map((category) => category.id),
+    ['coffee', 'snack'],
+  );
+
+  const parentOnly = buildCategoryPresetState(categories, 'salary', 'salary');
+  assert.equal(parentOnly.activeMainId, 'salary');
+  assert.equal(parentOnly.subCategoryId, '');
+  assert.equal(parentOnly.showSubcategoryStage, false);
+});
+
+test('runtime scan upload state: provider stages expose step-based progress copy', () => {
+  const scanning = getScanUploadMeta('calling_api', 'receipt.jpg');
+  assert.equal(scanning.stage, 'scanning');
+  assert.equal(scanning.progressStage, 'scanning');
+  assert.equal(scanning.stepText, '3/5');
+  assert.equal(scanning.badgeText, '3/5');
+  assert.equal(scanning.progress, 60);
+  assert.match(scanning.detailText, /3\/5/);
+
+  const done = getScanUploadMeta('done', 'receipt.jpg');
+  assert.equal(done.stage, 'done');
+  assert.equal(done.stepText, '5/5');
+  assert.equal(done.badgeText, 'พร้อมใช้');
+  assert.equal(done.progress, 100);
+});
+
+test('runtime scan upload state: error keeps prior stage progress instead of jumping to complete', () => {
+  const entry = createScanUploadEntry(
+    { name: 'receipt.jpg', size: 128000, type: 'image/jpeg' },
+    { status: 'calling_api' },
+  );
+  const failed = patchScanUploadEntry(entry, {
+    status: 'error',
+    error: 'scan_failed',
+  });
+
+  assert.equal(failed.stage, 'error');
+  assert.equal(failed.progressStage, 'scanning');
+  assert.equal(failed.stepText, '3/5');
+  assert.equal(failed.badgeText, 'ต้องตรวจ');
+  assert.equal(failed.progress, 60);
+  assert.match(failed.detailText, /3\/5/);
+});
+
+test('runtime source: category picker no longer renders a fallback dropdown and account edit exposes a delete footer trigger', () => {
+  const chooserSource = readFileSync(
+    new URL('../src/features/app/CategoryPresetChooser.jsx', import.meta.url),
+    'utf8',
+  );
+  const accountsSource = readFileSync(
+    new URL('../src/features/app/screens/AccountsScreen.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.doesNotMatch(chooserSource, /finance-category-fallback/);
+  assert.match(chooserSource, /finance-category-step-back/);
+  assert.match(accountsSource, /finance-sheet-actions-stack/);
+  assert.match(accountsSource, /data-testid="account-delete-trigger"/);
+});
+
+test('runtime styles: sheet review containers clamp width and hide horizontal overflow', () => {
+  const cssSource = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+
+  assert.match(
+    cssSource,
+    /\.finance-sheet-body\s*\{[^}]*overflow-y:\s*auto;[^}]*overflow-x:\s*hidden;[^}]*\}/s,
+  );
+  assert.match(
+    cssSource,
+    /\.finance-sheet-scroll-root,\s*\.finance-sheet-scroll-root > \*,\s*\.finance-form,\s*\.finance-form-section,[\s\S]*?max-width:\s*100%;/s,
+  );
 });
 
 test('categories: duplicate income ids are canonicalized for Supabase storage', () => {

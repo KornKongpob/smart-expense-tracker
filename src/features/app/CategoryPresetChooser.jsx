@@ -1,12 +1,10 @@
-import { useMemo } from "react";
-import { Check } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Check } from "lucide-react";
 
-import { buildCategoryHierarchy, splitSelection } from "../../utils/categoryHierarchy.js";
+import { buildCategoryPresetState } from "./categoryPresetState.js";
 
-function toCategoryRows(categories) {
-  return (Array.isArray(categories) ? categories : []).filter(
-    (category) => category && category.isHidden !== true,
-  );
+function toId(value) {
+  return String(value || "").trim();
 }
 
 export default function CategoryPresetChooser({
@@ -14,26 +12,58 @@ export default function CategoryPresetChooser({
   value,
   onChange,
   label = "หมวดหมู่",
-  fallbackLabel = "เลือกจากทั้งหมด",
-  fallbackTestId,
 }) {
-  const visibleCategories = useMemo(() => toCategoryRows(categories), [categories]);
-  const hierarchy = useMemo(() => buildCategoryHierarchy(visibleCategories), [visibleCategories]);
-  const selection = useMemo(() => splitSelection(value, hierarchy), [hierarchy, value]);
-  const mainCategories = Array.isArray(hierarchy.main) ? hierarchy.main : [];
-  const activeMainId = String(selection.mainId || "").trim();
-  const subCategoryId = String(selection.subId || "").trim();
-  const activeMain = activeMainId ? hierarchy.byId.get(activeMainId) || null : null;
-  const activeChildren = activeMainId ? hierarchy.childrenByParent.get(activeMainId) || [] : [];
+  const [focusedMainId, setFocusedMainId] = useState("");
+  const pickerState = useMemo(
+    () => buildCategoryPresetState(categories, value, focusedMainId),
+    [categories, focusedMainId, value],
+  );
+  const {
+    hierarchy,
+    mainCategories,
+    activeMainId,
+    subCategoryId,
+    activeSubcategory,
+    stageMainId,
+    stageMain,
+    stageChildren,
+    showSubcategoryStage,
+  } = pickerState;
+
+  useEffect(() => {
+    if (!stageMainId) return;
+    if (!hierarchy.byId.has(stageMainId)) {
+      setFocusedMainId("");
+      return;
+    }
+
+    const nextChildren = hierarchy.childrenByParent.get(stageMainId) || [];
+    if (!nextChildren.length) setFocusedMainId("");
+  }, [hierarchy, stageMainId]);
 
   const handleMainSelect = (categoryId) => {
-    const nextId = String(categoryId || "").trim();
+    const nextId = toId(categoryId);
     if (!nextId) return;
+
+    const children = hierarchy.childrenByParent.get(nextId) || [];
+    if (children.length) {
+      setFocusedMainId(nextId);
+      if (activeMainId !== nextId) onChange?.(nextId);
+      return;
+    }
+
+    setFocusedMainId("");
     onChange?.(nextId);
   };
 
-  const handleSubcategorySelect = (event) => {
-    const nextId = String(event.target.value || "").trim();
+  const handleUseMainCategory = () => {
+    if (!stageMainId) return;
+    onChange?.(stageMainId);
+  };
+
+  const handleSubcategoryPress = (categoryId) => {
+    const nextId = toId(categoryId);
+    if (!nextId) return;
     onChange?.(nextId);
   };
 
@@ -41,13 +71,14 @@ export default function CategoryPresetChooser({
     <section className="finance-form-section finance-form-section-compact">
       <div className="finance-section-label">{label}</div>
 
-      {mainCategories.length ? (
+      {!showSubcategoryStage && mainCategories.length ? (
         <div className="finance-category-preset-grid">
           {mainCategories.map((category) => {
-            const categoryId = String(category?.id || "").trim();
+            const categoryId = toId(category?.id);
             const isActive = categoryId === activeMainId;
             const childCount = (hierarchy.childrenByParent.get(categoryId) || []).length;
             const color = String(category?.color || "#0b84ff").trim() || "#0b84ff";
+            const selectedChildName = isActive ? activeSubcategory?.name || "" : "";
 
             return (
               <button
@@ -65,7 +96,11 @@ export default function CategoryPresetChooser({
                 <span className="finance-category-preset-copy">
                   <span className="finance-category-preset-name">{category?.name || "หมวดหมู่"}</span>
                   <span className="finance-category-preset-meta">
-                    {childCount ? `${childCount} หมวดย่อย` : "เลือกได้ทันที"}
+                    {selectedChildName
+                      ? `เลือก ${selectedChildName}`
+                      : childCount
+                        ? `${childCount} หมวดย่อย`
+                        : "แตะเพื่อใช้หมวดนี้"}
                   </span>
                 </span>
                 {isActive ? (
@@ -79,50 +114,86 @@ export default function CategoryPresetChooser({
         </div>
       ) : null}
 
-      {activeMain && activeChildren.length ? (
-        <label className="finance-field finance-category-subselect">
-          <span className="ui-label">{`หมวดย่อยใน ${activeMain.name}`}</span>
-          <select
-            className="ui-select"
-            value={subCategoryId || activeMainId}
-            onChange={handleSubcategorySelect}
-          >
-            <option value={activeMainId}>ใช้หมวดหลักนี้</option>
-            {activeChildren.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {showSubcategoryStage && stageMain ? (
+        <section className="finance-category-step">
+          <div className="finance-category-step-head">
+            <button
+              type="button"
+              className="finance-category-step-back"
+              onClick={() => setFocusedMainId("")}
+            >
+              <ArrowLeft size={14} />
+              เปลี่ยนหมวดหลัก
+            </button>
+            <span className="ui-label">{`หมวดย่อยใน ${stageMain.name}`}</span>
+            <span className="finance-category-step-copy">
+              เลือกหมวดย่อยที่ต้องการ หรือใช้หมวดหลักนี้ได้ทันที
+            </span>
+          </div>
+
+          <div className="finance-subcategory-card-grid">
+            <button
+              type="button"
+              className={[
+                "finance-subcategory-card",
+                !subCategoryId || subCategoryId === stageMainId ? "is-active" : "",
+                "is-main",
+              ].join(" ")}
+              onClick={handleUseMainCategory}
+            >
+              <span
+                className="finance-subcategory-card-badge"
+                style={{
+                  backgroundColor: `${String(stageMain?.color || "#0b84ff").trim() || "#0b84ff"}14`,
+                  color: String(stageMain?.color || "#0b84ff").trim() || "#0b84ff",
+                }}
+              >
+                {stageMain?.icon || "•"}
+              </span>
+              <span className="finance-subcategory-card-copy">
+                <span className="finance-subcategory-card-name">ใช้หมวดหลัก</span>
+                <span className="finance-subcategory-card-meta">{stageMain.name}</span>
+              </span>
+              {!subCategoryId || subCategoryId === stageMainId ? (
+                <span className="finance-subcategory-card-check" aria-hidden="true">
+                  <Check size={14} />
+                </span>
+              ) : null}
+            </button>
+
+            {stageChildren.map((category) => {
+              const categoryId = toId(category?.id);
+              const isActive = categoryId === subCategoryId;
+              const color = String(category?.color || stageMain?.color || "#0b84ff").trim() || "#0b84ff";
+
+              return (
+                <button
+                  key={categoryId}
+                  type="button"
+                  className={["finance-subcategory-card", isActive ? "is-active" : ""].join(" ")}
+                  onClick={() => handleSubcategoryPress(categoryId)}
+                >
+                  <span
+                    className="finance-subcategory-card-badge"
+                    style={{ backgroundColor: `${color}14`, color }}
+                  >
+                    {category?.icon || stageMain?.icon || "•"}
+                  </span>
+                  <span className="finance-subcategory-card-copy">
+                    <span className="finance-subcategory-card-name">{category.name}</span>
+                    <span className="finance-subcategory-card-meta">หมวดย่อย</span>
+                  </span>
+                  {isActive ? (
+                    <span className="finance-subcategory-card-check" aria-hidden="true">
+                      <Check size={14} />
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
-
-      <label className="finance-field finance-category-fallback">
-        <span className="ui-label">{fallbackLabel}</span>
-        <select
-          className="ui-select"
-          value={String(value || "").trim()}
-          data-testid={fallbackTestId}
-          onChange={handleSubcategorySelect}
-        >
-          <option value="">เลือกหมวดหมู่</option>
-          {mainCategories.map((category) => {
-            const categoryId = String(category?.id || "").trim();
-            const children = hierarchy.childrenByParent.get(categoryId) || [];
-
-            return [
-              <option key={categoryId} value={categoryId}>
-                {category.name}
-              </option>,
-              ...children.map((child) => (
-                <option key={child.id} value={child.id}>
-                  {`↳ ${child.name}`}
-                </option>
-              )),
-            ];
-          })}
-        </select>
-      </label>
     </section>
   );
 }

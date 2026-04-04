@@ -61,12 +61,7 @@ export const callGeminiScan = async (base64Data, mimeType) => {
 
   const res = await fetch(url, {
     method: "POST",
-    headers: (() => {
-      const h = { "Content-Type": "application/json" };
-      const token = import.meta.env.VITE_SCAN_API_TOKEN || "";
-      if (token) h.Authorization = `Bearer ${token}`;
-      return h;
-    })(),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 

@@ -39,7 +39,7 @@ function applyKeyboardDomState(open, inset = 0) {
   else document.body.removeAttribute("data-keyboard-open");
 }
 
-export function BottomNav({ view, onChange }) {
+export function BottomNav({ view, onChange, onIntent }) {
   const navRef = useRef(null);
 
   useLayoutEffect(() => {
@@ -87,6 +87,9 @@ export function BottomNav({ view, onChange }) {
               type="button"
               className={["finance-bottom-nav-item", active ? "finance-bottom-nav-item--active" : ""].filter(Boolean).join(" ")}
               onClick={() => onChange(item.id)}
+              onFocus={() => onIntent?.(item.id)}
+              onPointerEnter={() => onIntent?.(item.id)}
+              onTouchStart={() => onIntent?.(item.id)}
               aria-current={active ? "page" : undefined}
               data-testid={`nav-${item.id}`}
             >
@@ -261,7 +264,9 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }) {
             <X size={18} />
           </button>
         </div>
-        <div className="finance-sheet-body no-scrollbar">{children}</div>
+        <div className="finance-sheet-body finance-sheet-scroll-root no-scrollbar" data-testid="app-sheet-body">
+          {children}
+        </div>
         {footer ? <div className="finance-sheet-footer">{footer}</div> : null}
       </div>
     </div>

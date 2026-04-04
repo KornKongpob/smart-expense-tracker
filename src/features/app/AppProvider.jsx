@@ -30,8 +30,15 @@ import {
   normalizeFinancialGoals,
 } from "./plannerState.js";
 import { normalizeAccountBalanceRows } from "./accountBalanceState.js";
+import { createScanUploadEntry, patchScanUploadEntry } from "./scanUploadState.js";
+import {
+  buildApprovedSuggestion,
+  buildTransactionSavePlan,
+  sanitizeTransactionDraft,
+  scanToDraft,
+  todayDate,
+} from "./transactionDrafts.js";
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/supabase/client.js";
-import { canonicalizeCategoryId } from "../../utils/categoryIds.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
 
 const AppContext = createContext(null);
@@ -59,8 +66,20 @@ function todayMonth() {
   return new Date().toISOString().slice(0, 7);
 }
 
-function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+function buildScanAccountContext(accounts) {
+  return (Array.isArray(accounts) ? accounts : []).map((account) => ({
+    id: account.id,
+    name: account.name,
+    type: account.type,
+    last4: account.last4,
+    last6: account.last6,
+    cardLast4: account.last4,
+  }));
+}
+
+async function loadScanClient() {
+  const module = await import("../../services/scanOpenAI.js");
+  return module.scanReceiptOpenAI;
 }
 
 function toInt(value, fallback = 0) {
@@ -72,103 +91,6 @@ function toInt(value, fallback = 0) {
 function buildAuthMetadata(displayName) {
   const trimmed = String(displayName || "").trim();
   return trimmed ? { display_name: trimmed } : {};
-}
-
-function sanitizeTransactionDraft(input) {
-  const draft = input && typeof input === "object" ? input : {};
-  const kind = String(draft.kind || draft.type || "expense").trim().toLowerCase();
-  const baseKind = kind === "income" || kind === "transfer" ? kind : "expense";
-
-  return {
-    kind: baseKind,
-    accountId: draft.accountId ? String(draft.accountId) : "",
-    fromAccountId: draft.fromAccountId ? String(draft.fromAccountId) : "",
-    toAccountId: draft.toAccountId ? String(draft.toAccountId) : "",
-    categoryId: canonicalizeCategoryId(baseKind, draft.categoryId ? String(draft.categoryId) : ""),
-    amountSatang: Math.max(0, toInt(draft.amountSatang ?? draft.amount, 0)),
-    merchant: String(draft.merchant || "").trim(),
-    note: String(draft.note || "").trim(),
-    reference: String(draft.reference || draft.ref || "").trim(),
-    paymentMethod: String(draft.paymentMethod || draft.payment_method || "").trim(),
-    date: /^\d{4}-\d{2}-\d{2}$/.test(String(draft.date || "").trim()) ? String(draft.date).trim() : todayDate(),
-    lineItems: Array.isArray(draft.lineItems)
-      ? draft.lineItems
-      : Array.isArray(draft.items)
-      ? draft.items
-      : [],
-  };
-}
-
-function normalizeLineItems(items, kind = "expense") {
-  return (Array.isArray(items) ? items : [])
-    .map((item, index) => {
-      const amountRaw = Number(item?.amountSatang ?? item?.amount ?? item?.total ?? 0);
-      const isAdjustment =
-        String(item?.receiptLineType || item?.receipt_line_type || "").trim() === "adjustment" ||
-        String(item?.adjustmentType || item?.adjustment_type || "").trim() !== "" ||
-        String(item?.categoryId || item?.category || "").trim() === "discount" ||
-        amountRaw < 0;
-
-      return {
-        line_order: index,
-        name: String(item?.name || item?.title || item?.label || (isAdjustment ? "Adjustment" : "Item")).trim(),
-        category_id: canonicalizeCategoryId(kind, item?.categoryId || item?.category) || null,
-        amount_satang: Math.abs(toInt(amountRaw, 0)),
-        quantity:
-          item?.qty != null
-            ? Number(item.qty)
-            : item?.quantity != null
-            ? Number(item.quantity)
-            : null,
-        unit_price_satang:
-          item?.unitPriceSatang != null
-            ? toInt(item.unitPriceSatang, null)
-            : item?.unit_price_satang != null
-            ? toInt(item.unit_price_satang, null)
-            : item?.unitPrice != null
-            ? toInt(item.unitPrice, null)
-            : null,
-        receipt_line_type: isAdjustment ? "adjustment" : "item",
-        adjustment_effect:
-          String(item?.adjustmentEffect || item?.adjustment_effect || "").trim() === "subtract" || amountRaw < 0
-            ? "subtract"
-            : "add",
-        adjustment_type: String(item?.adjustmentType || item?.adjustment_type || "").trim() || null,
-        metadata: item,
-      };
-    })
-    .filter((item) => item.name || item.amount_satang > 0);
-}
-
-function scanToDraft(scan) {
-  const suggestion = scan?.normalized_suggestion && typeof scan.normalized_suggestion === "object"
-    ? scan.normalized_suggestion
-    : scan?.suggestion && typeof scan.suggestion === "object"
-    ? scan.suggestion
-    : {};
-
-  return sanitizeTransactionDraft({
-    kind: suggestion?.tx_type || "expense",
-    accountId: suggestion?.account_id || scan?.matched_account_id || "",
-    fromAccountId: suggestion?.from_account || "",
-    toAccountId: suggestion?.to_account || "",
-    categoryId: scan?.matched_category_id || suggestion?.category_key || suggestion?.category || "",
-    amountSatang: suggestion?.amount ?? 0,
-    merchant: suggestion?.merchant || "",
-    note: suggestion?.note || "",
-    reference: suggestion?.ref || "",
-    paymentMethod: suggestion?.payment_method || "",
-    date: suggestion?.date || todayDate(),
-    lineItems: Array.isArray(suggestion?.items)
-      ? suggestion.items.map((item) => ({
-          name: item?.name || "",
-          amountSatang: item?.total ?? item?.amount ?? 0,
-          categoryId: item?.category_key || item?.category || "",
-          qty: item?.qty ?? item?.quantity ?? null,
-          unitPriceSatang: item?.unit_price ?? item?.unitPrice ?? null,
-        }))
-      : [],
-  });
 }
 
 async function fetchWithSession(session, url, options = {}) {
@@ -186,39 +108,18 @@ async function fetchWithSession(session, url, options = {}) {
   return json;
 }
 
-async function uploadScanWithSession(session, accounts, file) {
-  const form = new FormData();
-  form.append("file", file, file.name || "scan-upload");
-  form.append(
-    "accounts",
-    JSON.stringify(
-      (Array.isArray(accounts) ? accounts : []).map((account) => ({
-        id: account.id,
-        name: account.name,
-        type: account.type,
-        last4: account.last4,
-        last6: account.last6,
-        cardLast4: account.last4,
-      })),
-    ),
-  );
-
-  const headers = new Headers();
-  if (session?.access_token) {
-    headers.set("Authorization", `Bearer ${session.access_token}`);
-  }
-
-  const res = await fetch("/api/scan", {
-    method: "POST",
-    headers,
-    body: form,
+async function uploadScanWithSession(session, accounts, file, options = {}) {
+  const scanReceiptOpenAI = await loadScanClient();
+  return scanReceiptOpenAI(file, {
+    endpoint: options.endpoint,
+    accounts: buildScanAccountContext(accounts),
+    headers: session?.access_token
+      ? {
+          Authorization: `Bearer ${session.access_token}`,
+        }
+      : {},
+    onStatus: typeof options.onStatus === "function" ? options.onStatus : undefined,
   });
-
-  const json = await readJson(res);
-  if (!res.ok || json?.ok === false) {
-    throw new Error(String(json?.message || res.statusText || "scan_failed"));
-  }
-  return json;
 }
 
 function isMissingPlannerRelationError(error, relationName) {
@@ -286,6 +187,7 @@ export function AppProvider({ children }) {
   const [selectedMonth, setSelectedMonth] = useState(todayMonth());
   const [toast, setToast] = useState(null);
   const [queue, setQueue] = useState(readOfflineQueue());
+  const [scanUploads, setScanUploads] = useState([]);
   const [isOnline, setIsOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine !== false,
   );
@@ -343,6 +245,7 @@ export function AppProvider({ children }) {
       setFinancialGoals([]);
       setDebtPlans([]);
       setScanDocuments([]);
+      setScanUploads([]);
       setDashboardSnapshot(null);
       setAccountBalanceSnapshot([]);
       setCashflowSeries([]);
@@ -397,6 +300,54 @@ export function AppProvider({ children }) {
 
   function clearToast() {
     setToast(null);
+  }
+
+  function appendScanUpload(file) {
+    const nextEntry = createScanUploadEntry(file);
+    setScanUploads((current) => [nextEntry, ...current].slice(0, 12));
+    return nextEntry;
+  }
+
+  function appendScanUploads(files) {
+    const entries = Array.from(files || [])
+      .filter(Boolean)
+      .map((file) => createScanUploadEntry(file));
+
+    if (!entries.length) return [];
+
+    setScanUploads((current) => [...entries, ...current].slice(0, 12));
+    return entries;
+  }
+
+  function updateScanUpload(entryId, patch) {
+    setScanUploads((current) =>
+      current.map((entry) => (entry.id === entryId ? patchScanUploadEntry(entry, patch) : entry)),
+    );
+  }
+
+  async function runScanUpload(entry, options = {}) {
+    updateScanUpload(entry.id, { status: "queued", error: "" });
+
+    try {
+      const result = await uploadScanWithSession(session, accounts, entry.file, {
+        endpoint: options.endpoint,
+        onStatus: (status) => updateScanUpload(entry.id, { status }),
+      });
+
+      updateScanUpload(entry.id, {
+        status: "done",
+        scanDocumentId: result?.scanDocumentId || null,
+        error: "",
+      });
+
+      return { ok: true, result };
+    } catch (error) {
+      updateScanUpload(entry.id, {
+        status: "error",
+        error: String(error?.message || error || "scan_failed"),
+      });
+      return { ok: false, error };
+    }
   }
 
   function toCategoryErrorMessage(error) {
@@ -972,54 +923,99 @@ export function AppProvider({ children }) {
 
   async function saveTransactionDraft(draft, options = {}) {
     if (!supabase || !session) return null;
+    const plan = buildTransactionSavePlan({
+      draft,
+      userId: session.user.id,
+      source: options.source || "manual",
+      scanDocumentId: options.scanDocumentId || null,
+      attachment: options.attachment || null,
+    });
 
-    const sanitized = sanitizeTransactionDraft(draft);
-    const kind = sanitized.kind;
-    const lineItems = normalizeLineItems(sanitized.lineItems, kind);
+    if (plan.mode === "split") {
+      const insertedIds = [];
 
-    const row = {
-      user_id: session.user.id,
-      legacy_id: null,
-      scan_document_id: options.scanDocumentId || null,
-      kind,
-      status: "posted",
-      account_id: kind === "transfer" ? null : sanitized.accountId || null,
-      from_account_id: kind === "transfer" ? sanitized.fromAccountId || null : null,
-      to_account_id: kind === "transfer" ? sanitized.toAccountId || null : null,
-      category_id: kind === "transfer" ? null : sanitized.categoryId || null,
-      merchant: sanitized.merchant || null,
-      merchant_key: normalizeMerchantKey(sanitized.merchant || ""),
-      note: sanitized.note || null,
-      reference: sanitized.reference || null,
-      payment_method: sanitized.paymentMethod || null,
-      amount_satang: sanitized.amountSatang,
-      currency: "THB",
-      date: sanitized.date,
-      attachment_path: options.attachment?.path || null,
-      attachment_name: options.attachment?.fileName || null,
-      attachment_mime_type: options.attachment?.mimeType || null,
-      raw: {
-        source: options.source || "manual",
-        lineItems: sanitized.lineItems,
-      },
-    };
+      try {
+        const { data: parent, error: parentError } = await supabase
+          .from("transactions")
+          .insert({
+            ...plan.parentRow,
+            merchant_key: normalizeMerchantKey(plan.sanitized.merchant || ""),
+          })
+          .select("id")
+          .single();
 
-    const { data, error } = await supabase.from("transactions").insert(row).select("id").single();
+        if (parentError) throw parentError;
+        insertedIds.push(Number(parent.id));
+
+        const childRows = plan.childRows.map((row) => ({
+          ...row,
+          split_parent_id: parent.id,
+          merchant_key: normalizeMerchantKey(plan.sanitized.merchant || ""),
+        }));
+
+        const { data: children, error: childError } = await supabase
+          .from("transactions")
+          .insert(childRows)
+          .select("id");
+
+        if (childError) throw childError;
+
+        for (const child of Array.isArray(children) ? children : []) {
+          if (child?.id != null) insertedIds.push(Number(child.id));
+        }
+
+        return {
+          id: Number(parent.id),
+          childIds: (Array.isArray(children) ? children : []).map((child) => Number(child?.id || 0)).filter(Boolean),
+          savedDraft: plan.sanitized,
+        };
+      } catch (error) {
+        if (insertedIds.length) {
+          try {
+            await supabase.from("transactions").delete().in("id", insertedIds);
+          } catch {
+            // Ignore cleanup failures and surface the original error.
+          }
+        }
+        throw error;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("transactions")
+      .insert({
+        ...plan.row,
+        merchant_key: normalizeMerchantKey(plan.sanitized.merchant || ""),
+      })
+      .select("id")
+      .single();
+
     if (error) throw error;
 
-    if (lineItems.length) {
+    if (plan.lineItems.length) {
       const { error: lineError } = await supabase.from("transaction_line_items").insert(
-        lineItems.map((item) => ({
+        plan.lineItems.map((item) => ({
           transaction_id: data.id,
           user_id: session.user.id,
           ...item,
         })),
       );
 
-      if (lineError) throw lineError;
+      if (lineError) {
+        try {
+          await supabase.from("transactions").delete().eq("id", data.id);
+        } catch {
+          // Ignore cleanup failures and surface the original error.
+        }
+        throw lineError;
+      }
     }
 
-    return data;
+    return {
+      id: Number(data.id),
+      childIds: [],
+      savedDraft: plan.sanitized,
+    };
   }
 
   async function createManualTransaction(draft, options = {}) {
@@ -1078,7 +1074,7 @@ export function AppProvider({ children }) {
           : null,
       });
 
-      const sanitized = sanitizeTransactionDraft(draft);
+      const sanitized = transaction?.savedDraft || sanitizeTransactionDraft(draft);
       const merchantKey = normalizeMerchantKey(sanitized.merchant || "");
 
       const { error: scanError } = await supabase
@@ -1086,18 +1082,16 @@ export function AppProvider({ children }) {
         .update({
           status: "approved",
           approved_transaction_id: transaction?.id || null,
-          matched_account_id: sanitized.accountId ? Number(sanitized.accountId) : null,
+          matched_account_id:
+            sanitized.kind === "transfer"
+              ? sanitized.fromAccountId
+                ? Number(sanitized.fromAccountId)
+                : null
+              : sanitized.accountId
+              ? Number(sanitized.accountId)
+              : null,
           matched_category_id: sanitized.categoryId || null,
-          normalized_suggestion: {
-            ...(scan?.normalized_suggestion || {}),
-            amount: sanitized.amountSatang,
-            date: sanitized.date,
-            merchant: sanitized.merchant,
-            note: sanitized.note,
-            category_key: sanitized.categoryId || null,
-            items: sanitized.lineItems,
-            payment_method: sanitized.paymentMethod || null,
-          },
+          normalized_suggestion: buildApprovedSuggestion(scan, sanitized),
           merchant_key: merchantKey || null,
           reviewed_at: new Date().toISOString(),
         })
@@ -1149,10 +1143,82 @@ export function AppProvider({ children }) {
 
     setSaving(true);
     try {
-      const result = await uploadScanWithSession(session, accounts, file);
+      const entry = appendScanUpload(file);
+      const outcome = await runScanUpload(entry, options);
+      if (!outcome.ok) {
+        pushToast("error", String(outcome.error?.message || outcome.error || "scan_failed"));
+        return null;
+      }
+
       await refreshAll();
       pushToast("success", "เพิ่มเข้า Inbox แล้ว");
-      return result;
+      return outcome.result;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function uploadScanFiles(files, options = {}) {
+    if (!session) return [];
+    const list = Array.from(files || []).filter(Boolean);
+    if (!list.length) return [];
+
+    if (!isOnline && !options.skipQueue) {
+      let nextQueue = queue;
+      for (const file of list) {
+        nextQueue = await enqueueScanDraft(file);
+      }
+      setQueue(nextQueue);
+      pushToast("info", list.length > 1 ? "เก็บไฟล์ไว้รออัปโหลดแล้ว" : "เก็บไฟล์ไว้แล้ว");
+      return [];
+    }
+
+    setSaving(true);
+    try {
+      const results = [];
+      let successCount = 0;
+      const entries = appendScanUploads(list);
+
+      for (const entry of entries) {
+        const outcome = await runScanUpload(entry, options);
+        results.push(outcome.ok ? outcome.result : null);
+        if (outcome.ok) successCount += 1;
+      }
+
+      const failureCount = Math.max(0, list.length - successCount);
+
+      if (successCount > 0) {
+        await refreshAll();
+        if (failureCount > 0) {
+          pushToast("info", `เพิ่มเข้า Inbox แล้ว ${successCount} ไฟล์ เหลือ ${failureCount} ไฟล์ที่ต้องตรวจ`);
+        } else {
+          pushToast("success", successCount > 1 ? `เพิ่มเข้า Inbox แล้ว ${successCount} ไฟล์` : "เพิ่มเข้า Inbox แล้ว");
+        }
+      } else {
+        pushToast("error", "สแกนไม่สำเร็จ กรุณาลองอีกครั้ง");
+      }
+
+      return results;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function retryScanUpload(uploadId) {
+    if (!session) return null;
+    const entry = (Array.isArray(scanUploads) ? scanUploads : []).find((item) => item.id === uploadId);
+    if (!entry?.file) return null;
+
+    setSaving(true);
+    try {
+      const outcome = await runScanUpload(entry);
+      if (outcome.ok) {
+        await refreshAll();
+        pushToast("success", "เพิ่มเข้า Inbox แล้ว");
+        return outcome.result;
+      }
+      pushToast("error", String(outcome.error?.message || outcome.error || "scan_failed"));
+      return null;
     } finally {
       setSaving(false);
     }
@@ -1360,6 +1426,7 @@ export function AppProvider({ children }) {
     plannerReminders,
     selectedMonth,
     queue,
+    scanUploads,
     toast,
     migrationState,
     setSelectedMonth,
@@ -1381,6 +1448,8 @@ export function AppProvider({ children }) {
     setCategoryHidden,
     createManualTransaction,
     uploadScanFile,
+    uploadScanFiles,
+    retryScanUpload,
     approveScanDocument,
     rejectScanDocument,
     runLegacyMigration,

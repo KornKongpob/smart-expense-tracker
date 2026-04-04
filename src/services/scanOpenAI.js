@@ -1,7 +1,7 @@
 // src/services/scanOpenAI.js
-// Client-side helper to call receipt scan API
+// Client-side helper to call the server-side receipt scan API.
 // Optional env: VITE_SCAN_API_URL (default: /api/scan)
-// OpenAI endpoint only: /api/scan
+// Secrets must stay on the server (Vercel env vars), never in the browser bundle.
 import { normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
 import {
   detectScanTextDocType,
@@ -670,7 +670,16 @@ function normalizeKeywords(kws) {
   return out.slice(0, 15);
 }
 
-function normalizeScanResult({ data, rawText, model, endpointUsed }) {
+function normalizeScanResult({
+  data,
+  rawText,
+  model,
+  endpointUsed,
+  scanDocumentId = null,
+  matchedAccountId = null,
+  matchedCategoryId = null,
+  attachment = null,
+}) {
   const d = data && typeof data === "object" ? data : null;
   const base = normalizeScanResponse(d, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
   const textContext = normalizeScanText(
@@ -721,6 +730,10 @@ function normalizeScanResult({ data, rawText, model, endpointUsed }) {
       : (base.confidence != null ? { overall: base.confidence } : null),
     errors: base.errors,
     flags: d?.flags && typeof d.flags === 'object' ? d.flags : null,
+    scanDocumentId,
+    matchedAccountId,
+    matchedCategoryId,
+    attachment: attachment && typeof attachment === "object" ? attachment : null,
 
     _rawText: rawText ?? "",
     _model: model ?? "",
@@ -757,7 +770,7 @@ function isPdfFileLike(file) {
 async function postMultipart(
   url,
   { file, imageDataUrl, imageDataUrls, fileName, accounts },
-  { timeoutMs = 95_000 } = {}
+  { timeoutMs = 95_000, headers = {} } = {}
 ) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -795,13 +808,6 @@ async function postMultipart(
       form.append("accounts", JSON.stringify(accounts));
     }
 
-    const headers = (() => {
-      const h = {};
-      const token = import.meta.env.VITE_SCAN_API_TOKEN || "";
-      if (token) h.Authorization = `Bearer ${token}`;
-      return h;
-    })();
-
     const res = await fetch(url, {
       method: "POST",
       headers,
@@ -823,12 +829,7 @@ async function _postJson(url, body, { timeoutMs = 95_000 } = {}) {
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: (() => {
-        const h = { "Content-Type": "application/json" };
-        const token = import.meta.env.VITE_SCAN_API_TOKEN || "";
-        if (token) h.Authorization = `Bearer ${token}`;
-        return h;
-      })(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
       signal: controller.signal,
     });
@@ -846,10 +847,13 @@ async function _postJson(url, body, { timeoutMs = 95_000 } = {}) {
  * onStatus steps:
  * - "encoding_image"
  * - "preparing_file" (PDF)
+ * - "uploading_files"
  * - "calling_api"
+ * - "parsing_response"
+ * - "validating_items"
  * - "done"
  */
-export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [] } = {}) {
+export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [], headers = {} } = {}) {
   // ✅ Prefer the receipt-optimized endpoint by default.
   // (We still keep /api/scan working as an alias on the backend.)
   const defaultUrl = import.meta.env.VITE_SCAN_API_URL || "/api/scan";
@@ -891,10 +895,11 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   };
 
   // ---- 1) Try primary endpoint (/api/scan by default) ----
+  onStatus?.("uploading_files");
   onStatus?.("calling_api");
   let primary;
   try {
-    primary = await postMultipart(url, multipartPayload);
+    primary = await postMultipart(url, multipartPayload, { headers });
   } catch (err) {
     const isAbort = err?.name === "AbortError";
     const e = new Error(isAbort ? "scan_timeout" : "scan_network_error");
@@ -906,6 +911,8 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
   // ---- Handle primary response (/api/scan) ----
   const res = primary.res;
   const json = primary.json || {};
+
+  onStatus?.("parsing_response");
 
   if (res.status === 404) {
     const e = new Error("scan_api_not_found");
@@ -935,6 +942,7 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
 
   const d = json?.data && typeof json.data === "object" ? json.data : null;
 
+  onStatus?.("validating_items");
   onStatus?.("done");
 
   return normalizeScanResult({
@@ -942,5 +950,9 @@ export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [
     rawText: json?.rawText || "",
     model: json?.model || "",
     endpointUsed: url,
+    scanDocumentId: json?.scanDocumentId || null,
+    matchedAccountId: json?.matchedAccountId || null,
+    matchedCategoryId: json?.matchedCategoryId || null,
+    attachment: json?.attachment || null,
   });
 }

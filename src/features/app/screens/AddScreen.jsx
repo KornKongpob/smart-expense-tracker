@@ -11,8 +11,9 @@ import {
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
+import LineItemEditorSection from "../LineItemEditorSection.jsx";
+import { lineItemsFromDraft } from "../lineItemDraftState.js";
 import { ScreenShell, StatusPill } from "../ui.jsx";
-import { formatCurrency } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
 
 const MANUAL_KIND_OPTIONS = [
@@ -40,10 +41,6 @@ function defaultDraft(accounts) {
   };
 }
 
-function lineItemsFromDraft(draft) {
-  return Array.isArray(draft?.lineItems) ? draft.lineItems : [];
-}
-
 function toInputAmount(satang, allowEmpty = true) {
   const amount = Number(satang || 0) / 100;
   if (!Number.isFinite(amount)) return allowEmpty ? "" : "0.00";
@@ -51,15 +48,23 @@ function toInputAmount(satang, allowEmpty = true) {
   return amount.toFixed(2);
 }
 
+function getUploadTone(stage) {
+  if (stage === "done") return "success";
+  if (stage === "error") return "danger";
+  return "warning";
+}
+
 export default function AddScreen() {
   const {
     accounts,
     categories,
     queue,
+    scanUploads,
     saving,
     isOnline,
     createManualTransaction,
-    uploadScanFile,
+    uploadScanFiles,
+    retryScanUpload,
   } = useExpenseApp();
 
   const [mode, setMode] = useState("scan");
@@ -71,6 +76,7 @@ export default function AddScreen() {
 
   const hasAccounts = accounts.length > 0;
   const queueCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
+  const activeUploads = (Array.isArray(scanUploads) ? scanUploads : []).slice(0, 6);
   const kindCategories = (
     draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense
   ).filter((category) => category?.isHidden !== true);
@@ -98,16 +104,25 @@ export default function AddScreen() {
   const applyKind = (kind) => {
     const firstAccountId = accounts[0] ? String(accounts[0].id) : "";
 
-    setDraft((current) => ({
-      ...current,
-      kind,
-      categoryId: kind === "transfer" ? "" : current.categoryId,
-      accountId: kind === "transfer" ? current.accountId : current.accountId || current.fromAccountId || firstAccountId,
-      fromAccountId:
-        kind === "transfer" ? current.fromAccountId || current.accountId || firstAccountId : current.fromAccountId,
-      toAccountId: kind === "transfer" ? current.toAccountId : "",
-      lineItems: kind === "transfer" ? [] : lineItemsFromDraft(current),
-    }));
+    setDraft((current) => {
+      const nextLineItems = kind === "transfer" ? [] : lineItemsFromDraft(current);
+      const nextDraft = {
+        ...current,
+        kind,
+        categoryId: kind === "transfer" ? "" : current.categoryId,
+        accountId: kind === "transfer" ? current.accountId : current.accountId || current.fromAccountId || firstAccountId,
+        fromAccountId:
+          kind === "transfer" ? current.fromAccountId || current.accountId || firstAccountId : current.fromAccountId,
+        toAccountId: kind === "transfer" ? current.toAccountId : "",
+        lineItems: nextLineItems,
+      };
+
+      if (Array.isArray(current?.receiptGroups)) {
+        nextDraft.receiptGroups = nextLineItems;
+      }
+
+      return nextDraft;
+    });
 
     if (kind === "transfer") setShowLines(false);
   };
@@ -117,8 +132,6 @@ export default function AddScreen() {
     (draft.kind === "transfer"
       ? Boolean(draft.fromAccountId && draft.toAccountId && draft.fromAccountId !== draft.toAccountId)
       : Boolean(draft.accountId));
-
-  const lineItemsTotal = lineItemsFromDraft(draft).reduce((sum, item) => sum + Number(item.amountSatang || 0), 0);
 
   return (
     <ScreenShell
@@ -171,11 +184,12 @@ export default function AddScreen() {
                   ref={fileInputRef}
                   type="file"
                   hidden
+                  multiple
                   accept="image/*,application/pdf"
                   onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    if (!file) return;
-                    await uploadScanFile(file);
+                    const files = Array.from(event.target.files || []);
+                    if (!files.length) return;
+                    await uploadScanFiles(files);
                     event.target.value = "";
                   }}
                 />
@@ -185,6 +199,50 @@ export default function AddScreen() {
                 <div className="finance-chip-grid">
                   {queue.scans.length ? <StatusPill tone="warning">สแกนรอ {queue.scans.length}</StatusPill> : null}
                   {queue.manual.length ? <StatusPill tone="warning">ฟอร์มรอ {queue.manual.length}</StatusPill> : null}
+                </div>
+              ) : null}
+
+              {activeUploads.length ? (
+                <div className="finance-upload-list">
+                  {activeUploads.map((upload) => (
+                    <div key={upload.id} className="finance-upload-row">
+                      <div className="finance-upload-copy">
+                        <div className="finance-upload-title">{upload.fileName}</div>
+                        <div className="finance-upload-meta">{upload.detailText || upload.label}</div>
+                      </div>
+
+                      <div className="finance-upload-side">
+                        <StatusPill tone={getUploadTone(upload.stage)}>
+                          {upload.badgeText || `${upload.progress}%`}
+                        </StatusPill>
+                        <div className="finance-upload-progress" aria-hidden="true">
+                          <span style={{ width: `${upload.progress}%` }} />
+                        </div>
+                        {upload.stage === "error" ? (
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn-secondary finance-upload-action"
+                            onClick={() => retryScanUpload(upload.id)}
+                            disabled={saving}
+                          >
+                            ลองอีกครั้ง
+                          </button>
+                        ) : null}
+                        {upload.stage === "done" ? (
+                          <button
+                            type="button"
+                            className="ui-btn ui-btn-secondary finance-upload-action"
+                            onClick={() => {
+                              window.location.hash = "#inbox";
+                            }}
+                          >
+                            เปิด Inbox
+                          </button>
+                        ) : null}
+                        {upload.error ? <div className="finance-upload-error">{upload.error}</div> : null}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : null}
             </div>
@@ -321,7 +379,6 @@ export default function AddScreen() {
                       <CategoryPresetChooser
                         categories={kindCategories}
                         value={draft.categoryId}
-                        fallbackTestId="manual-category-select"
                         onChange={(categoryId) => setDraft((current) => ({ ...current, categoryId }))}
                       />
                     </div>
@@ -359,9 +416,7 @@ export default function AddScreen() {
                           <input
                             className="ui-input"
                             value={draft.reference}
-                            onChange={(event) =>
-                              setDraft((current) => ({ ...current, reference: event.target.value }))
-                            }
+                            onChange={(event) => setDraft((current) => ({ ...current, reference: event.target.value }))}
                           />
                         </label>
 
@@ -390,123 +445,15 @@ export default function AddScreen() {
                 </details>
 
                 {draft.kind !== "transfer" ? (
-                  <details className="finance-details" open={showLines}>
-                    <summary
-                      className="finance-details-summary bento-summary"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        setShowLines((current) => !current);
-                      }}
-                    >
-                      <span>แยกรายการ</span>
-                      <span className="finance-details-caret">{showLines ? "ซ่อน" : "แสดง"}</span>
-                    </summary>
-
-                    {showLines ? (
-                      <div className="finance-details-body">
-                        <div className="finance-line-items">
-                          <div className="finance-line-items-head">
-                            <button
-                              type="button"
-                              className="ui-btn ui-btn-secondary"
-                              onClick={() =>
-                                setDraft((current) => ({
-                                  ...current,
-                                  lineItems: [
-                                    ...lineItemsFromDraft(current),
-                                    { name: "", amountSatang: 0, categoryId: current.categoryId || "" },
-                                  ],
-                                }))
-                              }
-                            >
-                              เพิ่มบรรทัด
-                            </button>
-                          </div>
-
-                          {lineItemsFromDraft(draft).length ? (
-                            lineItemsFromDraft(draft).map((item, index) => (
-                              <div key={`manual-line-${index}`} className="finance-line-item-card">
-                                <div className="finance-grid finance-grid-2">
-                                  <label className="finance-field">
-                                    <span className="ui-label">ชื่อรายการ</span>
-                                    <input
-                                      className="ui-input"
-                                      value={item.name || ""}
-                                      onChange={(event) =>
-                                        setDraft((current) => ({
-                                          ...current,
-                                          lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                            rowIndex === index ? { ...row, name: event.target.value } : row,
-                                          ),
-                                        }))
-                                      }
-                                    />
-                                  </label>
-
-                                  <label className="finance-field">
-                                    <span className="ui-label">จำนวนเงิน</span>
-                                    <input
-                                      className="ui-input"
-                                      inputMode="decimal"
-                                      value={toInputAmount(item.amountSatang)}
-                                      onChange={(event) =>
-                                        setDraft((current) => ({
-                                          ...current,
-                                          lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                            rowIndex === index
-                                              ? { ...row, amountSatang: parseMoneyToSatang(event.target.value) }
-                                              : row,
-                                          ),
-                                        }))
-                                      }
-                                    />
-                                  </label>
-                                </div>
-
-                                <label className="finance-field">
-                                  <span className="ui-label">หมวดหมู่</span>
-                                  <select
-                                    className="ui-select"
-                                    value={item.categoryId || ""}
-                                    onChange={(event) =>
-                                      setDraft((current) => ({
-                                        ...current,
-                                        lineItems: lineItemsFromDraft(current).map((row, rowIndex) =>
-                                          rowIndex === index ? { ...row, categoryId: event.target.value } : row,
-                                        ),
-                                      }))
-                                    }
-                                  >
-                                    <option value="">ใช้หมวดหลัก</option>
-                                    {kindCategories.map((category) => (
-                                      <option key={category.id} value={category.id}>
-                                        {category.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="finance-line-items-empty">ยังไม่มีบรรทัด</div>
-                          )}
-
-                          {lineItemsFromDraft(draft).length ? (
-                            <div className="finance-review-summary">
-                              <div>
-                                <span className="ui-label">ยอดหลัก</span>
-                                <div className="finance-row-title">{formatCurrency(draft.amountSatang)}</div>
-                              </div>
-                              <div>
-                                <span className="ui-label">รวมบรรทัด</span>
-                                <div className="finance-row-title">{formatCurrency(lineItemsTotal)}</div>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                  </details>
+                  <LineItemEditorSection
+                    draft={draft}
+                    categories={kindCategories}
+                    open={showLines}
+                    onToggle={() => setShowLines((current) => !current)}
+                    onDraftChange={setDraft}
+                    addTestId="manual-line-add"
+                    removeTestIdPrefix="manual-line-remove"
+                  />
                 ) : null}
 
                 <div className="finance-page-actions">

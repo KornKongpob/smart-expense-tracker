@@ -416,9 +416,18 @@ export default function App() {
   const reserveNavSpace = view !== "add";
   const showNavbar = reserveNavSpace && !keyboardOpen; // hide while keyboard is open
   const rootSpacingClass = showNavbar ? "pb-nav" : "pb-safe";
+  const shellBottomReserve = showNavbar
+    ? "calc(var(--app-nav-h, 5rem) + env(safe-area-inset-bottom))"
+    : "env(safe-area-inset-bottom)";
 
   return (
-    <div className={rootSpacingClass}>
+    <div
+      className={`app-shell-root ${rootSpacingClass}`}
+      style={{
+        "--app-shell-bottom-reserve": shellBottomReserve,
+        "--app-bottom-dock-reserve": "calc(7rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))",
+      }}
+    >
       <AlertToast message={alert} onClose={() => setAlert("")} />
       <ConfirmModal confirm={confirm} setConfirm={setConfirm} />
 

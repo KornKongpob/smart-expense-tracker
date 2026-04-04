@@ -37,7 +37,7 @@ async function computeCurrentBalance(admin, userId, account) {
 
   const { data: transactions, error: txError } = await admin
     .from("transactions")
-    .select("kind, amount_satang, account_id, from_account_id, to_account_id")
+    .select("kind, amount_satang, account_id, from_account_id, to_account_id, adjustment_effect, is_split_parent")
     .eq("user_id", userId)
     .or(`account_id.eq.${account.id},from_account_id.eq.${account.id},to_account_id.eq.${account.id}`);
 
@@ -46,6 +46,7 @@ async function computeCurrentBalance(admin, userId, account) {
   }
 
   return (Array.isArray(transactions) ? transactions : []).reduce((sum, transaction) => {
+    if (transaction?.is_split_parent) return sum;
     const amount = Number(transaction?.amount_satang || 0);
     if (!amount) return sum;
 
@@ -53,7 +54,9 @@ async function computeCurrentBalance(admin, userId, account) {
       return sum + amount;
     }
     if (transaction?.kind === "expense" && Number(transaction?.account_id) === Number(account.id)) {
-      return sum - amount;
+      return String(transaction?.adjustment_effect || "").trim().toLowerCase() === "subtract"
+        ? sum + amount
+        : sum - amount;
     }
     if (transaction?.kind === "transfer" && Number(transaction?.to_account_id) === Number(account.id)) {
       return sum + amount;

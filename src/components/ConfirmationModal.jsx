@@ -1,6 +1,8 @@
 // src/components/ConfirmationModal.jsx
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { AlertCircle, X } from "lucide-react";
+import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 export default function ConfirmationModal({
   isOpen,
@@ -15,6 +17,8 @@ export default function ConfirmationModal({
   const titleId = useId();
   const descId = useId();
   const confirmBtnRef = useRef(null);
+
+  useLockBodyScroll(isOpen);
 
   // ✅ UX: focus primary action when opened + allow ESC to close
   useEffect(() => {
@@ -34,16 +38,6 @@ export default function ConfirmationModal({
     };
   }, [isOpen, onCancel, onConfirm]);
 
-  // ✅ prevent background scroll while modal open
-  useEffect(() => {
-    if (!isOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [isOpen]);
-
   if (!isOpen) return null;
 
   const tone = isDestructive
@@ -58,13 +52,16 @@ export default function ConfirmationModal({
           "bg-gradient-to-tr from-indigo-600/95 to-purple-600/95 text-white border border-white/35 shadow-[0_18px_36px_rgba(99,102,241,0.28)] focus-visible:ring-indigo-300/40",
       };
 
-  return (
+  const modal = (
     <div
       className="fixed inset-0 z-[110] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={descId}
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget) e.preventDefault();
+      }}
     >
       {/* Backdrop */}
       <button
@@ -148,4 +145,6 @@ export default function ConfirmationModal({
       </div>
     </div>
   );
+
+  return typeof document !== "undefined" ? createPortal(modal, document.body) : modal;
 }

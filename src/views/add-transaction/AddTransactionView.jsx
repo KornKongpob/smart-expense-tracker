@@ -75,7 +75,7 @@ import { coerceClipboardFile, filterAllowedUploads, isPdfFile } from "./helpers/
 import { applyAutomationToQueuePatch, buildQueueTypeChangeItem, normalizeQueueItemType } from "./helpers/queueTypeHelpers";
 import EditTransactionMode from "./EditTransactionMode";
 import { duplicateStateFromMatch, toDuplicateComparable } from "../../utils/duplicateDetection";
-import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromNote, appendEvidenceToNote, hashString, humanizeScanStatus } from "./helpers/inputHelpers";
+import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromNote, appendEvidenceToNote, hashString, getScanStageMeta } from "./helpers/inputHelpers";
 import ReceiptSection from "./sections/ReceiptSection";
 import ScanQueueList from "./scan/ScanQueueList";
 
@@ -1458,6 +1458,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           // If IndexedDB fails (private mode / quota), keep in-memory preview.
         }
 
+        const initialStage = getScanStageMeta("", file.name);
+
         setQueue((prev) => [
           ...prev,
           {
@@ -1497,13 +1499,30 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             toDigits: "",
             suggestedCategoryId: "",
             suggestedReason: "",
+            scanStage: initialStage.key,
+            scanStageLabel: initialStage.label,
+            scanStageProgress: initialStage.progress,
+            scanStepIndex: initialStage.stepIndex,
+            scanStepTotal: initialStage.totalSteps,
           },
         ]);
 
         try {
-          setScanStatus(humanizeScanStatus("", file.name));
+          const applyScanStage = (stageKey) => {
+            const meta = getScanStageMeta(stageKey, file.name);
+            updateQueueItem(qid, {
+              scanStage: meta.key,
+              scanStageLabel: meta.label,
+              scanStageProgress: meta.progress,
+              scanStepIndex: meta.stepIndex,
+              scanStepTotal: meta.totalSteps,
+            });
+            setScanStatus(meta.summary);
+          };
+
+          applyScanStage("");
           const result = await scanReceiptOpenAI(file, {
-            onStatus: (s) => setScanStatus(humanizeScanStatus(s, file.name)),
+            onStatus: (s) => applyScanStage(s),
             accounts,
           });
 
@@ -1978,6 +1997,11 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             toDigits,
             suggestedCategoryId,
             suggestedReason,
+            scanStage: "done",
+            scanStageLabel: getScanStageMeta("done", file.name).label,
+            scanStageProgress: 100,
+            scanStepIndex: getScanStageMeta("done", file.name).stepIndex,
+            scanStepTotal: getScanStageMeta("done", file.name).totalSteps,
           };
 
           // ✅ Ensure split groups have a stable group id + label for Inbox & UI grouping
@@ -2121,7 +2145,16 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const code = err?.code ? String(err.code) : "";
           const msg = String(err?.message || err || "");
           const combined = code ? `${code}: ${msg || code}` : msg || "scan_failed";
-          updateQueueItem(qid, { status: "error", error: combined });
+          const errorStage = getScanStageMeta("error", file.name);
+          updateQueueItem(qid, {
+            status: "error",
+            error: combined,
+            scanStage: errorStage.key,
+            scanStageLabel: errorStage.label,
+            scanStageProgress: errorStage.progress,
+            scanStepIndex: errorStage.stepIndex,
+            scanStepTotal: errorStage.totalSteps,
+          });
         }
       }
     } finally {

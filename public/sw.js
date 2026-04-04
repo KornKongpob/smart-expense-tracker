@@ -1,8 +1,8 @@
-// Service Worker for Smart Expense Tracker PWA
-// Caches static assets for offline support
-
-const CACHE_NAME = "smart-expense-ios-v2";
-const STATIC_ASSETS = [
+const url = new URL(self.location.href);
+const VERSION = url.searchParams.get("v") || "dev";
+const CACHE_PREFIX = "smart-expense-runtime";
+const CACHE_NAME = `${CACHE_PREFIX}-${VERSION}`;
+const APP_SHELL = [
   "/",
   "/index.html",
   "/manifest.json",
@@ -11,49 +11,108 @@ const STATIC_ASSETS = [
   "/icon-512.png",
 ];
 
-// Install: cache static assets
+function isSameOrigin(requestUrl) {
+  return requestUrl.origin === self.location.origin;
+}
+
+function isCacheableResponse(response) {
+  return Boolean(response && response.ok && (response.type === "basic" || response.type === "cors"));
+}
+
+async function putInCache(request, response) {
+  if (!isCacheableResponse(response)) return response;
+  const cache = await caches.open(CACHE_NAME);
+  await cache.put(request, response.clone());
+  return response;
+}
+
+async function cleanupOldCaches() {
+  const cacheKeys = await caches.keys();
+  await Promise.all(
+    cacheKeys
+      .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+      .map((key) => caches.delete(key)),
+  );
+}
+
+async function networkFirst(request, fallbackRequest = "/index.html") {
+  try {
+    const response = await fetch(request);
+    await putInCache(request, response);
+    return response;
+  } catch {
+    const cache = await caches.open(CACHE_NAME);
+    return (
+      (await cache.match(request, { ignoreSearch: true })) ||
+      (await cache.match(fallbackRequest, { ignoreSearch: true })) ||
+      Response.error()
+    );
+  }
+}
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request, { ignoreSearch: false });
+  const networkPromise = fetch(request)
+    .then((response) => putInCache(request, response))
+    .catch(() => null);
+
+  if (cached) {
+    networkPromise.catch(() => null);
+    return cached;
+  }
+
+  return (await networkPromise) || Response.error();
+}
+
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request, { ignoreSearch: true });
+  if (cached) return cached;
+  const response = await fetch(request);
+  return putInCache(request, response);
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => Promise.all(APP_SHELL.map((asset) => cache.add(new Request(asset, { cache: "reload" })))))
+      .then(() => self.skipWaiting()),
   );
-  self.skipWaiting();
 });
 
-// Activate: clean old caches
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    cleanupOldCaches().then(async () => {
+      await self.clients.claim();
+    }),
   );
-  self.clients.claim();
 });
 
-// Fetch: network-first for API, cache-first for assets
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  const url = new URL(request.url);
-
-  // Skip non-GET requests
   if (request.method !== "GET") return;
 
-  // API calls: network only
-  if (url.pathname.startsWith("/api/")) return;
+  const requestUrl = new URL(request.url);
+  if (!isSameOrigin(requestUrl)) return;
+  if (requestUrl.pathname.startsWith("/api/")) return;
 
-  // Assets: stale-while-revalidate
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      const fetchPromise = fetch(request)
-        .then((response) => {
-          if (response && response.status === 200 && response.type === "basic") {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
-          return response;
-        })
-        .catch(() => cached);
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirst(request));
+    return;
+  }
 
-      return cached || fetchPromise;
-    })
-  );
+  if (["script", "style", "worker", "manifest", "font", "image"].includes(request.destination)) {
+    event.respondWith(staleWhileRevalidate(request));
+    return;
+  }
+
+  event.respondWith(cacheFirst(request));
 });

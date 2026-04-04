@@ -33,6 +33,7 @@ import {
 import AppHeader from "../components/AppHeader";
 import AccountAvatar from "../components/AccountAvatar.jsx";
 import InstitutionLogo from "../components/InstitutionLogo.jsx";
+import ModalShell from "../components/ModalShell.jsx";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 // ===== Visual helpers =====
@@ -283,6 +284,26 @@ function AccountSheetModal({ open, title, description, onClose, children }) {
       </div>
     </div>,
     document.body
+  );
+}
+
+function ManagedAccountSheetModal({ open, title, description, onClose, children }) {
+  if (!open) return null;
+
+  return (
+    <ModalShell
+      title={title}
+      description={description}
+      onClose={onClose}
+      isOpen={open}
+      maxWidth="sm:max-w-xl"
+      maxHeight="max-h-[92dvh]"
+      panelClassName="ui-card-strong shadow-2xl"
+      bodyClassName="overflow-y-auto overflow-x-hidden overscroll-contain px-1 pb-1"
+    >
+      {children}
+      <div className="h-3 pb-safe shrink-0" />
+    </ModalShell>
   );
 }
 
@@ -809,7 +830,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const [pendingAdjust, setPendingAdjust] = useState(null);
 
   // Prevent background scroll when any sheet/modal is open.
-  useLockBodyScroll(!!openCreate || !!openEdit || !!openCreateAdjustConfirm || !!openAdjustConfirm);
+  useLockBodyScroll(!!openCreateAdjustConfirm || !!openAdjustConfirm);
 
   const openEditModal = (acc) => {
     setEEditing(acc?.id || null);
@@ -939,7 +960,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     setOpenAdjustConfirm(true);
   };
 
-  const del = (id) => {
+  const DEL = (id) => {
     if (!id) return;
 
     const message =
@@ -952,6 +973,38 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
 
     if (typeof showConfirm === "function") {
       showConfirm("ลบบัญชี", message, doDelete, true, { confirmText: "ลบ" });
+      return;
+    }
+
+    if (window.confirm(message)) doDelete();
+  };
+
+  const confirmDeleteAccount = (id) => {
+    if (!id) return;
+
+    const account = (accounts || []).find((acc) => String(acc?.id || "") === String(id)) || null;
+    const accountName = String(account?.name || "บัญชีนี้").trim();
+    const impactedCount = (store.state.transactions || []).filter((tx) => String(tx?.accountId || "") === String(id)).length;
+    const message = [
+      `ลบบัญชี "${accountName}" ใช่ไหม?`,
+      "",
+      impactedCount
+        ? `ระบบจะลบธุรกรรมของบัญชีนี้อย่างน้อย ${impactedCount} รายการ และจะลบคู่โอนที่เกี่ยวข้องด้วย`
+        : "ระบบจะลบบัญชีนี้ออกจากรายการ และจะลบคู่โอนที่เกี่ยวข้องด้วยถ้ามี",
+      "การลบนี้ย้อนกลับไม่ได้",
+    ].join("\n");
+
+    const doDelete = () => {
+      deleteAccount(id);
+      closeEditModal();
+      notify("ลบบัญชีแล้ว", "warn");
+    };
+
+    if (typeof showConfirm === "function") {
+      showConfirm("ลบบัญชี", message, doDelete, true, {
+        confirmText: "ลบถาวร",
+        cancelText: "เก็บไว้",
+      });
       return;
     }
 
@@ -1248,28 +1301,39 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                       </div>
 
                       <div className="flex flex-col items-end gap-2 shrink-0">
-                        <div className="text-sm font-semibold text-gray-900">
+                        <div
+                          className={[
+                            "text-sm font-semibold tabular-nums",
+                            acc.type === "credit" && Number(acc.balance || 0) < 0 ? "text-red-700" : "text-gray-900",
+                          ].join(" ")}
+                        >
                           {String(acc.currency || "THB").toUpperCase() === "THB"
                             ? formatCurrency(acc.balance || 0)
                             : `${Number(acc.balance || 0).toLocaleString()} ${String(acc.currency || "").toUpperCase()}`}
                         </div>
 
+                        {acc.type === "credit" && Number(acc.balance || 0) < 0 ? (
+                          <div className="ui-chip border-red-200 bg-red-50/80 text-red-700">ยอดหนี้</div>
+                        ) : null}
+
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => openEditModal(acc)}
                             data-testid={`account-edit-${acc.id}`}
-                            className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
+                            className="inline-flex min-h-[40px] items-center gap-2 rounded-2xl bg-white/60 border border-white/20 px-3 text-sm font-semibold text-gray-900 active:scale-[0.98]"
                             title="แก้ไข"
                           >
                             <Pencil size={18} />
+                            <span>แก้ไข</span>
                           </button>
                           <button
-                            onClick={() => del(acc.id)}
+                            onClick={() => confirmDeleteAccount(acc.id)}
                             data-testid={`account-delete-${acc.id}`}
-                            className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
+                            className="inline-flex min-h-[40px] items-center gap-2 rounded-2xl bg-red-50/80 border border-red-200 px-3 text-sm font-semibold text-red-700 active:scale-[0.98]"
                             title="ลบ"
                           >
                             <Trash2 size={18} />
+                            <span>ลบ</span>
                           </button>
                         </div>
                       </div>
@@ -1288,7 +1352,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   {/* Create Modal */}
 
       {openCreate ? (
-        <AccountSheetModal
+        <ManagedAccountSheetModal
           open={openCreate}
           title="เพิ่มบัญชี"
           description="กรอกข้อมูลหลักก่อน แล้วค่อยเพิ่มเลขช่วยจำถ้าจำเป็น"
@@ -1579,7 +1643,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                 บันทึก
               </button>
             </div>
-        </AccountSheetModal>
+        </ManagedAccountSheetModal>
       ) : null}
 
       
@@ -1671,7 +1735,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
 
 {/* Edit Modal */}
       {openEdit ? (
-        <AccountSheetModal
+        <ManagedAccountSheetModal
           open={openEdit}
           title="แก้ไขบัญชี"
           description={<>รองรับเลขช่วยจำหลายชุด เช่น <span className="font-semibold text-gray-900">6345, 4373</span></>}
@@ -2017,7 +2081,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                 </button>
               </div>
             </div>
-        </AccountSheetModal>
+        </ManagedAccountSheetModal>
       ) : null}
 
       {/* ✅ Adjust balance confirmation */}

@@ -3,12 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#f5f7fb" />
-    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="บันทึกรายรับรายจ่ายและจัดการบัญชีบนมือถือ" />
+    <meta name="application-name" content="Smart Expense" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Smart Expense" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#f5f7fb" />
+    <meta name="color-scheme" content="light" />
     <meta name="format-detection" content="telephone=no" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="/manifest.json" />
@@ -18,10 +20,65 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    <script>
+    <script type="module">
       if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        const buildId = String(import.meta.env.VITE_APP_BUILD_ID || document.lastModified || import.meta.env.MODE || "dev")
+          .trim()
+          .replace(/\s+/g, "-");
+        const scope = import.meta.env.BASE_URL || "/";
+        const swUrl = `${scope}sw.js?v=${encodeURIComponent(buildId)}`;
+        let refreshing = false;
+
+        const announceUpdate = (registration) => {
+          window.__SMART_EXPENSE_SW__ = registration;
+          window.dispatchEvent(new CustomEvent("smart-expense:update-ready"));
+        };
+
+        window.addEventListener("load", async () => {
+          try {
+            const registration = await navigator.serviceWorker.register(swUrl, { scope });
+            window.__SMART_EXPENSE_SW__ = registration;
+
+            if (registration.waiting) {
+              announceUpdate(registration);
+            }
+
+            registration.addEventListener("updatefound", () => {
+              const worker = registration.installing;
+              if (!worker) return;
+
+              worker.addEventListener("statechange", () => {
+                if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                  announceUpdate(registration);
+                }
+              });
+            });
+
+            navigator.serviceWorker.addEventListener("controllerchange", () => {
+              if (refreshing) return;
+              refreshing = true;
+              window.location.reload();
+            });
+
+            const refreshRegistration = async () => {
+              try {
+                await registration.update();
+              } catch {
+                // Ignore best-effort background refresh failures.
+              }
+            };
+
+            window.addEventListener("focus", refreshRegistration);
+            document.addEventListener("visibilitychange", () => {
+              if (document.visibilityState === "visible") {
+                refreshRegistration();
+              }
+            });
+
+            window.setInterval(refreshRegistration, 60 * 60 * 1000);
+          } catch {
+            // Ignore service worker registration failures.
+          }
         });
       }
     </script>

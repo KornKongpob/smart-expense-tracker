@@ -1,8 +1,5 @@
 // src/components/ModalShell.jsx
-// Shared modal shell component used across BudgetsView, RecurringView, RulesView, CategoriesView, StatsView.
-// Centralizes the glass-card bottom-sheet pattern to eliminate duplication.
-// Uses createPortal to render at <body> level so CSS transforms on parent views
-// (e.g. animate-view-enter) don't trap the fixed-position modal in a stacking context.
+// Shared modal shell component used across legacy views.
 
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -10,17 +7,21 @@ import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 /**
  * ModalShell
- * @param {string}  title       - Modal header title
- * @param {React.ReactNode} children - Modal body content
- * @param {function} onClose    - Close callback
- * @param {boolean}  [isOpen]   - Optional open state (for useLockBodyScroll). Default true.
- * @param {string}   [maxWidth] - Tailwind max-width class. Default "sm:max-w-md"
- * @param {number}   [zIndex]   - z-index level. Default 60
- * @param {string}   [maxHeight]- Tailwind max-height. Default "max-h-[90dvh]"
- * @param {boolean}  [noScroll] - If true, children wrapper won't scroll (for modals managing own scroll)
+ * @param {string} title
+ * @param {string} [description]
+ * @param {React.ReactNode} children
+ * @param {function} onClose
+ * @param {boolean} [isOpen]
+ * @param {string} [maxWidth]
+ * @param {number} [zIndex]
+ * @param {string} [maxHeight]
+ * @param {boolean} [noScroll]
+ * @param {string} [panelClassName]
+ * @param {string} [bodyClassName]
  */
 export default function ModalShell({
   title,
+  description,
   children,
   onClose,
   isOpen = true,
@@ -28,6 +29,8 @@ export default function ModalShell({
   zIndex = 100,
   maxHeight = "max-h-[90dvh]",
   noScroll = false,
+  panelClassName = "",
+  bodyClassName = "",
 }) {
   useLockBodyScroll(isOpen);
 
@@ -42,31 +45,39 @@ export default function ModalShell({
         paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))",
       }}
       onTouchMove={(e) => {
-        // Allow scrolling inside the modal card, block background scroll on backdrop only
         if (e.target === e.currentTarget) e.preventDefault();
       }}
     >
       <div
-        className={`w-full ${maxWidth} glass-card rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 ${maxHeight} overflow-hidden relative flex flex-col`}
+        className={`w-full ${maxWidth} glass-card rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 ${maxHeight} overflow-hidden relative flex flex-col ${panelClassName}`.trim()}
         style={{
           touchAction: "pan-y",
           maxHeight: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem - var(--keyboard-inset, 0px))",
         }}
       >
-        <div className="flex items-center justify-between mb-4 shrink-0">
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center"
-            aria-label="close"
-            title="ปิด"
-          >
-            <X size={18} />
-          </button>
+        <div className="mb-4 shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+              {description ? (
+                <div className="mt-1 text-xs font-semibold leading-relaxed text-gray-800/65">
+                  {description}
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-10 h-10 rounded-full glass-icon-btn text-gray-700 flex items-center justify-center shrink-0"
+              aria-label="close"
+              title="ปิด"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
-        <div className={`flex-1 min-h-0 flex flex-col min-w-0 ${noScroll ? "" : "overflow-y-auto"}`}>
+        <div className={`flex-1 min-h-0 flex flex-col min-w-0 ${noScroll ? "" : "overflow-y-auto"} ${bodyClassName}`.trim()}>
           {children}
         </div>
 
