@@ -218,8 +218,10 @@ export function ScreenShell({
   children,
   dock = null,
   fillViewport = true,
+  headerMode = "hidden",
 }) {
   const dockRef = useRef(null);
+  const showVisualHeader = headerMode === "visible";
 
   useLayoutEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -263,16 +265,26 @@ export function ScreenShell({
         "finance-screen",
         fillViewport ? "finance-screen-fill" : "",
         dock ? "finance-screen-has-dock" : "",
+        showVisualHeader ? "finance-screen-header-visible" : "finance-screen-header-hidden",
       ].filter(Boolean).join(" ")}
     >
-      <header className="finance-screen-head finance-screen-head-sticky">
-        <div className="finance-screen-copy">
-          {eyebrow ? <div className="view-eyebrow">{eyebrow}</div> : null}
-          <h1 className="finance-screen-title">{title}</h1>
-          {subtitle ? <p className="finance-screen-subtitle">{subtitle}</p> : null}
+      {showVisualHeader ? (
+        <header className="finance-screen-head">
+          <div className="finance-screen-copy">
+            {eyebrow ? <div className="view-eyebrow">{eyebrow}</div> : null}
+            <h1 className="finance-screen-title">{title}</h1>
+            {subtitle ? <p className="finance-screen-subtitle">{subtitle}</p> : null}
+          </div>
+          {actions ? <div className="finance-screen-actions">{actions}</div> : null}
+        </header>
+      ) : (
+        <div className="finance-screen-a11y">
+          {eyebrow ? <div>{eyebrow}</div> : null}
+          <h1>{title}</h1>
+          {subtitle ? <p>{subtitle}</p> : null}
         </div>
-        {actions ? <div className="finance-screen-actions">{actions}</div> : null}
-      </header>
+      )}
+      {!showVisualHeader && actions ? <div className="finance-screen-toolbar">{actions}</div> : null}
       <div className="finance-screen-body">{children}</div>
       {dock ? (
         <div ref={dockRef} className="finance-screen-dock">

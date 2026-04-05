@@ -243,6 +243,12 @@ export default function AccountsScreen() {
       }
     >
       <section className="ui-card finance-panel finance-accounts-panel">
+        <div className="finance-panel-head">
+          <div>
+            <div className="finance-panel-title">บัญชีทั้งหมด</div>
+            <div className="finance-panel-copy">แตะรายการเพื่อดูรายละเอียดและปรับยอดของบัญชี</div>
+          </div>
+        </div>
         {accounts.length ? (
           <div className="finance-list finance-account-list">
             {accounts.map((account) => {

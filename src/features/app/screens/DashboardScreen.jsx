@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, CreditCard, PencilLine, PlusCircle, Repeat2, Target, Trash2 } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, CreditCard, PlusCircle, Repeat2, Target, Trash2 } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import { AmountText, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
-import { formatCurrency } from "../../../utils/format.js";
+import { formatCurrency, formatDateShort, parseDateSafe } from "../../../utils/format.js";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
 
 function percentOf(value, total) {
@@ -25,6 +25,10 @@ function navigateTo(hash) {
 }
 
 const ACCOUNT_DEEPLINK_KEY = "smart-expense-open-account";
+const TRANSACTION_TIME_FORMATTER = new Intl.DateTimeFormat("th-TH", {
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 function toId(value) {
   return String(value || "").trim();
@@ -66,7 +70,7 @@ function buildTransactionTitle(transaction) {
   return String(transaction?.kind || "").trim().toLowerCase() === "transfer" ? "โอนเงิน" : `รายการ${getTransactionKindLabel(transaction?.kind)}`;
 }
 
-function buildTransactionMeta(transaction, accountMap, categoryMap) {
+function _buildTransactionMeta(transaction, accountMap, categoryMap) {
   const date = String(transaction?.date || "").slice(0, 10);
   const kind = String(transaction?.kind || "").trim().toLowerCase();
 
@@ -79,6 +83,44 @@ function buildTransactionMeta(transaction, accountMap, categoryMap) {
   const accountName = accountMap.get(toId(transaction?.account_id))?.name || "";
   const categoryName = categoryMap.get(toId(transaction?.category_id))?.name || "";
   return [date, accountName, categoryName].filter(Boolean).join(" • ");
+}
+
+function buildTransactionAccountLabel(transaction, accountMap) {
+  const kind = String(transaction?.kind || "").trim().toLowerCase();
+
+  if (kind === "transfer") {
+    const fromName = accountMap.get(toId(transaction?.from_account_id))?.name || "ไม่พบบัญชีต้นทาง";
+    const toName = accountMap.get(toId(transaction?.to_account_id))?.name || "ไม่พบบัญชีปลายทาง";
+    return `${fromName} -> ${toName}`;
+  }
+
+  return accountMap.get(toId(transaction?.account_id))?.name || "";
+}
+
+function buildTransactionDateTimeLabel(transaction) {
+  const dateLabel = transaction?.date ? formatDateShort(transaction.date) : "";
+  const timeSource = transaction?.created_at || (String(transaction?.date || "").includes("T") ? transaction.date : "");
+
+  if (!timeSource) return dateLabel;
+
+  const parsed = parseDateSafe(timeSource);
+  if (!Number.isFinite(parsed.getTime())) return dateLabel;
+
+  return [dateLabel, TRANSACTION_TIME_FORMATTER.format(parsed)].filter(Boolean).join(" • ");
+}
+
+function canEditTransactionFromHistory(transaction) {
+  return Boolean(transaction) && transaction?.is_split_parent !== true && transaction?.is_split_child !== true;
+}
+
+function getReadOnlyTransactionNote(transaction) {
+  if (transaction?.is_split_parent) {
+    return "รายการนี้เป็นรายการแยกหมวด จึงเปิดแก้จากการ์ดนี้ไม่ได้ แต่ยังดูสรุปและลบทั้งชุดได้";
+  }
+  if (transaction?.is_split_child) {
+    return "รายการนี้เป็นรายการย่อยจากการแยกหมวด จึงต้องกลับไปแก้จากรายการหลัก";
+  }
+  return "รายการนี้ยังไม่รองรับการแก้ไขจากการ์ดล่าสุด แต่ยังดูสรุปและลบรายการได้";
 }
 
 function createTransactionEditDraft(transaction = null) {
@@ -148,7 +190,7 @@ export default function DashboardScreen() {
     () => new Map(allAccounts.map((account) => [toId(account?.id), account])),
     [allAccounts],
   );
-  const categoryMap = useMemo(
+  const _categoryMap = useMemo(
     () => new Map(allCategories.map((category) => [toId(category?.id), category])),
     [allCategories],
   );
@@ -157,6 +199,7 @@ export default function DashboardScreen() {
   const hasCategories = topCategories.length > 0;
   const rawCashflow = Array.isArray(cashflowSeries) ? cashflowSeries : [];
   const [editingTransaction, setEditingTransaction] = useState(null);
+  const [readOnlyTransaction, setReadOnlyTransaction] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [editDraft, setEditDraft] = useState(createTransactionEditDraft());
   const [editAmountInput, setEditAmountInput] = useState("");
@@ -206,12 +249,23 @@ export default function DashboardScreen() {
       .join(" ");
 
   const openTransactionEditor = (transaction) => {
-    if (!transaction || transaction?.is_split_parent || transaction?.is_split_child) return;
+    if (!canEditTransactionFromHistory(transaction)) return;
     const nextDraft = createTransactionEditDraft(transaction);
+    setReadOnlyTransaction(null);
     setEditingTransaction(transaction);
     setEditDraft(nextDraft);
     setEditAmountInput(toMoneyInput(nextDraft.amountSatang));
     setEditShowMore(false);
+  };
+
+  const openTransactionFromHistory = (transaction) => {
+    if (!transaction) return;
+    if (canEditTransactionFromHistory(transaction)) {
+      openTransactionEditor(transaction);
+      return;
+    }
+    setEditingTransaction(null);
+    setReadOnlyTransaction(transaction);
   };
 
   const closeTransactionEditor = () => {
@@ -219,6 +273,10 @@ export default function DashboardScreen() {
     setEditDraft(createTransactionEditDraft());
     setEditAmountInput("");
     setEditShowMore(false);
+  };
+
+  const closeReadOnlyTransaction = () => {
+    setReadOnlyTransaction(null);
   };
 
   const submitEdit = async () => {
@@ -241,6 +299,9 @@ export default function DashboardScreen() {
     if (!deleted) return;
     if (editingTransaction && String(editingTransaction?.id || "") === String(deleteTarget?.id || "")) {
       closeTransactionEditor();
+    }
+    if (readOnlyTransaction && String(readOnlyTransaction?.id || "") === String(deleteTarget?.id || "")) {
+      closeReadOnlyTransaction();
     }
     setDeleteTarget(null);
   };
@@ -384,63 +445,41 @@ export default function DashboardScreen() {
           <div className="finance-panel-head">
             <div>
               <div className="finance-panel-title">รายการล่าสุด</div>
-              <div className="finance-panel-copy">แก้ไขหรือลบรายการที่บันทึกซ้ำได้จากหน้านี้ทันที</div>
+              <div className="finance-panel-copy">แตะรายการเพื่อเปิดแก้ไขหรือดูสรุปสั้น ๆ ได้ทันที</div>
             </div>
           </div>
 
           <div className="finance-list">
             {history.map((transaction) => {
               const kindKey = String(transaction?.kind || "expense").trim().toLowerCase();
-              const isSplitParent = transaction?.is_split_parent === true;
+              const accountLabel = buildTransactionAccountLabel(transaction, accountMap);
+              const dateTimeLabel = buildTransactionDateTimeLabel(transaction);
 
               return (
-                <div
+                <button
                   key={transaction.id}
-                  className="finance-row finance-history-row"
+                  type="button"
+                  className="finance-list-button finance-history-button"
+                  onClick={() => openTransactionFromHistory(transaction)}
                   data-testid={`dashboard-transaction-${transaction.id}`}
                 >
-                  <div className="finance-row-main">
-                    <span className={["finance-category-icon", "finance-history-icon", `finance-history-icon-${kindKey}`].join(" ")}>
-                      <TransactionKindIcon kind={transaction.kind} />
-                    </span>
-                    <div className="finance-account-copy">
-                      <div className="finance-row-title">{buildTransactionTitle(transaction)}</div>
-                      <div className="finance-row-meta">{buildTransactionMeta(transaction, accountMap, categoryMap)}</div>
-                      <div className="finance-chip-grid finance-history-chip-grid">
-                        <StatusPill tone={kindKey === "income" ? "success" : kindKey === "transfer" ? "default" : "danger"}>
-                          {getTransactionKindLabel(transaction.kind)}
-                        </StatusPill>
-                        {isSplitParent ? <StatusPill tone="warning">แยกหมวด</StatusPill> : null}
+                  <div className="finance-row finance-history-row">
+                    <div className="finance-row-main">
+                      <span className={["finance-category-icon", "finance-history-icon", `finance-history-icon-${kindKey}`].join(" ")}>
+                        <TransactionKindIcon kind={transaction.kind} />
+                      </span>
+                      <div className="finance-account-copy finance-history-copy">
+                        <div className="finance-row-title">{buildTransactionTitle(transaction)}</div>
+                        {accountLabel ? <div className="finance-row-meta finance-history-account">{accountLabel}</div> : null}
                       </div>
                     </div>
-                  </div>
 
-                  <div className="finance-row-side finance-history-side">
-                    <AmountText value={transaction.amount_satang} tone={getTransactionAmountTone(transaction.kind)} />
-                    <div className="finance-history-actions">
-                      {!isSplitParent ? (
-                        <button
-                          type="button"
-                          className="ui-btn ui-btn-secondary ui-btn-compact"
-                          onClick={() => openTransactionEditor(transaction)}
-                          data-testid={`dashboard-edit-transaction-${transaction.id}`}
-                        >
-                          <PencilLine size={15} />
-                          แก้ไข
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="ui-btn ui-btn-danger-outline ui-btn-compact"
-                        onClick={() => confirmDelete(transaction)}
-                        data-testid={`dashboard-delete-transaction-${transaction.id}`}
-                      >
-                        <Trash2 size={15} />
-                        ลบ
-                      </button>
+                    <div className="finance-row-side finance-history-side">
+                      <AmountText value={transaction.amount_satang} tone={getTransactionAmountTone(transaction.kind)} />
+                      {dateTimeLabel ? <div className="finance-row-meta finance-history-time">{dateTimeLabel}</div> : null}
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -519,6 +558,66 @@ export default function DashboardScreen() {
           ) : null}
         </section>
       ) : null}
+
+      <Sheet
+        open={Boolean(readOnlyTransaction)}
+        onClose={closeReadOnlyTransaction}
+        title="รายละเอียดรายการ"
+        subtitle={readOnlyTransaction ? buildTransactionTitle(readOnlyTransaction) : "ดูสรุปสั้นของรายการนี้"}
+        footer={
+          readOnlyTransaction ? (
+            <div className="finance-sheet-actions-compact">
+              <button
+                type="button"
+                className="ui-btn ui-btn-danger-outline ui-btn-compact finance-sheet-danger-trigger"
+                disabled={saving}
+                onClick={() => confirmDelete(readOnlyTransaction)}
+              >
+                <Trash2 size={16} />
+                ลบรายการ
+              </button>
+              <div className="finance-sheet-actions-end">
+                <button type="button" className="ui-btn ui-btn-secondary" onClick={closeReadOnlyTransaction}>
+                  ปิดหน้านี้
+                </button>
+              </div>
+            </div>
+          ) : null
+        }
+      >
+        {readOnlyTransaction ? (
+          <div className="finance-form">
+            <section className="finance-history-preview-sheet">
+              <div className="finance-history-preview-note">{getReadOnlyTransactionNote(readOnlyTransaction)}</div>
+              <div className="finance-list finance-history-preview-list">
+                <div className="finance-row finance-history-preview-row">
+                  <div className="finance-history-preview-copy">
+                    <div className="finance-history-preview-label">ประเภท</div>
+                    <div className="finance-history-preview-value">{getTransactionKindLabel(readOnlyTransaction.kind)}</div>
+                  </div>
+                  <AmountText value={readOnlyTransaction.amount_satang} tone={getTransactionAmountTone(readOnlyTransaction.kind)} />
+                </div>
+                <div className="finance-row finance-history-preview-row">
+                  <div className="finance-history-preview-copy">
+                    <div className="finance-history-preview-label">บัญชี</div>
+                    <div className="finance-history-preview-value finance-history-preview-value-muted">
+                      {buildTransactionAccountLabel(readOnlyTransaction, accountMap) || "-"}
+                    </div>
+                  </div>
+                </div>
+                <div className="finance-row finance-history-preview-row">
+                  <div className="finance-history-preview-copy">
+                    <div className="finance-history-preview-label">วันเวลา</div>
+                    <div className="finance-history-preview-value finance-history-preview-value-muted">
+                      {buildTransactionDateTimeLabel(readOnlyTransaction) || "-"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : null}
+      </Sheet>
 
       <Sheet
         open={Boolean(editingTransaction)}
