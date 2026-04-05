@@ -19,6 +19,14 @@ const NAV_ITEMS = [
   { id: "settings", label: "ตั้งค่า", icon: Settings },
 ];
 
+function getToastLabel(tone) {
+  const key = String(tone || "info").trim().toLowerCase();
+  if (key === "success") return "สำเร็จ";
+  if (key === "warning") return "ตรวจสอบ";
+  if (key === "error") return "ผิดพลาด";
+  return "แจ้งเตือน";
+}
+
 function isTextEntryElement(node) {
   if (!(node instanceof HTMLElement)) return false;
   if (node.isContentEditable) return true;
@@ -191,7 +199,7 @@ export function ToastBar({ toast, onClose }) {
     <div className="finance-toast-wrap">
       <div className={["ui-toast", "finance-toast-card", `finance-toast-${toast.tone || "info"}`].join(" ")}>
         <div>
-          <div className="finance-toast-label">{toast.tone === "error" ? "ต้องตรวจ" : "บันทึกแล้ว"}</div>
+          <div className="finance-toast-label">{getToastLabel(toast.tone)}</div>
           <div className="finance-toast-copy">{toast.message}</div>
         </div>
         <button type="button" className="ui-icon-btn" onClick={onClose} aria-label="Close message">

@@ -206,21 +206,23 @@ function SignedInApp() {
     <div className="finance-app-shell">
       <ToastBar toast={toast} onClose={clearToast} />
 
-      <header ref={headerRef} className="finance-app-page finance-app-header">
-        <div className="finance-app-header-surface">
-          <div className="finance-brand">Smart Expense</div>
-          <div className="finance-header-state">
-            {updateReady ? (
-              <button
-                type="button"
-                className="finance-header-pill finance-header-pill-action"
-                onClick={applyAppUpdate}
-              >
-                อัปเดตแอป
-              </button>
-            ) : null}
-            {!isOnline ? <span className="finance-header-pill finance-header-pill-warning">ออฟไลน์</span> : null}
-            {pendingCount ? <span className="finance-header-pill">{pendingCount} รอซิงก์</span> : null}
+      <header ref={headerRef} className="finance-app-header">
+        <div className="finance-app-page">
+          <div className="finance-app-header-surface">
+            <div className="finance-brand">Smart Expense</div>
+            <div className="finance-header-state">
+              {updateReady ? (
+                <button
+                  type="button"
+                  className="finance-header-pill finance-header-pill-action"
+                  onClick={applyAppUpdate}
+                >
+                  อัปเดตแอป
+                </button>
+              ) : null}
+              {!isOnline ? <span className="finance-header-pill finance-header-pill-warning">ออฟไลน์</span> : null}
+              {pendingCount ? <span className="finance-header-pill">{pendingCount} รอซิงก์</span> : null}
+            </div>
           </div>
         </div>
       </header>

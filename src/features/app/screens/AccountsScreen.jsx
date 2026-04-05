@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, CreditCard, HandCoins, Landmark, Trash2, Wallet } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
@@ -29,6 +29,7 @@ const ACCOUNT_TYPE_OPTIONS = [
   { id: "credit", label: "บัตรเครดิต", icon: CreditCard },
   { id: "cash", label: "เงินสด", icon: Wallet },
 ];
+const ACCOUNT_DEEPLINK_KEY = "smart-expense-open-account";
 
 function createDraft(account = null) {
   const base = {
@@ -148,6 +149,26 @@ export default function AccountsScreen() {
     setDeleteConfirmOpen(false);
     setEditorOpen(false);
   };
+
+  useEffect(() => {
+    if (editorOpen || typeof window === "undefined") return;
+    const requestedId = String(window.sessionStorage.getItem(ACCOUNT_DEEPLINK_KEY) || "").trim();
+    if (!requestedId) return;
+    window.sessionStorage.removeItem(ACCOUNT_DEEPLINK_KEY);
+    const nextAccount = accounts.find((account) => String(account?.id || "") === requestedId);
+    if (!nextAccount) return;
+
+    const nextDraft = createDraft(nextAccount);
+    const currentBalance = balanceMap.get(Number(nextDraft.id)) ?? Number(nextDraft.openingBalanceSatang || 0);
+    setDraft(nextDraft);
+    setOpeningBalanceInput(toAccountMoneyInput(nextDraft.type, nextDraft.openingBalanceSatang));
+    setCreditLimitInput(toMoneyInput(Math.abs(nextDraft.creditLimitSatang), true));
+    setDesiredBalanceInput(toAccountMoneyInput(nextDraft.type, currentBalance));
+    setAdjustMode("transaction");
+    setAdjustDate(new Date().toISOString().slice(0, 10));
+    setShowMore(false);
+    setEditorOpen(true);
+  }, [accounts, balanceMap, editorOpen]);
 
   const applyTypePreset = (type) => {
     const nextDraft = applyPresetToAccountDraft(draft, getDefaultPresetIdForAccountType(type), type);
@@ -432,7 +453,7 @@ export default function AccountsScreen() {
                 <span className="ui-label">ยอดตั้งต้น</span>
                 <input
                   className="ui-input"
-                  inputMode={isDraftLiability ? "text" : "decimal"}
+                  inputMode="decimal"
                   value={openingBalanceInput}
                   onChange={(event) => {
                     const nextValue = sanitizeMoneyInput(event.target.value);
@@ -459,9 +480,9 @@ export default function AccountsScreen() {
                   <span className="ui-label">วงเงิน</span>
                   <input
                     className="ui-input"
-                  inputMode="decimal"
-                  value={creditLimitInput}
-                  onChange={(event) => {
+                    inputMode="decimal"
+                    value={creditLimitInput}
+                    onChange={(event) => {
                       const nextValue = sanitizeMoneyInput(event.target.value);
                       setCreditLimitInput(nextValue);
                       setDraft((current) => ({
@@ -479,6 +500,7 @@ export default function AccountsScreen() {
                   <input
                     className="ui-input"
                     type="number"
+                    inputMode="numeric"
                     min="1"
                     max="31"
                     value={draft.statementDay}
@@ -492,6 +514,7 @@ export default function AccountsScreen() {
                   <input
                     className="ui-input"
                     type="number"
+                    inputMode="numeric"
                     min="1"
                     max="31"
                     value={draft.dueDay}
@@ -534,7 +557,7 @@ export default function AccountsScreen() {
                     <span className="ui-label">{isDraftLiability ? "ยอดหนี้ที่ต้องการ" : "ยอดที่ต้องการ"}</span>
                     <input
                       className="ui-input"
-                      inputMode={isDraftLiability ? "text" : "decimal"}
+                      inputMode="decimal"
                       value={desiredBalanceInput}
                       onChange={(event) => setDesiredBalanceInput(sanitizeMoneyInput(event.target.value))}
                       placeholder={isDraftLiability ? "2336.75" : "0.00"}
@@ -627,20 +650,6 @@ export default function AccountsScreen() {
               </div>
             ) : null}
           </details>
-
-          {draft.id ? (
-            <section className="finance-form-section finance-account-danger-zone">
-              <div className="finance-section-label">โซนอันตราย</div>
-              <div className="ui-card finance-account-danger-card">
-                <div className="finance-account-danger-copy">
-                  <div className="finance-panel-title">ลบบัญชีนี้ออกจากแอป</div>
-                  <div className="finance-panel-copy">
-                    รายการเดิมจะยังอยู่ แต่จะถูกถอดออกจากบัญชีนี้และต้องจัดบัญชีใหม่ภายหลัง
-                  </div>
-                </div>
-              </div>
-            </section>
-          ) : null}
         </div>
       </Sheet>
 

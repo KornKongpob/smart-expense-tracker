@@ -1981,11 +1981,12 @@ html[data-theme="dark"] .view-segmented {
 
 .finance-toast-wrap {
   position: fixed;
-  top: calc(env(safe-area-inset-top) + 1rem);
+  top: calc(env(safe-area-inset-top) + var(--finance-app-header-h, 0px) + 0.35rem);
   left: 50%;
   transform: translateX(-50%);
   width: min(92vw, 34rem);
   z-index: var(--finance-z-toast);
+  pointer-events: none;
 }
 
 .finance-toast-wrap .ui-toast {
@@ -1993,6 +1994,7 @@ html[data-theme="dark"] .view-segmented {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+  pointer-events: auto;
 }
 
 .finance-toast-label {
@@ -2919,14 +2921,21 @@ body[data-standalone="true"] {
 }
 
 .finance-app-header {
-  flex: 0 0 auto;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: var(--finance-z-app-header);
   padding-top: max(0.45rem, env(safe-area-inset-top));
   padding-bottom: 0.55rem;
+  width: 100%;
+  max-width: 100%;
   overflow-x: hidden;
   overflow-x: clip;
+}
+
+.finance-app-header .finance-app-page {
+  width: 100%;
 }
 
 .finance-app-header-surface {
@@ -2997,8 +3006,9 @@ body[data-standalone="true"] {
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
+  padding-top: calc(var(--finance-app-header-h) + 0.1rem);
   padding-bottom: calc(var(--finance-nav-reserve) + var(--finance-screen-dock-h) + 0.35rem);
-  scroll-padding-top: 0.75rem;
+  scroll-padding-top: calc(var(--finance-app-header-h) + 0.75rem);
   scroll-padding-bottom: calc(var(--finance-nav-reserve) + var(--finance-screen-dock-h) + 1rem);
 }
 
@@ -3025,7 +3035,7 @@ body[data-standalone="true"] {
 
 .finance-screen-head-sticky {
   position: sticky;
-  top: 0;
+  top: calc(var(--finance-app-header-h) + 0.1rem);
   z-index: var(--finance-z-page-header);
   padding-top: 0.1rem;
   padding-bottom: 0.45rem;
@@ -3070,6 +3080,8 @@ body[data-standalone="true"] {
   flex: 1 1 auto;
   min-height: 0;
   gap: var(--finance-section-gap);
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .finance-screen-has-dock .finance-screen-body {
@@ -3477,6 +3489,75 @@ body[data-standalone="true"] {
   transform: scale(0.986);
 }
 
+.finance-dashboard-account-button {
+  text-align: left;
+}
+
+.finance-history-row {
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.finance-history-icon {
+  flex: 0 0 auto;
+}
+
+.finance-history-icon-expense {
+  background: rgba(254, 243, 242, 0.98);
+  color: #b42318;
+}
+
+.finance-history-icon-income {
+  background: rgba(236, 253, 243, 0.98);
+  color: #027a48;
+}
+
+.finance-history-icon-transfer {
+  background: rgba(234, 244, 255, 0.98);
+  color: #0566d6;
+}
+
+.finance-history-chip-grid {
+  margin-top: 0.45rem;
+}
+
+.finance-history-side {
+  min-width: 0;
+  max-width: min(14rem, 100%);
+  gap: 0.55rem;
+}
+
+.finance-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.finance-history-actions .ui-btn {
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+  .finance-history-row {
+    flex-direction: column;
+  }
+
+  .finance-history-side {
+    width: 100%;
+    max-width: 100%;
+    align-items: stretch;
+  }
+
+  .finance-history-actions {
+    justify-content: stretch;
+  }
+
+  .finance-history-actions .ui-btn {
+    flex: 1 1 8rem;
+  }
+}
+
 .finance-form {
   display: flex;
   flex-direction: column;
@@ -3656,6 +3737,8 @@ body[data-standalone="true"] {
   padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem 0;
   background: rgba(15, 23, 42, 0.18);
   backdrop-filter: blur(10px);
+  overflow: hidden;
+  overflow-x: clip;
 }
 
 .finance-sheet {
@@ -3665,6 +3748,9 @@ body[data-standalone="true"] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
   border-radius: 1.8rem 1.8rem 0 0;
   background: rgba(247, 249, 252, 0.98);
   border: 1px solid rgba(15, 23, 42, 0.1);
@@ -4926,6 +5012,7 @@ body[data-standalone="true"] .finance-toast-wrap {
   line-height: 1.22;
   font-weight: 700;
   -webkit-box-orient: vertical;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
 }
 
@@ -5048,6 +5135,7 @@ body[data-standalone="true"] .finance-toast-wrap {
   font-weight: 700;
   color: var(--text);
   -webkit-box-orient: vertical;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
 }
 

@@ -15,7 +15,7 @@ import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import LineItemEditorSection from "../LineItemEditorSection.jsx";
 import { lineItemsFromDraft } from "../lineItemDraftState.js";
 import { ScreenShell, StatusPill, useKeyboardViewportState } from "../ui.jsx";
-import { parseMoneyToSatang } from "../../../utils/money.js";
+import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
 
 const MANUAL_KIND_OPTIONS = [
   { id: "expense", label: "รายจ่าย", icon: ArrowDownLeft },
@@ -55,6 +55,20 @@ function getUploadTone(stage) {
   return "warning";
 }
 
+function hasAccountId(accounts, value) {
+  const target = String(value || "").trim();
+  if (!target) return false;
+  return (Array.isArray(accounts) ? accounts : []).some((account) => String(account?.id || "") === target);
+}
+
+function normalizeAccountId(accounts, value, fallback = "") {
+  const target = String(value || "").trim();
+  if (target && hasAccountId(accounts, target)) return target;
+  const safeFallback = String(fallback || "").trim();
+  if (safeFallback && hasAccountId(accounts, safeFallback)) return safeFallback;
+  return accounts[0] ? String(accounts[0].id) : "";
+}
+
 export default function AddScreen() {
   const {
     accounts,
@@ -85,15 +99,38 @@ export default function AddScreen() {
   useKeyboardViewportState(mode === "manual" && hasAccounts);
 
   useEffect(() => {
-    setDraft((current) =>
-      current.accountId || !accounts.length
-        ? current
-        : {
-            ...current,
-            accountId: String(accounts[0].id),
-            fromAccountId: String(accounts[0].id),
-          },
-    );
+    setDraft((current) => {
+      if (!accounts.length) {
+        if (!current.accountId && !current.fromAccountId && !current.toAccountId) return current;
+        return {
+          ...current,
+          accountId: "",
+          fromAccountId: "",
+          toAccountId: "",
+        };
+      }
+
+      const nextAccountId = normalizeAccountId(accounts, current.accountId, current.fromAccountId);
+      const nextFromAccountId = normalizeAccountId(accounts, current.fromAccountId, nextAccountId);
+      const nextToAccountId = hasAccountId(accounts, current.toAccountId) && String(current.toAccountId || "") !== nextFromAccountId
+        ? String(current.toAccountId)
+        : "";
+
+      if (
+        nextAccountId === String(current.accountId || "") &&
+        nextFromAccountId === String(current.fromAccountId || "") &&
+        nextToAccountId === String(current.toAccountId || "")
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        accountId: nextAccountId,
+        fromAccountId: nextFromAccountId,
+        toAccountId: current.kind === "transfer" ? nextToAccountId : "",
+      };
+    });
   }, [accounts]);
 
   const resetDraft = (nextAccounts = accounts) => {
@@ -108,15 +145,25 @@ export default function AddScreen() {
     const firstAccountId = accounts[0] ? String(accounts[0].id) : "";
 
     setDraft((current) => {
+      const currentAccountId = normalizeAccountId(accounts, current.accountId, current.fromAccountId || firstAccountId);
+      const currentFromAccountId = normalizeAccountId(accounts, current.fromAccountId, currentAccountId || firstAccountId);
+      const currentToAccountId = hasAccountId(accounts, current.toAccountId) ? String(current.toAccountId) : "";
       const nextLineItems = kind === "transfer" ? [] : lineItemsFromDraft(current);
       const nextDraft = {
         ...current,
         kind,
         categoryId: kind === "transfer" ? "" : current.categoryId,
-        accountId: kind === "transfer" ? current.accountId : current.accountId || current.fromAccountId || firstAccountId,
-        fromAccountId:
-          kind === "transfer" ? current.fromAccountId || current.accountId || firstAccountId : current.fromAccountId,
-        toAccountId: kind === "transfer" ? current.toAccountId : "",
+        accountId:
+          kind === "transfer"
+            ? currentFromAccountId || currentAccountId || firstAccountId
+            : current.kind === "transfer"
+              ? currentFromAccountId || currentAccountId || firstAccountId
+              : currentAccountId || currentFromAccountId || firstAccountId,
+        fromAccountId: currentFromAccountId || currentAccountId || firstAccountId,
+        toAccountId:
+          kind === "transfer" && currentToAccountId && currentToAccountId !== (currentFromAccountId || currentAccountId || firstAccountId)
+            ? currentToAccountId
+            : "",
         lineItems: nextLineItems,
       };
 
@@ -329,10 +376,11 @@ export default function AddScreen() {
                         value={amountInput}
                         data-testid="manual-amount-input"
                         onChange={(event) => {
-                          setAmountInput(event.target.value);
+                          const nextValue = sanitizeMoneyInput(event.target.value);
+                          setAmountInput(nextValue);
                           setDraft((current) => ({
                             ...current,
-                            amountSatang: parseMoneyToSatang(event.target.value),
+                            amountSatang: parseMoneyToSatang(nextValue),
                           }));
                         }}
                       />
@@ -356,7 +404,14 @@ export default function AddScreen() {
                         <AccountSheetPicker
                           accounts={accounts}
                           value={draft.fromAccountId}
-                          onChange={(fromAccountId) => setDraft((current) => ({ ...current, fromAccountId }))}
+                          onChange={(fromAccountId) =>
+                            setDraft((current) => ({
+                              ...current,
+                              accountId: fromAccountId || current.accountId,
+                              fromAccountId,
+                              toAccountId: String(current.toAccountId || "") === String(fromAccountId || "") ? "" : current.toAccountId,
+                            }))
+                          }
                           title="เลือกบัญชีต้นทาง"
                           placeholder="เลือกบัญชีต้นทาง"
                           testId="manual-from-account-picker"
@@ -369,7 +424,12 @@ export default function AddScreen() {
                         <AccountSheetPicker
                           accounts={accounts}
                           value={draft.toAccountId}
-                          onChange={(toAccountId) => setDraft((current) => ({ ...current, toAccountId }))}
+                          onChange={(toAccountId) =>
+                            setDraft((current) => ({
+                              ...current,
+                              toAccountId: String(toAccountId || "") === String(current.fromAccountId || "") ? "" : toAccountId,
+                            }))
+                          }
                           title="เลือกบัญชีปลายทาง"
                           placeholder="เลือกบัญชีปลายทาง"
                           testId="manual-to-account-picker"
@@ -384,7 +444,13 @@ export default function AddScreen() {
                         <AccountSheetPicker
                           accounts={accounts}
                           value={draft.accountId}
-                          onChange={(accountId) => setDraft((current) => ({ ...current, accountId }))}
+                          onChange={(accountId) =>
+                            setDraft((current) => ({
+                              ...current,
+                              accountId,
+                              fromAccountId: accountId || current.fromAccountId,
+                            }))
+                          }
                           title="เลือกบัญชี"
                           placeholder="เลือกบัญชี"
                           testId="manual-account-select"

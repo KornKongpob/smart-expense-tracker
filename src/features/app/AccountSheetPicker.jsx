@@ -110,6 +110,15 @@ export default function AccountSheetPicker({
     return displayAccounts.filter((account) => account.searchText.includes(normalizedQuery));
   }, [deferredQuery, displayAccounts]);
 
+  const openPicker = (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (disabled || open) return;
+    if (Date.now() < suppressOpenUntilRef.current) return;
+    setQuery("");
+    setOpen(true);
+  };
+
   const closePicker = () => {
     suppressOpenUntilRef.current = Date.now() + 320;
     setOpen(false);
@@ -117,6 +126,10 @@ export default function AccountSheetPicker({
   };
 
   const selectValue = (nextValue) => {
+    if (String(nextValue || "") === String(value || "")) {
+      closePicker();
+      return;
+    }
     onChange?.(nextValue);
     closePicker();
   };
@@ -126,10 +139,9 @@ export default function AccountSheetPicker({
       <button
         type="button"
         className={["finance-picker-trigger", disabled ? "is-disabled" : ""].filter(Boolean).join(" ")}
-        onClick={() => {
-          if (disabled) return;
-          if (Date.now() < suppressOpenUntilRef.current) return;
-          setOpen(true);
+        onClick={openPicker}
+        onPointerDown={(event) => {
+          if (Date.now() < suppressOpenUntilRef.current) event.preventDefault();
         }}
         disabled={disabled}
         aria-haspopup="dialog"

@@ -168,6 +168,26 @@ async function fetchOptionalRpcRows(queryPromise, functionName) {
   return { data: Array.isArray(data) ? data : [], error: null, unavailable: false };
 }
 
+function buildMergedTransactionRaw(existingRaw, nextRaw, draft) {
+  const current = existingRaw && typeof existingRaw === "object" ? existingRaw : {};
+  const incoming = nextRaw && typeof nextRaw === "object" ? nextRaw : {};
+  const merged = {
+    ...current,
+    ...incoming,
+  };
+
+  if (draft?.docType == null && current.docType !== undefined) merged.docType = current.docType;
+  if (draft?.splitByCategory == null && current.splitByCategory !== undefined) merged.splitByCategory = current.splitByCategory;
+  if (!Array.isArray(draft?.lineItems) && !Array.isArray(draft?.items) && current.lineItems !== undefined) {
+    merged.lineItems = current.lineItems;
+  }
+  if (!Array.isArray(draft?.receiptGroups) && !Array.isArray(draft?.groups) && current.receiptGroups !== undefined) {
+    merged.receiptGroups = current.receiptGroups;
+  }
+
+  return merged;
+}
+
 export function AppProvider({ children }) {
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -181,6 +201,7 @@ export function AppProvider({ children }) {
   const [financialGoals, setFinancialGoals] = useState([]);
   const [debtPlans, setDebtPlans] = useState([]);
   const [scanDocuments, setScanDocuments] = useState([]);
+  const [recentTransactions, setRecentTransactions] = useState([]);
   const [dashboardSnapshot, setDashboardSnapshot] = useState(null);
   const [accountBalanceSnapshot, setAccountBalanceSnapshot] = useState([]);
   const [cashflowSeries, setCashflowSeries] = useState([]);
@@ -245,6 +266,7 @@ export function AppProvider({ children }) {
       setFinancialGoals([]);
       setDebtPlans([]);
       setScanDocuments([]);
+      setRecentTransactions([]);
       setScanUploads([]);
       setDashboardSnapshot(null);
       setAccountBalanceSnapshot([]);
@@ -464,6 +486,7 @@ export function AppProvider({ children }) {
         snapshotResult,
         accountBalanceResult,
         cashflowResult,
+        transactionsResult,
       ] = await Promise.all([
         nextProfile
           ? Promise.resolve({ data: nextProfile, error: null })
@@ -508,6 +531,16 @@ export function AppProvider({ children }) {
           "account_balance_snapshot",
         ),
         supabase.rpc("dashboard_cashflow_series", { target_month: monthDate }),
+        supabase
+          .from("transactions")
+          .select(
+            "id, kind, status, account_id, from_account_id, to_account_id, category_id, merchant, note, reference, payment_method, amount_satang, currency, date, is_split_parent, is_split_child, split_group_id, split_parent_id, split_index, split_count, raw, created_at",
+          )
+          .eq("user_id", session.user.id)
+          .eq("status", "posted")
+          .order("date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(24),
       ]);
 
       if (profileResult.error) throw profileResult.error;
@@ -520,6 +553,7 @@ export function AppProvider({ children }) {
       if (snapshotResult.error) throw snapshotResult.error;
       if (accountBalanceResult.error) throw accountBalanceResult.error;
       if (cashflowResult.error) throw cashflowResult.error;
+      if (transactionsResult.error) throw transactionsResult.error;
 
       const nextCategories = mergeCategoryState(
         categoriesResult.data || [],
@@ -533,6 +567,11 @@ export function AppProvider({ children }) {
       setFinancialGoals(normalizeFinancialGoals(goalsResult.data || []));
       setDebtPlans(normalizeDebtPlans(debtPlansResult.data || []));
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
+      setRecentTransactions(
+        (Array.isArray(transactionsResult.data) ? transactionsResult.data : []).filter(
+          (transaction) => transaction?.is_split_child !== true,
+        ),
+      );
       setDashboardSnapshot(nextSnapshot);
       setAccountBalanceSnapshot(normalizeAccountBalanceRows(accountBalanceResult.data || []));
       setCashflowSeries(Array.isArray(cashflowResult.data) ? cashflowResult.data : []);
@@ -1038,6 +1077,109 @@ export function AppProvider({ children }) {
     }
   }
 
+  async function updateTransaction(transactionLike, draft) {
+    if (!supabase || !session) return false;
+    const transactionId = Number((transactionLike?.id ?? transactionLike) || 0);
+    if (!transactionId) return false;
+
+    const existing =
+      transactionLike && typeof transactionLike === "object"
+        ? transactionLike
+        : recentTransactions.find((transaction) => Number(transaction?.id || 0) === transactionId) || null;
+
+    if (existing?.is_split_parent || existing?.is_split_child) {
+      pushToast("warning", "แก้ไขรายการแยกหมวดจากหน้านี้ยังไม่ได้");
+      return false;
+    }
+
+    const plan = buildTransactionSavePlan({
+      draft,
+      userId: session.user.id,
+      source: existing?.raw?.source || "manual",
+    });
+
+    if (plan.mode !== "single") {
+      pushToast("warning", "แก้ไขรายการแยกหมวดจากหน้านี้ยังไม่ได้");
+      return false;
+    }
+
+    setSaving(true);
+    try {
+      const { row, sanitized } = plan;
+      const { error } = await supabase
+        .from("transactions")
+        .update({
+          kind: row.kind,
+          account_id: row.account_id,
+          from_account_id: row.from_account_id,
+          to_account_id: row.to_account_id,
+          category_id: row.category_id,
+          merchant: row.merchant,
+          merchant_key: normalizeMerchantKey(sanitized.merchant || "") || null,
+          note: row.note,
+          reference: row.reference,
+          payment_method: row.payment_method,
+          amount_satang: row.amount_satang,
+          currency: row.currency,
+          date: row.date,
+          raw: buildMergedTransactionRaw(existing?.raw, row.raw, draft),
+        })
+        .eq("user_id", session.user.id)
+        .eq("id", transactionId);
+
+      if (error) throw error;
+      await refreshAll();
+      pushToast("success", "อัปเดตรายการแล้ว");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteTransaction(transactionLike) {
+    if (!supabase || !session) return false;
+    const transactionId = Number((transactionLike?.id ?? transactionLike) || 0);
+    if (!transactionId) return false;
+
+    const existing =
+      transactionLike && typeof transactionLike === "object"
+        ? transactionLike
+        : recentTransactions.find((transaction) => Number(transaction?.id || 0) === transactionId) || null;
+
+    setSaving(true);
+    try {
+      let targetIds = [transactionId];
+
+      if (existing?.is_split_parent && existing?.split_group_id) {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("id")
+          .eq("user_id", session.user.id)
+          .eq("split_group_id", existing.split_group_id);
+
+        if (error) throw error;
+        const nextIds = (Array.isArray(data) ? data : []).map((row) => Number(row?.id || 0)).filter(Boolean);
+        if (nextIds.length) targetIds = nextIds;
+      }
+
+      const { error: lineItemsError } = await supabase.from("transaction_line_items").delete().in("transaction_id", targetIds);
+      if (lineItemsError) throw lineItemsError;
+
+      const { error } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("user_id", session.user.id)
+        .in("id", targetIds);
+
+      if (error) throw error;
+      await refreshAll();
+      pushToast("success", targetIds.length > 1 ? "ลบรายการที่แยกหมวดแล้ว" : "ลบรายการแล้ว");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function rejectScanDocument(scanId) {
     if (!supabase) return;
     setSaving(true);
@@ -1419,6 +1561,7 @@ export function AppProvider({ children }) {
     financialGoals,
     debtPlans,
     scanDocuments,
+    recentTransactions,
     dashboardSnapshot,
     accountBalanceSnapshot,
     cashflowSeries,
@@ -1447,6 +1590,8 @@ export function AppProvider({ children }) {
     saveCategory,
     setCategoryHidden,
     createManualTransaction,
+    updateTransaction,
+    deleteTransaction,
     uploadScanFile,
     uploadScanFiles,
     retryScanUpload,
