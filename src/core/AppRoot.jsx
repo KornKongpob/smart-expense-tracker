@@ -69,6 +69,18 @@ function SignedInApp() {
 
   useStandaloneMode();
 
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    if (!session) {
+      document.body.removeAttribute("data-finance-shell");
+      return undefined;
+    }
+    document.body.setAttribute("data-finance-shell", "true");
+    return () => {
+      document.body.removeAttribute("data-finance-shell");
+    };
+  }, [session]);
+
   useLayoutEffect(() => {
     const node = headerRef.current;
     if (!node || typeof document === "undefined") return undefined;

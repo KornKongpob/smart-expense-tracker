@@ -976,6 +976,79 @@ test('runtime styles: sheet review containers clamp width and hide horizontal ov
   assert.match(cssSource, /\.finance-line-item-summary-row\s*\{[\s\S]*text-align:\s*left;/s);
 });
 
+test('runtime source: shared account picker is wired through add, inbox, planner, and shell docks', () => {
+  const addSource = readFileSync(
+    new URL('../src/features/app/screens/AddScreen.jsx', import.meta.url),
+    'utf8',
+  );
+  const inboxSource = readFileSync(
+    new URL('../src/features/app/screens/InboxScreen.jsx', import.meta.url),
+    'utf8',
+  );
+  const plannerSource = readFileSync(
+    new URL('../src/features/app/screens/PlannerScreen.jsx', import.meta.url),
+    'utf8',
+  );
+  const uiSource = readFileSync(
+    new URL('../src/features/app/ui.jsx', import.meta.url),
+    'utf8',
+  );
+  const accountPickerSource = readFileSync(
+    new URL('../src/features/app/AccountSheetPicker.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(addSource, /import AccountSheetPicker/);
+  assert.match(addSource, /useKeyboardViewportState/);
+  assert.match(addSource, /dock=\{manualDock\}/);
+  assert.match(addSource, /testId="manual-account-select"/);
+  assert.match(addSource, /testId="manual-from-account-picker"/);
+  assert.match(addSource, /testId="manual-to-account-picker"/);
+  assert.doesNotMatch(addSource, /finance-page-actions/);
+
+  assert.match(inboxSource, /import AccountSheetPicker/);
+  assert.match(inboxSource, /testId="review-account-picker"/);
+  assert.match(inboxSource, /testId="review-from-account-picker"/);
+  assert.match(inboxSource, /testId="review-to-account-picker"/);
+
+  assert.match(plannerSource, /import AccountSheetPicker/);
+  assert.match(plannerSource, /testId="planner-goal-linked-account"/);
+  assert.match(plannerSource, /emptyTestId="planner-goal-linked-account-empty"/);
+  assert.match(plannerSource, /testId="planner-debt-account"/);
+
+  assert.match(uiSource, /finance-screen-head-sticky/);
+  assert.match(uiSource, /finance-screen-dock/);
+  assert.match(uiSource, /finance-screen-has-dock/);
+  assert.match(uiSource, /export function useKeyboardViewportState/);
+
+  assert.match(accountPickerSource, /suppressOpenUntilRef/);
+  assert.match(accountPickerSource, /Date\.now\(\) < suppressOpenUntilRef\.current/);
+});
+
+test('runtime styles: mobile shell exposes sticky headers, dock reserve, and account picker cards', () => {
+  const cssSource = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+
+  assert.match(cssSource, /--finance-viewport-h:\s*100dvh/);
+  assert.match(cssSource, /body\[data-finance-shell="true"\]\s*\{[\s\S]*overflow-y:\s*hidden;/s);
+  assert.match(cssSource, /\.finance-screen-head-sticky\s*\{[\s\S]*position:\s*sticky;[\s\S]*top:\s*0;/s);
+  assert.match(cssSource, /\.finance-screen-dock\s*\{[\s\S]*position:\s*fixed;[\s\S]*bottom:\s*calc\(var\(--finance-nav-reserve\) - 0\.25rem\);/s);
+  assert.match(cssSource, /\.finance-screen-has-dock \.finance-screen-body\s*\{[\s\S]*padding-bottom:\s*calc\(var\(--finance-screen-dock-h\)/s);
+  assert.match(cssSource, /body\[data-keyboard-open="true"\] \.finance-screen-dock\s*\{[\s\S]*bottom:\s*calc\(var\(--keyboard-inset,\s*0px\) \+ env\(safe-area-inset-bottom\) \+ 0\.7rem\);/s);
+  assert.match(cssSource, /\.finance-picker-trigger\s*\{[\s\S]*min-height:\s*4\.15rem;/s);
+  assert.match(cssSource, /\.finance-account-picker-card\.is-selected\s*\{[\s\S]*border-color:/s);
+});
+
+test('runtime source: service worker only registers in production and clears old runtime caches in dev', () => {
+  const htmlSource = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+
+  assert.match(htmlSource, /const CACHE_PREFIX = "smart-expense-runtime";/);
+  assert.match(htmlSource, /const isProd = Boolean\(import\.meta\.env\.PROD\);/);
+  assert.match(htmlSource, /const clearDevServiceWorkers = async \(\) => \{[\s\S]*navigator\.serviceWorker\.getRegistrations\(\)/s);
+  assert.match(htmlSource, /if \(!isProd\) \{[\s\S]*clearDevServiceWorkers\(\)/s);
+  assert.match(htmlSource, /window\.caches\.keys\(\)/);
+  assert.match(htmlSource, /registration = await navigator\.serviceWorker\.register\(swUrl, \{ scope \}\)/);
+});
+
 test('categories: duplicate income ids are canonicalized for Supabase storage', () => {
   assert.equal(canonicalizeCategoryId('expense', 'interest'), 'interest');
   assert.equal(canonicalizeCategoryId('income', 'interest'), 'interest_income');

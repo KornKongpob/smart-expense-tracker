@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Repeat2, Search, XCircle } from "lucide-react";
 
+import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import { useExpenseApp } from "../AppProvider.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import LineItemEditorSection from "../LineItemEditorSection.jsx";
@@ -357,54 +358,43 @@ export default function InboxScreen() {
                     <div className="finance-grid finance-grid-2">
                       <label className="finance-field">
                         <span className="ui-label">จากบัญชี</span>
-                        <select
-                          className="ui-select"
+                        <AccountSheetPicker
+                          accounts={accounts}
                           value={draft.fromAccountId}
-                          onChange={(event) =>
-                            setDraft((current) => ({ ...current, fromAccountId: event.target.value }))
-                          }
-                        >
-                          <option value="">เลือกบัญชี</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(fromAccountId) => setDraft((current) => ({ ...current, fromAccountId }))}
+                          title="เลือกบัญชีต้นทาง"
+                          placeholder="เลือกบัญชีต้นทาง"
+                          testId="review-from-account-picker"
+                          optionTestIdPrefix="review-from-account-option"
+                        />
                       </label>
 
                       <label className="finance-field">
                         <span className="ui-label">ไปบัญชี</span>
-                        <select
-                          className="ui-select"
+                        <AccountSheetPicker
+                          accounts={accounts}
                           value={draft.toAccountId}
-                          onChange={(event) => setDraft((current) => ({ ...current, toAccountId: event.target.value }))}
-                        >
-                          <option value="">เลือกบัญชี</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(toAccountId) => setDraft((current) => ({ ...current, toAccountId }))}
+                          title="เลือกบัญชีปลายทาง"
+                          placeholder="เลือกบัญชีปลายทาง"
+                          testId="review-to-account-picker"
+                          optionTestIdPrefix="review-to-account-option"
+                        />
                       </label>
                     </div>
                   ) : (
                     <div className="finance-grid finance-grid-2">
                       <label className="finance-field">
                         <span className="ui-label">บัญชี</span>
-                        <select
-                          className="ui-select"
+                        <AccountSheetPicker
+                          accounts={accounts}
                           value={draft.accountId}
-                          onChange={(event) => setDraft((current) => ({ ...current, accountId: event.target.value }))}
-                        >
-                          <option value="">เลือกบัญชี</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(accountId) => setDraft((current) => ({ ...current, accountId }))}
+                          title="เลือกบัญชี"
+                          placeholder="เลือกบัญชี"
+                          testId="review-account-picker"
+                          optionTestIdPrefix="review-account-option"
+                        />
                       </label>
 
                       <CategoryPresetChooser

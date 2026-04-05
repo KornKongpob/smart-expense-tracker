@@ -22,64 +22,91 @@
     <script type="module" src="/src/main.jsx"></script>
     <script type="module">
       if ("serviceWorker" in navigator) {
-        const buildId = String(import.meta.env.VITE_APP_BUILD_ID || document.lastModified || import.meta.env.MODE || "dev")
-          .trim()
-          .replace(/\s+/g, "-");
-        const scope = import.meta.env.BASE_URL || "/";
-        const swUrl = `${scope}sw.js?v=${encodeURIComponent(buildId)}`;
-        let refreshing = false;
+        const CACHE_PREFIX = "smart-expense-runtime";
+        const isProd = Boolean(import.meta.env.PROD);
 
-        const announceUpdate = (registration) => {
-          window.__SMART_EXPENSE_SW__ = registration;
-          window.dispatchEvent(new CustomEvent("smart-expense:update-ready"));
+        const clearDevServiceWorkers = async () => {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+
+            if ("caches" in window) {
+              const keys = await window.caches.keys();
+              await Promise.all(
+                keys
+                  .filter((key) => key.startsWith(CACHE_PREFIX))
+                  .map((key) => window.caches.delete(key)),
+              );
+            }
+          } catch {
+            // Ignore best-effort dev cleanup failures.
+          }
         };
 
-        window.addEventListener("load", async () => {
-          try {
-            const registration = await navigator.serviceWorker.register(swUrl, { scope });
+        if (!isProd) {
+          window.addEventListener("load", () => {
+            void clearDevServiceWorkers();
+          });
+        } else {
+          const buildId = String(import.meta.env.VITE_APP_BUILD_ID || document.lastModified || import.meta.env.MODE || "dev")
+            .trim()
+            .replace(/\s+/g, "-");
+          const scope = import.meta.env.BASE_URL || "/";
+          const swUrl = `${scope}sw.js?v=${encodeURIComponent(buildId)}`;
+          let refreshing = false;
+
+          const announceUpdate = (registration) => {
             window.__SMART_EXPENSE_SW__ = registration;
+            window.dispatchEvent(new CustomEvent("smart-expense:update-ready"));
+          };
 
-            if (registration.waiting) {
-              announceUpdate(registration);
-            }
+          window.addEventListener("load", async () => {
+            try {
+              const registration = await navigator.serviceWorker.register(swUrl, { scope });
+              window.__SMART_EXPENSE_SW__ = registration;
 
-            registration.addEventListener("updatefound", () => {
-              const worker = registration.installing;
-              if (!worker) return;
+              if (registration.waiting) {
+                announceUpdate(registration);
+              }
 
-              worker.addEventListener("statechange", () => {
-                if (worker.state === "installed" && navigator.serviceWorker.controller) {
-                  announceUpdate(registration);
+              registration.addEventListener("updatefound", () => {
+                const worker = registration.installing;
+                if (!worker) return;
+
+                worker.addEventListener("statechange", () => {
+                  if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                    announceUpdate(registration);
+                  }
+                });
+              });
+
+              navigator.serviceWorker.addEventListener("controllerchange", () => {
+                if (refreshing) return;
+                refreshing = true;
+                window.location.reload();
+              });
+
+              const refreshRegistration = async () => {
+                try {
+                  await registration.update();
+                } catch {
+                  // Ignore best-effort background refresh failures.
+                }
+              };
+
+              window.addEventListener("focus", refreshRegistration);
+              document.addEventListener("visibilitychange", () => {
+                if (document.visibilityState === "visible") {
+                  refreshRegistration();
                 }
               });
-            });
 
-            navigator.serviceWorker.addEventListener("controllerchange", () => {
-              if (refreshing) return;
-              refreshing = true;
-              window.location.reload();
-            });
-
-            const refreshRegistration = async () => {
-              try {
-                await registration.update();
-              } catch {
-                // Ignore best-effort background refresh failures.
-              }
-            };
-
-            window.addEventListener("focus", refreshRegistration);
-            document.addEventListener("visibilitychange", () => {
-              if (document.visibilityState === "visible") {
-                refreshRegistration();
-              }
-            });
-
-            window.setInterval(refreshRegistration, 60 * 60 * 1000);
-          } catch {
-            // Ignore service worker registration failures.
-          }
-        });
+              window.setInterval(refreshRegistration, 60 * 60 * 1000);
+            } catch {
+              // Ignore service worker registration failures.
+            }
+          });
+        }
       }
     </script>
   </body>

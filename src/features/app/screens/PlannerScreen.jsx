@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CreditCard, PlusCircle, Target, Trash2 } from "lucide-react";
 
+import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import { useExpenseApp } from "../AppProvider.jsx";
 import { EmptyPanel, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { getGoalProgressPercent, getGoalRemainingSatang, getNextDebtDueDateISO } from "../plannerState.js";
@@ -439,20 +440,19 @@ export default function PlannerScreen() {
 
             <label className="finance-field">
               <span className="ui-label">บัญชีที่เชื่อม</span>
-              <select
-                className="ui-select"
+              <AccountSheetPicker
+                accounts={accounts}
                 value={goalDraft.linkedAccountId}
-                onChange={(event) =>
-                  setGoalDraft((current) => ({ ...current, linkedAccountId: event.target.value }))
-                }
-              >
-                <option value="">ไม่ผูกบัญชี</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(linkedAccountId) => setGoalDraft((current) => ({ ...current, linkedAccountId }))}
+                title="เลือกบัญชีที่เชื่อม"
+                placeholder="เลือกบัญชีที่เชื่อม"
+                allowEmpty
+                emptyLabel="ไม่ผูกบัญชี"
+                emptyDescription="เก็บเป้าหมายนี้แบบไม่ผูกกับบัญชีใดไว้ก่อนได้"
+                testId="planner-goal-linked-account"
+                emptyTestId="planner-goal-linked-account-empty"
+                optionTestIdPrefix="planner-goal-linked-account-option"
+              />
             </label>
           </div>
 
@@ -520,18 +520,15 @@ export default function PlannerScreen() {
         <div className="finance-form">
           <label className="finance-field">
             <span className="ui-label">บัญชีหนี้</span>
-            <select
-              className="ui-select"
+            <AccountSheetPicker
+              accounts={debtAccounts}
               value={debtDraft.accountId}
-              onChange={(event) => setDebtDraft((current) => ({ ...current, accountId: event.target.value }))}
-            >
-              <option value="">เลือกบัญชี</option>
-              {debtAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </select>
+              onChange={(accountId) => setDebtDraft((current) => ({ ...current, accountId }))}
+              title="เลือกบัญชีหนี้"
+              placeholder="เลือกบัญชีหนี้"
+              testId="planner-debt-account"
+              optionTestIdPrefix="planner-debt-account-option"
+            />
           </label>
 
           <div className="finance-grid finance-grid-2">

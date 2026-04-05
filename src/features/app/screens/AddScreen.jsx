@@ -10,10 +10,11 @@ import {
 } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
+import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import LineItemEditorSection from "../LineItemEditorSection.jsx";
 import { lineItemsFromDraft } from "../lineItemDraftState.js";
-import { ScreenShell, StatusPill } from "../ui.jsx";
+import { ScreenShell, StatusPill, useKeyboardViewportState } from "../ui.jsx";
 import { parseMoneyToSatang } from "../../../utils/money.js";
 
 const MANUAL_KIND_OPTIONS = [
@@ -81,6 +82,8 @@ export default function AddScreen() {
     draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense
   ).filter((category) => category?.isHidden !== true);
 
+  useKeyboardViewportState(mode === "manual" && hasAccounts);
+
   useEffect(() => {
     setDraft((current) =>
       current.accountId || !accounts.length
@@ -133,9 +136,34 @@ export default function AddScreen() {
       ? Boolean(draft.fromAccountId && draft.toAccountId && draft.fromAccountId !== draft.toAccountId)
       : Boolean(draft.accountId));
 
+  const manualDock =
+    mode === "manual" && hasAccounts ? (
+      <div className="finance-sheet-actions finance-screen-dock-actions">
+        <button type="button" className="ui-btn ui-btn-secondary" onClick={() => resetDraft()}>
+          <RotateCcw size={16} />
+          ล้าง
+        </button>
+
+        <button
+          type="button"
+          className="ui-btn ui-btn-primary"
+          disabled={saving || !canSave}
+          data-testid="manual-save"
+          onClick={async () => {
+            await createManualTransaction(draft);
+            resetDraft();
+          }}
+        >
+          <SendHorizonal size={16} />
+          บันทึก
+        </button>
+      </div>
+    ) : null;
+
   return (
     <ScreenShell
       title="เพิ่ม"
+      dock={manualDock}
       actions={
         !isOnline ? (
           <StatusPill tone="warning">
@@ -325,55 +353,43 @@ export default function AddScreen() {
                     <div className="finance-grid finance-grid-2">
                       <label className="finance-field">
                         <span className="ui-label">จากบัญชี</span>
-                        <select
-                          className="ui-select"
+                        <AccountSheetPicker
+                          accounts={accounts}
                           value={draft.fromAccountId}
-                          onChange={(event) =>
-                            setDraft((current) => ({ ...current, fromAccountId: event.target.value }))
-                          }
-                        >
-                          <option value="">เลือกบัญชี</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(fromAccountId) => setDraft((current) => ({ ...current, fromAccountId }))}
+                          title="เลือกบัญชีต้นทาง"
+                          placeholder="เลือกบัญชีต้นทาง"
+                          testId="manual-from-account-picker"
+                          optionTestIdPrefix="manual-from-account-option"
+                        />
                       </label>
 
                       <label className="finance-field">
                         <span className="ui-label">ไปบัญชี</span>
-                        <select
-                          className="ui-select"
+                        <AccountSheetPicker
+                          accounts={accounts}
                           value={draft.toAccountId}
-                          onChange={(event) => setDraft((current) => ({ ...current, toAccountId: event.target.value }))}
-                        >
-                          <option value="">เลือกบัญชี</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(toAccountId) => setDraft((current) => ({ ...current, toAccountId }))}
+                          title="เลือกบัญชีปลายทาง"
+                          placeholder="เลือกบัญชีปลายทาง"
+                          testId="manual-to-account-picker"
+                          optionTestIdPrefix="manual-to-account-option"
+                        />
                       </label>
                     </div>
                   ) : (
                     <div className="finance-grid finance-grid-2">
                       <label className="finance-field">
                         <span className="ui-label">บัญชี</span>
-                        <select
-                          className="ui-select"
+                        <AccountSheetPicker
+                          accounts={accounts}
                           value={draft.accountId}
-                          data-testid="manual-account-select"
-                          onChange={(event) => setDraft((current) => ({ ...current, accountId: event.target.value }))}
-                        >
-                          <option value="">เลือกบัญชี</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(accountId) => setDraft((current) => ({ ...current, accountId }))}
+                          title="เลือกบัญชี"
+                          placeholder="เลือกบัญชี"
+                          testId="manual-account-select"
+                          optionTestIdPrefix="manual-account-option"
+                        />
                       </label>
 
                       <CategoryPresetChooser
@@ -456,26 +472,6 @@ export default function AddScreen() {
                   />
                 ) : null}
 
-                <div className="finance-page-actions">
-                  <button type="button" className="ui-btn ui-btn-secondary" onClick={() => resetDraft()}>
-                    <RotateCcw size={16} />
-                    ล้าง
-                  </button>
-
-                  <button
-                    type="button"
-                    className="ui-btn ui-btn-primary"
-                    disabled={saving || !canSave}
-                    data-testid="manual-save"
-                    onClick={async () => {
-                      await createManualTransaction(draft);
-                      resetDraft();
-                    }}
-                  >
-                    <SendHorizonal size={16} />
-                    บันทึก
-                  </button>
-                </div>
               </>
             )}
           </div>

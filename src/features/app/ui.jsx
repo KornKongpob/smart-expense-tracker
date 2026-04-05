@@ -39,6 +39,79 @@ function applyKeyboardDomState(open, inset = 0) {
   else document.body.removeAttribute("data-keyboard-open");
 }
 
+export function useKeyboardViewportState(active, { onEscape } = {}) {
+  useEffect(() => {
+    if (!active || typeof window === "undefined" || typeof document === "undefined") return undefined;
+
+    let focusTimer = 0;
+    let maxWindowHeight = window.innerHeight || 0;
+    const visualViewport = window.visualViewport;
+
+    const updateKeyboardState = () => {
+      const windowHeight = window.innerHeight || 0;
+      if (windowHeight > maxWindowHeight) maxWindowHeight = windowHeight;
+
+      const viewportInset = visualViewport
+        ? Math.max(0, windowHeight - Math.max(0, (visualViewport.height || 0) + (visualViewport.offsetTop || 0)))
+        : 0;
+      const fallbackInset = Math.max(0, maxWindowHeight - windowHeight);
+      const inset = Math.max(viewportInset, fallbackInset);
+      const compactViewport = (window.innerWidth || 0) < 768;
+      const focusedEditable = isTextEntryElement(document.activeElement);
+      const keyboardOpen = inset > 110 || (compactViewport && focusedEditable);
+
+      applyKeyboardDomState(keyboardOpen, inset);
+    };
+
+    const onFocusIn = (event) => {
+      if (!isTextEntryElement(event.target)) return;
+      clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
+        updateKeyboardState();
+        if ((window.innerWidth || 0) < 768 && event.target instanceof HTMLElement) {
+          try {
+            event.target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+          } catch {
+            // Ignore browsers that do not support scrollIntoView options.
+          }
+        }
+      }, 120);
+    };
+
+    const onFocusOut = () => {
+      clearTimeout(focusTimer);
+      window.setTimeout(updateKeyboardState, 80);
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") onEscape?.();
+    };
+
+    applyKeyboardDomState(false, 0);
+    updateKeyboardState();
+
+    visualViewport?.addEventListener("resize", updateKeyboardState);
+    visualViewport?.addEventListener("scroll", updateKeyboardState);
+    window.addEventListener("resize", updateKeyboardState);
+    window.addEventListener("orientationchange", updateKeyboardState);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      clearTimeout(focusTimer);
+      visualViewport?.removeEventListener("resize", updateKeyboardState);
+      visualViewport?.removeEventListener("scroll", updateKeyboardState);
+      window.removeEventListener("resize", updateKeyboardState);
+      window.removeEventListener("orientationchange", updateKeyboardState);
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("keydown", onKeyDown);
+      applyKeyboardDomState(false, 0);
+    };
+  }, [active, onEscape]);
+}
+
 export function BottomNav({ view, onChange, onIntent }) {
   const navRef = useRef(null);
 
@@ -129,10 +202,62 @@ export function ToastBar({ toast, onClose }) {
   );
 }
 
-export function ScreenShell({ eyebrow, title, subtitle, actions, children, fillViewport = true }) {
+export function ScreenShell({
+  eyebrow,
+  title,
+  subtitle,
+  actions,
+  children,
+  dock = null,
+  fillViewport = true,
+}) {
+  const dockRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const root = document.documentElement;
+    if (!dockRef.current || !dock) {
+      root.style.removeProperty("--finance-screen-dock-h");
+      return undefined;
+    }
+
+    const updateHeight = () => {
+      const nextHeight = Math.ceil(dockRef.current?.getBoundingClientRect().height || 0);
+      if (nextHeight > 0) root.style.setProperty("--finance-screen-dock-h", `${nextHeight}px`);
+      else root.style.removeProperty("--finance-screen-dock-h");
+    };
+
+    updateHeight();
+
+    let observer;
+    try {
+      observer = new ResizeObserver(() => updateHeight());
+      observer.observe(dockRef.current);
+    } catch {
+      // Ignore browsers without ResizeObserver support.
+    }
+
+    window.addEventListener("resize", updateHeight);
+    window.addEventListener("orientationchange", updateHeight);
+
+    return () => {
+      window.removeEventListener("resize", updateHeight);
+      window.removeEventListener("orientationchange", updateHeight);
+      observer?.disconnect?.();
+      root.style.removeProperty("--finance-screen-dock-h");
+    };
+  }, [dock]);
+
   return (
-    <section className={["finance-screen", fillViewport ? "finance-screen-fill" : ""].filter(Boolean).join(" ")}>
-      <header className="finance-screen-head">
+    <section
+      className={[
+        "finance-screen",
+        fillViewport ? "finance-screen-fill" : "",
+        dock ? "finance-screen-has-dock" : "",
+      ].filter(Boolean).join(" ")}
+    >
+      <header className="finance-screen-head finance-screen-head-sticky">
         <div className="finance-screen-copy">
           {eyebrow ? <div className="view-eyebrow">{eyebrow}</div> : null}
           <h1 className="finance-screen-title">{title}</h1>
@@ -141,6 +266,11 @@ export function ScreenShell({ eyebrow, title, subtitle, actions, children, fillV
         {actions ? <div className="finance-screen-actions">{actions}</div> : null}
       </header>
       <div className="finance-screen-body">{children}</div>
+      {dock ? (
+        <div ref={dockRef} className="finance-screen-dock">
+          <div className="finance-screen-dock-surface">{dock}</div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -171,77 +301,7 @@ export function StatusPill({ tone = "default", children }) {
 
 export function Sheet({ open, onClose, title, subtitle, children, footer }) {
   useLockBodyScroll(open);
-
-  useEffect(() => {
-    if (!open || typeof window === "undefined") return undefined;
-
-    let focusTimer = 0;
-    let maxWindowHeight = window.innerHeight || 0;
-    const visualViewport = window.visualViewport;
-
-    const updateKeyboardState = () => {
-      const windowHeight = window.innerHeight || 0;
-      if (windowHeight > maxWindowHeight) maxWindowHeight = windowHeight;
-
-      const viewportInset = visualViewport
-        ? Math.max(0, windowHeight - Math.max(0, (visualViewport.height || 0) + (visualViewport.offsetTop || 0)))
-        : 0;
-      const fallbackInset = Math.max(0, maxWindowHeight - windowHeight);
-      const inset = Math.max(viewportInset, fallbackInset);
-      const compactViewport = (window.innerWidth || 0) < 768;
-      const focusedEditable = isTextEntryElement(document.activeElement);
-      const keyboardOpen = inset > 110 || (compactViewport && focusedEditable);
-
-      applyKeyboardDomState(keyboardOpen, inset);
-    };
-
-    const onFocusIn = (event) => {
-      if (!isTextEntryElement(event.target)) return;
-      clearTimeout(focusTimer);
-      focusTimer = window.setTimeout(() => {
-        updateKeyboardState();
-        if ((window.innerWidth || 0) < 768 && event.target instanceof HTMLElement) {
-          try {
-            event.target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-          } catch {
-            // Ignore browsers that do not support scrollIntoView options.
-          }
-        }
-      }, 120);
-    };
-
-    const onFocusOut = () => {
-      clearTimeout(focusTimer);
-      window.setTimeout(updateKeyboardState, 80);
-    };
-
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") onClose?.();
-    };
-
-    applyKeyboardDomState(false, 0);
-    updateKeyboardState();
-
-    visualViewport?.addEventListener("resize", updateKeyboardState);
-    visualViewport?.addEventListener("scroll", updateKeyboardState);
-    window.addEventListener("resize", updateKeyboardState);
-    window.addEventListener("orientationchange", updateKeyboardState);
-    document.addEventListener("focusin", onFocusIn);
-    document.addEventListener("focusout", onFocusOut);
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      clearTimeout(focusTimer);
-      visualViewport?.removeEventListener("resize", updateKeyboardState);
-      visualViewport?.removeEventListener("scroll", updateKeyboardState);
-      window.removeEventListener("resize", updateKeyboardState);
-      window.removeEventListener("orientationchange", updateKeyboardState);
-      document.removeEventListener("focusin", onFocusIn);
-      document.removeEventListener("focusout", onFocusOut);
-      document.removeEventListener("keydown", onKeyDown);
-      applyKeyboardDomState(false, 0);
-    };
-  }, [onClose, open]);
+  useKeyboardViewportState(open, { onEscape: onClose });
 
   if (!open) return null;
 
