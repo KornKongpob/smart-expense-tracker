@@ -2,7 +2,7 @@
 // Centralized transaction helpers used across views.
 // Eliminates duplicated isTransferLike / signedExpenseSatang / sumExpense* / compareTx* / daysInMonthKey.
 
-import { parseDateSafe } from "./format";
+import { combineLocalDateTime, normalizeTimeHHmm, parseDateSafe } from "./format";
 
 /**
  * Check if a transaction looks like a transfer (2-leg or credit payment).
@@ -87,6 +87,20 @@ function getTxDateMs(t) {
   return t?.date ? parseDateSafe(String(t.date).slice(0, 10)).getTime() : 0;
 }
 
+function getTxTimeValue(t) {
+  const normalized = normalizeTimeHHmm(
+    t?.time ||
+      t?.meta?.time ||
+      t?.meta?.slip?.time ||
+      t?.scanMeta?.time ||
+      t?.scanMeta?.slip?.time,
+  );
+  if (!normalized) return -1;
+
+  const combined = combineLocalDateTime(t?.date, normalized);
+  return combined ? combined.getTime() : -1;
+}
+
 /**
  * Get created-at timestamp for sorting.
  */
@@ -102,6 +116,10 @@ export function compareTxNewestFirst(a, b) {
   const da = getTxDateMs(a);
   const db = getTxDateMs(b);
   if (db !== da) return db - da;
+
+  const ta = getTxTimeValue(a);
+  const tb = getTxTimeValue(b);
+  if (tb !== ta) return tb - ta;
 
   const ca = getTxCreatedAt(a);
   const cb = getTxCreatedAt(b);

@@ -48,8 +48,10 @@ export default function Navbar() {
     }
 
     window.addEventListener("resize", updateHeight);
+    window.addEventListener("orientationchange", updateHeight);
     return () => {
       window.removeEventListener("resize", updateHeight);
+      window.removeEventListener("orientationchange", updateHeight);
       observer?.disconnect?.();
     };
   }, []);

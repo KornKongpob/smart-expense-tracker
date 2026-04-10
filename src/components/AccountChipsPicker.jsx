@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 
 function isImageSrc(v) {
@@ -35,9 +36,23 @@ export default function AccountChipsPicker({
   const list = Array.isArray(accounts) ? accounts : [];
   const selected = list.find((a) => String(a?.id || "") === String(value || ""));
   const isCompact = density === "compact";
+  const selectedRef = useRef(null);
+
+  useEffect(() => {
+    if (!mobileSingleRow || !selectedRef.current) return;
+    try {
+      selectedRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    } catch {
+      // ignore browsers without smooth scroll support
+    }
+  }, [mobileSingleRow, value]);
 
   const chipsWrapClass = mobileSingleRow
-    ? "flex gap-2 pb-2 overflow-x-auto overscroll-x-contain snap-x snap-mandatory sm:flex-wrap sm:overflow-visible"
+    ? "flex gap-2 pb-2 overflow-x-auto overscroll-x-contain snap-x snap-mandatory no-scrollbar touch-pan-x-scroll sm:flex-wrap sm:overflow-visible sm:touch-auto"
     : isCompact
       ? "flex flex-wrap gap-2 pb-2"
       : "flex flex-wrap gap-3 pb-2";
@@ -60,15 +75,27 @@ export default function AccountChipsPicker({
         <h3 className="text-xs font-bold text-gray-900/55 mb-3 uppercase ml-1">{title}</h3>
       ) : null}
 
-      <div className={chipsWrapClass}>
+      <div
+        className={chipsWrapClass}
+        style={
+          mobileSingleRow
+            ? {
+                WebkitOverflowScrolling: "touch",
+                touchAction: "pan-x manipulation",
+              }
+            : undefined
+        }
+      >
         {list.map((acc) => {
           const isSelected = String(value || "") === String(acc?.id || "");
           const v = getAccountVisual(acc);
           return (
             <button
               key={acc.id}
+              ref={isSelected ? selectedRef : null}
               type="button"
               onClick={() => onChange?.(acc.id)}
+              aria-pressed={isSelected}
               className={`${chipClass} ${mobileSingleRow ? "snap-start shrink-0" : ""} ${
                 isSelected
                   ? "bg-gray-900/90 text-white border-white/10 shadow-lg"

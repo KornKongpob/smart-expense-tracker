@@ -190,7 +190,7 @@ export default function DashboardView() {
         }
       />
 
-      <main className="ui-page pt-4 pb-8 view-flow">
+    <main className="ui-page pt-4 pb-nav view-flow">
         <section className="dashboard-hero">
           <div className="dashboard-hero-grid">
             <div>

@@ -1,5 +1,5 @@
 // src/views/AddTransactionView.jsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   isCreditAccount,
@@ -38,7 +38,7 @@ import BentoGrid from "../../components/bento/BentoGrid";
 import BentoCard from "../../components/bento/BentoCard";
 import { scanReceiptOpenAI } from "../../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../../services/blobStore";
-import { formatCurrency, toISODate } from "../../utils/format";
+import { formatCurrency, normalizeTimeHHmm, toISODate } from "../../utils/format";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput, normalizeThaiDigits } from "../../utils/money";
 import { generateId, generateTransferId, generateSplitGroupId } from "../../utils/id";
 import { expandTransactionToInstallments } from "../../utils/installments";
@@ -420,6 +420,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     setToAccountId,
     date,
     setDate,
+    time,
+    setTime,
     note,
     setNote,
     ref,
@@ -444,6 +446,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
   const [isSaving, setIsSaving] = useState(false);
   const savingLockRef = useRef(false);
+  const bottomDockRef = useRef(null);
 
   useEffect(() => {
     if (!isEditMode) return;
@@ -702,6 +705,43 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     removeQueueItems,
   } = useScanQueue();
   const dropZoneRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const root = document.documentElement;
+    const node = bottomDockRef.current;
+    if (!node) {
+      root.style.removeProperty("--app-bottom-dock-h");
+      return undefined;
+    }
+
+    const updateHeight = () => {
+      const nextHeight = Math.ceil(node.getBoundingClientRect().height || 0);
+      if (nextHeight > 0) root.style.setProperty("--app-bottom-dock-h", `${nextHeight}px`);
+      else root.style.removeProperty("--app-bottom-dock-h");
+    };
+
+    updateHeight();
+
+    let observer;
+    try {
+      observer = new ResizeObserver(() => updateHeight());
+      observer.observe(node);
+    } catch {
+      // ignore browsers without ResizeObserver
+    }
+
+    window.addEventListener("resize", updateHeight);
+    window.addEventListener("orientationchange", updateHeight);
+
+    return () => {
+      window.removeEventListener("resize", updateHeight);
+      window.removeEventListener("orientationchange", updateHeight);
+      observer?.disconnect?.();
+      root.style.removeProperty("--app-bottom-dock-h");
+    };
+  }, [entryMode, isEditMode, queue.length]);
 
   // scan batch
   const scanBatchIdRef = useRef(0);
@@ -1981,7 +2021,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               slip:
                 docType === "transfer_slip" || docType === "bill_payment"
                   ? {
-                      time: slipTime || "",
+                      time: normalizeTimeHHmm(slipTime) || "",
                       receiverBankId: receiverBankId || "",
                       transactionRef: rref || "",
                       receiverName: merchant || "",
@@ -2727,7 +2767,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       const base = q && typeof q === "object" ? q : {};
       const sm = base.scanMeta && typeof base.scanMeta === "object" ? base.scanMeta : null;
       const reconcile = sm?.reconcile && typeof sm.reconcile === "object" ? sm.reconcile : null;
-      const slip = sm?.slip && typeof sm.slip === "object" ? sm.slip : null;
+      const slip = sm?.slip && typeof sm.slip === "object" ? { ...sm.slip } : null;
+      if (slip) slip.time = normalizeTimeHHmm(slip.time) || "";
       // Keep meta compact and stable
       return {
         ...(reconcile || {}),
@@ -2739,6 +2780,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     const txs = [];
     for (const q of normalizedReady) {
       const d = String(q.date || toISODate(new Date())).slice(0, 10);
+      const txTime = normalizeTimeHHmm(q.time || q.scanMeta?.slip?.time || q.meta?.slip?.time) || "";
       const noteText = String(q.note || "").trim();
       const merchant = String(q.merchant || "").trim();
       const baseNoteRaw = noteText || merchant || "Scan";
@@ -2760,6 +2802,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           category: "transfer",
           accountId: q.fromAccountId,
           date: d,
+          time: txTime,
           note: baseNote || defaultNote,
           isTransfer: true,
           transferId,
@@ -2789,6 +2832,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           category: "transfer",
           accountId: q.toAccountId,
           date: d,
+          time: txTime,
           note: baseNote || defaultNote,
           isTransfer: true,
           transferId,
@@ -2906,6 +2950,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           category: parentCategory,
           accountId: q.accountId,
           date: d,
+          time: txTime,
           note: baseNote,
           isTransfer: false,
           transferId: null,
@@ -2951,6 +2996,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             category: g.categoryId,
             accountId: q.accountId,
             date: d,
+            time: txTime,
             // ✅ Explicit item name for child line (also mirrored into note for compatibility)
             itemName,
             note: itemName,
@@ -3054,6 +3100,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         category: q.categoryId,
         accountId: q.accountId,
         date: d,
+        time: txTime,
         note: baseNote,
         isTransfer: false,
         transferId: null,
@@ -3158,6 +3205,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   const handleSaveManual = () => {
     if (savingLockRef.current) return;
     const d = String(date || toISODate(new Date())).slice(0, 10);
+    const manualTime = normalizeTimeHHmm(time) || "";
     const noteText = String(note || "").trim();
     const refText = String(ref || "").trim();
 
@@ -3234,6 +3282,7 @@ const inId =
           category: "transfer",
           accountId: fromAccountId,
           date: d,
+          time: manualTime,
           note: noteText || defaultNote,
           isTransfer: true,
           transferId,
@@ -3252,6 +3301,7 @@ const inId =
           category: "transfer",
           accountId: toAccountId,
           date: d,
+          time: manualTime,
           note: noteText || defaultNote,
           isTransfer: true,
           transferId,
@@ -3313,6 +3363,7 @@ const inId =
         category: parentCategory,
         accountId,
         date: d,
+        time: manualTime,
         note: noteText || groupLabel || "Split",
         isTransfer: false,
         transferId: null,
@@ -3340,6 +3391,7 @@ const inId =
           category: l.categoryId,
           accountId,
           date: d,
+          time: manualTime,
           itemName: itemName || null,
           note: itemName,
           isTransfer: false,
@@ -3458,6 +3510,7 @@ const inId =
       category: categoryForSave,
       accountId,
       date: d,
+      time: manualTime,
       note: noteText,
       tags: tags.length ? tags : null,
       isTransfer: false,
@@ -3615,7 +3668,6 @@ const handleClose = () => {
       className="pb-safe min-h-dvh overflow-x-hidden"
       style={{
         overflowX: "hidden",
-        touchAction: "pan-y",
       }}
     >
       <AppHeader
@@ -3939,7 +3991,7 @@ const handleClose = () => {
               </div>
 
               {/* Date + Note */}
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <div className="ui-label mb-1">วันที่</div>
                   <div className="flex items-center gap-2">
@@ -3956,6 +4008,21 @@ const handleClose = () => {
                 </div>
 
                 <div>
+                  <div className="ui-label mb-1">เวลา</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-2xl bg-sky-600/10 border border-sky-600/15 flex items-center justify-center shrink-0">
+                      <Calendar size={16} className="text-sky-700" />
+                    </div>
+                    <input
+                      type="time"
+                      value={time}
+                      onChange={(e) => setTime(e.target.value)}
+                      className="ui-input flex-1"
+                    />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-1">
                   <div className="ui-label mb-1">ร้าน / โน้ต</div>
                   <div className="flex items-center gap-2">
                     <div className="w-10 h-10 rounded-2xl bg-amber-600/10 border border-amber-600/15 flex items-center justify-center shrink-0">
@@ -4366,7 +4433,7 @@ const handleClose = () => {
           </BentoGrid>
 
           {/* Sticky action bar */}
-          <div className="fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-40">
+          <div ref={bottomDockRef} className="page-fixed-action-bar fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-[42]">
             <div className="ui-card-strong p-2 rounded-3xl shadow-[0_28px_70px_-50px_rgba(0,0,0,0.65)]">
               <button
                 onClick={handleSaveManual}
@@ -4385,7 +4452,7 @@ const handleClose = () => {
 
       {/* Fixed actions (scan mode) */}
       {!isEditMode && entryMode === "scan" && queue.length ? (
-        <div className="fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-40">
+        <div ref={bottomDockRef} className="page-fixed-action-bar fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-[42]">
           <div className="ui-card-strong p-2 rounded-3xl shadow-[0_28px_70px_-50px_rgba(0,0,0,0.65)]">
             <div className="grid grid-cols-2 gap-2">
               <button

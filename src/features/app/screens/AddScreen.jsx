@@ -15,6 +15,7 @@ import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import LineItemEditorSection from "../LineItemEditorSection.jsx";
 import { lineItemsFromDraft } from "../lineItemDraftState.js";
 import { ScreenShell, StatusPill, useKeyboardViewportState } from "../ui.jsx";
+import { getCurrentLocalTimeHHmm, toISODate } from "../../../utils/format.js";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
 
 const MANUAL_KIND_OPTIONS = [
@@ -37,7 +38,8 @@ function defaultDraft(accounts) {
     note: "",
     reference: "",
     paymentMethod: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: toISODate(new Date()),
+    time: getCurrentLocalTimeHHmm(),
     lineItems: [],
   };
 }
@@ -366,7 +368,7 @@ export default function AddScreen() {
             ) : (
               <>
                 <section className="finance-form-section">
-                  <div className="finance-grid finance-grid-2">
+                  <div className="finance-grid finance-grid-3">
                     <label className="finance-field">
                       <span className="ui-label">จำนวนเงิน</span>
                       <input
@@ -393,6 +395,16 @@ export default function AddScreen() {
                         type="date"
                         value={draft.date}
                         onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))}
+                      />
+                    </label>
+
+                    <label className="finance-field">
+                      <span className="ui-label">เวลา</span>
+                      <input
+                        className="ui-input"
+                        type="time"
+                        value={draft.time || ""}
+                        onChange={(event) => setDraft((current) => ({ ...current, time: event.target.value }))}
                       />
                     </label>
                   </div>

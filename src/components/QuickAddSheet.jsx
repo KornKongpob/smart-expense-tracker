@@ -7,7 +7,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { X, Check, ChevronRight, ChevronDown, Camera, FileText, Search } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../utils/money";
-import { toISODate } from "../utils/format";
+import { getCurrentLocalTimeHHmm, toISODate } from "../utils/format";
 import { generateId } from "../utils/id";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
@@ -114,6 +114,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
       category: cat,
       accountId: acc,
       date: toISODate(new Date()),
+      time: getCurrentLocalTimeHHmm(),
       note: note || "",
       isTransfer: false,
       transferId: null,
@@ -206,7 +207,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           {/* Account */}
           {accounts.length > 1 && (
             <div className="mb-4">
-              <div className="flex gap-2 overflow-x-auto no-scrollbar">
+              <div className="flex gap-2 overflow-x-auto no-scrollbar touch-pan-x-scroll">
                 {accounts.map((a) => (
                   <button
                     key={a.id}
@@ -244,7 +245,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           {recentCats.length > 0 && !mainCatId && !searchQuery && (
             <div className="mb-4">
               <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">ล่าสุด</div>
-              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 touch-pan-x-scroll">
                 {recentCats.map((cat) => {
                   const isActive = effectiveCatId === cat.id;
                   return (

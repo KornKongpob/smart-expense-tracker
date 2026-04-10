@@ -217,7 +217,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6 view-flow">
+    <main className="ui-page pt-4 pb-nav view-flow">
 
       {/* Summary bar */}
       <div className="ui-card p-4 flex items-center justify-between gap-3">

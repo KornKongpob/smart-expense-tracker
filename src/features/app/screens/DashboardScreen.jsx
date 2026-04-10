@@ -6,7 +6,7 @@ import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import { AmountText, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
-import { formatCurrency, formatDateShort, parseDateSafe } from "../../../utils/format.js";
+import { formatCurrency, formatTransactionDateTime, normalizeTimeHHmm, toISODate } from "../../../utils/format.js";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
 
 function percentOf(value, total) {
@@ -25,11 +25,6 @@ function navigateTo(hash) {
 }
 
 const ACCOUNT_DEEPLINK_KEY = "smart-expense-open-account";
-const TRANSACTION_TIME_FORMATTER = new Intl.DateTimeFormat("th-TH", {
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 function toId(value) {
   return String(value || "").trim();
 }
@@ -98,15 +93,7 @@ function buildTransactionAccountLabel(transaction, accountMap) {
 }
 
 function buildTransactionDateTimeLabel(transaction) {
-  const dateLabel = transaction?.date ? formatDateShort(transaction.date) : "";
-  const timeSource = transaction?.created_at || (String(transaction?.date || "").includes("T") ? transaction.date : "");
-
-  if (!timeSource) return dateLabel;
-
-  const parsed = parseDateSafe(timeSource);
-  if (!Number.isFinite(parsed.getTime())) return dateLabel;
-
-  return [dateLabel, TRANSACTION_TIME_FORMATTER.format(parsed)].filter(Boolean).join(" • ");
+  return formatTransactionDateTime(transaction?.date, transaction?.raw?.time || transaction?.time || "");
 }
 
 function canEditTransactionFromHistory(transaction) {
@@ -137,7 +124,8 @@ function createTransactionEditDraft(transaction = null) {
     note: String(source?.note || ""),
     reference: String(source?.reference || ""),
     paymentMethod: String(source?.payment_method || ""),
-    date: source?.date ? String(source.date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    date: source?.date ? String(source.date).slice(0, 10) : toISODate(new Date()),
+    time: normalizeTimeHHmm(source?.raw?.time || source?.time) || "",
   };
 }
 
@@ -650,7 +638,7 @@ export default function DashboardScreen() {
       >
         <div className="finance-form">
           <section className="finance-form-section">
-            <div className="finance-grid finance-grid-2">
+            <div className="finance-grid finance-grid-3">
               <label className="finance-field">
                 <span className="ui-label">จำนวนเงิน</span>
                 <input
@@ -669,6 +657,16 @@ export default function DashboardScreen() {
                   type="date"
                   value={editDraft.date}
                   onChange={(event) => setEditDraft((current) => ({ ...current, date: event.target.value }))}
+                />
+              </label>
+
+              <label className="finance-field">
+                <span className="ui-label">เวลา</span>
+                <input
+                  className="ui-input"
+                  type="time"
+                  value={editDraft.time || ""}
+                  onChange={(event) => setEditDraft((current) => ({ ...current, time: event.target.value }))}
                 />
               </label>
             </div>

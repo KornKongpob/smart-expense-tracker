@@ -176,7 +176,7 @@ export default function MerchantLibraryView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6 view-flow">
+    <main className="ui-page pt-4 pb-nav view-flow">
 
       {/* Summary */}
       <div className="text-[13px] text-slate-500">{merchants.length} ร้านค้า{q ? ` • แสดง ${filtered.length} ผลลัพธ์` : ""}</div>

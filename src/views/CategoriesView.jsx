@@ -339,7 +339,7 @@ export default function CategoriesView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6 view-flow">
+    <main className="ui-page pt-4 pb-nav view-flow">
 
       {/* Summary */}
       <div className="text-[13px] text-slate-500 mb-1">หมวดหลัก {counts.mains} • หมวดย่อย {counts.subs}</div>

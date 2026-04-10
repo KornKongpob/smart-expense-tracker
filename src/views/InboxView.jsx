@@ -22,7 +22,7 @@ import {
 import { useAppStore } from "../store/store.jsx";
 import { findFuzzyDuplicate } from "../store/selectors.js";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
-import { formatCurrency, toISODate } from "../utils/format";
+import { formatCurrency, formatTransactionDateTime, normalizeTimeHHmm, toISODate } from "../utils/format";
 import AppHeader from "../components/AppHeader";
 import InboxItemReviewModal from "./inbox/InboxItemReviewModal";
 import { parseMoneyToSatang } from "../utils/money";
@@ -167,6 +167,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
   const accounts = Array.isArray(ctx?.accounts) ? ctx.accounts : [];
   const txType = normalizeTxType(item?.type || item?.txType);
   const date = item?.date ? String(item.date).slice(0, 10) : toISODate(new Date());
+  const time = normalizeTimeHHmm(item?.time || item?.scanMeta?.slip?.time || item?.meta?.slip?.time) || "";
   const merchant = item?.merchant || "";
   const note = appendEvidenceToNote(item?.note || "", item?.evidence);
   const ref = item?.referenceId || item?.ref || "";
@@ -269,6 +270,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
           type: txType,
           amount,
           date,
+          time,
           merchant,
           note: String(g0?.note || "").trim() || note,
           ref: ref || "",
@@ -335,6 +337,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
       type: txType,
       amount: parentAmount,
       date,
+      time,
       merchant,
       note,
       ref: ref || "",
@@ -371,6 +374,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         type: txType,
         amount,
         date,
+        time,
         merchant,
         itemName,
         note: itemName,
@@ -422,6 +426,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         transferId,
         amount,
         date,
+        time,
         note,
         merchant,
         ref,
@@ -439,6 +444,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         transferId,
         amount,
         date,
+        time,
         note,
         merchant,
         ref: "",
@@ -519,6 +525,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
     type: txType,
     amount,
     date,
+    time,
     merchant,
     note,
     ref,
@@ -1054,7 +1061,7 @@ export default function InboxView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6 min-w-0 view-flow">
+      <main className="ui-page pt-4 pb-nav min-w-0 view-flow">
 
       {/* Summary */}
       <div className="text-[13px] text-slate-500">รอตรวจ {pendingCount} • อนุมัติแล้ว {approved.length}{selectedCount ? ` • เลือก ${selectedCount}` : ""}</div>
@@ -1327,7 +1334,7 @@ export default function InboxView({ showAlert, showConfirm }) {
                     </div>
 
                     <div className="mt-1 text-sm text-gray-900/70 whitespace-normal break-words wrap-anywhere">
-                      {it?.date || "(no date)"}
+                      {formatTransactionDateTime(it?.date || "", it?.time) || "(no date)"}
                       {it?.merchant ? ` • ${it.merchant}` : ""}
                     </div>
 

@@ -25,7 +25,7 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { formatCurrency, formatDateShort } from "../utils/format";
+import { combineLocalDateTime, formatCurrency, formatDateShort, formatTransactionDateTime, normalizeTimeHHmm } from "../utils/format";
 import { useAppStore } from "../store/store.jsx";
 import { parseDateSafe } from "../store/selectors.js";
 import AppHeader from "../components/AppHeader";
@@ -105,6 +105,9 @@ function getPeriodStart(period, now) {
 }
 
 function getTxOrderKey(tx) {
+  const combined = combineLocalDateTime(tx?._iso || tx?.date, normalizeTimeHHmm(tx?.time));
+  if (combined) return combined.getTime();
+
   const updated = Number(tx?.updatedAt);
   const created = Number(tx?.createdAt);
   if (Number.isFinite(updated) && updated > 0) return updated;
@@ -234,7 +237,7 @@ const CatIcon = memo(function CatIcon({ icon, color, title }) {
 const TxRow = memo(function TxRow({ tx, cat, account }) {
   const note = String(tx?.note || "").trim();
   const ref = String(tx?.ref || "").trim();
-  const dateText = tx?._iso ? formatDateShort(tx._iso) : formatDateShort(tx?.date);
+  const dateText = formatTransactionDateTime(tx?._iso || tx?.date, tx?.time);
 
   return (
     <div className="glass-panel border border-white/20 rounded-2xl p-3">
@@ -521,7 +524,7 @@ export default function StatsView() {
         }
       />
 
-      <main className="ui-page pt-4 pb-10">
+    <main className="ui-page pt-4 pb-nav">
 
       {/* Period segmented */}
       <div className="ui-card p-1 rounded-2xl mb-5 flex">

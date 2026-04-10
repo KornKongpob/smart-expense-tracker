@@ -176,6 +176,88 @@ export const toISODate = (date = new Date()) => {
   return `${y}-${m}-${da}`;
 };
 
+const TIME_ONLY_FORMATTER = new Intl.DateTimeFormat("th-TH", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+export function normalizeTimeHHmm(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return undefined;
+
+  const embedded = raw.match(/[T\s]([01]?\d|2[0-3])[:.]([0-5]\d)(?:[:.]([0-5]\d))?/);
+  if (embedded) {
+    const hh = Number(embedded[1]);
+    const mm = Number(embedded[2]);
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    }
+  }
+
+  const match = raw.match(/^(\d{1,2})(?:[:.](\d{2}))(?:(?:[:.](\d{2})))?$/);
+  if (match) {
+    const hh = Number(match[1]);
+    const mm = Number(match[2]);
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    }
+    return undefined;
+  }
+
+  const compact = raw.match(/^(\d{2})(\d{2})$/);
+  if (compact) {
+    const hh = Number(compact[1]);
+    const mm = Number(compact[2]);
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      return `${compact[1]}:${compact[2]}`;
+    }
+  }
+
+  return undefined;
+}
+
+export function getCurrentLocalTimeHHmm(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (!Number.isFinite(d.getTime())) return "00:00";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+export function combineLocalDateTime(dateInput, timeInput) {
+  const date = parseDateSafe(dateInput);
+  if (!Number.isFinite(date.getTime())) return null;
+  const normalizedTime = normalizeTimeHHmm(timeInput);
+  if (!normalizedTime) return null;
+
+  const [hours, minutes] = normalizedTime.split(":").map(Number);
+  const combined = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    hours,
+    minutes,
+    0,
+    0,
+  );
+
+  return Number.isFinite(combined.getTime()) ? combined : null;
+}
+
+export function formatTimeShort(timeInput) {
+  const normalizedTime = normalizeTimeHHmm(timeInput);
+  if (!normalizedTime) return "";
+  const [hours, minutes] = normalizedTime.split(":").map(Number);
+  const d = new Date(2000, 0, 1, hours, minutes, 0, 0);
+  if (!Number.isFinite(d.getTime())) return normalizedTime;
+  return TIME_ONLY_FORMATTER.format(d);
+}
+
+export function formatTransactionDateTime(dateInput, timeInput) {
+  const dateLabel = formatDateShort(dateInput);
+  const timeLabel = formatTimeShort(timeInput);
+  return timeLabel ? `${dateLabel} • ${timeLabel}` : dateLabel;
+}
+
 /**
  * ✅ toMonthKey
  * - คืนค่า "YYYY-MM"

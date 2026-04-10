@@ -379,7 +379,7 @@ export default function MoreView({ showAlert, showConfirm }) {
     <div className="min-h-dvh">
       <AppHeader title="ตั้งค่า" subtitle="ระบบ / ข้อมูล / ความปลอดภัย" />
 
-      <main className="ui-page pt-4 pb-8 view-flow">
+    <main className="ui-page pt-4 pb-nav view-flow">
         <section className="hub-hero">
           <div className="dashboard-kicker">Control Center</div>
           <h2 className="hub-hero-title">จัดการระบบ งานอัตโนมัติ และข้อมูลสำรองจากที่เดียว</h2>

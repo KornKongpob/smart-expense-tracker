@@ -9,6 +9,7 @@ import { z } from "zod";
 
 const satangInt = z.number().int().finite().default(0);
 const isoDateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.string().length(0)).default("");
+const timeHHmmStr = z.string().regex(/^\d{2}:\d{2}$/).or(z.string().length(0)).default("");
 const optionalStr = z.string().default("");
 const optionalBool = z.boolean().default(false);
 const timestamp = z.number().finite().default(0);
@@ -20,6 +21,7 @@ export const TransactionSchema = z.object({
   type: z.enum(["expense", "income"]).default("expense"),
   amount: satangInt,
   date: isoDateStr,
+  time: timeHHmmStr,
   category: optionalStr,
   accountId: optionalStr,
   note: optionalStr,
@@ -217,6 +219,7 @@ export const InboxItemSchema = z.object({
   type: z.string().default("expense"),
   amount: satangInt,
   date: isoDateStr,
+  time: timeHHmmStr,
   categoryId: optionalStr,
   accountId: optionalStr,
   fromAccountId: optionalStr,

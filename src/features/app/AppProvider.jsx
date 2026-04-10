@@ -40,6 +40,7 @@ import {
 } from "./transactionDrafts.js";
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/supabase/client.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
+import { compareTxNewestFirst } from "../../utils/transaction.js";
 
 const AppContext = createContext(null);
 const GUEST_DISPLAY_NAME = "Guest";
@@ -184,8 +185,30 @@ function buildMergedTransactionRaw(existingRaw, nextRaw, draft) {
   if (!Array.isArray(draft?.receiptGroups) && !Array.isArray(draft?.groups) && current.receiptGroups !== undefined) {
     merged.receiptGroups = current.receiptGroups;
   }
+  if (draft?.time == null && current.time !== undefined) {
+    merged.time = current.time;
+  }
 
   return merged;
+}
+
+function sortRuntimeTransactionsNewestFirst(list) {
+  return (Array.isArray(list) ? list : [])
+    .slice()
+    .sort((a, b) =>
+      compareTxNewestFirst(
+        {
+          ...a,
+          time: a?.raw?.time || a?.time || "",
+          createdAt: a?.created_at ? new Date(a.created_at).getTime() : 0,
+        },
+        {
+          ...b,
+          time: b?.raw?.time || b?.time || "",
+          createdAt: b?.created_at ? new Date(b.created_at).getTime() : 0,
+        },
+      ),
+    );
 }
 
 export function AppProvider({ children }) {
@@ -568,8 +591,10 @@ export function AppProvider({ children }) {
       setDebtPlans(normalizeDebtPlans(debtPlansResult.data || []));
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
       setRecentTransactions(
-        (Array.isArray(transactionsResult.data) ? transactionsResult.data : []).filter(
-          (transaction) => transaction?.is_split_child !== true,
+        sortRuntimeTransactionsNewestFirst(
+          (Array.isArray(transactionsResult.data) ? transactionsResult.data : []).filter(
+            (transaction) => transaction?.is_split_child !== true,
+          ),
         ),
       );
       setDashboardSnapshot(nextSnapshot);

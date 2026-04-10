@@ -3,7 +3,7 @@ import React, { useMemo } from "react";
 import { ArrowRightLeft, ChevronRight, CreditCard, Layers } from "lucide-react";
 import { isCreditAccount } from "../utils/accountMatch";
 import { useAppStore } from "../store/store.jsx";
-import { formatCurrency, formatDateShort } from "../utils/format";
+import { formatCurrency, formatTransactionDateTime } from "../utils/format";
 import { signedReceiptTxSatang } from "../utils/receiptAdjustments";
 import AccountPill from "./AccountPill";
 
@@ -11,9 +11,9 @@ import AccountPill from "./AccountPill";
 
 function safeDateLabel(d) {
   try {
-    return formatDateShort(d);
+    return formatTransactionDateTime(d?.date || d, d?.time);
   } catch {
-    return String(d || "");
+    return String(d?.date || d || "");
   }
 }
 
@@ -254,7 +254,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
         <span className="text-gray-900/35 font-semibold">→</span>
         <AccountPill account={transferMeta.toAcc} size="sm" showHint={true} className="max-w-full" />
         <span className="text-gray-900/25 font-semibold">•</span>
-        <span className="font-semibold">{safeDateLabel(transferMeta.date)}</span>
+        <span className="font-semibold">{safeDateLabel({ date: transferMeta.date, time: tx?.time })}</span>
       </div>
     );
   } else {
@@ -262,7 +262,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
       <div className="flex flex-wrap items-center gap-2">
         <AccountPill account={selfAcc} fallbackName={accountName} size="sm" showHint={true} className="max-w-full" />
         <span className="text-gray-900/25 font-semibold">•</span>
-        <span className="font-semibold">{safeDateLabel(tx?.date)}</span>
+        <span className="font-semibold">{safeDateLabel(tx)}</span>
       </div>
     );
   }

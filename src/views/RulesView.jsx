@@ -269,7 +269,7 @@ const applyTemplate = (tpl) => {
         }
       />
 
-      <main className="ui-page pt-4 pb-6 view-flow">
+    <main className="ui-page pt-4 pb-nav view-flow">
 
       {/* Summary */}
       <div className="text-[13px] text-slate-500">เปิดใช้ {enabledCount} จาก {rules.length} กฎ</div>

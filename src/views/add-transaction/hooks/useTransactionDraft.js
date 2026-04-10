@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { getCurrentLocalTimeHHmm } from "../../../utils/format.js";
 
 export function useTransactionDraft({ initialData, isEditMode, transferKindForEdit, transferPair, accounts, toISODate, normalizeLatLng }) {
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan");
@@ -16,6 +17,11 @@ const [scanUploadKind, setScanUploadKind] = useState("receipt");
   const [fromAccountId, setFromAccountId] = useState(transferPair?.outTx?.accountId || accounts?.[0]?.id || "");
   const [toAccountId, setToAccountId] = useState(transferPair?.inTx?.accountId || accounts?.[0]?.id || "");
   const [date, setDate] = useState(initialData?.date ? String(initialData.date).slice(0, 10) : toISODate(new Date()));
+  const [time, setTime] = useState(() => {
+    const existingTime = String(initialData?.time || "").trim();
+    if (existingTime) return existingTime;
+    return isEditMode ? "" : getCurrentLocalTimeHHmm();
+  });
   const [note, setNote] = useState(initialData?.note || "");
   const [ref, setRef] = useState(initialData?.ref || "");
   const [tags, setTags] = useState(() => Array.isArray(initialData?.tags) ? initialData.tags : []);
@@ -78,6 +84,8 @@ const [scanUploadKind, setScanUploadKind] = useState("receipt");
     setToAccountId,
     date,
     setDate,
+    time,
+    setTime,
     note,
     setNote,
     ref,

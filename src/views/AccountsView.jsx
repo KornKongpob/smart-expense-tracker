@@ -1067,7 +1067,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6">
+    <main className="ui-page pt-4 pb-nav">
         {/* Header Card */}
       <div className="mt-4 ui-card p-4">
         <div className="flex items-start justify-between gap-3">

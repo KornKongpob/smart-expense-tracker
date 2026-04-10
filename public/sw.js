@@ -1,6 +1,7 @@
 const url = new URL(self.location.href);
 const VERSION = url.searchParams.get("v") || "dev";
-const CACHE_PREFIX = "smart-expense-runtime";
+const CACHE_PREFIX = "smart-expense-runtime-v2";
+const LEGACY_CACHE_PREFIXES = ["smart-expense-runtime", CACHE_PREFIX];
 const CACHE_NAME = `${CACHE_PREFIX}-${VERSION}`;
 const APP_SHELL = [
   "/",
@@ -30,7 +31,7 @@ async function cleanupOldCaches() {
   const cacheKeys = await caches.keys();
   await Promise.all(
     cacheKeys
-      .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+      .filter((key) => LEGACY_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)) && key !== CACHE_NAME)
       .map((key) => caches.delete(key)),
   );
 }

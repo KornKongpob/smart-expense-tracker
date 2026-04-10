@@ -269,7 +269,7 @@ export function ScreenShell({
       ].filter(Boolean).join(" ")}
     >
       {showVisualHeader ? (
-        <header className="finance-screen-head">
+        <header className="finance-screen-head finance-screen-head-sticky">
           <div className="finance-screen-copy">
             {eyebrow ? <div className="view-eyebrow">{eyebrow}</div> : null}
             <h1 className="finance-screen-title">{title}</h1>

@@ -8,7 +8,7 @@ import LineItemEditorSection from "../LineItemEditorSection.jsx";
 import { lineItemsFromDraft } from "../lineItemDraftState.js";
 import { getScanDisplayAmountSatang } from "../transactionDrafts.js";
 import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
-import { formatCurrency, formatDateLong } from "../../../utils/format.js";
+import { formatCurrency, formatDateLong, formatTransactionDateTime } from "../../../utils/format.js";
 import { parseMoneyToSatang } from "../../../utils/money.js";
 
 const REVIEW_KIND_OPTIONS = [
@@ -227,7 +227,9 @@ export default function InboxScreen() {
                         <div className="finance-row-title">
                           {suggestion?.merchant || scan.file_name || "รายการสแกน"}
                         </div>
-                        <div className="finance-row-meta">{formatDateLong(suggestion?.date || scan.created_at)}</div>
+                        <div className="finance-row-meta">
+                          {formatTransactionDateTime(suggestion?.date || scan.created_at, suggestion?.time)}
+                        </div>
                       </div>
                     </div>
 
@@ -326,7 +328,7 @@ export default function InboxScreen() {
             ) : (
               <>
                 <section className="finance-form-section">
-                  <div className="finance-grid finance-grid-2">
+                  <div className="finance-grid finance-grid-3">
                     <label className="finance-field">
                       <span className="ui-label">จำนวนเงิน</span>
                       <input
@@ -350,6 +352,16 @@ export default function InboxScreen() {
                         type="date"
                         value={draft.date}
                         onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))}
+                      />
+                    </label>
+
+                    <label className="finance-field">
+                      <span className="ui-label">เวลา</span>
+                      <input
+                        className="ui-input"
+                        type="time"
+                        value={draft.time || ""}
+                        onChange={(event) => setDraft((current) => ({ ...current, time: event.target.value }))}
                       />
                     </label>
                   </div>

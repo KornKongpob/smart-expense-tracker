@@ -1,5 +1,6 @@
 import { canonicalizeCategoryId } from "../../utils/categoryIds.js";
 import { generateSplitGroupId } from "../../utils/id.js";
+import { normalizeTimeHHmm, toISODate } from "../../utils/format.js";
 import { ensureSatangInt, parseMoneyToSatang, satangToBahtNumber } from "../../utils/money.js";
 import {
   chooseReceiptPaidTotalSatang,
@@ -68,7 +69,11 @@ function sanitizeIsoDate(value) {
 }
 
 export function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return toISODate(new Date());
+}
+
+function sanitizeDraftTime(value, fallback = "") {
+  return normalizeTimeHHmm(value) || normalizeTimeHHmm(fallback) || "";
 }
 
 function normalizeQuantity(value) {
@@ -231,6 +236,7 @@ export function sanitizeTransactionDraft(input) {
     reference: cleanText(draft.reference || draft.ref),
     paymentMethod: cleanText(draft.paymentMethod || draft.payment_method),
     date: sanitizeIsoDate(draft.date),
+    time: sanitizeDraftTime(draft.time),
     docType: cleanText(draft.docType || draft.doc_type),
     lineItems,
     receiptGroups,
@@ -389,6 +395,7 @@ function buildBaseTransactionRow({
     raw: {
       source,
       docType: draft.docType || null,
+      time: draft.time || null,
       splitByCategory: draft.splitByCategory === true,
       lineItems: draft.lineItems,
       receiptGroups: draft.receiptGroups,
@@ -580,6 +587,7 @@ export function buildApprovedSuggestion(scan, draft) {
     doc_type: sanitized.docType || baseSuggestion.doc_type || null,
     amount: toBahtAmount(sanitized.amountSatang),
     date: sanitized.date,
+    time: sanitized.time || null,
     merchant: sanitized.merchant || null,
     note: sanitized.note || null,
     ref: sanitized.reference || null,
@@ -653,6 +661,7 @@ export function scanToDraft(scan) {
     reference: suggestion?.ref || suggestion?.referenceId || "",
     paymentMethod: suggestion?.payment_method || suggestion?.paymentMethod || "",
     date: suggestion?.date || todayDate(),
+    time: suggestion?.time || suggestion?.slip_time || "",
     docType: suggestion?.doc_type || suggestion?.docType || "",
     lineItems: receiptGroups,
     receiptGroups,

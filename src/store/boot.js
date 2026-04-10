@@ -3,7 +3,7 @@ import { THAI_INSTITUTION_PRESET_MAP } from "../constants/institutions.js";
 import { generateId } from "../utils/id.js";
 import { parseDigitsList as parseDigitsListUtil, choosePrimaryDigits, digitsOnly } from "../utils/accountMatch.js";
 import { parseDateSafe } from "./selectors.js";
-import { toISODate } from "../utils/format.js";
+import { normalizeTimeHHmm, toISODate } from "../utils/format.js";
 import { parseMoneyToSatang, ensureSatangInt } from "../utils/money.js";
 import { normalizeMerchants } from "../utils/merchantDictionary.js";
 
@@ -503,11 +503,49 @@ const normalizeNestedEntry = (raw) => {
   return next;
 };
 
+const readNestedTimeCandidates = (raw) => {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const meta = source.meta && typeof source.meta === "object" ? source.meta : {};
+  const scanMeta = source.scanMeta && typeof source.scanMeta === "object" ? source.scanMeta : {};
+  const slip = source.slip && typeof source.slip === "object" ? source.slip : {};
+
+  return [
+    source.time,
+    source.transactionTime,
+    source.txTime,
+    source.localTime,
+    source.timeText,
+    meta.time,
+    meta.transactionTime,
+    meta?.slip?.time,
+    scanMeta.time,
+    scanMeta?.slip?.time,
+    slip.time,
+  ];
+};
+
+function normalizeCanonicalTime(raw) {
+  for (const candidate of readNestedTimeCandidates(raw)) {
+    const normalized = normalizeTimeHHmm(candidate);
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+export function normalizeCanonicalTransactionTime(raw) {
+  return normalizeCanonicalTime(raw);
+}
+
+export function normalizeCanonicalInboxTime(raw) {
+  return normalizeCanonicalTime(raw);
+}
+
 function normalizeTransaction(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
   const id = String(t.id || generateId());
   const amount = safeSatang(t.amount, 0);
   const date = t?.date ? String(t.date).slice(0, 10) : toISODate(new Date());
+  const time = normalizeCanonicalTransactionTime(t);
   const dateMs = date ? parseDateSafe(date).getTime() : 0;
   const createdAt = Number(t.createdAt || t.addedAt || t.updatedAt || dateMs || Date.now());
   const updatedAt = Number(t.updatedAt || createdAt);
@@ -519,6 +557,7 @@ function normalizeTransaction(raw) {
     id,
     amount,
     date,
+    time,
     categoryId,
     category: categoryId,
     note: String(t.note || ""),
@@ -538,6 +577,7 @@ export function normalizeInboxItem(raw) {
   const type = String(it.type || it.txType || "expense");
   const amount = safeSatang(it.amount, 0);
   const date = it.date ? String(it.date).slice(0, 10) : toISODate(new Date());
+  const time = normalizeCanonicalInboxTime(it);
   const categoryId = String(it.categoryId || it.category || "").trim();
   const referenceId = String(it.referenceId || it.ref || "");
 
@@ -550,6 +590,7 @@ export function normalizeInboxItem(raw) {
     txType: type,
     amount,
     date,
+    time,
     categoryId,
     category: categoryId,
     accountId: String(it.accountId || ""),

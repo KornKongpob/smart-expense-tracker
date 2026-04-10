@@ -224,11 +224,11 @@ html[data-theme="dark"] .glass-input {
 
 /* Dark Navbar scrim */
 html[data-theme="dark"] .pb-nav {
-  padding-bottom: calc(var(--app-nav-h, 5rem) + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--app-nav-h, 5rem) + env(safe-area-inset-bottom) + 0.75rem);
 }
 
 html[data-theme="dark"] .pb-bottom-dock {
-  padding-bottom: calc(6rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
+  padding-bottom: calc(var(--app-bottom-dock-reserve, calc(var(--app-bottom-dock-h, 0px) + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))) + 0.75rem);
 }
 
 /* ---------- Base ---------- */
@@ -271,7 +271,6 @@ body[data-finance-shell="true"] {
   min-width: 0;
   position: relative;
   isolation: isolate;
-  touch-action: pan-y;
 }
 
 /* Improve default focus for keyboard a11y */
@@ -294,6 +293,13 @@ body[data-finance-shell="true"] {
   min-height: 100dvh;
 }
 
+.touch-pan-x-scroll {
+  touch-action: pan-x manipulation;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  overflow-y: hidden;
+}
+
 /* Safe-area helpers */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
@@ -304,15 +310,20 @@ body[data-finance-shell="true"] {
 
 /* Space for fixed bottom navbar */
 .pb-nav {
-  padding-bottom: calc(var(--app-nav-h, 5rem) + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--app-nav-h, 5rem) + env(safe-area-inset-bottom) + 0.75rem);
 }
 
 .pb-bottom-dock {
-  padding-bottom: calc(7rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px));
+  padding-bottom: calc(var(--app-bottom-dock-reserve, calc(var(--app-bottom-dock-h, 0px) + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))) + 0.75rem);
 }
 
 /* Hide Navbar when a modal/overlay is open (set by useLockBodyScroll) */
 body[data-modal-open="true"] .app-navbar {
+  display: none !important;
+}
+
+body[data-modal-open="true"] .page-fixed-action-bar,
+body[data-keyboard-open="true"] .page-fixed-action-bar {
   display: none !important;
 }
 
@@ -322,7 +333,7 @@ body[data-keyboard-open="true"] .app-navbar {
 
 body[data-keyboard-open="true"] .ui-page {
   scroll-padding-top: calc(var(--app-header-h, 76px) + 1rem);
-  scroll-padding-bottom: var(--app-bottom-dock-reserve, calc(7rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px)));
+  scroll-padding-bottom: var(--app-bottom-dock-reserve, calc(var(--app-bottom-dock-h, 0px) + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px)));
 }
 
 /* Hide scrollbars */
@@ -393,10 +404,12 @@ summary::-webkit-details-marker {
   overflow-x: clip;
   min-height: calc(100dvh - var(--app-header-h, 76px) - var(--app-shell-bottom-reserve, env(safe-area-inset-bottom)));
   scroll-padding-top: calc(var(--app-header-h, 76px) + 1rem);
+  scroll-padding-bottom: calc(var(--app-shell-bottom-reserve, env(safe-area-inset-bottom)) + 1rem);
 }
 
 .ui-page.pb-bottom-dock {
-  min-height: calc(100dvh - var(--app-header-h, 76px) - var(--app-bottom-dock-reserve, calc(7rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))));
+  min-height: calc(100dvh - var(--app-header-h, 76px) - var(--app-bottom-dock-reserve, calc(var(--app-bottom-dock-h, 0px) + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))));
+  scroll-padding-bottom: calc(var(--app-bottom-dock-reserve, calc(var(--app-bottom-dock-h, 0px) + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))) + 1rem);
 }
 
 .ui-card {
@@ -3005,7 +3018,6 @@ body[data-standalone="true"] {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
   padding-top: calc(var(--finance-app-header-h) + 0.6rem);
   padding-bottom: calc(var(--finance-nav-reserve) + var(--finance-screen-dock-h) + 0.55rem);
   scroll-padding-top: calc(var(--finance-app-header-h) + 0.9rem);
@@ -3123,7 +3135,7 @@ body[data-standalone="true"] {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--finance-nav-reserve) - 0.1rem);
+  bottom: calc(var(--finance-nav-reserve) - 0.25rem);
   z-index: var(--finance-z-screen-dock);
   padding-left: var(--finance-app-gutter);
   padding-right: var(--finance-app-gutter);
@@ -3993,13 +4005,15 @@ body[data-keyboard-open="true"] .finance-screen-has-dock .finance-screen-body {
 }
 
 body[data-keyboard-open="true"] .finance-screen-dock {
-  bottom: calc(var(--keyboard-inset, 0px) + env(safe-area-inset-bottom) + 0.35rem);
+  bottom: calc(var(--keyboard-inset, 0px) + env(safe-area-inset-bottom) + 0.7rem);
 }
 
 body[data-modal-open="true"] .finance-nav-wrap,
 body[data-keyboard-open="true"] .finance-nav-wrap,
 body[data-modal-open="true"] .finance-bottom-nav-wrap,
-body[data-keyboard-open="true"] .finance-bottom-nav-wrap {
+body[data-keyboard-open="true"] .finance-bottom-nav-wrap,
+body[data-modal-open="true"] .finance-screen-dock,
+body[data-modal-open="true"] .finance-page-actions {
   opacity: 0;
   pointer-events: none;
   transform: translateY(20px);

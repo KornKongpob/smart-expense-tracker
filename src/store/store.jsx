@@ -11,6 +11,7 @@ import {
   clampInt,
   createInitialState,
   normalizeAccount,
+  normalizeCanonicalTransactionTime,
   normalizeInboxItem,
   normalizeRule,
   normalizeRules,
@@ -774,6 +775,7 @@ export function AppStoreProvider({ children }) {
       const now = Date.now();
       const prev = (state.transactions || []).find((t) => t?.id === id) || null;
       const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
+      const time = normalizeCanonicalTransactionTime({ ...(prev || {}), ...(tx || {}) });
 
       const cleaned = {
         // ✅ preserve fields that the current form doesn't edit (e.g., merchant/evidence/attachment)
@@ -782,6 +784,7 @@ export function AppStoreProvider({ children }) {
         id,
         amount,
         date,
+        time,
         note: String(tx?.note || ""),
         createdAt,
         updatedAt: now,
@@ -803,6 +806,7 @@ export function AppStoreProvider({ children }) {
           const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
           const prev = prevById.get(String(id)) || null;
           const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
+          const time = normalizeCanonicalTransactionTime({ ...(prev || {}), ...(tx || {}) });
           return {
             // ✅ preserve fields that the current form doesn't edit (e.g., merchant/evidence/attachment)
             ...(prev || {}),
@@ -810,6 +814,7 @@ export function AppStoreProvider({ children }) {
             id,
             amount,
             date,
+            time,
             note: String(tx?.note || ""),
             createdAt,
             updatedAt: now,

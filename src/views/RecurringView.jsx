@@ -174,7 +174,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
         }
       />
 
-      <main className="ui-page pt-4 pb-6 view-flow">
+    <main className="ui-page pt-4 pb-nav view-flow">
 
       {/* Summary */}
       <div className="text-[13px] text-slate-500">เปิดใช้ {recurringStats.enabled}/{recurringStats.total} • ถึงรอบ {recurringStats.due || 0} รายการ</div>

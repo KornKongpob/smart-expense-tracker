@@ -23,6 +23,7 @@
     <script type="module">
       if ("serviceWorker" in navigator) {
         const CACHE_PREFIX = "smart-expense-runtime";
+        const CACHE_PREFIXES = [CACHE_PREFIX, "smart-expense-runtime-v2"];
         const isProd = Boolean(import.meta.env.PROD);
 
         const clearDevServiceWorkers = async () => {
@@ -34,7 +35,7 @@
               const keys = await window.caches.keys();
               await Promise.all(
                 keys
-                  .filter((key) => key.startsWith(CACHE_PREFIX))
+                  .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)))
                   .map((key) => window.caches.delete(key)),
               );
             }
@@ -55,6 +56,12 @@
           const swUrl = `${scope}sw.js?v=${encodeURIComponent(buildId)}`;
           let refreshing = false;
 
+          const activateWaitingWorker = (registration) => {
+            const waiting = registration?.waiting;
+            if (!waiting) return;
+            waiting.postMessage({ type: "SKIP_WAITING" });
+          };
+
           const announceUpdate = (registration) => {
             window.__SMART_EXPENSE_SW__ = registration;
             window.dispatchEvent(new CustomEvent("smart-expense:update-ready"));
@@ -67,6 +74,7 @@
 
               if (registration.waiting) {
                 announceUpdate(registration);
+                activateWaitingWorker(registration);
               }
 
               registration.addEventListener("updatefound", () => {
@@ -89,6 +97,10 @@
               const refreshRegistration = async () => {
                 try {
                   await registration.update();
+                  if (registration.waiting) {
+                    announceUpdate(registration);
+                    activateWaitingWorker(registration);
+                  }
                 } catch {
                   // Ignore best-effort background refresh failures.
                 }
