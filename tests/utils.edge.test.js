@@ -976,13 +976,17 @@ test('runtime styles: sheet review containers clamp width and hide horizontal ov
   assert.match(cssSource, /\.finance-line-item-summary-row\s*\{[\s\S]*text-align:\s*left;/s);
 });
 
-test('runtime source: shared account picker is wired through add, inbox, planner, and shell docks', () => {
+test('runtime source: shared account picker is wired through add, inbox, dashboard, planner, and shell docks', () => {
   const addSource = readFileSync(
     new URL('../src/features/app/screens/AddScreen.jsx', import.meta.url),
     'utf8',
   );
   const inboxSource = readFileSync(
     new URL('../src/features/app/screens/InboxScreen.jsx', import.meta.url),
+    'utf8',
+  );
+  const dashboardSource = readFileSync(
+    new URL('../src/features/app/screens/DashboardScreen.jsx', import.meta.url),
     'utf8',
   );
   const plannerSource = readFileSync(
@@ -1004,25 +1008,38 @@ test('runtime source: shared account picker is wired through add, inbox, planner
   assert.match(addSource, /testId="manual-account-select"/);
   assert.match(addSource, /testId="manual-from-account-picker"/);
   assert.match(addSource, /testId="manual-to-account-picker"/);
+  assert.match(addSource, /applySingleAccountSelection/);
+  assert.match(addSource, /applyTransferFromAccountSelection/);
+  assert.match(addSource, /applyTransferToAccountSelection/);
+  assert.doesNotMatch(addSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
   assert.doesNotMatch(addSource, /finance-page-actions/);
 
   assert.match(inboxSource, /import AccountSheetPicker/);
   assert.match(inboxSource, /testId="review-account-picker"/);
   assert.match(inboxSource, /testId="review-from-account-picker"/);
   assert.match(inboxSource, /testId="review-to-account-picker"/);
+  assert.doesNotMatch(inboxSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
+
+  assert.match(dashboardSource, /import AccountSheetPicker/);
+  assert.doesNotMatch(dashboardSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
 
   assert.match(plannerSource, /import AccountSheetPicker/);
   assert.match(plannerSource, /testId="planner-goal-linked-account"/);
   assert.match(plannerSource, /emptyTestId="planner-goal-linked-account-empty"/);
   assert.match(plannerSource, /testId="planner-debt-account"/);
+  assert.doesNotMatch(plannerSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
 
   assert.match(uiSource, /finance-screen-head-sticky/);
   assert.match(uiSource, /finance-screen-dock/);
   assert.match(uiSource, /finance-screen-has-dock/);
   assert.match(uiSource, /export function useKeyboardViewportState/);
+  assert.match(uiSource, /createPortal/);
+  assert.match(uiSource, /document\.body/);
 
   assert.match(accountPickerSource, /suppressOpenUntilRef/);
   assert.match(accountPickerSource, /Date\.now\(\) < suppressOpenUntilRef\.current/);
+  assert.match(accountPickerSource, /requestAnimationFrame/);
+  assert.match(accountPickerSource, /event\?\.preventDefault/);
 });
 
 test('runtime styles: mobile shell exposes sticky headers, dock reserve, and account picker cards', () => {
@@ -1036,6 +1053,8 @@ test('runtime styles: mobile shell exposes sticky headers, dock reserve, and acc
   assert.match(cssSource, /body\[data-keyboard-open="true"\] \.finance-screen-dock\s*\{[\s\S]*bottom:\s*calc\(var\(--keyboard-inset,\s*0px\) \+ env\(safe-area-inset-bottom\) \+ 0\.7rem\);/s);
   assert.match(cssSource, /\.finance-picker-trigger\s*\{[\s\S]*min-height:\s*4\.15rem;/s);
   assert.match(cssSource, /\.finance-account-picker-card\.is-selected\s*\{[\s\S]*border-color:/s);
+  assert.doesNotMatch(cssSource, /\.finance-app-shell\s*\{[\s\S]*touch-action:\s*pan-y;/s);
+  assert.doesNotMatch(cssSource, /\.finance-bottom-nav-wrap\s*\{[\s\S]*touch-action:\s*pan-y;/s);
 });
 
 test('runtime source: service worker only registers in production and clears old runtime caches in dev', () => {

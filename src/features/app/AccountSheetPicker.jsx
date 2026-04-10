@@ -58,6 +58,20 @@ function buildSearchText(account, meta, preset) {
     .join(" ");
 }
 
+function scheduleNextFrame(callback) {
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(() => callback());
+    return;
+  }
+
+  if (typeof window !== "undefined") {
+    window.setTimeout(() => callback(), 0);
+    return;
+  }
+
+  queueMicrotask(callback);
+}
+
 export default function AccountSheetPicker({
   accounts,
   value,
@@ -125,13 +139,21 @@ export default function AccountSheetPicker({
     setQuery("");
   };
 
-  const selectValue = (nextValue) => {
-    if (String(nextValue || "") === String(value || "")) {
+  const closePickerAfterCommit = () => {
+    scheduleNextFrame(() => {
       closePicker();
+    });
+  };
+
+  const selectValue = (nextValue, event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (String(nextValue || "") === String(value || "")) {
+      closePickerAfterCommit();
       return;
     }
     onChange?.(nextValue);
-    closePicker();
+    closePickerAfterCommit();
   };
 
   return (
@@ -206,7 +228,8 @@ export default function AccountSheetPicker({
                   "finance-account-picker-card-empty",
                   !selectedAccount ? "is-selected" : "",
                 ].filter(Boolean).join(" ")}
-                onClick={() => selectValue("")}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => selectValue("", event)}
                 data-testid={emptyTestId}
               >
                 <span className="finance-picker-badge finance-picker-badge-empty">—</span>
@@ -230,7 +253,8 @@ export default function AccountSheetPicker({
                     key={account.id}
                     type="button"
                     className={["finance-account-picker-card", active ? "is-selected" : ""].filter(Boolean).join(" ")}
-                    onClick={() => selectValue(String(account.id))}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => selectValue(String(account.id), event)}
                     data-testid={optionTestIdPrefix ? `${optionTestIdPrefix}-${account.id}` : undefined}
                   >
                     <span

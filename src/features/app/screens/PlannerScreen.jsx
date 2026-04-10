@@ -438,7 +438,7 @@ export default function PlannerScreen() {
               />
             </label>
 
-            <label className="finance-field">
+            <div className="finance-field">
               <span className="ui-label">บัญชีที่เชื่อม</span>
               <AccountSheetPicker
                 accounts={accounts}
@@ -453,7 +453,7 @@ export default function PlannerScreen() {
                 emptyTestId="planner-goal-linked-account-empty"
                 optionTestIdPrefix="planner-goal-linked-account-option"
               />
-            </label>
+            </div>
           </div>
 
           <label className="finance-field">
@@ -518,7 +518,7 @@ export default function PlannerScreen() {
         }
       >
         <div className="finance-form">
-          <label className="finance-field">
+          <div className="finance-field">
             <span className="ui-label">บัญชีหนี้</span>
             <AccountSheetPicker
               accounts={debtAccounts}
@@ -529,7 +529,7 @@ export default function PlannerScreen() {
               testId="planner-debt-account"
               optionTestIdPrefix="planner-debt-account-option"
             />
-          </label>
+          </div>
 
           <div className="finance-grid finance-grid-2">
             <label className="finance-field">

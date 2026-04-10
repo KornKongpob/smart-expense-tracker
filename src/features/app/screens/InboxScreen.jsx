@@ -368,7 +368,7 @@ export default function InboxScreen() {
 
                   {draft.kind === "transfer" ? (
                     <div className="finance-grid finance-grid-2">
-                      <label className="finance-field">
+                      <div className="finance-field">
                         <span className="ui-label">จากบัญชี</span>
                         <AccountSheetPicker
                           accounts={accounts}
@@ -379,9 +379,9 @@ export default function InboxScreen() {
                           testId="review-from-account-picker"
                           optionTestIdPrefix="review-from-account-option"
                         />
-                      </label>
+                      </div>
 
-                      <label className="finance-field">
+                      <div className="finance-field">
                         <span className="ui-label">ไปบัญชี</span>
                         <AccountSheetPicker
                           accounts={accounts}
@@ -392,11 +392,11 @@ export default function InboxScreen() {
                           testId="review-to-account-picker"
                           optionTestIdPrefix="review-to-account-option"
                         />
-                      </label>
+                      </div>
                     </div>
                   ) : (
                     <div className="finance-grid finance-grid-2">
-                      <label className="finance-field">
+                      <div className="finance-field">
                         <span className="ui-label">บัญชี</span>
                         <AccountSheetPicker
                           accounts={accounts}
@@ -407,7 +407,7 @@ export default function InboxScreen() {
                           testId="review-account-picker"
                           optionTestIdPrefix="review-account-option"
                         />
-                      </label>
+                      </div>
 
                       <CategoryPresetChooser
                         categories={kindCategories}

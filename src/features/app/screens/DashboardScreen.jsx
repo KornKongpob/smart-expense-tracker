@@ -673,7 +673,7 @@ export default function DashboardScreen() {
 
             {editDraft.kind === "transfer" ? (
               <div className="finance-grid finance-grid-2">
-                <label className="finance-field">
+                <div className="finance-field">
                   <span className="ui-label">จากบัญชี</span>
                   <AccountSheetPicker
                     accounts={allAccounts}
@@ -688,9 +688,9 @@ export default function DashboardScreen() {
                     title="เลือกบัญชีต้นทาง"
                     placeholder="เลือกบัญชีต้นทาง"
                   />
-                </label>
+                </div>
 
-                <label className="finance-field">
+                <div className="finance-field">
                   <span className="ui-label">ไปบัญชี</span>
                   <AccountSheetPicker
                     accounts={allAccounts}
@@ -704,11 +704,11 @@ export default function DashboardScreen() {
                     title="เลือกบัญชีปลายทาง"
                     placeholder="เลือกบัญชีปลายทาง"
                   />
-                </label>
+                </div>
               </div>
             ) : (
               <div className="finance-grid finance-grid-2">
-                <label className="finance-field">
+                <div className="finance-field">
                   <span className="ui-label">บัญชี</span>
                   <AccountSheetPicker
                     accounts={allAccounts}
@@ -723,7 +723,7 @@ export default function DashboardScreen() {
                     title="เลือกบัญชี"
                     placeholder="เลือกบัญชี"
                   />
-                </label>
+                </div>
 
                 <CategoryPresetChooser
                   categories={editCategories}

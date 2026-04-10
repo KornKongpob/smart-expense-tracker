@@ -2898,7 +2898,6 @@ body[data-standalone="true"] {
   overflow-x: hidden;
   overflow-x: clip;
   overscroll-behavior-x: none;
-  touch-action: pan-y;
   position: relative;
   padding-bottom: 0;
   overflow: hidden;
@@ -4166,7 +4165,6 @@ body[data-standalone="true"] .finance-nav {
   overflow-x: hidden;
   overflow-x: clip;
   overscroll-behavior-x: none;
-  touch-action: pan-y;
   padding-left: var(--finance-app-gutter);
   padding-right: var(--finance-app-gutter);
   padding-bottom: 0;

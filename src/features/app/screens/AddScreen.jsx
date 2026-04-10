@@ -179,6 +179,53 @@ export default function AddScreen() {
     if (kind === "transfer") setShowLines(false);
   };
 
+  const applySingleAccountSelection = (nextAccountId) => {
+    setDraft((current) => {
+      const resolvedAccountId = normalizeAccountId(
+        accounts,
+        nextAccountId,
+        current.accountId || current.fromAccountId,
+      );
+
+      return {
+        ...current,
+        accountId: resolvedAccountId,
+        fromAccountId: resolvedAccountId,
+      };
+    });
+  };
+
+  const applyTransferFromAccountSelection = (nextFromAccountId) => {
+    setDraft((current) => {
+      const resolvedFromAccountId = normalizeAccountId(
+        accounts,
+        nextFromAccountId,
+        current.fromAccountId || current.accountId,
+      );
+
+      return {
+        ...current,
+        accountId: resolvedFromAccountId || current.accountId,
+        fromAccountId: resolvedFromAccountId,
+        toAccountId:
+          String(current.toAccountId || "") === String(resolvedFromAccountId || "")
+            ? ""
+            : current.toAccountId,
+      };
+    });
+  };
+
+  const applyTransferToAccountSelection = (nextToAccountId) => {
+    setDraft((current) => {
+      if (String(nextToAccountId || "") === String(current.fromAccountId || "")) return current;
+
+      return {
+        ...current,
+        toAccountId: nextToAccountId,
+      };
+    });
+  };
+
   const canSave =
     Number(draft.amountSatang || 0) > 0 &&
     (draft.kind === "transfer"
@@ -411,64 +458,46 @@ export default function AddScreen() {
 
                   {draft.kind === "transfer" ? (
                     <div className="finance-grid finance-grid-2">
-                      <label className="finance-field">
+                      <div className="finance-field">
                         <span className="ui-label">จากบัญชี</span>
                         <AccountSheetPicker
                           accounts={accounts}
                           value={draft.fromAccountId}
-                          onChange={(fromAccountId) =>
-                            setDraft((current) => ({
-                              ...current,
-                              accountId: fromAccountId || current.accountId,
-                              fromAccountId,
-                              toAccountId: String(current.toAccountId || "") === String(fromAccountId || "") ? "" : current.toAccountId,
-                            }))
-                          }
+                          onChange={applyTransferFromAccountSelection}
                           title="เลือกบัญชีต้นทาง"
                           placeholder="เลือกบัญชีต้นทาง"
                           testId="manual-from-account-picker"
                           optionTestIdPrefix="manual-from-account-option"
                         />
-                      </label>
+                      </div>
 
-                      <label className="finance-field">
+                      <div className="finance-field">
                         <span className="ui-label">ไปบัญชี</span>
                         <AccountSheetPicker
                           accounts={accounts}
                           value={draft.toAccountId}
-                          onChange={(toAccountId) =>
-                            setDraft((current) => ({
-                              ...current,
-                              toAccountId: String(toAccountId || "") === String(current.fromAccountId || "") ? "" : toAccountId,
-                            }))
-                          }
+                          onChange={applyTransferToAccountSelection}
                           title="เลือกบัญชีปลายทาง"
                           placeholder="เลือกบัญชีปลายทาง"
                           testId="manual-to-account-picker"
                           optionTestIdPrefix="manual-to-account-option"
                         />
-                      </label>
+                      </div>
                     </div>
                   ) : (
                     <div className="finance-grid finance-grid-2">
-                      <label className="finance-field">
+                      <div className="finance-field">
                         <span className="ui-label">บัญชี</span>
                         <AccountSheetPicker
                           accounts={accounts}
                           value={draft.accountId}
-                          onChange={(accountId) =>
-                            setDraft((current) => ({
-                              ...current,
-                              accountId,
-                              fromAccountId: accountId || current.fromAccountId,
-                            }))
-                          }
+                          onChange={applySingleAccountSelection}
                           title="เลือกบัญชี"
                           placeholder="เลือกบัญชี"
                           testId="manual-account-select"
                           optionTestIdPrefix="manual-account-option"
                         />
-                      </label>
+                      </div>
 
                       <CategoryPresetChooser
                         categories={kindCategories}

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   BarChart3,
   CreditCard,
@@ -320,13 +321,27 @@ export function StatusPill({ tone = "default", children }) {
 }
 
 export function Sheet({ open, onClose, title, subtitle, children, footer }) {
+  const shouldDismissBackdropRef = useRef(false);
+
   useLockBodyScroll(open);
   useKeyboardViewportState(open, { onEscape: onClose });
 
   if (!open) return null;
 
-  return (
-    <div className="finance-sheet-backdrop" role="presentation" onClick={onClose}>
+  const sheetContent = (
+    <div
+      className="finance-sheet-backdrop"
+      role="presentation"
+      onPointerDown={(event) => {
+        shouldDismissBackdropRef.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (!shouldDismissBackdropRef.current) return;
+        shouldDismissBackdropRef.current = false;
+        onClose?.();
+      }}
+    >
       <div
         className="finance-sheet"
         role="dialog"
@@ -351,6 +366,9 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }) {
       </div>
     </div>
   );
+
+  if (typeof document === "undefined" || !document.body) return sheetContent;
+  return createPortal(sheetContent, document.body);
 }
 
 export function MiniCashflowChart({ series }) {
