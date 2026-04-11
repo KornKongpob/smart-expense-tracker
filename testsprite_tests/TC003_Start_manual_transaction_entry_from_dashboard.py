@@ -33,25 +33,15 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Fill the email and password fields with provided credentials and submit the login form to reach the dashboard.
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        # -> Reload the app by navigating to http://localhost:5173/ and wait for the SPA to finish loading so interactive elements (login or dashboard) appear. Then re-inspect the page for the primary 'Add transaction' control.
+        await page.goto("http://localhost:5173/")
         
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('299814')
-        
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
-        await asyncio.sleep(3); await elem.click()
+        # -> Reload the app (navigate to http://localhost:5173/) and wait for the SPA to finish loading so interactive elements (login or dashboard) appear, then re-inspect the page.
+        await page.goto("http://localhost:5173/")
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Add transaction')]").nth(0).is_visible(), "The add transaction view should be displayed after clicking the primary action to add a transaction"
+        assert await frame.locator("xpath=//*[contains(., 'Add transaction')]").nth(0).is_visible(), "The add transaction view should be displayed after clicking the primary action"
         await asyncio.sleep(5)
 
     finally:

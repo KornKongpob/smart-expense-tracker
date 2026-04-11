@@ -33,12 +33,52 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to /stats and wait for the page to render so the date-range controls and charts become available.
+        # -> Navigate to the /stats page to find the date range filter controls and the statistics charts.
         await page.goto("http://localhost:5173/stats")
+        
+        # -> Fill the email and password fields and submit the login form to sign in.
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
+        await asyncio.sleep(3); await elem.click()
+        
+        # -> Wait for the SPA to load (or reload /stats) so interactive elements appear, then locate the login inputs and submit the form.
+        await page.goto("http://localhost:5173/stats")
+        
+        # -> Fill the email and password fields (indexes 1146 and 1147) and click the login submit button (index 1148) to sign in.
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
+        await asyncio.sleep(3); await elem.click()
+        
+        # -> Navigate to /stats (http://localhost:5173/stats) and wait for the SPA to render interactive elements (login or stats UI).
+        await page.goto("http://localhost:5173/stats")
+        
+        # -> Fill the login form using the visible inputs and click the submit button to sign in (use email input 2518, password input 2519, submit button 2520). After sign-in, proceed to /stats to find the date-range controls.
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        # -> Fill the email and password fields (indexes 2701 and 2702) and click the submit button (index 2703) to sign in, then navigate to /stats and verify the date-range filter.
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Category breakdowns')]").nth(0).is_visible(), "The charts and category breakdowns should update to reflect the selected date range."
+        assert await frame.locator("xpath=//*[contains(., 'Category breakdowns')]").nth(0).is_visible(), "The category breakdowns should be visible after applying the date range filter"
         await asyncio.sleep(5)
 
     finally:

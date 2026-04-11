@@ -33,12 +33,9 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to the /accounts page so we can locate the accounts list or account creation action.
-        await page.goto("http://localhost:5173/accounts")
-        
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'new unique name')]").nth(0).is_visible(), "The accounts list should show the updated account name after editing."
+        assert await frame.locator("xpath=//*[contains(., 'Updated Account Name')]").nth(0).is_visible(), "The accounts list should show the updated account name after saving the changes"
         await asyncio.sleep(5)
 
     finally:

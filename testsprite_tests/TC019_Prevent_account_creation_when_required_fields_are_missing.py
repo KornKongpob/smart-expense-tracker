@@ -33,24 +33,12 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Wait for the SPA to finish loading; if no UI appears, navigate to /accounts and look for the account creation form or 'Add account' button.
+        # -> Navigate to http://localhost:5173/accounts and look for the account creation form (buttons/links to add an account).
         await page.goto("http://localhost:5173/accounts")
-        
-        # -> Reload /accounts so the SPA can finish rendering and interactive elements appear, then open the 'สมัคร' (signup) tab to inspect the signup form.
-        await page.goto("http://localhost:5173/accounts")
-        
-        # -> Reload /accounts to force the SPA to re-render and reveal interactive elements. After the page becomes interactive, open the 'สมัคร' (signup) tab (stop after the tab click so the form can be observed). Immediate action: wait a short time then reload /accounts.
-        await page.goto("http://localhost:5173/accounts")
-        
-        # -> Click the 'สมัคร' (signup) tab to open the account creation form so the signup fields can be observed.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/div[2]/button[2]').nth(0)
-        await asyncio.sleep(3); await elem.click()
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'This field is required')]").nth(0).is_visible(), "The form should show the required-field validation error 'This field is required' after submitting the empty account form."
+        assert await frame.locator("xpath=//*[contains(., 'This field is required')]").nth(0).is_visible(), "The form should show required field validation errors after submitting the empty account form."
         await asyncio.sleep(5)
 
     finally:

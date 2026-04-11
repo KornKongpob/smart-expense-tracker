@@ -33,12 +33,34 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to /categories
+        # -> Navigate directly to http://localhost:5173/categories to load the categories UI (no clickable navigation available on current page).
         await page.goto("http://localhost:5173/categories")
+        
+        # -> Fill email and password with provided credentials and submit the login form so the categories UI becomes accessible.
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
+        await asyncio.sleep(3); await elem.click()
+        
+        # -> Fill the email (index 1051) and password (index 1052) fields with provided credentials and click the submit button (index 1053) to log in.
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
+        await asyncio.sleep(3); await elem.click()
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Restaurants')]").nth(0).is_visible(), "The category list should display Restaurants after editing the category"
+        assert await frame.locator("xpath=//*[contains(., 'Restaurants')]").nth(0).is_visible(), "The category list should display Restaurants after editing."
         await asyncio.sleep(5)
 
     finally:

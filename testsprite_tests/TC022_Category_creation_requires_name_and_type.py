@@ -33,10 +33,10 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to /categories to reach the categories page and look for the create-category action.
+        # -> Navigate to the categories page (/categories) so the category form can be tested.
         await page.goto("http://localhost:5173/categories")
         
-        # -> Log in using the provided credentials so the categories page is accessible.
+        # -> Log in using the provided credentials so the categories page and category creation form can be accessed.
         frame = context.pages[-1]
         # Input text
         elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
@@ -54,8 +54,8 @@ async def run_test():
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Name is required')]").nth(0).is_visible(), "The expected text should be visible because the category form should show a validation error when required fields are missing.",
-        assert await frame.locator("xpath=//*[contains(., 'No categories found')]").nth(0).is_visible(), "The expected text should be visible because the category list should remain empty when the category creation is prevented by validation."
+        assert await frame.locator("xpath=//*[contains(., 'This field is required')]").nth(0).is_visible(), "The category form should show a validation error when required fields are missing",
+        assert await frame.locator("xpath=//*[contains(., 'No categories found')]").nth(0).is_visible(), "The category list should still be empty when submitting the form with missing required fields"
         await asyncio.sleep(5)
 
     finally:

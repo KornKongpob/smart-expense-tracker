@@ -33,12 +33,12 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to /inbox (http://localhost:5173/inbox) and then verify whether an empty-state message appears indicating there are no incoming transactions to review.
+        # -> Navigate to /inbox (explicit path) so the app can either show inbox or redirect to login. If redirected, proceed with login and then re-open /inbox to check empty state.
         await page.goto("http://localhost:5173/inbox")
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'There are no incoming transactions to review')]").nth(0).is_visible(), "The inbox should show an empty state message indicating there are no incoming transactions to review"
+        assert await frame.locator("xpath=//*[contains(., 'There are no incoming transactions to review')]").nth(0).is_visible(), "The inbox should display 'There are no incoming transactions to review' indicating an empty state."
         await asyncio.sleep(5)
 
     finally:

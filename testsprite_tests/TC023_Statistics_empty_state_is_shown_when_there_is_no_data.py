@@ -33,56 +33,30 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to http://localhost:5173/stats and inspect the page for an empty-state message or UI indicating no data to display.
+        # -> Navigate to /stats and check whether an empty state is displayed that indicates there are no transactions to chart.
         await page.goto("http://localhost:5173/stats")
         
-        # -> Enter the provided email and password into the login form and submit to access the stats page, then inspect the page for an empty-state message.
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        # -> Navigate to http://localhost:5173/stats and wait for the page to load so I can inspect the page for an empty-state message indicating there are no transactions to chart.
+        await page.goto("http://localhost:5173/stats")
         
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('299814')
+        # -> Click the 'ใช้แบบ Guest' (Use Guest) button to enter the app, then open /stats and verify the empty-state is shown.
+        await page.goto("http://localhost:5173/stats")
         
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
-        await asyncio.sleep(3); await elem.click()
+        # -> Click the 'ใช้แบบ Guest' (Use Guest) button to enter the app, then open /stats and verify an empty-state is displayed indicating no transactions to chart.
+        await page.goto("http://localhost:5173/stats")
         
-        # -> Fill the email and password fields and click the login submit button to access the stats view, then inspect the stats page for an empty-state indicating no transactions.
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        # -> Reload the app root to try to get the SPA to render. After reload, wait for the page to settle, then re-check interactive elements and attempt Guest login or navigate to /stats as needed.
+        await page.goto("http://localhost:5173")
         
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('299814')
+        # -> Click the 'ใช้แบบ Guest' (Use Guest) button to enter the app, then open /stats and verify an empty-state is shown indicating no transactions to chart.
+        await page.goto("http://localhost:5173/stats")
         
-        # -> Fill the email and password fields and click the 'เข้าสู่ระบบ' submit button to log in and then check the stats view for an empty-state indicating no transactions.
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        # -> Navigate to /stats, wait for the page to load until interactive elements appear, then inspect the page and verify an empty-state message indicating there are no transactions to chart.
+        await page.goto("http://localhost:5173/stats")
         
+        # --> Assertions to verify final state
         frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('299814')
-        
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # --> Test passed — verified by AI agent
-        frame = context.pages[-1]
-        current_url = await frame.evaluate("() => window.location.href")
-        assert current_url is not None, "Test completed successfully"
+        assert await frame.locator("xpath=//*[contains(., 'No transactions to chart')]").nth(0).is_visible(), "The statistics view should show an empty state indicating there are no transactions to chart."
         await asyncio.sleep(5)
 
     finally:

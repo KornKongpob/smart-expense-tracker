@@ -33,35 +33,31 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to http://localhost:5173/stats and wait for the page to load so interactive elements appear, then proceed to exercise the date filter.
+        # -> Navigate to /stats (use direct URL since the current page has no interactive navigation).
         await page.goto("http://localhost:5173/stats")
         
-        # -> Reload the /stats page to recover interactive elements, then proceed to sign in with provided credentials so the statistics UI and date-range filter can be tested.
-        await page.goto("http://localhost:5173/stats")
-        
-        # -> Fill the email and password fields and click the login (submit) button to reach the statistics view so the date-range filter can be tested.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # -> Fill the email and password fields with provided credentials and click the submit button to sign in so the statistics view (with date-range filter) becomes accessible.
+        # -> Sign in using provided credentials (teerawut.sue@gmail.com / 299814) to reach the authenticated UI so we can open the Stats page.
         frame = context.pages[-1]
         # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label/input').nth(0)
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
         await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
         
         frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        frame = context.pages[-1]
         # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
         await asyncio.sleep(3); await elem.click()
         
-        # -> Wait for the SPA to finish rendering; if the page remains non-interactive, reload /stats to recover the UI, then attempt login so the statistics view and date-range filter can be tested.
+        # -> Navigate to /stats (use direct URL since the current page has no interactive navigation)
         await page.goto("http://localhost:5173/stats")
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Start date must be before end date')]").nth(0).is_visible(), "A date range validation error should be visible when the start date is after the end date."]} PMID.}{
+        assert await frame.locator("xpath=//*[contains(., 'Invalid date range')]").nth(0).is_visible(), "The date range validation error should be visible after attempting to apply an invalid date range"
         await asyncio.sleep(5)
 
     finally:

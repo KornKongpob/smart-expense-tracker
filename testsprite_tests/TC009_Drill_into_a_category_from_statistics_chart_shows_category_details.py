@@ -33,12 +33,34 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to /stats to open the statistics visualization page.
+        # -> Navigate explicitly to /stats (http://localhost:5173/stats) to reach the statistics visualization page.
         await page.goto("http://localhost:5173/stats")
+        
+        # -> Fill the login form (email and password) and submit to authenticate so we can access the statistics page.
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
+        await asyncio.sleep(3); await elem.click()
+        
+        # -> Click the 'ใช้แบบ Guest' (Use as Guest) button (index 2310) to enter the app as a guest, then wait for the app to load.
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[2]').nth(0)
+        await asyncio.sleep(3); await elem.click()
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Category details')]").nth(0).is_visible(), "The detailed view for the selected category should be displayed after drilling into the chart."
+        assert await frame.locator("xpath=//*[contains(., 'Category Details')]").nth(0).is_visible(), "The detailed view for the selected category should be visible after drilling into a chart segment."
         await asyncio.sleep(5)
 
     finally:

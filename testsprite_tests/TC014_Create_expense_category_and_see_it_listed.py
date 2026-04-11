@@ -33,18 +33,15 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Wait briefly for the SPA to load, then navigate to /categories to reach the category creation UI.
+        # -> Navigate explicitly to /categories to reach the category management page and load its UI.
         await page.goto("http://localhost:5173/categories")
         
-        # -> Reload the app by navigating to http://localhost:5173 to force a fresh load, wait for the SPA to render, then check for interactive elements (login form or categories UI).
-        await page.goto("http://localhost:5173")
-        
-        # -> Navigate to /categories and wait for the SPA to finish loading so the login or categories UI becomes available.
+        # -> Reload the categories page to recover the SPA UI so the login form or navigation becomes visible, then wait for the page to render and re-check interactive elements.
         await page.goto("http://localhost:5173/categories")
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Groceries')]").nth(0).is_visible(), "The category named \"Groceries\" should be visible in the category list after creation"
+        assert await frame.locator("xpath=//*[contains(., 'Groceries')]").nth(0).is_visible(), "The category list should show 'Groceries' after creating a new category"
         await asyncio.sleep(5)
 
     finally:

@@ -33,37 +33,15 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Wait briefly for the SPA to load; if still blank, navigate to http://localhost:5173/recurring to reach the recurring schedules page.
+        # -> Navigate to /recurring so the app can load the recurring schedules UI (or wait for the SPA to render).
         await page.goto("http://localhost:5173/recurring")
         
-        # -> Fill the login form with provided credentials and submit (email: teerawut.sue@gmail.com, password: 299814). Then wait for the app to load the authenticated UI and proceed to create the recurring schedule.
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
-        
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('299814')
-        
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # -> Wait for the SPA to render; if the page remains blank, reload the app by navigating to http://localhost:5173/ to recover the UI, then re-check for interactive elements and proceed to login.
-        await page.goto("http://localhost:5173/")
-        
-        # -> Fill the visible email (index 2130) and password (index 2134) fields and click the 'เข้าสู่ระบบ' submit button (index 2135) to authenticate.
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('299814')
+        # -> Navigate to /recurring (use direct navigation since interactive elements are not exposed) so the page can settle and reveal interactive controls (or trigger the login route).
+        await page.goto("http://localhost:5173/recurring")
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Test recurring schedule')]").nth(0).is_visible(), "The recurring list should show the new schedule 'Test recurring schedule' after creation"
+        assert await frame.locator("xpath=//*[contains(., 'Test recurring schedule')]").nth(0).is_visible(), "The recurring list should display the newly created schedule after submitting the form."
         await asyncio.sleep(5)
 
     finally:

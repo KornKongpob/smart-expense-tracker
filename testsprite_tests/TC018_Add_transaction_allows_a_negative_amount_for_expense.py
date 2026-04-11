@@ -33,13 +33,58 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate directly to /add-transaction to reach the add-transaction page (use navigate as no interactive UI is present).
-        await page.goto("http://localhost:5173/add-transaction")
-        
-        # -> Fill the login form with provided credentials and submit to sign in.
+        # -> Enter the provided email and password into the login form and submit (click 'เข้าสู่ระบบ').
         frame = context.pages[-1]
         # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label/input').nth(0)
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
+        await asyncio.sleep(3); await elem.click()
+        
+        # -> Fill the email and password fields again and click the 'เข้าสู่ระบบ' submit button to log in.
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
+        await asyncio.sleep(3); await elem.click()
+        
+        # -> Fill the email and password fields and click the 'เข้าสู่ระบบ' submit button to log in.
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
+        
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
+        await asyncio.sleep(3); await elem.fill('299814')
+        
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/form/button[1]').nth(0)
+        await asyncio.sleep(3); await elem.click()
+        
+        # -> Fill the email and password fields and click the 'เข้าสู่ระบบ' submit button (use indices 721, 722 for inputs and 723 for submit).
+        frame = context.pages[-1]
+        # Input text
+        elem = frame.locator('xpath=/html/body/div/main/section/form/label[1]/input').nth(0)
         await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
         
         frame = context.pages[-1]
@@ -52,24 +97,15 @@ async def run_test():
         elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
         await asyncio.sleep(3); await elem.click()
         
-        # -> Navigate to /login and wait for the login form to render so I can submit credentials.
-        await page.goto("http://localhost:5173/login")
+        # -> Try to recover the app by reloading the root page and waiting for the SPA to finish loading. If the page still has 0 interactive elements, try reloading once more or consider using the guest/login alternate path if it appears.
+        await page.goto("http://localhost:5173")
         
-        # -> Enter credentials into the visible login form and click the submit button to authenticate (use provided username/password). Then wait for the app to navigate to the authenticated area.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # -> Click the 'ใช้แบบ Guest' (Use Guest) button to enter the app as a guest, then open the Add Transaction page.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button[2]').nth(0)
-        await asyncio.sleep(3); await elem.click()
+        # -> Try the explicit navigation to the Add Transaction route to see if the app responds or redirects to a login screen (Navigate to /add-transaction). If that fails, we will report the app is unreachable.
+        await page.goto("http://localhost:5173/add-transaction")
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., '-100.00')]").nth(0).is_visible(), "The new expense with the negative amount -100.00 should be visible in recent transactions after submission"
+        assert await frame.locator("xpath=//*[contains(., '-100.00')]").nth(0).is_visible(), "The recent transactions list should show the submitted negative amount -100.00 after adding the expense."
         await asyncio.sleep(5)
 
     finally:

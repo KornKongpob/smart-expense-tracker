@@ -33,30 +33,15 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to /recurring to reach the recurring schedules page (or to trigger the app to render).
+        # -> Navigate directly to the recurring page at /recurring so the app route loads and interactive elements appear.
         await page.goto("http://localhost:5173/recurring")
         
-        # -> Submit the login form by entering credentials (clear existing values) and clicking the 'เข้าสู่ระบบ' button to log in.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # -> Fill email and password with provided credentials and click the 'เข้าสู่ระบบ' submit button to log in.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # -> Recover a usable UI state (reload /recurring) so interactive elements appear and then proceed to log in. If UI remains blank or non-interactive, report the feature as unreachable.
-        await page.goto("http://localhost:5173/recurring")
-        
-        # -> Recover a usable UI by reloading /recurring (wait then navigate). After reload, re-check interactive elements and proceed to log in if the UI becomes interactive. If the page remains non-interactive, report blocked.
+        # -> Reload or navigate to the recurring page so the SPA can render the login UI (attempt to reach the login screen again).
         await page.goto("http://localhost:5173/recurring")
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., '฿1,500.00')]").nth(0).is_visible(), "The recurring list should show the schedule with the updated amount after editing."
+        assert await frame.locator("xpath=//*[contains(., '200.00')]").nth(0).is_visible(), "The recurring list should show the schedule with the updated amount 200.00 after editing."
         await asyncio.sleep(5)
 
     finally:

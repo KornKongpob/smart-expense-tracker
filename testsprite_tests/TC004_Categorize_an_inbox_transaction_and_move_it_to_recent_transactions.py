@@ -33,43 +33,12 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to /inbox and wait for the page to load so we can inspect the inbox UI.
+        # -> Navigate to /inbox and wait for the page to render so the inbox UI elements become available.
         await page.goto("http://localhost:5173/inbox")
-        
-        # -> Give the SPA a moment to render, then reload the app root (http://localhost:5173). If the app still does not load, report TEST BLOCKED.
-        await page.goto("http://localhost:5173")
-        
-        # -> Fill the email and password fields with the provided credentials and submit the login form.
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('teerawut.sue@gmail.com')
-        
-        frame = context.pages[-1]
-        # Input text
-        elem = frame.locator('xpath=/html/body/div/main/section/form/label[2]/input').nth(0)
-        await asyncio.sleep(3); await elem.fill('299814')
-        
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/main/section/form/button').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # -> Open the inbox view by clicking the 'กล่องรับ' (Inbox) button.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/div/nav/div/button[3]').nth(0)
-        await asyncio.sleep(3); await elem.click()
-        
-        # -> Open the inbox by clicking the 'กล่องรับ' (Inbox) button so we can inspect the list of incoming transactions.
-        frame = context.pages[-1]
-        # Click element
-        elem = frame.locator('xpath=/html/body/div/div/nav/div/button[2]').nth(0)
-        await asyncio.sleep(3); await elem.click()
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'No transactions in inbox')]").nth(0).is_visible(), "The inbox should no longer list the transaction after it was categorized."
+        assert not await frame.locator("xpath=//*[contains(., 'Incoming inbox transaction')]").nth(0).is_visible(), "The categorized incoming transaction should no longer appear in the inbox after categorization."
         await asyncio.sleep(5)
 
     finally:

@@ -33,15 +33,18 @@ async def run_test():
         # -> Navigate to http://localhost:5173
         await page.goto("http://localhost:5173")
         
-        # -> Navigate to http://localhost:5173/accounts to reach the accounts page (per test steps).
+        # -> Navigate to http://localhost:5173/accounts to reach the accounts page (use navigate since no clickable UI is available).
         await page.goto("http://localhost:5173/accounts")
         
-        # -> Open the login page so I can sign in with the provided credentials and then proceed to the accounts page.
-        await page.goto("http://localhost:5173/login")
+        # -> Open the sign-up (สมัคร) tab to display the account creation form by clicking the 'สมัคร' element.
+        frame = context.pages[-1]
+        # Click element
+        elem = frame.locator('xpath=/html/body/div/main/section/div[2]/button[2]').nth(0)
+        await asyncio.sleep(3); await elem.click()
         
         # --> Assertions to verify final state
         frame = context.pages[-1]
-        assert await frame.locator("xpath=//*[contains(., 'Test Account')]").nth(0).is_visible(), "The accounts list should show the newly created account 'Test Account' after submitting the account form."
+        assert await frame.locator("xpath=//*[contains(., 'Test Account')]").nth(0).is_visible(), "The new account named Test Account should appear in the accounts list after creation"
         await asyncio.sleep(5)
 
     finally:
