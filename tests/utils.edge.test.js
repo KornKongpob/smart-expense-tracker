@@ -69,7 +69,11 @@ import {
   replaceDraftLineItems,
   summarizeDraftLineItems,
 } from '../src/features/app/lineItemDraftState.js';
-import { buildCategoryPresetState } from '../src/features/app/categoryPresetState.js';
+import {
+  buildCategoryPresetState,
+  buildCategorySearchResults,
+  resolveCategoryPresetFocusMainId,
+} from '../src/features/app/categoryPresetState.js';
 import {
   createScanUploadEntry,
   getScanUploadMeta,
@@ -904,6 +908,40 @@ test('runtime category preset state: starts on main cards and only opens the cho
   assert.equal(parentOnly.showSubcategoryStage, false);
 });
 
+test('runtime category preset state: search finds visible main and subcategories and preserves parent focus after select', () => {
+  const categories = [
+    { id: 'food', name: 'Food' },
+    { id: 'coffee', name: 'Coffee', parentId: 'food' },
+    { id: 'snack', name: 'Snack', parentId: 'food' },
+    { id: 'travel', name: 'Travel' },
+    { id: 'train', name: 'Train', parentId: 'travel' },
+    { id: 'hidden', name: 'Hidden', isHidden: true },
+    { id: 'hidden-child', name: 'Hidden child', parentId: 'hidden', isHidden: true },
+  ];
+
+  assert.deepEqual(buildCategorySearchResults(categories, ''), []);
+
+  const parentMatches = buildCategorySearchResults(categories, ' food ');
+  assert.deepEqual(parentMatches.map((result) => result.id), ['food', 'coffee', 'snack']);
+  assert.ok(parentMatches.every((result) => result.id !== 'hidden' && result.id !== 'hidden-child'));
+
+  const coffeeMatches = buildCategorySearchResults(categories, 'coffee', 'coffee');
+  assert.equal(coffeeMatches.length, 1);
+  assert.equal(coffeeMatches[0].id, 'coffee');
+  assert.equal(coffeeMatches[0].parentName, 'Food');
+  assert.equal(coffeeMatches[0].isSubcategory, true);
+  assert.equal(coffeeMatches[0].isActive, true);
+
+  const focusedMainId = resolveCategoryPresetFocusMainId(categories, 'coffee');
+  assert.equal(focusedMainId, 'food');
+  assert.equal(resolveCategoryPresetFocusMainId(categories, 'travel'), '');
+
+  const selectedState = buildCategoryPresetState(categories, 'coffee', focusedMainId);
+  assert.equal(selectedState.stageMainId, 'food');
+  assert.equal(selectedState.subCategoryId, 'coffee');
+  assert.equal(selectedState.showSubcategoryStage, true);
+});
+
 test('runtime scan upload state: provider stages expose step-based progress copy', () => {
   const scanning = getScanUploadMeta('calling_api', 'receipt.jpg');
   assert.equal(scanning.stage, 'scanning');
@@ -954,6 +992,9 @@ test('runtime source: category picker keeps card flow, account edit uses a compa
 
   assert.doesNotMatch(chooserSource, /finance-category-fallback/);
   assert.match(chooserSource, /finance-category-step-back/);
+  assert.match(chooserSource, /finance-category-search/);
+  assert.match(chooserSource, /type="search"/);
+  assert.match(chooserSource, /finance-category-search-empty/);
   assert.match(accountsSource, /finance-sheet-actions-compact/);
   assert.match(accountsSource, /ui-btn-danger-outline/);
   assert.match(accountsSource, /data-testid="account-delete-trigger"/);
@@ -974,6 +1015,14 @@ test('runtime styles: sheet review containers clamp width and hide horizontal ov
   );
   assert.match(cssSource, /\.finance-sheet-actions-compact\s*\{[\s\S]*display:\s*flex;/s);
   assert.match(cssSource, /\.finance-line-item-summary-row\s*\{[\s\S]*text-align:\s*left;/s);
+});
+
+test('runtime styles: category chooser search adds dedicated result and empty states', () => {
+  const cssSource = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+
+  assert.match(cssSource, /\.finance-category-search\s*\{[\s\S]*margin-bottom:\s*0\.7rem;/s);
+  assert.match(cssSource, /\.finance-category-search-results\s*\{[\s\S]*display:\s*flex;/s);
+  assert.match(cssSource, /\.finance-category-search-empty\s*\{[\s\S]*text-align:\s*center;/s);
 });
 
 test('runtime source: shared account picker is wired through add, inbox, dashboard, planner, and shell docks', () => {
@@ -1011,6 +1060,7 @@ test('runtime source: shared account picker is wired through add, inbox, dashboa
   assert.match(addSource, /applySingleAccountSelection/);
   assert.match(addSource, /applyTransferFromAccountSelection/);
   assert.match(addSource, /applyTransferToAccountSelection/);
+  assert.match(addSource, /await createManualTransaction\(draft\);[\s\S]*resetDraft\(\);[\s\S]*setMode\("scan"\);/s);
   assert.doesNotMatch(addSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
   assert.doesNotMatch(addSource, /finance-page-actions/);
 
@@ -1042,15 +1092,20 @@ test('runtime source: shared account picker is wired through add, inbox, dashboa
   assert.match(accountPickerSource, /event\?\.preventDefault/);
 });
 
-test('runtime styles: mobile shell exposes sticky headers, dock reserve, and account picker cards', () => {
+test('runtime styles: mobile shell keeps app chrome in flow and preserves dock/account picker cards', () => {
   const cssSource = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
 
   assert.match(cssSource, /--finance-viewport-h:\s*100dvh/);
   assert.match(cssSource, /body\[data-finance-shell="true"\]\s*\{[\s\S]*overflow-y:\s*hidden;/s);
-  assert.match(cssSource, /\.finance-screen-head-sticky\s*\{[\s\S]*position:\s*sticky;[\s\S]*top:\s*0;/s);
+  assert.match(cssSource, /\.finance-app-header\s*\{[\s\S]*position:\s*relative;/s);
+  assert.match(cssSource, /\.finance-bottom-nav-wrap\s*\{[\s\S]*position:\s*relative;/s);
+  assert.match(cssSource, /\.finance-app-main\s*\{[\s\S]*padding-top:\s*0\.55rem;[\s\S]*padding-bottom:\s*calc\(var\(--finance-screen-dock-h\) \+ 0\.55rem\);/s);
+  assert.doesNotMatch(cssSource, /\.finance-app-main\s*\{[^}]*finance-nav-reserve/s);
+  assert.match(cssSource, /\.finance-screen-head-sticky\s*\{[\s\S]*position:\s*static;/s);
   assert.match(cssSource, /\.finance-screen-dock\s*\{[\s\S]*position:\s*fixed;[\s\S]*bottom:\s*calc\(var\(--finance-nav-reserve\) - 0\.25rem\);/s);
   assert.match(cssSource, /\.finance-screen-has-dock \.finance-screen-body\s*\{[\s\S]*padding-bottom:\s*calc\(var\(--finance-screen-dock-h\)/s);
   assert.match(cssSource, /body\[data-keyboard-open="true"\] \.finance-screen-dock\s*\{[\s\S]*bottom:\s*calc\(var\(--keyboard-inset,\s*0px\) \+ env\(safe-area-inset-bottom\) \+ 0\.7rem\);/s);
+  assert.match(cssSource, /body\[data-modal-open="true"\] \.finance-bottom-nav-wrap,\s*body\[data-keyboard-open="true"\] \.finance-bottom-nav-wrap\s*\{[\s\S]*display:\s*none;/s);
   assert.match(cssSource, /\.finance-picker-trigger\s*\{[\s\S]*min-height:\s*4\.15rem;/s);
   assert.match(cssSource, /\.finance-account-picker-card\.is-selected\s*\{[\s\S]*border-color:/s);
   assert.doesNotMatch(cssSource, /\.finance-app-shell\s*\{[\s\S]*touch-action:\s*pan-y;/s);

@@ -248,6 +248,7 @@ export default function AddScreen() {
           onClick={async () => {
             await createManualTransaction(draft);
             resetDraft();
+            setMode("scan");
           }}
         >
           <SendHorizonal size={16} />
