@@ -2,14 +2,18 @@ import { createClient } from "@supabase/supabase-js";
 
 let browserClient = null;
 
-function readEnv(name) {
-  return String(import.meta.env[name] || "").trim();
+function readStaticEnvUrl() {
+  return String(import.meta.env.VITE_SUPABASE_URL || "").trim();
+}
+
+function readStaticEnvKey() {
+  return String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 }
 
 export function getSupabaseBrowserConfig() {
   return {
-    url: readEnv("VITE_SUPABASE_URL"),
-    anonKey: readEnv("VITE_SUPABASE_ANON_KEY"),
+    url: readStaticEnvUrl(),
+    anonKey: readStaticEnvKey(),
   };
 }
 

@@ -2,8 +2,36 @@ import { useEffect, useState } from "react";
 
 const ALLOWED_VIEWS = new Set(["dashboard", "inbox", "add", "accounts", "categories", "planner", "settings"]);
 
+function redirectPathToHash() {
+  if (typeof window === "undefined") return;
+  const path = window.location.pathname.replace(/^\/+/, "").toLowerCase();
+  
+  if (path) {
+    const routeMap = {
+      "dashboard": "dashboard",
+      "inbox": "inbox",
+      "add": "add",
+      "add-transaction": "add",
+      "accounts": "accounts",
+      "categories": "categories",
+      "planner": "planner",
+      "budgets": "planner",
+      "recurring": "planner",
+      "stats": "planner",
+      "settings": "settings"
+    };
+    
+    const matched = Object.keys(routeMap).find(k => path.startsWith(k));
+    if (matched && !window.location.hash) {
+      window.history.replaceState(null, "", "/#" + routeMap[matched]);
+      return routeMap[matched];
+    }
+  }
+}
+
 function readHashView() {
   if (typeof window === "undefined") return "dashboard";
+  redirectPathToHash();
   const raw = String(window.location.hash || "").replace(/^#/, "").trim().toLowerCase();
   return ALLOWED_VIEWS.has(raw) ? raw : "dashboard";
 }

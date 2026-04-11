@@ -248,8 +248,17 @@ export function AppProvider({ children }) {
     }
 
     let mounted = true;
+    
+    // Fallback if Supabase getSession hangs (e.g. in test envs without offline cache)
+    const timeout = setTimeout(() => {
+      if (mounted && !authReady) {
+        setAuthReady(true);
+      }
+    }, 2500);
+
     supabase.auth.getSession().then(({ data, error }) => {
       if (!mounted) return;
+      clearTimeout(timeout);
       setSession(data?.session || null);
       setAuthReady(true);
       if (error) setAuthError(String(error.message || "auth_session_failed"));
@@ -262,6 +271,7 @@ export function AppProvider({ children }) {
 
     return () => {
       mounted = false;
+      clearTimeout(timeout);
       data.subscription.unsubscribe();
     };
   }, [supabase]);

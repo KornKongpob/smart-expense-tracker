@@ -1,0 +1,851 @@
+[
+  {
+    "id": "TC001",
+    "title": "View dashboard overview and reach statistics",
+    "description": "Verifies the user can see an overall balance and recent transactions on the dashboard and can navigate to statistics from there.",
+    "category": "Dashboard Viewing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Wait for the dashboard overview to finish loading"
+      },
+      {
+        "type": "action",
+        "description": "Scroll to the recent transactions section"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation option to open statistics"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the statistics view is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Add a valid transaction and see it in recent transactions",
+    "description": "Verifies the user can submit a valid transaction and it appears in recent transactions after submission.",
+    "category": "Add Transaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /add-transaction"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid amount into the amount field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid date in the date field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid account"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid category"
+      },
+      {
+        "type": "action",
+        "description": "Submit the transaction"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to return to the dashboard"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new transaction is visible in the recent transactions list"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Start manual transaction entry from dashboard",
+    "description": "Verifies the user can navigate from the dashboard to add a new transaction.",
+    "category": "Dashboard Viewing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /"
+      },
+      {
+        "type": "action",
+        "description": "Wait for the dashboard to finish loading"
+      },
+      {
+        "type": "action",
+        "description": "Click the primary action to add a transaction"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the add transaction view is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Categorize an inbox transaction and move it to recent transactions",
+    "description": "Verifies the user can categorize an incoming inbox transaction and it is removed from the inbox and appears in recent transactions.",
+    "category": "Transaction Inbox",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /inbox"
+      },
+      {
+        "type": "action",
+        "description": "If the inbox is empty, stop this test case execution as the required UI state cannot be created from the inbox view alone"
+      },
+      {
+        "type": "action",
+        "description": "Open the details or actions for the first inbox transaction"
+      },
+      {
+        "type": "action",
+        "description": "Select a category for the transaction"
+      },
+      {
+        "type": "action",
+        "description": "Confirm categorization for the transaction"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the categorized transaction is no longer present in the inbox list"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Create a new account and see it listed",
+    "description": "Verifies a user can create an account with required details and see the new account appear in the accounts list.",
+    "category": "Account Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /accounts"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to add a new account"
+      },
+      {
+        "type": "action",
+        "description": "Fill a unique account name into the account name field"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid opening balance into the balance field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the account form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new account appears in the accounts list"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Filter statistics by date range updates breakdowns",
+    "description": "Verifies the user can filter statistics by a date range and the charts and category breakdowns update accordingly.",
+    "category": "View Statistics",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /stats"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid start date in the date range filter"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid end date in the date range filter"
+      },
+      {
+        "type": "action",
+        "description": "Apply the date range filter"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the statistics charts and category breakdowns update to reflect the selected date range"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Edit an existing account and see list reflect changes",
+    "description": "Verifies a user can edit an existing account and the updated details are reflected in the accounts list.",
+    "category": "Account Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /accounts"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to add a new account"
+      },
+      {
+        "type": "action",
+        "description": "Fill a unique account name into the account name field"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid opening balance into the balance field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the account form"
+      },
+      {
+        "type": "action",
+        "description": "Select the created account from the accounts list to edit"
+      },
+      {
+        "type": "action",
+        "description": "Update the account name to a new unique name"
+      },
+      {
+        "type": "action",
+        "description": "Save the account changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the accounts list shows the updated account details"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Create a budget and view progress and remaining",
+    "description": "Verifies a user can create a budget with a target and period and then see budget progress and remaining amount displayed.",
+    "category": "Budget Tracking",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /budgets"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new budget"
+      },
+      {
+        "type": "action",
+        "description": "Fill a unique budget name into the budget name field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid budget period"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid target amount into the budget amount field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the budget form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new budget shows progress and remaining amount"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Drill into a category from statistics chart shows category details",
+    "description": "Verifies the user can drill into a category from a statistics visualization and see detailed category statistics.",
+    "category": "View Statistics",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /stats"
+      },
+      {
+        "type": "action",
+        "description": "If a date range filter is present, apply a valid date range"
+      },
+      {
+        "type": "action",
+        "description": "Interact with a visible chart segment to drill into a category"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a detailed view for the selected category is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC010",
+    "title": "Dismiss an inbox transaction removes it from the inbox",
+    "description": "Verifies the user can dismiss an incoming inbox transaction and it is removed from the inbox list.",
+    "category": "Transaction Inbox",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /inbox"
+      },
+      {
+        "type": "action",
+        "description": "If the inbox is empty, stop this test case execution as the required UI state cannot be created from the inbox view alone"
+      },
+      {
+        "type": "action",
+        "description": "Open the details or actions for a different inbox transaction than used for categorization"
+      },
+      {
+        "type": "action",
+        "description": "Dismiss the transaction"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dismissed transaction is no longer present in the inbox list"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC011",
+    "title": "Inspect budget spending in statistics from budgets view",
+    "description": "Verifies the user can navigate from a budget to statistics to inspect related spending for that budget.",
+    "category": "Budget Tracking",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /budgets"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new budget"
+      },
+      {
+        "type": "action",
+        "description": "Fill a unique budget name into the budget name field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid budget period"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid target amount into the budget amount field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the budget form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation option from the budget area to inspect spending in statistics"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the statistics view is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC012",
+    "title": "Assign a category to an existing transaction",
+    "description": "Verifies a user can assign a category to an existing transaction and the transaction shows the selected category afterward.",
+    "category": "Category Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /categories"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new category"
+      },
+      {
+        "type": "action",
+        "description": "Fill \"Utilities\" into the category name field"
+      },
+      {
+        "type": "action",
+        "description": "Select the expense category type"
+      },
+      {
+        "type": "action",
+        "description": "Submit the category form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to go to add a new transaction"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid transaction amount into the amount field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid account for the transaction"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid date into the transaction date field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the transaction form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to go back to category management"
+      },
+      {
+        "type": "action",
+        "description": "Start the flow to assign a category to an existing transaction"
+      },
+      {
+        "type": "action",
+        "description": "Select the transaction you just created"
+      },
+      {
+        "type": "action",
+        "description": "Select the category named \"Utilities\""
+      },
+      {
+        "type": "action",
+        "description": "Save the transaction category change"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected transaction shows category \"Utilities\""
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC013",
+    "title": "Create recurring transaction schedule and see it listed",
+    "description": "Verifies a user can create a recurring transaction schedule with an amount and frequency and then see the new schedule appear in the recurring list.",
+    "category": "Recurring Transactions",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /recurring"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new recurring schedule"
+      },
+      {
+        "type": "action",
+        "description": "Fill a name or description for the recurring schedule"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid amount into the amount field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid frequency for the schedule"
+      },
+      {
+        "type": "action",
+        "description": "Submit the recurring schedule form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new recurring schedule is displayed in the recurring list"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC014",
+    "title": "Create expense category and see it listed",
+    "description": "Verifies a user can create a new category by providing a name and type and then see it in the category list.",
+    "category": "Category Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /categories"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new category"
+      },
+      {
+        "type": "action",
+        "description": "Fill \"Groceries\" into the category name field"
+      },
+      {
+        "type": "action",
+        "description": "Select the expense category type"
+      },
+      {
+        "type": "action",
+        "description": "Submit the category form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a category named \"Groceries\" is displayed in the category list"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC015",
+    "title": "Edit an existing recurring schedule and see updates in the list",
+    "description": "Verifies a user can edit an existing recurring schedule and the list reflects the updated schedule details.",
+    "category": "Recurring Transactions",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /recurring"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new recurring schedule"
+      },
+      {
+        "type": "action",
+        "description": "Fill a name or description for the recurring schedule"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid amount into the amount field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid frequency for the schedule"
+      },
+      {
+        "type": "action",
+        "description": "Submit the recurring schedule form"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to edit the recurring schedule you just created"
+      },
+      {
+        "type": "action",
+        "description": "Change the amount to a different valid amount"
+      },
+      {
+        "type": "action",
+        "description": "Submit the schedule updates"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the recurring list shows the schedule with the updated amount"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC016",
+    "title": "Add transaction requires mandatory fields",
+    "description": "Verifies the add transaction form prevents submission with missing required fields and shows validation errors while staying on the form.",
+    "category": "Add Transaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /add-transaction"
+      },
+      {
+        "type": "action",
+        "description": "Submit the transaction without filling all required fields"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify validation errors are visible and the transaction is not submitted"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC017",
+    "title": "Edit an existing category and see it updated",
+    "description": "Verifies a user can edit a category and the updated category appears in the category list.",
+    "category": "Category Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /categories"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new category"
+      },
+      {
+        "type": "action",
+        "description": "Fill \"Dining Out\" into the category name field"
+      },
+      {
+        "type": "action",
+        "description": "Select the expense category type"
+      },
+      {
+        "type": "action",
+        "description": "Submit the category form"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to edit the category named \"Dining Out\""
+      },
+      {
+        "type": "action",
+        "description": "Fill \"Restaurants\" into the category name field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the category updates"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a category named \"Restaurants\" is displayed in the category list"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC018",
+    "title": "Add transaction allows a negative amount for expense",
+    "description": "Verifies the user can enter a negative amount for an expense transaction and successfully submit it so it appears in recent transactions.",
+    "category": "Add Transaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /add-transaction"
+      },
+      {
+        "type": "action",
+        "description": "Fill a negative amount into the amount field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid date in the date field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid account"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid category"
+      },
+      {
+        "type": "action",
+        "description": "Submit the transaction"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to return to the dashboard"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the new transaction is visible in the recent transactions list"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC019",
+    "title": "Prevent account creation when required fields are missing",
+    "description": "Verifies the account creation form shows validation errors and does not create an account when required fields are missing.",
+    "category": "Account Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /accounts"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to add a new account"
+      },
+      {
+        "type": "action",
+        "description": "Leave required fields empty"
+      },
+      {
+        "type": "action",
+        "description": "Submit the account form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify required-field validation errors are displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC020",
+    "title": "Reject invalid budget amount",
+    "description": "Verifies the budget form prevents submission with an invalid amount and shows a validation error while staying on the form.",
+    "category": "Budget Tracking",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /budgets"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new budget"
+      },
+      {
+        "type": "action",
+        "description": "Fill a unique budget name into the budget name field"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid budget period"
+      },
+      {
+        "type": "action",
+        "description": "Fill an invalid value into the budget amount field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the budget form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an amount validation error is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC021",
+    "title": "Statistics date range validation prevents invalid ranges",
+    "description": "Verifies the statistics date filter prevents selecting or applying an invalid date range and shows a validation error.",
+    "category": "View Statistics",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /stats"
+      },
+      {
+        "type": "action",
+        "description": "Select a start date that is after the end date"
+      },
+      {
+        "type": "action",
+        "description": "Apply the date range filter"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a date range validation error is visible and the statistics view does not switch to a filtered result state"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC022",
+    "title": "Category creation requires name and type",
+    "description": "Verifies the category form prevents creating a category when required fields are missing and shows a validation error.",
+    "category": "Category Management",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /categories"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new category"
+      },
+      {
+        "type": "action",
+        "description": "Submit the category form without filling required fields"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a category form validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no new category is added to the category list"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC023",
+    "title": "Statistics empty state is shown when there is no data",
+    "description": "Verifies the statistics view shows an appropriate empty state when there are no transactions to chart.",
+    "category": "View Statistics",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /stats"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state is visible indicating there is no data to display"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC024",
+    "title": "Recurring schedule requires mandatory fields",
+    "description": "Verifies the recurring schedule form prevents submission when required fields are missing and shows a validation error.",
+    "category": "Recurring Transactions",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /recurring"
+      },
+      {
+        "type": "action",
+        "description": "Click the action to create a new recurring schedule"
+      },
+      {
+        "type": "action",
+        "description": "Submit the recurring schedule form without filling required fields"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a form validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no new recurring schedule is added to the recurring list"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC025",
+    "title": "Inbox empty state is shown when there are no incoming transactions",
+    "description": "Verifies the inbox view shows an empty state when there are no incoming transactions to review.",
+    "category": "Transaction Inbox",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /inbox"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state is visible indicating there are no incoming transactions"
+      }
+    ],
+    "priority": "Low"
+  }
+]

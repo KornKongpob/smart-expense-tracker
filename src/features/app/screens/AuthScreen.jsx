@@ -46,6 +46,7 @@ export default function AuthScreen() {
             type="button"
             className={["view-segmented-btn", mode === "signin" ? "is-active" : ""].join(" ")}
             onClick={() => setMode("signin")}
+            data-testid="sign-in-tab"
           >
             เข้าสู่ระบบ
           </button>
@@ -53,6 +54,7 @@ export default function AuthScreen() {
             type="button"
             className={["view-segmented-btn", mode === "signup" ? "is-active" : ""].join(" ")}
             onClick={() => setMode("signup")}
+            data-testid="sign-up-tab"
           >
             สมัคร
           </button>
@@ -88,6 +90,7 @@ export default function AuthScreen() {
               placeholder="you@example.com"
               autoComplete="email"
               required
+              data-testid="login-email"
             />
           </label>
 
@@ -102,12 +105,13 @@ export default function AuthScreen() {
                 autoComplete={mode === "signup" ? "new-password" : "current-password"}
                 minLength={6}
                 required
+                data-testid="login-password"
               />
           </label>
 
           {error ? <div className="ui-error">{error}</div> : null}
 
-          <button type="submit" className="ui-btn ui-btn-primary finance-submit" disabled={!hasSupabaseConfig || saving}>
+          <button type="submit" className="ui-btn ui-btn-primary finance-submit" disabled={!hasSupabaseConfig || saving} data-testid="login-submit">
             {saving ? "กำลังดำเนินการ..." : mode === "signup" ? "สร้างบัญชี" : "เข้าสู่ระบบ"}
           </button>
 

@@ -1,0 +1,85 @@
+version: "2"
+type: frontend
+tech_stack:
+  - Javascript
+  - React
+  - TailwindCSS
+  - Vite
+  - Supabase
+routes:
+  - path: /
+    file: src/views/DashboardView.jsx
+    auth_required: false
+    description: Main dashboard showing financial overview
+  - path: /accounts
+    file: src/views/AccountsView.jsx
+    auth_required: false
+    description: Accounts management view
+  - path: /budgets
+    file: src/views/BudgetsView.jsx
+    auth_required: false
+    description: Budgets management view
+  - path: /categories
+    file: src/views/CategoriesView.jsx
+    auth_required: false
+    description: Categories management view
+  - path: /stats
+    file: src/views/StatsView.jsx
+    auth_required: false
+    description: Statistics and charts view
+  - path: /inbox
+    file: src/views/InboxView.jsx
+    auth_required: false
+    description: Transaction inbox view
+  - path: /add-transaction
+    file: src/views/AddTransactionView.jsx
+    auth_required: false
+    description: Add new transaction view
+  - path: /recurring
+    file: src/views/RecurringView.jsx
+    auth_required: false
+    description: Recurring transactions view
+features:
+  - name: Dashboard Viewing
+    description: View overall financial status
+    files:
+      - src/views/DashboardView.jsx
+    entry_route: /
+    user_interactions:
+      - View total balance
+      - View recent transactions
+      - Navigate to other tabs
+    api_calls: []
+    auth_required: false
+  - name: Account Management
+    description: Create and manage financial accounts
+    files:
+      - src/views/AccountsView.jsx
+    entry_route: /accounts
+    user_interactions:
+      - Click to add new account
+      - Edit existing accounts
+      - View account details
+    api_calls: []
+    auth_required: false
+  - name: Budget Tracking
+    description: Set and track budgets
+    files:
+      - src/views/BudgetsView.jsx
+    entry_route: /budgets
+    user_interactions:
+      - Create a budget
+      - View budget progress
+    api_calls: []
+    auth_required: false
+  - name: View Statistics
+    description: View financial charts and categories statistics
+    files:
+      - src/views/StatsView.jsx
+    entry_route: /stats
+    user_interactions:
+      - Interacts with charts
+      - Filter by date range
+    api_calls: []
+    auth_required: false
+known_limitations: []

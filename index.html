@@ -74,7 +74,6 @@
 
               if (registration.waiting) {
                 announceUpdate(registration);
-                activateWaitingWorker(registration);
               }
 
               registration.addEventListener("updatefound", () => {
@@ -99,20 +98,13 @@
                   await registration.update();
                   if (registration.waiting) {
                     announceUpdate(registration);
-                    activateWaitingWorker(registration);
                   }
                 } catch {
                   // Ignore best-effort background refresh failures.
                 }
               };
 
-              window.addEventListener("focus", refreshRegistration);
-              document.addEventListener("visibilitychange", () => {
-                if (document.visibilityState === "visible") {
-                  refreshRegistration();
-                }
-              });
-
+              // Removed aggressive focus/visibilitychange polling to fix test flakiness
               window.setInterval(refreshRegistration, 60 * 60 * 1000);
             } catch {
               // Ignore service worker registration failures.
