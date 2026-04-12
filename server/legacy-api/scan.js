@@ -1,19 +1,19 @@
 // api/scan-receipt.js
 import Busboy from "busboy";
-import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../shared/scanSchema.js";
-import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "../lib/scan/access.js";
-import { createRateLimiter } from "../lib/scan/rateLimit.js";
+import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema.js";
+import { enforceAccess as enforceAccessModule, setSecurityHeaders as setSecurityHeadersModule } from "../../lib/scan/access.js";
+import { createRateLimiter } from "../../lib/scan/rateLimit.js";
 import {
   parseJsonBody,
   parseDataUrlMaybe,
   normalizeInputMime,
   assertAllowedInputMime,
   assertBase64UnderLimit,
-} from "../lib/scan/requestParse.js";
-import { scanWithProvider } from "../lib/scan/providers/index.js";
-import { normalizeErrorResponse, safeJsonParseMaybe } from "../lib/scan/normalize.js";
-import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from "../lib/scan/openaiModel.js";
-import { validateReceiptLineExtraction } from "../lib/scan/receiptValidation.js";
+} from "../../lib/scan/requestParse.js";
+import { scanWithProvider } from "../../lib/scan/providers/index.js";
+import { normalizeErrorResponse, safeJsonParseMaybe } from "../../lib/scan/normalize.js";
+import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from "../../lib/scan/openaiModel.js";
+import { validateReceiptLineExtraction } from "../../lib/scan/receiptValidation.js";
 import {
   clamp01 as clamp01Helper,
   extractResponsesOutputText as extractResponsesOutputTextHelper,
@@ -21,18 +21,18 @@ import {
   normalizeDigits as normalizeDigitsHelper,
   safeNumber as safeNumberHelper,
   toArabicDigits as toArabicDigitsHelper,
-} from "../lib/scan/resultHelpers.js";
+} from "../../lib/scan/resultHelpers.js";
 import {
   detectScanTextDocType,
   extractLikelyAmountFromScanText,
   extractMerchantFromScanText,
   normalizeScanText,
-} from "../src/utils/scanPostprocess.js";
-import { getSupabaseAdmin, hasSupabaseServerConfig } from "../lib/supabase/admin.js";
-import { getRequestUser } from "../lib/supabase/auth.js";
-import { uploadUserDocument } from "../lib/supabase/documents.js";
-import { ensureSystemCategories } from "../lib/supabase/systemCategories.js";
-import { normalizeMerchantKey } from "../src/utils/merchantDictionary.js";
+} from "../../src/utils/scanPostprocess.js";
+import { getSupabaseAdmin, hasSupabaseServerConfig } from "../../lib/supabase/admin.js";
+import { getRequestUser } from "../../lib/supabase/auth.js";
+import { uploadUserDocument } from "../../lib/supabase/documents.js";
+import { ensureSystemCategories } from "../../lib/supabase/systemCategories.js";
+import { normalizeMerchantKey } from "../../src/utils/merchantDictionary.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 

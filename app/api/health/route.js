@@ -1,4 +1,4 @@
-import legacyHandler from "../../../api/health.js";
+import legacyHandler from "../../../server/legacy-api/health.js";
 import { createLegacyRouteHandler } from "../../../lib/next/legacyRoute.js";
 
 export const runtime = "nodejs";

@@ -1,4 +1,4 @@
-import legacyHandler from "../../../../api/import/local.js";
+import legacyHandler from "../../../../server/legacy-api/import/local.js";
 import { createLegacyRouteHandler } from "../../../../lib/next/legacyRoute.js";
 
 export const runtime = "nodejs";

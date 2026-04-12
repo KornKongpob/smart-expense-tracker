@@ -23,7 +23,7 @@ import {
   extractMerchantFromScanText,
 } from '../src/utils/scanPostprocess.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
-import { normalizeProviderScanResult } from '../api/scan.js';
+import { normalizeProviderScanResult } from '../server/legacy-api/scan.js';
 import { parseScanRequest, assertAllowedInputMime, assertBase64UnderLimit } from '../lib/scan/requestParse.js';
 import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from '../lib/scan/openaiModel.js';
 import {

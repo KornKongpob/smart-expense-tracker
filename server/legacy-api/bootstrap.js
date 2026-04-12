@@ -1,7 +1,7 @@
-import { getSupabaseAdmin, hasSupabaseServerConfig } from "../lib/supabase/admin.js";
-import { requireRequestUser } from "../lib/supabase/auth.js";
-import { ensureSystemCategories } from "../lib/supabase/systemCategories.js";
-import { parseJsonBody } from "../lib/scan/requestParse.js";
+import { getSupabaseAdmin, hasSupabaseServerConfig } from "../../lib/supabase/admin.js";
+import { requireRequestUser } from "../../lib/supabase/auth.js";
+import { ensureSystemCategories } from "../../lib/supabase/systemCategories.js";
+import { parseJsonBody } from "../../lib/scan/requestParse.js";
 
 export const config = { api: { bodyParser: false } };
 

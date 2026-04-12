@@ -1,4 +1,4 @@
-import legacyHandler from "../../../api/scan-receipt.js";
+import legacyHandler from "../../../server/legacy-api/scan-receipt.js";
 import { createLegacyRouteHandler } from "../../../lib/next/legacyRoute.js";
 
 export const runtime = "nodejs";

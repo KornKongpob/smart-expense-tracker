@@ -1,4 +1,4 @@
-import legacyHandler from "../../../api/gemini-scan.js";
+import legacyHandler from "../../../server/legacy-api/gemini-scan.js";
 import { createLegacyRouteHandler } from "../../../lib/next/legacyRoute.js";
 
 export const runtime = "nodejs";

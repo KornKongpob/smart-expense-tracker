@@ -1,4 +1,4 @@
-import legacyHandler from "../../../api/bootstrap.js";
+import legacyHandler from "../../../server/legacy-api/bootstrap.js";
 import { createLegacyRouteHandler } from "../../../lib/next/legacyRoute.js";
 
 export const runtime = "nodejs";
