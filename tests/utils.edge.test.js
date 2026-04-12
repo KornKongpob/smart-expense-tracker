@@ -79,6 +79,11 @@ import {
   getScanUploadMeta,
   patchScanUploadEntry,
 } from '../src/features/app/scanUploadState.js';
+import {
+  getCanonicalPathForPathname,
+  getPathForLegacyHash,
+  getViewForPathname,
+} from '../src/features/app/routes.js';
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
 
@@ -1113,14 +1118,24 @@ test('runtime styles: mobile shell keeps app chrome in flow and preserves dock/a
 });
 
 test('runtime source: service worker only registers in production and clears old runtime caches in dev', () => {
-  const htmlSource = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const appRootSource = readFileSync(new URL('../src/core/AppRoot.jsx', import.meta.url), 'utf8');
 
-  assert.match(htmlSource, /const CACHE_PREFIX = "smart-expense-runtime";/);
-  assert.match(htmlSource, /const isProd = Boolean\(import\.meta\.env\.PROD\);/);
-  assert.match(htmlSource, /const clearDevServiceWorkers = async \(\) => \{[\s\S]*navigator\.serviceWorker\.getRegistrations\(\)/s);
-  assert.match(htmlSource, /if \(!isProd\) \{[\s\S]*clearDevServiceWorkers\(\)/s);
-  assert.match(htmlSource, /window\.caches\.keys\(\)/);
-  assert.match(htmlSource, /registration = await navigator\.serviceWorker\.register\(swUrl, \{ scope \}\)/);
+  assert.match(appRootSource, /const CACHE_PREFIX = "smart-expense-runtime";/);
+  assert.match(appRootSource, /const isProd = String\(process\.env\.NODE_ENV \|\| ""\)\.toLowerCase\(\) === "production";/);
+  assert.match(appRootSource, /const clearDevServiceWorkers = async \(\) => \{[\s\S]*navigator\.serviceWorker\.getRegistrations\(\)/s);
+  assert.match(appRootSource, /if \(!isProd\) \{[\s\S]*clearDevServiceWorkers\(\)/s);
+  assert.match(appRootSource, /window\.caches\.keys\(\)/);
+  assert.match(appRootSource, /registration = await navigator\.serviceWorker\.register\(swUrl, \{ scope: "\/" \}\)/);
+});
+
+test('route helpers: canonical routes, aliases, and legacy hashes resolve to Next paths', () => {
+  assert.equal(getCanonicalPathForPathname('/add-transaction'), '/add');
+  assert.equal(getCanonicalPathForPathname('/budgets'), '/planner');
+  assert.equal(getViewForPathname('/accounts'), 'accounts');
+  assert.equal(getViewForPathname('/stats'), 'planner');
+  assert.equal(getPathForLegacyHash('#dashboard'), '/dashboard');
+  assert.equal(getPathForLegacyHash('#add-transaction'), '/add');
+  assert.equal(getPathForLegacyHash('#stats'), '/planner');
 });
 
 test('categories: duplicate income ids are canonicalized for Supabase storage', () => {

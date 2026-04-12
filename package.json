@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node ./node_modules/vite/dist/node/cli.js",
-    "build": "node ./node_modules/vite/dist/node/cli.js build",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
-    "preview": "node ./node_modules/vite/dist/node/cli.js preview",
+    "preview": "next start",
     "supabase:setup": "node ./scripts/setup-supabase-project.mjs",
     "test": "node --experimental-specifier-resolution=node --test tests/utils.edge.test.js",
     "test:coverage": "node --experimental-specifier-resolution=node --test --experimental-test-coverage tests/utils.edge.test.js",
@@ -17,6 +18,7 @@
     "@supabase/supabase-js": "^2.100.1",
     "busboy": "^1.6.0",
     "lucide-react": "^0.561.0",
+    "next": "^16.0.0",
     "openai": "^6.10.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -26,16 +28,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@tailwindcss/vite": "^4.1.18",
+    "@tailwindcss/postcss": "^4.1.18",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "playwright": "1.58.2",
-    "tailwindcss": "^4.1.18",
-    "vite": "^7.2.4"
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18"
   }
 }

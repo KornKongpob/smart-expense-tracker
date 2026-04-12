@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, CreditCard, PlusCircle, Repeat2, Target, Trash2 } from "lucide-react";
 
+import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
@@ -20,11 +21,6 @@ function hasValue(value) {
   return Math.abs(Number(value || 0)) > 0;
 }
 
-function navigateTo(hash) {
-  window.location.hash = hash;
-}
-
-const ACCOUNT_DEEPLINK_KEY = "smart-expense-open-account";
 function toId(value) {
   return String(value || "").trim();
 }
@@ -129,16 +125,6 @@ function createTransactionEditDraft(transaction = null) {
   };
 }
 
-function openAccountDetails(accountId) {
-  const targetId = String(accountId || "").trim();
-  if (!targetId || typeof window === "undefined") {
-    navigateTo("#accounts");
-    return;
-  }
-  window.sessionStorage.setItem(ACCOUNT_DEEPLINK_KEY, targetId);
-  navigateTo("#accounts");
-}
-
 function getAccountMeta(account) {
   const presetLabel = getPresetLabel(resolvePresetForAccount(account), account.type);
   if (presetLabel && String(presetLabel).trim() !== String(account?.name || "").trim()) {
@@ -148,6 +134,7 @@ function getAccountMeta(account) {
 }
 
 export default function DashboardScreen() {
+  const { navigateToView, openAccountDetails } = useExpenseNavigation();
   const {
     dashboardSnapshot,
     cashflowSeries,
@@ -386,17 +373,17 @@ export default function DashboardScreen() {
         <div className="finance-dashboard-actions">
           {hasAccounts ? (
             <>
-              <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#add")}>
+              <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateToView("add")}>
                 <PlusCircle size={16} />
                 เพิ่มรายการ
               </button>
-              <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateTo("#planner")}>
+              <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateToView("planner")}>
                 <Target size={16} />
                 เปิด Planner
               </button>
             </>
           ) : (
-            <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#accounts")}>
+            <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateToView("accounts")}>
               <CreditCard size={16} />
               สร้างบัญชี
             </button>

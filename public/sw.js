@@ -5,7 +5,7 @@ const LEGACY_CACHE_PREFIXES = ["smart-expense-runtime", CACHE_PREFIX];
 const CACHE_NAME = `${CACHE_PREFIX}-${VERSION}`;
 const APP_SHELL = [
   "/",
-  "/index.html",
+  "/dashboard",
   "/manifest.json",
   "/apple-touch-icon.png",
   "/icon-192.png",
@@ -36,7 +36,7 @@ async function cleanupOldCaches() {
   );
 }
 
-async function networkFirst(request, fallbackRequest = "/index.html") {
+async function networkFirst(request, fallbackRequest = "/dashboard") {
   try {
     const response = await fetch(request);
     await putInCache(request, response);

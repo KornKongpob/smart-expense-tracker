@@ -3,11 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 let browserClient = null;
 
 function readStaticEnvUrl() {
-  return String(import.meta.env.VITE_SUPABASE_URL || "").trim();
+  return String(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
 }
 
 function readStaticEnvKey() {
-  return String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+  return String(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
 }
 
 export function getSupabaseBrowserConfig() {

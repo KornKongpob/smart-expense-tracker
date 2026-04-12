@@ -287,6 +287,8 @@ async function main() {
     readTrimmedEnv("SUPABASE_ACCOUNT_DIGITS_KEY") || crypto.randomBytes(32).toString("base64url");
 
   const runtimeEnv = {
+    NEXT_PUBLIC_SUPABASE_URL: supabaseUrl,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: publicKey,
     VITE_SUPABASE_URL: supabaseUrl,
     VITE_SUPABASE_ANON_KEY: publicKey,
     SUPABASE_URL: supabaseUrl,

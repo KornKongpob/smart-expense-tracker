@@ -86,7 +86,11 @@ export function buildCategorySearchResults(categoriesOrHierarchy, query, value =
       };
     })
     .filter((entry) => entry.id && entry.searchText.includes(normalizedQuery))
-    .map(({ searchText, ...entry }) => entry);
+    .map((entry) => {
+      const nextEntry = { ...entry };
+      delete nextEntry.searchText;
+      return nextEntry;
+    });
 }
 
 export function buildCategoryPresetState(categories, value, focusedMainId = "") {

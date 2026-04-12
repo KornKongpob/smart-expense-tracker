@@ -1,6 +1,6 @@
 # Smart Expense Tracker
 
-Smart Expense Tracker is a mobile-first React + Vite expense app built for iPhone Safari and Add to Home Screen usage. The current production runtime lives in `src/main.jsx -> src/core/AppRoot.jsx -> src/features/app/*`.
+Smart Expense Tracker is a mobile-first Next.js App Router expense app built for iPhone Safari and Add to Home Screen usage. The current production runtime lives in `app/* -> src/core/AppRoot.jsx -> src/features/app/*`.
 
 ## What is in the app
 
@@ -29,7 +29,8 @@ Useful scripts:
 
 ### App shell
 
-- `src/core/AppRoot.jsx` owns the signed-in runtime shell, lazy-loads large screens, and keeps the fixed top header outside the scroll container.
+- `app/(runtime)/*` defines the canonical routes for the signed-in app.
+- `src/core/AppRoot.jsx` owns the signed-in runtime shell, resolves the active pathname, lazy-loads large screens, and keeps the fixed top header outside the scroll container.
 - `src/features/app/ui.jsx` contains the shared runtime `Sheet`, `ScreenShell`, nav, and toast components.
 - `src/index.css` contains the active runtime finance shell styles used by the current deployed app.
 
@@ -42,8 +43,8 @@ Useful scripts:
 ### Scanning
 
 - Client scan uploads go through `src/services/scanOpenAI.js`.
-- The default public endpoint is `VITE_SCAN_API_URL` and points to `/api/scan`.
-- Server-side request parsing, provider orchestration, and normalization live in `api/scan.js` and `lib/scan/*`.
+- The default public endpoint is `NEXT_PUBLIC_SCAN_API_URL` and points to `/api/scan`.
+- Server-side request parsing, provider orchestration, and normalization live in `api/scan.js`, `app/api/*`, and `lib/scan/*`.
 - Receipt line validation lives in `lib/scan/receiptValidation.js`.
 
 Current scan behavior:
@@ -81,11 +82,11 @@ It also updates dashboard/account balance SQL helpers so split parents are exclu
 
 These are safe to expose in the browser bundle:
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-- `VITE_SCAN_API_URL`
-- `VITE_GEMINI_SCAN_API_URL`
-- `VITE_APP_BUILD_ID` (optional, recommended for cache/update versioning)
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SCAN_API_URL`
+- `NEXT_PUBLIC_GEMINI_SCAN_API_URL`
+- `NEXT_PUBLIC_APP_BUILD_ID` (optional, recommended for cache/update versioning)
 
 ### Server-only variables
 
@@ -114,13 +115,13 @@ Keep these in Vercel Project Settings > Environment Variables:
 
 Important deployment note:
 
-- Vite variables that start with `VITE_` are public by design.
-- Provider keys must never live in `VITE_*`.
+- Next.js variables that start with `NEXT_PUBLIC_` are public by design.
+- Provider keys must never live in `NEXT_PUBLIC_*`.
 - Updating Vercel environment variables does not change old deployments. Redeploy after env changes so the new values reach the deployed build and functions.
 
 ## PWA / iPhone notes
 
-- `index.html`, `public/manifest.json`, and `public/sw.js` now assume iPhone Safari + Add to Home Screen as a primary platform.
+- `app/layout.js`, `public/manifest.json`, and `public/sw.js` assume iPhone Safari + Add to Home Screen as a primary platform.
 - The service worker uses versioned runtime caches, network-first navigation, and update detection instead of a single static cache bucket.
 - The app header stays visible while the signed-in runtime content scrolls inside one dedicated scroll container.
 

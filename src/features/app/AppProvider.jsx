@@ -237,9 +237,14 @@ export function AppProvider({ children }) {
   );
   const [legacyAvailable, setLegacyAvailable] = useState(hasLegacySnapshot());
   const [migrationState, setMigrationState] = useState({ running: false, skipped: false, failures: [] });
+  const authReadyRef = useRef(false);
   const migrationAttemptedRef = useRef(false);
 
   const supabase = hasSupabaseBrowserConfig() ? getSupabaseBrowserClient() : null;
+
+  useEffect(() => {
+    authReadyRef.current = authReady;
+  }, [authReady]);
 
   useEffect(() => {
     if (!supabase) {
@@ -251,7 +256,7 @@ export function AppProvider({ children }) {
     
     // Fallback if Supabase getSession hangs (e.g. in test envs without offline cache)
     const timeout = setTimeout(() => {
-      if (mounted && !authReady) {
+      if (mounted && !authReadyRef.current) {
         setAuthReady(true);
       }
     }, 2500);

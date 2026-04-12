@@ -9,6 +9,7 @@ import {
   WifiOff,
 } from "lucide-react";
 
+import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
@@ -72,6 +73,7 @@ function normalizeAccountId(accounts, value, fallback = "") {
 }
 
 export default function AddScreen() {
+  const { navigateToView } = useExpenseNavigation();
   const {
     accounts,
     categories,
@@ -357,9 +359,7 @@ export default function AddScreen() {
                           <button
                             type="button"
                             className="ui-btn ui-btn-secondary finance-upload-action"
-                            onClick={() => {
-                              window.location.hash = "#inbox";
-                            }}
+                            onClick={() => navigateToView("inbox")}
                           >
                             เปิด Inbox
                           </button>
@@ -406,9 +406,7 @@ export default function AddScreen() {
                 <button
                   type="button"
                   className="ui-btn ui-btn-secondary"
-                  onClick={() => {
-                    window.location.hash = "#accounts";
-                  }}
+                  onClick={() => navigateToView("accounts")}
                 >
                   ไปที่บัญชี
                 </button>

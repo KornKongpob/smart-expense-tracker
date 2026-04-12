@@ -9,15 +9,13 @@ import {
   Upload,
 } from "lucide-react";
 
+import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import { ScreenShell, StatusPill } from "../ui.jsx";
 import { parseMoneyToSatang } from "../../../utils/money.js";
 
-function navigateTo(hash) {
-  window.location.hash = hash;
-}
-
 export default function SettingsScreen() {
+  const { navigateToView } = useExpenseNavigation();
   const {
     profile,
     queue,
@@ -99,7 +97,7 @@ export default function SettingsScreen() {
             <button
               type="button"
               className="finance-list-button"
-              onClick={() => navigateTo("#planner")}
+              onClick={() => navigateToView("planner")}
               data-testid="open-planner"
             >
               <div className="finance-row">
@@ -122,7 +120,7 @@ export default function SettingsScreen() {
             <button
               type="button"
               className="finance-list-button"
-              onClick={() => navigateTo("#categories")}
+              onClick={() => navigateToView("categories")}
               data-testid="open-categories"
             >
               <div className="finance-row">

@@ -3,7 +3,7 @@
   "short_name": "Smart Expense",
   "description": "บันทึกรายรับรายจ่ายและจัดการบัญชีบนมือถือ",
   "id": "/",
-  "start_url": "/?source=pwa",
+  "start_url": "/dashboard?source=pwa",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui", "browser"],

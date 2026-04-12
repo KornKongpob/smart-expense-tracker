@@ -4,6 +4,7 @@ import { ChevronLeft, Edit3, EyeOff, FolderPlus, Plus, RotateCcw } from "lucide-
 import { PRESET_COLORS } from "../../../constants/presets.jsx";
 import { buildCategoryHierarchy } from "../../../utils/categoryHierarchy.js";
 import { useExpenseApp } from "../AppProvider.jsx";
+import { useExpenseNavigation } from "../navigation.js";
 import { EmptyPanel, ScreenShell, Sheet } from "../ui.jsx";
 
 const KIND_OPTIONS = [
@@ -196,6 +197,7 @@ function CategoryTree({
 }
 
 export default function CategoriesScreen() {
+  const { navigateToView } = useExpenseNavigation();
   const { categories, saveCategory, setCategoryHidden, saving } = useExpenseApp();
   const [kind, setKind] = useState("expense");
   const [draft, setDraft] = useState(createDraft("expense"));
@@ -277,9 +279,7 @@ export default function CategoriesScreen() {
           <button
             type="button"
             className="ui-btn ui-btn-secondary"
-            onClick={() => {
-              window.location.hash = "#settings";
-            }}
+            onClick={() => navigateToView("settings")}
             data-testid="categories-back"
           >
             <ChevronLeft size={16} />

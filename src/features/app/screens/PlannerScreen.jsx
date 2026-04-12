@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CreditCard, PlusCircle, Target, Trash2 } from "lucide-react";
 
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
+import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import { EmptyPanel, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import { getGoalProgressPercent, getGoalRemainingSatang, getNextDebtDueDateISO } from "../plannerState.js";
@@ -19,10 +20,6 @@ const DEBT_STATUS_OPTIONS = [
   { id: "paused", label: "พักไว้" },
   { id: "paid_off", label: "ปิดหนี้แล้ว" },
 ];
-
-function navigateTo(hash) {
-  window.location.hash = hash;
-}
 
 function toMoneyInput(satang, allowEmpty = true) {
   const amount = Number(satang || 0) / 100;
@@ -66,6 +63,7 @@ function getDebtStatusLabel(status) {
 }
 
 export default function PlannerScreen() {
+  const { navigateToView } = useExpenseNavigation();
   const {
     accounts,
     financialGoals,
@@ -347,7 +345,7 @@ export default function PlannerScreen() {
               title="ยังไม่มีบัญชีหนี้"
               copy="เพิ่มบัญชีประเภทบัตรเครดิตหรือสินเชื่อก่อน แล้วค่อยสร้างแผนชำระ"
               action={
-                <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateTo("#accounts")}>
+                <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateToView("accounts")}>
                   <CreditCard size={16} />
                   ไปที่บัญชี
                 </button>

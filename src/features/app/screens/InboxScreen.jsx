@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Repeat2, Search, XCircle } from "lucide-react";
 
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
+import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import LineItemEditorSection from "../LineItemEditorSection.jsx";
@@ -31,6 +32,7 @@ function splitGroupsFromDraft(draft) {
 }
 
 export default function InboxScreen() {
+  const { navigateToView } = useExpenseNavigation();
   const {
     scanDocuments,
     accounts,
@@ -152,7 +154,7 @@ export default function InboxScreen() {
                 className="finance-list-button"
                 onClick={() => {
                   setSelected(null);
-                  window.location.hash = "#planner";
+                  navigateToView("planner");
                 }}
               >
                 <div className="finance-row finance-reminder-row">
@@ -319,7 +321,7 @@ export default function InboxScreen() {
                   className="ui-btn ui-btn-secondary"
                   onClick={() => {
                     setSelected(null);
-                    window.location.hash = "#accounts";
+                    navigateToView("accounts");
                   }}
                 >
                   ไปที่บัญชี

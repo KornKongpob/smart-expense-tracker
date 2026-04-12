@@ -1,6 +1,6 @@
 // src/services/gemini.js
 // ✅ SAFE: calls a server-side endpoint (/api/gemini-scan) so the API key never ships to the browser.
-// Optional env: VITE_GEMINI_SCAN_API_URL (default: /api/gemini-scan)
+// Optional env: NEXT_PUBLIC_GEMINI_SCAN_API_URL (default: /api/gemini-scan)
 
 // NOTE:
 // The app's primary AI service is OpenAI via src/services/scanOpenAI.js.
@@ -44,7 +44,7 @@ async function safeReadJson(res) {
  * -> calls /api/gemini-scan and returns parsed JSON
  */
 export const callGeminiScan = async (base64Data, mimeType) => {
-  const url = (import.meta.env.VITE_GEMINI_SCAN_API_URL || "/api/gemini-scan").trim();
+  const url = (process.env.NEXT_PUBLIC_GEMINI_SCAN_API_URL || process.env.VITE_GEMINI_SCAN_API_URL || "/api/gemini-scan").trim();
 
   const payload = {
     base64: String(base64Data || ""),

@@ -1,6 +1,6 @@
 // src/services/scanOpenAI.js
 // Client-side helper to call the server-side receipt scan API.
-// Optional env: VITE_SCAN_API_URL (default: /api/scan)
+// Optional env: NEXT_PUBLIC_SCAN_API_URL (default: /api/scan)
 // Secrets must stay on the server (Vercel env vars), never in the browser bundle.
 import { normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
 import {
@@ -856,7 +856,7 @@ async function _postJson(url, body, { timeoutMs = 95_000 } = {}) {
 export async function scanReceiptOpenAI(file, { endpoint, onStatus, accounts = [], headers = {} } = {}) {
   // ✅ Prefer the receipt-optimized endpoint by default.
   // (We still keep /api/scan working as an alias on the backend.)
-  const defaultUrl = import.meta.env.VITE_SCAN_API_URL || "/api/scan";
+  const defaultUrl = process.env.NEXT_PUBLIC_SCAN_API_URL || process.env.VITE_SCAN_API_URL || "/api/scan";
   const url = (endpoint || defaultUrl || "/api/scan").trim();
 
   if (!file) {

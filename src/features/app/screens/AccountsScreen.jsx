@@ -22,6 +22,7 @@ import {
   getPresetOptionsForCreateFlow,
   resolvePresetForAccount,
 } from "../accountPresetUtils.js";
+import { consumePendingAccountDeepLink } from "../navigation.js";
 
 const ACCOUNT_TYPE_OPTIONS = [
   { id: "loan", label: "สินเชื่อ", icon: HandCoins },
@@ -29,8 +30,6 @@ const ACCOUNT_TYPE_OPTIONS = [
   { id: "credit", label: "บัตรเครดิต", icon: CreditCard },
   { id: "cash", label: "เงินสด", icon: Wallet },
 ];
-const ACCOUNT_DEEPLINK_KEY = "smart-expense-open-account";
-
 function createDraft(account = null) {
   const base = {
     id: account?.id || null,
@@ -152,9 +151,8 @@ export default function AccountsScreen() {
 
   useEffect(() => {
     if (editorOpen || typeof window === "undefined") return;
-    const requestedId = String(window.sessionStorage.getItem(ACCOUNT_DEEPLINK_KEY) || "").trim();
+    const requestedId = consumePendingAccountDeepLink();
     if (!requestedId) return;
-    window.sessionStorage.removeItem(ACCOUNT_DEEPLINK_KEY);
     const nextAccount = accounts.find((account) => String(account?.id || "") === requestedId);
     if (!nextAccount) return;
 

@@ -1,23 +1,24 @@
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
   // Keep lint focused on this repo's source code (avoid scanning virtualenvs, build output, etc.)
-  globalIgnores(['dist', '.venv/**']),
+  globalIgnores(['dist', '.next', '.venv/**']),
   {
-    // Frontend (Vite/React) - runs in the browser
-    files: ['src/**/*.{js,jsx}'],
+    // Frontend React code - runs in the browser / client component graph
+    files: ['src/**/*.{js,jsx}', 'app/**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,
       reactHooks.configs.flat.recommended,
-      reactRefresh.configs.vite,
     ],
     languageOptions: {
       ecmaVersion: 2020,
-      globals: globals.browser,
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
       parserOptions: {
         ecmaVersion: 'latest',
         ecmaFeatures: { jsx: true },
@@ -32,16 +33,12 @@ export default defineConfig([
       // currently create lots of false-positive errors (e.g., setState in effects).
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/preserve-manual-memoization': 'off',
-
-      // Project preference: allow inline SVG React components in constants/presets files.
-      // React Refresh rule is helpful, but it is noisy in this codebase.
-      'react-refresh/only-export-components': 'off',
     },
   },
 
   {
     // Backend/API scripts - runs in Node (process, Buffer, etc.)
-    files: ['api/**/*.{js,jsx}', '*.config.js', 'vite.config.js'],
+    files: ['api/**/*.{js,jsx}', 'lib/**/*.{js,jsx}', '*.config.js', '*.config.mjs', 'next.config.mjs', 'postcss.config.mjs'],
     extends: [js.configs.recommended],
     languageOptions: {
       ecmaVersion: 2020,

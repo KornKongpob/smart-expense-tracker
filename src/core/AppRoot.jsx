@@ -1,10 +1,30 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
+"use client";
+
+import {
+  Suspense,
+  lazy,
+  startTransition,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 import { AppProvider, useExpenseApp } from "../features/app/AppProvider.jsx";
+import {
+  ExpenseNavigationProvider,
+  setPendingAccountDeepLink,
+} from "../features/app/navigation.js";
+import {
+  getCanonicalPathForPathname,
+  getPathForView,
+  getViewForPathname,
+} from "../features/app/routes.js";
 import AuthScreen from "../features/app/screens/AuthScreen.jsx";
 import LoadingScreen from "../features/app/screens/LoadingScreen.jsx";
 import { BottomNav, ToastBar } from "../features/app/ui.jsx";
-import { useHashView } from "../features/app/useHashView.js";
 
 const SCREEN_LOADERS = {
   dashboard: () => import("../features/app/screens/DashboardScreen.jsx"),
@@ -38,6 +58,26 @@ const CategoriesScreen = lazy(SCREEN_LOADERS.categories);
 const PlannerScreen = lazy(SCREEN_LOADERS.planner);
 const SettingsScreen = lazy(SCREEN_LOADERS.settings);
 
+const SCREEN_COMPONENTS = {
+  dashboard: DashboardScreen,
+  inbox: InboxScreen,
+  add: AddScreen,
+  accounts: AccountsScreen,
+  categories: CategoriesScreen,
+  planner: PlannerScreen,
+  settings: SettingsScreen,
+};
+
+const SCREEN_TITLES = {
+  dashboard: "Smart Expense",
+  inbox: "Inbox | Smart Expense",
+  add: "Add | Smart Expense",
+  accounts: "Accounts | Smart Expense",
+  categories: "Categories | Smart Expense",
+  planner: "Planner | Smart Expense",
+  settings: "Settings | Smart Expense",
+};
+
 function useStandaloneMode() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -58,16 +98,128 @@ function useStandaloneMode() {
   }, []);
 }
 
+function useAppServiceWorker() {
+  useEffect(() => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return undefined;
+
+    const CACHE_PREFIX = "smart-expense-runtime";
+    const CACHE_PREFIXES = [CACHE_PREFIX, "smart-expense-runtime-v2"];
+    const isProd = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+
+    const clearDevServiceWorkers = async () => {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+
+        if ("caches" in window) {
+          const keys = await window.caches.keys();
+          await Promise.all(
+            keys
+              .filter((key) => CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)))
+              .map((key) => window.caches.delete(key)),
+          );
+        }
+      } catch {
+        // Ignore best-effort dev cleanup failures.
+      }
+    };
+
+    if (!isProd) {
+      const handleLoad = () => {
+        void clearDevServiceWorkers();
+      };
+      window.addEventListener("load", handleLoad);
+      return () => {
+        window.removeEventListener("load", handleLoad);
+      };
+    }
+
+    const buildId = String(
+      process.env.NEXT_PUBLIC_APP_BUILD_ID || document.lastModified || process.env.NODE_ENV || "dev",
+    )
+      .trim()
+      .replace(/\s+/g, "-");
+    const swUrl = `/sw.js?v=${encodeURIComponent(buildId)}`;
+    let refreshing = false;
+
+    const handleLoad = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register(swUrl, { scope: "/" });
+        window.__SMART_EXPENSE_SW__ = registration;
+
+        if (registration.waiting) {
+          window.dispatchEvent(new CustomEvent("smart-expense:update-ready"));
+        }
+
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          if (!worker) return;
+
+          worker.addEventListener("statechange", () => {
+            if (worker.state === "installed" && navigator.serviceWorker.controller) {
+              window.__SMART_EXPENSE_SW__ = registration;
+              window.dispatchEvent(new CustomEvent("smart-expense:update-ready"));
+            }
+          });
+        });
+
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (refreshing) return;
+          refreshing = true;
+          window.location.reload();
+        });
+
+        const refreshRegistration = async () => {
+          try {
+            await registration.update();
+            if (registration.waiting) {
+              window.__SMART_EXPENSE_SW__ = registration;
+              window.dispatchEvent(new CustomEvent("smart-expense:update-ready"));
+            }
+          } catch {
+            // Ignore best-effort background refresh failures.
+          }
+        };
+
+        window.setInterval(refreshRegistration, 60 * 60 * 1000);
+      } catch {
+        // Ignore service worker registration failures.
+      }
+    };
+
+    window.addEventListener("load", handleLoad);
+    return () => {
+      window.removeEventListener("load", handleLoad);
+    };
+  }, []);
+}
+
 function SignedInApp() {
   const { authReady, session, bootstrapping, queue, toast, clearToast, isOnline } = useExpenseApp();
-  const [view, setView] = useHashView();
+  const router = useRouter();
+  const pathname = usePathname();
+  const view = getViewForPathname(pathname);
   const [appUpdateRegistration, setAppUpdateRegistration] = useState(null);
   const [updateReady, setUpdateReady] = useState(false);
   const pendingCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
   const headerRef = useRef(null);
   const mainRef = useRef(null);
+  const canonicalPath = getCanonicalPathForPathname(pathname);
 
   useStandaloneMode();
+  useAppServiceWorker();
+
+  useEffect(() => {
+    if (canonicalPath === pathname) return;
+    startTransition(() => {
+      router.replace(canonicalPath);
+    });
+  }, [canonicalPath, pathname, router]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = SCREEN_TITLES[view] || SCREEN_TITLES.dashboard;
+  }, [view]);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -131,7 +283,7 @@ function SignedInApp() {
       setUpdateReady(Boolean(registration?.waiting));
     };
 
-    syncUpdateState();
+    void syncUpdateState();
     window.addEventListener("smart-expense:update-ready", syncUpdateState);
 
     return () => {
@@ -149,7 +301,7 @@ function SignedInApp() {
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [view]);
+  }, [pathname]);
 
   useEffect(() => {
     preloadView(view);
@@ -160,7 +312,10 @@ function SignedInApp() {
 
     const warmLikelyRoutes = () => {
       IDLE_PRELOAD_VIEWS.forEach((nextView, index) => {
-        window.setTimeout(() => preloadView(nextView), index * 180);
+        window.setTimeout(() => {
+          preloadView(nextView);
+          router.prefetch?.(getPathForView(nextView));
+        }, index * 180);
       });
     };
 
@@ -171,7 +326,38 @@ function SignedInApp() {
 
     const timeoutId = window.setTimeout(warmLikelyRoutes, 700);
     return () => window.clearTimeout(timeoutId);
-  }, [bootstrapping, session]);
+  }, [bootstrapping, router, session]);
+
+  const navigationValue = useMemo(
+    () => ({
+      view,
+      navigateToView: (nextView, { replace = false } = {}) => {
+        const nextPath = getPathForView(nextView);
+        startTransition(() => {
+          if (replace) router.replace(nextPath);
+          else router.push(nextPath);
+        });
+      },
+      navigateToPath: (nextPath, { replace = false } = {}) => {
+        const targetPath = String(nextPath || "").trim() || getPathForView(view);
+        startTransition(() => {
+          if (replace) router.replace(targetPath);
+          else router.push(targetPath);
+        });
+      },
+      prefetchView: (nextView) => {
+        preloadView(nextView);
+        router.prefetch?.(getPathForView(nextView));
+      },
+      openAccountDetails: (accountId) => {
+        setPendingAccountDeepLink(accountId);
+        startTransition(() => {
+          router.push(getPathForView("accounts"));
+        });
+      },
+    }),
+    [router, view],
+  );
 
   const applyAppUpdate = () => {
     const waiting = appUpdateRegistration?.waiting;
@@ -202,45 +388,51 @@ function SignedInApp() {
     return <LoadingScreen label="กำลังโหลด" />;
   }
 
-  return (
-    <div className="finance-app-shell">
-      <ToastBar toast={toast} onClose={clearToast} />
+  const ActiveScreen = SCREEN_COMPONENTS[view] || DashboardScreen;
 
-      <header ref={headerRef} className="finance-app-header">
-        <div className="finance-app-page">
-          <div className="finance-app-header-surface">
-            <div className="finance-brand">Smart Expense</div>
-            <div className="finance-header-state">
-              {updateReady ? (
-                <button
-                  type="button"
-                  className="finance-header-pill finance-header-pill-action"
-                  onClick={applyAppUpdate}
-                >
-                  อัปเดตแอป
-                </button>
-              ) : null}
-              {!isOnline ? <span className="finance-header-pill finance-header-pill-warning">ออฟไลน์</span> : null}
-              {pendingCount ? <span className="finance-header-pill">{pendingCount} รอซิงก์</span> : null}
+  return (
+    <ExpenseNavigationProvider value={navigationValue}>
+      <div className="finance-app-shell">
+        <ToastBar toast={toast} onClose={clearToast} />
+
+        <header ref={headerRef} className="finance-app-header">
+          <div className="finance-app-page">
+            <div className="finance-app-header-surface">
+              <div className="finance-brand">Smart Expense</div>
+              <div className="finance-header-state">
+                {updateReady ? (
+                  <button
+                    type="button"
+                    className="finance-header-pill finance-header-pill-action"
+                    onClick={applyAppUpdate}
+                  >
+                    อัปเดตแอป
+                  </button>
+                ) : null}
+                {!isOnline ? (
+                  <span className="finance-header-pill finance-header-pill-warning">
+                    ออฟไลน์
+                  </span>
+                ) : null}
+                {pendingCount ? <span className="finance-header-pill">{pendingCount} รอซิงก์</span> : null}
+              </div>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main ref={mainRef} className="finance-app-page finance-app-main" data-app-scroll-root="true">
-        <Suspense fallback={<LoadingScreen label="กำลังโหลดหน้าถัดไป" />}>
-          {view === "dashboard" ? <DashboardScreen /> : null}
-          {view === "inbox" ? <InboxScreen /> : null}
-          {view === "add" ? <AddScreen /> : null}
-          {view === "accounts" ? <AccountsScreen /> : null}
-          {view === "categories" ? <CategoriesScreen /> : null}
-          {view === "planner" ? <PlannerScreen /> : null}
-          {view === "settings" ? <SettingsScreen /> : null}
-        </Suspense>
-      </main>
+        <main ref={mainRef} className="finance-app-page finance-app-main" data-app-scroll-root="true">
+          <Suspense fallback={<LoadingScreen label="กำลังโหลดหน้าถัดไป" />}>
+            <ActiveScreen />
+          </Suspense>
+        </main>
 
-      <BottomNav view={view} onChange={setView} onIntent={preloadView} />
-    </div>
+        <BottomNav
+          view={view}
+          onChange={navigationValue.navigateToView}
+          onIntent={navigationValue.prefetchView}
+        />
+      </div>
+    </ExpenseNavigationProvider>
   );
 }
 
