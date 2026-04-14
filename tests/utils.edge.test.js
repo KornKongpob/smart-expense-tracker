@@ -46,6 +46,11 @@ import {
   mergeCategoryState,
 } from '../src/features/app/categoryState.js';
 import {
+  buildBudgetHint,
+  buildBudgetPlanSnapshot,
+  normalizePlanningConfig,
+} from '../src/features/app/budgetPlanningState.js';
+import {
   buildPlannerReminders,
   buildPlannerSnapshot,
   getGoalProgressPercent,
@@ -85,6 +90,7 @@ import {
   getViewForPathname,
 } from '../src/features/app/routes.js';
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
+import { importLegacySnapshot } from '../lib/import/local.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
 
 function installBrowserGlobals(t, { getItem = () => null, setItem = () => {}, removeItem = () => {} } = {}) {
@@ -119,6 +125,224 @@ function installBrowserGlobals(t, { getItem = () => null, setItem = () => {}, re
   });
 
   return { dispatched };
+}
+
+function createImportAdmin({ userId = 'user-1' } = {}) {
+  const tables = {
+    profiles: [{ user_id: userId }],
+    import_runs: [],
+  };
+  const nextIds = {
+    accounts: 1,
+    transactions: 1,
+    import_runs: 1,
+  };
+
+  function ensureTable(table) {
+    if (!tables[table]) tables[table] = [];
+    return tables[table];
+  }
+
+  function clone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function parseSelectFields(fields) {
+    const text = String(fields || '').trim();
+    if (!text || text === '*') return null;
+    return text
+      .split(',')
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .map((part) => part.replace(/\(\*\)$/u, ''));
+  }
+
+  function projectRows(rows, fields) {
+    const selectedFields = parseSelectFields(fields);
+    if (!selectedFields) return rows.map((row) => clone(row));
+    return rows.map((row) => {
+      const projected = {};
+      for (const field of selectedFields) {
+        if (field in row) projected[field] = row[field];
+      }
+      return projected;
+    });
+  }
+
+  function matchesFilters(row, filters) {
+    return filters.every((filter) => {
+      if (filter.type === 'eq') return row?.[filter.column] === filter.value;
+      if (filter.type === 'in') return filter.values.includes(row?.[filter.column]);
+      return true;
+    });
+  }
+
+  function nextIdFor(table) {
+    const current = nextIds[table] || 1;
+    nextIds[table] = current + 1;
+    return current;
+  }
+
+  class QueryBuilder {
+    constructor(table) {
+      this.table = table;
+      this.filters = [];
+      this.operation = null;
+      this.payload = null;
+      this.options = null;
+      this.fields = null;
+    }
+
+    select(fields) {
+      this.fields = fields;
+      return this;
+    }
+
+    eq(column, value) {
+      this.filters.push({ type: 'eq', column, value });
+      return this;
+    }
+
+    in(column, values) {
+      this.filters.push({ type: 'in', column, values: Array.isArray(values) ? values : [] });
+      return this;
+    }
+
+    order() {
+      return this;
+    }
+
+    upsert(payload, options = {}) {
+      this.operation = 'upsert';
+      this.payload = Array.isArray(payload) ? payload : [payload];
+      this.options = options;
+      return this;
+    }
+
+    insert(payload) {
+      this.operation = 'insert';
+      this.payload = Array.isArray(payload) ? payload : [payload];
+      this.options = null;
+      return this;
+    }
+
+    update(payload) {
+      this.operation = 'update';
+      this.payload = payload && typeof payload === 'object' ? payload : {};
+      this.options = null;
+      return this;
+    }
+
+    delete() {
+      this.operation = 'delete';
+      this.payload = null;
+      this.options = null;
+      return this;
+    }
+
+    async maybeSingle() {
+      const rows = ensureTable(this.table).filter((row) => matchesFilters(row, this.filters));
+      const projected = projectRows(rows, this.fields);
+      return { data: projected[0] || null, error: null };
+    }
+
+    async execute() {
+      const tableRows = ensureTable(this.table);
+
+      if (this.operation === 'upsert') {
+        const touched = [];
+        const conflictKeys = String(this.options?.onConflict || '')
+          .split(',')
+          .map((part) => String(part || '').trim())
+          .filter(Boolean);
+
+        for (const sourceRow of this.payload || []) {
+          const row = clone(sourceRow);
+          let index = -1;
+          if (conflictKeys.length) {
+            index = tableRows.findIndex((existing) =>
+              conflictKeys.every((key) => existing?.[key] === row?.[key]),
+            );
+          }
+
+          if (index >= 0) {
+            row.id = tableRows[index]?.id ?? row.id;
+            tableRows[index] = { ...tableRows[index], ...row };
+            touched.push(tableRows[index]);
+            continue;
+          }
+
+          if (
+            row.id == null &&
+            (this.table === 'accounts' || this.table === 'transactions' || this.table === 'import_runs')
+          ) {
+            row.id = nextIdFor(this.table);
+          }
+
+          tableRows.push(row);
+          touched.push(row);
+        }
+
+        return {
+          data: this.fields ? projectRows(touched, this.fields) : null,
+          error: null,
+        };
+      }
+
+      if (this.operation === 'insert') {
+        const inserted = [];
+        for (const sourceRow of this.payload || []) {
+          const row = clone(sourceRow);
+          if (
+            row.id == null &&
+            (this.table === 'accounts' || this.table === 'transactions' || this.table === 'import_runs')
+          ) {
+            row.id = nextIdFor(this.table);
+          }
+          tableRows.push(row);
+          inserted.push(row);
+        }
+
+        return {
+          data: this.fields ? projectRows(inserted, this.fields) : null,
+          error: null,
+        };
+      }
+
+      if (this.operation === 'update') {
+        for (let index = 0; index < tableRows.length; index += 1) {
+          if (!matchesFilters(tableRows[index], this.filters)) continue;
+          tableRows[index] = { ...tableRows[index], ...clone(this.payload) };
+        }
+        return { data: null, error: null };
+      }
+
+      if (this.operation === 'delete') {
+        const kept = tableRows.filter((row) => !matchesFilters(row, this.filters));
+        tables[this.table] = kept;
+        return { data: null, error: null };
+      }
+
+      const projected = projectRows(
+        tableRows.filter((row) => matchesFilters(row, this.filters)),
+        this.fields,
+      );
+      return { data: projected, error: null };
+    }
+
+    then(resolve, reject) {
+      return this.execute().then(resolve, reject);
+    }
+  }
+
+  return {
+    admin: {
+      from(table) {
+        return new QueryBuilder(table);
+      },
+    },
+    tables,
+  };
 }
 
 test('money: negative/zero/excess decimals are sanitized and parsed safely', () => {
@@ -472,6 +696,123 @@ test('boot: legacy baht backups convert nested inbox and receipt line amounts to
   assert.equal(state.inbox[0].groups[0].amount, 14500);
   assert.equal(state.inbox[0].groups[0].children[0].amount, 14500);
   assert.equal(state.inbox[0].lines[0].amount, 12000);
+});
+
+test('import: legacy planner settings, debt fields, and budgets migrate into the new runtime shape', async () => {
+  const userId = 'user-import-1';
+  const { admin, tables } = createImportAdmin({ userId });
+  const snapshot = {
+    profile: {
+      displayName: 'Planner Import',
+      incomeMode: 'rolling_average',
+      fixedIncomeSatang: 900000,
+      incomeLookbackMonths: 6,
+      savingsMode: 'percent',
+      savingsPercentBps: 1500,
+      debtStrategyMode: 'survival',
+    },
+    accounts: [
+      {
+        id: 'credit-card-1',
+        name: 'Main Card',
+        type: 'credit',
+      },
+    ],
+    categoryPreferences: [
+      {
+        category_id: 'food',
+        budget_behavior: 'essential',
+      },
+    ],
+    debtPlans: [
+      {
+        id: 'debt-plan-1',
+        accountId: 'credit-card-1',
+        currentBalanceSatang: 120000,
+        minimumPaymentSatang: 15000,
+        targetPaymentSatang: 22000,
+        aprBps: 1999,
+        dueDay: 15,
+        payoffTargetDate: '2026-12-31',
+        note: 'focus card',
+      },
+    ],
+    budgets: [
+      {
+        month_key: '2026-04',
+        category_id: 'food',
+        limit_satang: 400000,
+        alert_pct: 85,
+        source: 'manual',
+        manual_override: true,
+      },
+      {
+        month: '2026-04',
+        categoryId: '__TOTAL__',
+        limit: 550000,
+      },
+      {
+        month_key: '2026-04',
+        category_id: '__DAILY__',
+        limit_satang: 20000,
+      },
+    ],
+  };
+
+  const firstRun = await importLegacySnapshot({
+    admin,
+    userId,
+    snapshot,
+  });
+
+  assert.equal(firstRun.skipped, false);
+  assert.equal(firstRun.counts.accounts, 1);
+  assert.equal(firstRun.counts.categoryPreferences, 1);
+  assert.equal(firstRun.counts.debtPlans, 1);
+  assert.equal(firstRun.counts.budgets, 1);
+
+  assert.equal(tables.accounts.length, 1);
+  assert.equal(tables.accounts[0].legacy_id, 'credit-card-1');
+
+  assert.equal(tables.category_preferences.length, 1);
+  assert.equal(tables.category_preferences[0].category_id, 'food');
+  assert.equal(tables.category_preferences[0].budget_behavior, 'essential');
+
+  assert.equal(tables.budgets.length, 1);
+  assert.equal(tables.budgets[0].month_key, '2026-04');
+  assert.equal(tables.budgets[0].category_id, 'food');
+  assert.equal(tables.budgets[0].limit_satang, 400000);
+  assert.equal(tables.budgets[0].alert_pct, 85);
+  assert.equal(tables.budgets[0].manual_override, true);
+
+  assert.equal(tables.debt_plans.length, 1);
+  assert.equal(tables.debt_plans[0].account_id, tables.accounts[0].id);
+  assert.equal(tables.debt_plans[0].minimum_payment_satang, 15000);
+  assert.equal(tables.debt_plans[0].target_payment_satang, 22000);
+  assert.equal(tables.debt_plans[0].apr_bps, 1999);
+
+  assert.equal(tables.profiles.length, 1);
+  assert.equal(tables.profiles[0].display_name, 'Planner Import');
+  assert.equal(tables.profiles[0].income_mode, 'rolling_average');
+  assert.equal(tables.profiles[0].fixed_income_satang, 900000);
+  assert.equal(tables.profiles[0].income_lookback_months, 6);
+  assert.equal(tables.profiles[0].savings_mode, 'percent');
+  assert.equal(tables.profiles[0].savings_percent_bps, 1500);
+  assert.equal(tables.profiles[0].debt_strategy_mode, 'survival');
+  assert.equal(tables.profiles[0].monthly_target_satang, 550000);
+  assert.ok(tables.profiles[0].migrated_at);
+
+  assert.equal(tables.import_runs.length, 1);
+  assert.equal(tables.import_runs[0].status, 'completed');
+
+  const secondRun = await importLegacySnapshot({
+    admin,
+    userId,
+    snapshot,
+  });
+
+  assert.equal(secondRun.skipped, true);
+  assert.equal(tables.import_runs.length, 1);
 });
 
 test('boot: category and categoryId stay mirrored for legacy and modern transactions', () => {
@@ -1243,6 +1584,126 @@ test('planner helpers: reminders surface due debts and near-deadline goals', () 
   assert.equal(reminders[0].title, 'Visa Platinum');
   assert.equal(reminders[1].type, 'goal');
   assert.equal(reminders[1].title, 'Vacation');
+});
+
+test('budget planning helpers: config defaults stay on rolling average paydown', () => {
+  const config = normalizePlanningConfig({});
+
+  assert.equal(config.incomeMode, 'rolling_average');
+  assert.equal(config.incomeLookbackMonths, 3);
+  assert.equal(config.savingsMode, 'amount');
+  assert.equal(config.savingsAmountSatang, 0);
+  assert.equal(config.savingsPercentBps, 0);
+  assert.equal(config.debtStrategyMode, 'paydown');
+});
+
+test('budget planning helpers: rolling income, category reduction, and debt priority are deterministic', () => {
+  const categories = {
+    expense: [
+      { id: 'housing', kind: 'expense', name: 'Housing', parentId: '', isHidden: false },
+      { id: 'food', kind: 'expense', name: 'Food', parentId: '', isHidden: false },
+      { id: 'fun', kind: 'expense', name: 'Fun', parentId: '', isHidden: false },
+    ],
+    income: [],
+  };
+
+  const snapshot = buildBudgetPlanSnapshot({
+    profile: {
+      income_mode: 'rolling_average',
+      income_lookback_months: 3,
+      savings_mode: 'amount',
+      savings_amount_satang: 10000,
+      debt_strategy_mode: 'paydown',
+    },
+    categories,
+    debtPlans: [
+      { id: 1, account_id: 11, current_balance_satang: 50000, minimum_payment_satang: 3000, apr_bps: 2500, due_day: 20, status: 'active' },
+      { id: 2, account_id: 12, current_balance_satang: 20000, minimum_payment_satang: 2000, apr_bps: 1800, due_day: 5, status: 'active' },
+    ],
+    budgetRows: [],
+    transactions: [
+      { kind: 'income', category_id: '', amount_satang: 100000, date: '2026-01-10' },
+      { kind: 'income', category_id: '', amount_satang: 100000, date: '2026-02-10' },
+      { kind: 'income', category_id: '', amount_satang: 100000, date: '2026-03-10' },
+      { kind: 'expense', category_id: 'housing', amount_satang: 50000, date: '2026-01-05' },
+      { kind: 'expense', category_id: 'food', amount_satang: 30000, date: '2026-01-06' },
+      { kind: 'expense', category_id: 'fun', amount_satang: 40000, date: '2026-01-07' },
+      { kind: 'expense', category_id: 'housing', amount_satang: 50000, date: '2026-02-05' },
+      { kind: 'expense', category_id: 'food', amount_satang: 30000, date: '2026-02-06' },
+      { kind: 'expense', category_id: 'fun', amount_satang: 40000, date: '2026-02-07' },
+      { kind: 'expense', category_id: 'housing', amount_satang: 50000, date: '2026-03-05' },
+      { kind: 'expense', category_id: 'food', amount_satang: 30000, date: '2026-03-06' },
+      { kind: 'expense', category_id: 'fun', amount_satang: 40000, date: '2026-03-07' },
+    ],
+    monthValue: '2026-04',
+    today: '2026-04-01',
+  });
+
+  const byId = new Map(snapshot.categoryPlans.map((plan) => [plan.categoryId, plan]));
+
+  assert.equal(snapshot.selectedIncomeSatang, 100000);
+  assert.equal(snapshot.availableExpenseSatang, 85000);
+  assert.equal(byId.get('housing')?.suggestedLimitSatang, 50000);
+  assert.equal(byId.get('food')?.suggestedLimitSatang, 30000);
+  assert.equal(byId.get('fun')?.suggestedLimitSatang, 5000);
+  assert.equal(snapshot.suggestedShortfallSatang, 0);
+  assert.equal(snapshot.debtTarget?.id, 1);
+});
+
+test('budget planning helpers: daily budget uses remaining monthly budget for the current month', () => {
+  const snapshot = buildBudgetPlanSnapshot({
+    profile: { income_mode: 'fixed', fixed_income_satang: 50000, debt_strategy_mode: 'survival' },
+    categories: {
+      expense: [{ id: 'food', kind: 'expense', name: 'Food', parentId: '', isHidden: false }],
+      income: [],
+    },
+    debtPlans: [],
+    budgetRows: [{ month_key: '2026-04', category_id: 'food', limit_satang: 9000, alert_pct: 90, source: 'manual', manual_override: true }],
+    transactions: [
+      { kind: 'expense', category_id: 'food', amount_satang: 1000, date: '2026-04-01' },
+      { kind: 'expense', category_id: 'food', amount_satang: 2000, date: '2026-04-10' },
+    ],
+    monthValue: '2026-04',
+    today: '2026-04-11',
+  });
+
+  assert.equal(snapshot.activeExpenseBudgetSatang, 9000);
+  assert.equal(snapshot.spentToDateSatang, 3000);
+  assert.equal(snapshot.daysRemaining, 20);
+  assert.equal(snapshot.dailyBudgetSatang, 300);
+});
+
+test('budget planning helpers: add-transaction hint prefers child override over parent budget', () => {
+  const hint = buildBudgetHint({
+    draft: {
+      kind: 'expense',
+      categoryId: 'coffee',
+      amountSatang: 3000,
+      date: '2026-04-12',
+    },
+    budgetRows: [
+      { month_key: '2026-04', category_id: 'food', limit_satang: 30000, alert_pct: 90, source: 'manual', manual_override: true },
+      { month_key: '2026-04', category_id: 'coffee', limit_satang: 10000, alert_pct: 90, source: 'manual', manual_override: true },
+    ],
+    categories: {
+      expense: [
+        { id: 'food', kind: 'expense', name: 'Food', parentId: '', isHidden: false },
+        { id: 'coffee', kind: 'expense', name: 'Coffee', parentId: 'food', isHidden: false },
+        { id: 'groceries', kind: 'expense', name: 'Groceries', parentId: 'food', isHidden: false },
+      ],
+      income: [],
+    },
+    transactions: [
+      { kind: 'expense', category_id: 'coffee', amount_satang: 8000, date: '2026-04-04' },
+      { kind: 'expense', category_id: 'groceries', amount_satang: 15000, date: '2026-04-06' },
+    ],
+  });
+
+  assert.equal(hint?.scope, 'child');
+  assert.equal(hint?.plannedLimitSatang, 10000);
+  assert.equal(hint?.spentSatang, 8000);
+  assert.equal(hint?.overBySatang, 1000);
+  assert.equal(hint?.status, 'over');
 });
 
 test('scan model helpers: normalize GPT-5.4 aliases and keep GPT-5.4 as the default', () => {

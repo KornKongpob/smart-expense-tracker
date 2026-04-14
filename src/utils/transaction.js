@@ -2,7 +2,7 @@
 // Centralized transaction helpers used across views.
 // Eliminates duplicated isTransferLike / signedExpenseSatang / sumExpense* / compareTx* / daysInMonthKey.
 
-import { combineLocalDateTime, normalizeTimeHHmm, parseDateSafe } from "./format";
+import { combineLocalDateTime, normalizeTimeHHmm, parseDateSafe } from "./format.js";
 
 /**
  * Check if a transaction looks like a transfer (2-leg or credit payment).

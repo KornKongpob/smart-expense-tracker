@@ -113,7 +113,9 @@ export function normalizeDebtPlans(rows) {
     ...row,
     account_id: row?.account_id != null ? Number(row.account_id) : null,
     current_balance_satang: clampPositiveInt(row?.current_balance_satang),
+    minimum_payment_satang: clampPositiveInt(row?.minimum_payment_satang ?? row?.minimumPaymentSatang),
     target_payment_satang: clampPositiveInt(row?.target_payment_satang),
+    apr_bps: Math.max(0, toInt(row?.apr_bps ?? row?.aprBps, 0)),
     due_day:
       row?.due_day != null && row?.due_day !== ""
         ? Math.max(1, Math.min(31, Math.trunc(Number(row.due_day) || 1)))
@@ -301,9 +303,13 @@ export function buildDebtPlanPayload(input) {
     current_balance_satang: clampPositiveInt(
       input?.current_balance_satang ?? input?.currentBalanceSatang,
     ),
+    minimum_payment_satang: clampPositiveInt(
+      input?.minimum_payment_satang ?? input?.minimumPaymentSatang,
+    ),
     target_payment_satang: clampPositiveInt(
       input?.target_payment_satang ?? input?.targetPaymentSatang,
     ),
+    apr_bps: Math.max(0, toInt(input?.apr_bps ?? input?.aprBps, 0)),
     due_day:
       dueValue != null && dueValue !== ""
         ? Math.max(1, Math.min(31, Math.trunc(Number(dueValue) || 1)))

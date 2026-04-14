@@ -141,6 +141,7 @@ export default function DashboardScreen() {
     loading,
     saving,
     plannerSummary,
+    budgetPlanSnapshot,
     selectedMonth,
     setSelectedMonth,
     accounts,
@@ -151,7 +152,24 @@ export default function DashboardScreen() {
   } = useExpenseApp();
 
   const snapshot = dashboardSnapshot || {};
-  const progress = percentOf(snapshot.expense_satang, snapshot.monthly_target_satang);
+  const usingSuggestedPlan = !budgetPlanSnapshot?.hasAppliedBudget && !budgetPlanSnapshot?.usesLegacyMonthlyTarget;
+  const displayExpenseBudgetSatang = usingSuggestedPlan
+    ? Number(budgetPlanSnapshot?.suggestedExpenseBudgetSatang || 0)
+    : Number(budgetPlanSnapshot?.activeExpenseBudgetSatang || 0);
+  const displayDailyBudgetSatang = usingSuggestedPlan
+    ? Number(budgetPlanSnapshot?.suggestedDailyBudgetSatang || 0)
+    : Number(budgetPlanSnapshot?.dailyBudgetSatang || 0);
+  const displayShortfallSatang = usingSuggestedPlan
+    ? Number(budgetPlanSnapshot?.suggestedShortfallSatang || 0)
+    : Number(budgetPlanSnapshot?.shortfallSatang || 0);
+  const displaySurplusSatang = budgetPlanSnapshot?.debtStrategyMode === "paydown"
+    ? usingSuggestedPlan
+      ? Number(budgetPlanSnapshot?.suggestedDebtExtraSatang || 0)
+      : Number(budgetPlanSnapshot?.debtExtraSatang || 0)
+    : usingSuggestedPlan
+      ? Number(budgetPlanSnapshot?.suggestedBufferSatang || 0)
+      : Number(budgetPlanSnapshot?.bufferSatang || 0);
+  const progress = percentOf(snapshot.expense_satang, displayExpenseBudgetSatang);
   const pendingReviewCount = Number(snapshot.pending_review_count || 0);
   const unmatchedCount = Number(snapshot.unmatched_count || 0);
   const topCategories = Array.isArray(snapshot.top_categories) ? snapshot.top_categories : [];
@@ -320,8 +338,8 @@ export default function DashboardScreen() {
 
         <div className="finance-dashboard-goal">
           <div className="finance-dashboard-goal-copy">
-            <span>เป้าหมาย</span>
-            <strong>{formatCurrency(snapshot.monthly_target_satang || 0)}</strong>
+            <span>{usingSuggestedPlan ? "งบแนะนำ" : "งบเดือนนี้"}</span>
+            <strong>{formatCurrency(displayExpenseBudgetSatang || 0)}</strong>
           </div>
           <div className={`dashboard-progress finance-progress-bar ${progress >= 85 ? "dashboard-progress--alert" : ""}`}>
             <span style={{ width: `${progress || 0}%` }} />
@@ -337,25 +355,27 @@ export default function DashboardScreen() {
 
       <section className="finance-grid finance-dashboard-planner-grid">
         <MetricCard
-          label="จ่ายตามแผนเดือนนี้"
-          value={formatCurrency(plannerSummary.monthlyPlannedPaymentSatang)}
-          hint={`${plannerSummary.activeDebtCount} แผนที่กำลังติดตาม`}
+          label="งบรายวัน"
+          value={formatCurrency(displayDailyBudgetSatang)}
+          hint={`${budgetPlanSnapshot?.daysRemaining || 0} วันที่เหลือในเดือนนี้`}
         />
         <MetricCard
-          label="หนี้คงเหลือ"
-          value={formatCurrency(plannerSummary.totalDebtBalanceSatang)}
-          hint={`${plannerSummary.dueSoonCount} รายการใกล้ถึงกำหนด`}
-          tone={plannerSummary.totalDebtBalanceSatang > 0 ? "danger" : "success"}
+          label="เงินออมที่กันไว้"
+          value={formatCurrency(budgetPlanSnapshot?.savingsReserveSatang || 0)}
+          hint={`หนี้ขั้นต่ำ ${formatCurrency(budgetPlanSnapshot?.debtMinimumSatang || 0)}`}
+          tone="success"
         />
         <MetricCard
-          label="ความคืบหน้าเป้าหมาย"
-          value={`${plannerSummary.goalProgressPercent}%`}
-          hint={
-            plannerSummary.activeGoalCount
-              ? `${plannerSummary.activeGoalCount} เป้าหมาย · เก็บแล้ว ${formatCurrency(plannerSummary.totalGoalCurrentSatang)}`
-              : "ยังไม่มีเป้าหมายที่กำลังติดตาม"
-          }
-          tone={plannerSummary.goalProgressPercent >= 100 ? "success" : "default"}
+          label={budgetPlanSnapshot?.debtStrategyMode === "paydown" ? "เงินโปะหนี้เพิ่ม" : "Buffer"}
+          value={formatCurrency(displaySurplusSatang)}
+          hint={budgetPlanSnapshot?.debtTarget ? "มี debt target สำหรับเดือนนี้" : `${plannerSummary.activeDebtCount} แผนหนี้`}
+          tone="default"
+        />
+        <MetricCard
+          label="สถานะแผน"
+          value={displayShortfallSatang > 0 ? `-${formatCurrency(displayShortfallSatang)}` : formatCurrency(displaySurplusSatang)}
+          hint={displayShortfallSatang > 0 ? "ควรลดงบหรือปรับแผน" : "แผนยังอยู่ในกรอบ"}
+          tone={displayShortfallSatang > 0 ? "danger" : "success"}
         />
       </section>
 

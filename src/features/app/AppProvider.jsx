@@ -22,6 +22,22 @@ import {
   upsertStoredCategoryPreference,
 } from "./categoryPreferenceStorage.js";
 import {
+  DEFAULT_BUDGET_ALERT_PCT,
+  buildBudgetCompatRows,
+  buildBudgetHint,
+  buildBudgetPlanSnapshot,
+  buildPlanningProfilePayload,
+  buildBudgetRowPayload,
+  compareMonthKeys,
+  monthEndIso,
+  monthStartIso,
+  normalizeBudgetRows,
+  normalizeBudgetBehavior,
+  normalizePlanningConfig,
+  sanitizeMonthKey,
+  shiftMonthKey,
+} from "./budgetPlanningState.js";
+import {
   buildDebtPlanPayload,
   buildFinancialGoalPayload,
   buildPlannerReminders,
@@ -221,8 +237,11 @@ export function AppProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState({ expense: [], income: [] });
+  const [categoryPreferenceRows, setCategoryPreferenceRows] = useState([]);
   const [financialGoals, setFinancialGoals] = useState([]);
   const [debtPlans, setDebtPlans] = useState([]);
+  const [budgetRows, setBudgetRows] = useState([]);
+  const [planningTransactions, setPlanningTransactions] = useState([]);
   const [scanDocuments, setScanDocuments] = useState([]);
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [dashboardSnapshot, setDashboardSnapshot] = useState(null);
@@ -301,8 +320,11 @@ export function AppProvider({ children }) {
       setProfile(null);
       setAccounts([]);
       setCategories({ expense: [], income: [] });
+      setCategoryPreferenceRows([]);
       setFinancialGoals([]);
       setDebtPlans([]);
+      setBudgetRows([]);
+      setPlanningTransactions([]);
       setScanDocuments([]);
       setRecentTransactions([]);
       setScanUploads([]);
@@ -461,13 +483,38 @@ export function AppProvider({ children }) {
 
   async function upsertCategoryPreference(row) {
     if (!session) return null;
+    const categoryId = String(row?.category_id || row?.categoryId || "").trim();
+    const existing = categoryPreferenceRows.find(
+      (item) => String(item?.category_id || item?.categoryId || "").trim() === categoryId,
+    ) || null;
 
     const payload = {
-      categoryId: String(row?.category_id || row?.categoryId || "").trim(),
-      name: row?.name != null ? String(row.name || "").trim() || null : null,
-      icon: row?.icon != null ? String(row.icon || "").trim() || null : null,
-      color: row?.color != null ? String(row.color || "").trim() || null : null,
-      hidden: row?.hidden === true,
+      categoryId,
+      name:
+        row?.name != null
+          ? String(row.name || "").trim() || null
+          : existing?.name != null
+            ? String(existing.name || "").trim() || null
+            : null,
+      icon:
+        row?.icon != null
+          ? String(row.icon || "").trim() || null
+          : existing?.icon != null
+            ? String(existing.icon || "").trim() || null
+            : null,
+      color:
+        row?.color != null
+          ? String(row.color || "").trim() || null
+          : existing?.color != null
+            ? String(existing.color || "").trim() || null
+            : null,
+      hidden: row?.hidden != null ? row.hidden === true : existing?.hidden === true,
+      budgetBehavior:
+        row?.budgetBehavior != null || row?.budget_behavior != null
+          ? String((row?.budgetBehavior ?? row?.budget_behavior) || "").trim().toLowerCase() || null
+          : existing?.budget_behavior != null || existing?.budgetBehavior != null
+            ? String((existing?.budget_behavior ?? existing?.budgetBehavior) || "").trim().toLowerCase() || null
+            : null,
     };
 
     try {
@@ -507,12 +554,66 @@ export function AppProvider({ children }) {
     }
   }
 
+  function buildRuntimeCategoryIndex() {
+    const allCategories = flattenCategoryGroups(categories);
+    const categoryMap = new Map(
+      allCategories
+        .map((row) => [String(row?.id || "").trim(), row])
+        .filter(([categoryId]) => categoryId),
+    );
+
+    return { allCategories, categoryMap };
+  }
+
+  function getBudgetRootCategoryId(categoryId, categoryMap) {
+    let currentId = String(categoryId || "").trim();
+    let guard = 0;
+
+    while (currentId && guard < 24) {
+      const row = categoryMap.get(currentId);
+      const parentId = String(row?.parentId || "").trim();
+      if (!parentId) return currentId;
+      currentId = parentId;
+      guard += 1;
+    }
+
+    return String(categoryId || "").trim();
+  }
+
+  function listDescendantCategoryIds(rootId, categoryMap) {
+    const targetRootId = String(rootId || "").trim();
+    if (!targetRootId) return [];
+
+    return Array.from(categoryMap.keys()).filter((categoryId) => {
+      if (categoryId === targetRootId) return false;
+      return getBudgetRootCategoryId(categoryId, categoryMap) === targetRootId;
+    });
+  }
+
+  function getBudgetValidationMessage(code) {
+    const key = String(code || "").trim();
+    if (key === "budget_category_required") return "เลือกหมวดหมู่ก่อนบันทึกงบ";
+    if (key === "budget_root_required") return "ต้องมีงบหมวดหลักก่อน จึงจะตั้ง child override ได้";
+    if (key === "budget_limit_required") return "กรอกวงเงินงบให้มากกว่า 0";
+    if (key === "budget_child_limit_exceeded") return "งบหมวดย่อยรวมกันเกินเพดานของหมวดหลัก";
+    return key || "บันทึกงบไม่สำเร็จ";
+  }
+
   async function refreshAll(nextProfile = null) {
     if (!supabase || !session) return;
 
     startTransition(() => setLoading(true));
     try {
       const monthDate = monthToDate(selectedMonth);
+      const currentMonthValue = todayMonth();
+      const planningStartMonth = compareMonthKeys(selectedMonth, currentMonthValue) <= 0
+        ? selectedMonth
+        : currentMonthValue;
+      const planningEndMonth = compareMonthKeys(selectedMonth, currentMonthValue) >= 0
+        ? selectedMonth
+        : currentMonthValue;
+      const planningRangeStart = monthStartIso(shiftMonthKey(planningStartMonth, -18));
+      const planningRangeEnd = monthEndIso(planningEndMonth);
       const [
         profileResult,
         categoriesResult,
@@ -520,11 +621,13 @@ export function AppProvider({ children }) {
         accountsResult,
         goalsResult,
         debtPlansResult,
+        budgetsResult,
         scansResult,
         snapshotResult,
         accountBalanceResult,
         cashflowResult,
         transactionsResult,
+        planningTransactionsResult,
       ] = await Promise.all([
         nextProfile
           ? Promise.resolve({ data: nextProfile, error: null })
@@ -553,10 +656,20 @@ export function AppProvider({ children }) {
           supabase
             .from("debt_plans")
             .select(
-              "id, legacy_id, account_id, current_balance_satang, target_payment_satang, due_day, payoff_target_date, status, note, created_at",
+              "id, legacy_id, account_id, current_balance_satang, minimum_payment_satang, target_payment_satang, apr_bps, due_day, payoff_target_date, status, note, created_at",
             )
             .order("created_at", { ascending: true }),
           "debt_plans",
+        ),
+        fetchOptionalPlannerRows(
+          supabase
+            .from("budgets")
+            .select(
+              "id, user_id, month_key, category_id, limit_satang, alert_pct, source, manual_override, created_at, updated_at",
+            )
+            .order("month_key", { ascending: false })
+            .order("category_id", { ascending: true }),
+          "budgets",
         ),
         supabase
           .from("scan_documents")
@@ -579,6 +692,14 @@ export function AppProvider({ children }) {
           .order("date", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(24),
+        supabase
+          .from("transactions")
+          .select("id, kind, category_id, amount_satang, date, is_split_parent, is_split_child")
+          .eq("user_id", session.user.id)
+          .eq("status", "posted")
+          .gte("date", planningRangeStart)
+          .lte("date", planningRangeEnd)
+          .order("date", { ascending: false }),
       ]);
 
       if (profileResult.error) throw profileResult.error;
@@ -587,11 +708,13 @@ export function AppProvider({ children }) {
       if (accountsResult.error) throw accountsResult.error;
       if (goalsResult.error) throw goalsResult.error;
       if (debtPlansResult.error) throw debtPlansResult.error;
+      if (budgetsResult.error) throw budgetsResult.error;
       if (scansResult.error) throw scansResult.error;
       if (snapshotResult.error) throw snapshotResult.error;
       if (accountBalanceResult.error) throw accountBalanceResult.error;
       if (cashflowResult.error) throw cashflowResult.error;
       if (transactionsResult.error) throw transactionsResult.error;
+      if (planningTransactionsResult.error) throw planningTransactionsResult.error;
 
       const nextCategories = mergeCategoryState(
         categoriesResult.data || [],
@@ -601,9 +724,12 @@ export function AppProvider({ children }) {
 
       setProfile(profileResult.data || nextProfile || null);
       setCategories(nextCategories);
+      setCategoryPreferenceRows(Array.isArray(categoryPreferencesResult.data) ? categoryPreferencesResult.data : []);
       setAccounts(Array.isArray(accountsResult.data) ? accountsResult.data : []);
       setFinancialGoals(normalizeFinancialGoals(goalsResult.data || []));
       setDebtPlans(normalizeDebtPlans(debtPlansResult.data || []));
+      setBudgetRows(normalizeBudgetRows(budgetsResult.data || []));
+      setPlanningTransactions(Array.isArray(planningTransactionsResult.data) ? planningTransactionsResult.data : []);
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
       setRecentTransactions(
         sortRuntimeTransactionsNewestFirst(
@@ -681,12 +807,20 @@ export function AppProvider({ children }) {
     if (!supabase || !session) return;
     setSaving(true);
     try {
+      const planningPayload = buildPlanningProfilePayload(patch, profile);
       const payload = {
-        display_name: String(patch?.display_name || patch?.displayName || profile?.display_name || "").trim(),
+        display_name: planningPayload.display_name,
         monthly_target_satang: Math.max(
           0,
           toInt(patch?.monthly_target_satang ?? patch?.monthlyTargetSatang ?? profile?.monthly_target_satang, 0),
         ),
+        income_mode: planningPayload.income_mode,
+        fixed_income_satang: planningPayload.fixed_income_satang,
+        income_lookback_months: planningPayload.income_lookback_months,
+        savings_mode: planningPayload.savings_mode,
+        savings_amount_satang: planningPayload.savings_amount_satang,
+        savings_percent_bps: planningPayload.savings_percent_bps,
+        debt_strategy_mode: planningPayload.debt_strategy_mode,
       };
 
       const { data, error } = await supabase
@@ -700,6 +834,240 @@ export function AppProvider({ children }) {
       setProfile(data);
       await refreshAll(data);
       pushToast("success", "บันทึกโปรไฟล์แล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function savePlanningConfig(patch) {
+    if (!supabase || !session) return null;
+    setSaving(true);
+    try {
+      const payload = buildPlanningProfilePayload(patch, profile);
+      const { data, error } = await supabase
+        .from("profiles")
+        .update(payload)
+        .eq("user_id", session.user.id)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+      setProfile(data);
+      await refreshAll(data);
+      pushToast("success", "บันทึกแผนรายรับแล้ว");
+      return data;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCategoryBudgetBehavior(categoryId, budgetBehavior) {
+    if (!supabase || !session) return null;
+    const targetId = String(categoryId || "").trim();
+    if (!targetId) return null;
+
+    setSaving(true);
+    try {
+      const normalizedBehavior = normalizeBudgetBehavior(budgetBehavior, "flexible");
+      const nextPreference = await upsertCategoryPreference({
+        categoryId: targetId,
+        budgetBehavior: normalizedBehavior,
+      });
+      await refreshAll();
+      pushToast("success", "บันทึกประเภทงบของหมวดแล้ว");
+      return nextPreference;
+    } catch (error) {
+      const message = getBudgetValidationMessage(error?.message || error);
+      pushToast("error", message);
+      throw new Error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveBudgetRow(input) {
+    if (!supabase || !session) return null;
+
+    setSaving(true);
+    try {
+      const row = buildBudgetRowPayload(input);
+      const monthKey = sanitizeMonthKey(row.month_key || selectedMonth);
+      const { categoryMap } = buildRuntimeCategoryIndex();
+      const category = categoryMap.get(String(row.category_id || "").trim()) || null;
+
+      if (!category || String(category.kind || "").toLowerCase() !== "expense") {
+        throw new Error("budget_category_required");
+      }
+      if (row.limit_satang <= 0) {
+        throw new Error("budget_limit_required");
+      }
+
+      const rootId = getBudgetRootCategoryId(row.category_id, categoryMap);
+      const isRootBudget = rootId === row.category_id;
+      const monthRows = normalizeBudgetRows(budgetRows).filter((budgetRow) => budgetRow.month_key === monthKey);
+      const siblingDescendantIds = new Set(listDescendantCategoryIds(rootId, categoryMap));
+
+      if (!isRootBudget) {
+        const rootRow =
+          monthRows.find((budgetRow) => budgetRow.category_id === rootId) ||
+          (row.category_id === rootId ? row : null);
+        const rootLimitSatang = Number(rootRow?.limit_satang || 0);
+
+        if (!rootRow || rootLimitSatang <= 0) {
+          throw new Error("budget_root_required");
+        }
+
+        const siblingTotalSatang = monthRows.reduce((sum, budgetRow) => {
+          if (!siblingDescendantIds.has(budgetRow.category_id)) return sum;
+          if (budgetRow.category_id === row.category_id) return sum;
+          return sum + Number(budgetRow.limit_satang || 0);
+        }, 0);
+
+        if (siblingTotalSatang + row.limit_satang > rootLimitSatang) {
+          throw new Error("budget_child_limit_exceeded");
+        }
+      } else {
+        const childTotalSatang = monthRows.reduce((sum, budgetRow) => {
+          if (!siblingDescendantIds.has(budgetRow.category_id)) return sum;
+          return sum + Number(budgetRow.limit_satang || 0);
+        }, 0);
+
+        if (childTotalSatang > row.limit_satang) {
+          throw new Error("budget_child_limit_exceeded");
+        }
+      }
+
+      const payload = {
+        user_id: session.user.id,
+        month_key: monthKey,
+        category_id: row.category_id,
+        limit_satang: row.limit_satang,
+        alert_pct: row.alert_pct || DEFAULT_BUDGET_ALERT_PCT,
+        source: row.source || "manual",
+        manual_override: row.manual_override === true,
+      };
+
+      const query = row.id
+        ? supabase.from("budgets").update(payload).eq("id", row.id).eq("user_id", session.user.id)
+        : supabase.from("budgets").upsert(payload, {
+            onConflict: "user_id,month_key,category_id",
+          });
+      const { error } = await query;
+      if (error) throw error;
+
+      await refreshAll();
+      pushToast("success", "บันทึกงบรายเดือนแล้ว");
+      return true;
+    } catch (error) {
+      const message = getBudgetValidationMessage(error?.message || error);
+      pushToast("error", message);
+      throw new Error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteBudgetRow({ id, categoryId, monthKey } = {}) {
+    if (!supabase || !session) return false;
+
+    const targetCategoryId = String(categoryId || "").trim();
+    const safeMonthKey = sanitizeMonthKey(monthKey || selectedMonth);
+    if (!targetCategoryId) return false;
+
+    const { categoryMap } = buildRuntimeCategoryIndex();
+    const rootId = getBudgetRootCategoryId(targetCategoryId, categoryMap);
+    const deleteIds = rootId === targetCategoryId
+      ? [targetCategoryId, ...listDescendantCategoryIds(rootId, categoryMap)]
+      : [targetCategoryId];
+
+    setSaving(true);
+    try {
+      let query = supabase
+        .from("budgets")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("month_key", safeMonthKey);
+      if (id) {
+        query = query.eq("id", Number(id));
+      } else {
+        query = query.in("category_id", deleteIds);
+      }
+
+      const { error } = await query;
+      if (error) throw error;
+
+      await refreshAll();
+      pushToast("success", rootId === targetCategoryId ? "ลบงบของหมวดแล้ว" : "ลบ child override แล้ว");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function applySuggestedBudgets() {
+    if (!supabase || !session) return false;
+
+    const safeMonthKey = sanitizeMonthKey(selectedMonth);
+    const { categoryMap } = buildRuntimeCategoryIndex();
+    const snapshot = buildBudgetPlanSnapshot({
+      profile,
+      categories,
+      debtPlans,
+      budgetRows,
+      transactions: planningTransactions,
+      monthValue: safeMonthKey,
+      today: todayDate(),
+    });
+    const childRows = normalizeBudgetRows(budgetRows).filter((row) => {
+      if (row.month_key !== safeMonthKey) return false;
+      return getBudgetRootCategoryId(row.category_id, categoryMap) !== row.category_id;
+    });
+    const childTotalsByRoot = childRows.reduce((map, row) => {
+      const rootId = getBudgetRootCategoryId(row.category_id, categoryMap);
+      map.set(rootId, (map.get(rootId) || 0) + Number(row.limit_satang || 0));
+      return map;
+    }, new Map());
+
+    const rootRows = snapshot.categoryPlans
+      .map((plan) => {
+        const childTotalSatang = Number(childTotalsByRoot.get(plan.categoryId) || 0);
+        const suggestedLimitSatang = Math.max(Number(plan.suggestedLimitSatang || 0), childTotalSatang);
+        if (suggestedLimitSatang <= 0) return null;
+        return {
+          user_id: session.user.id,
+          month_key: safeMonthKey,
+          category_id: plan.categoryId,
+          limit_satang: suggestedLimitSatang,
+          alert_pct: Number(plan.alertPct || DEFAULT_BUDGET_ALERT_PCT),
+          source: "suggested",
+          manual_override: false,
+        };
+      })
+      .filter(Boolean);
+
+    setSaving(true);
+    try {
+      const rootCategoryIds = snapshot.categoryPlans.map((plan) => plan.categoryId);
+      if (rootCategoryIds.length) {
+        const { error: deleteError } = await supabase
+          .from("budgets")
+          .delete()
+          .eq("user_id", session.user.id)
+          .eq("month_key", safeMonthKey)
+          .in("category_id", rootCategoryIds);
+        if (deleteError) throw deleteError;
+      }
+
+      if (rootRows.length) {
+        const { error: insertError } = await supabase
+          .from("budgets")
+          .upsert(rootRows, { onConflict: "user_id,month_key,category_id" });
+        if (insertError) throw insertError;
+      }
+
+      await refreshAll();
+      pushToast("success", "นำงบแนะนำมาใช้แล้ว");
+      return true;
     } finally {
       setSaving(false);
     }
@@ -829,7 +1197,9 @@ export function AppProvider({ children }) {
         legacy_id: plan.legacy_id,
         account_id: plan.account_id,
         current_balance_satang: plan.current_balance_satang,
+        minimum_payment_satang: plan.minimum_payment_satang,
         target_payment_satang: plan.target_payment_satang,
+        apr_bps: plan.apr_bps,
         due_day: plan.due_day,
         payoff_target_date: plan.payoff_target_date,
         status: plan.status,
@@ -1501,21 +1871,36 @@ export function AppProvider({ children }) {
       if (transactionError) throw transactionError;
       if (mappingError) throw mappingError;
 
+      const exportedBudgetRows = normalizeBudgetRows(budgetRows).map((row) => ({
+        id: row.id != null ? `budget_${row.id}` : `${row.month_key}_${row.category_id}`,
+        month: row.month_key,
+        categoryId: row.category_id,
+        limit: row.limit_satang,
+        alertPct: row.alert_pct,
+        source: row.source,
+        manualOverride: row.manual_override === true,
+      }));
+      const compatBudgetRows = buildBudgetCompatRows({
+        monthKey: selectedMonth,
+        budgetPlanSnapshot,
+        budgetRows: [],
+      });
+
       const payload = {
-        v: 2,
+        v: 3,
         exportedAt: new Date().toISOString(),
         profile,
         data: {
           moneyUnit: "satang",
+          profile,
+          categoryPreferences: categoryPreferenceRows,
           accounts,
           categories,
           financialGoals,
           debtPlans,
           inbox: scanDocuments,
           merchants: mappingRows || [],
-          budgets: profile?.monthly_target_satang
-            ? [{ categoryId: "__TOTAL__", limit: profile.monthly_target_satang, month: selectedMonth }]
-            : [],
+          budgets: [...exportedBudgetRows, ...compatBudgetRows],
           transactions: transactionRows || [],
         },
       };
@@ -1541,7 +1926,21 @@ export function AppProvider({ children }) {
     if (!file || !session) return;
     const text = await file.text();
     const parsed = JSON.parse(text);
-    const snapshot = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+    const baseSnapshot = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+    const snapshot = {
+      ...(baseSnapshot && typeof baseSnapshot === "object" ? baseSnapshot : {}),
+      profile:
+        baseSnapshot?.profile && typeof baseSnapshot.profile === "object"
+          ? baseSnapshot.profile
+          : parsed?.profile && typeof parsed.profile === "object"
+            ? parsed.profile
+            : null,
+      categoryPreferences: Array.isArray(baseSnapshot?.categoryPreferences)
+        ? baseSnapshot.categoryPreferences
+        : Array.isArray(parsed?.categoryPreferences)
+          ? parsed.categoryPreferences
+          : [],
+    };
     const attachments = Array.isArray(parsed?.attachments) ? parsed.attachments : [];
 
     setSaving(true);
@@ -1566,12 +1965,29 @@ export function AppProvider({ children }) {
     monthValue: selectedMonth,
     today: todayDate(),
   });
+  const planningConfig = normalizePlanningConfig(profile);
+  const budgetPlanSnapshot = buildBudgetPlanSnapshot({
+    profile,
+    categories,
+    debtPlans,
+    budgetRows,
+    transactions: planningTransactions,
+    monthValue: selectedMonth,
+    today: todayDate(),
+  });
   const plannerReminders = buildPlannerReminders({
     goals: financialGoals,
     debts: debtPlans,
     today: todayDate(),
     accountsById,
   });
+  const getBudgetHintForDraft = (draft) =>
+    buildBudgetHint({
+      draft,
+      budgetRows,
+      categories,
+      transactions: planningTransactions,
+    });
 
   const refreshAllEvent = useEffectEvent((nextProfile = null) => {
     void refreshAll(nextProfile);
@@ -1600,6 +2016,7 @@ export function AppProvider({ children }) {
     categories,
     financialGoals,
     debtPlans,
+    budgetRows,
     scanDocuments,
     recentTransactions,
     dashboardSnapshot,
@@ -1607,6 +2024,8 @@ export function AppProvider({ children }) {
     cashflowSeries,
     plannerSummary,
     plannerReminders,
+    planningConfig,
+    budgetPlanSnapshot,
     selectedMonth,
     queue,
     scanUploads,
@@ -1620,6 +2039,7 @@ export function AppProvider({ children }) {
     signOut,
     refreshAll,
     saveProfile,
+    savePlanningConfig,
     saveAccount,
     deleteAccount,
     adjustAccountBalance,
@@ -1629,6 +2049,11 @@ export function AppProvider({ children }) {
     deleteDebtPlan,
     saveCategory,
     setCategoryHidden,
+    saveCategoryBudgetBehavior,
+    saveBudgetRow,
+    deleteBudgetRow,
+    applySuggestedBudgets,
+    getBudgetHintForDraft,
     createManualTransaction,
     updateTransaction,
     deleteTransaction,

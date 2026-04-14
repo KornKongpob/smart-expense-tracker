@@ -27,6 +27,12 @@ export function upsertStoredCategoryPreference(userId, row) {
     icon: row?.icon != null ? String(row.icon || "").trim() || null : null,
     color: row?.color != null ? String(row.color || "").trim() || null : null,
     hidden: row?.hidden === true,
+    budget_behavior:
+      row?.budgetBehavior === "fixed" || row?.budgetBehavior === "essential" || row?.budgetBehavior === "flexible"
+        ? row.budgetBehavior
+        : row?.budget_behavior === "fixed" || row?.budget_behavior === "essential" || row?.budget_behavior === "flexible"
+          ? row.budget_behavior
+          : null,
     updated_at: new Date().toISOString(),
   };
 

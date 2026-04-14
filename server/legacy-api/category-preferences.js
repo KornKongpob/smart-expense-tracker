@@ -27,6 +27,7 @@ function toCategoryPreferencesError(error, fallback = "category_preferences_fail
 function buildUnavailablePreference(row) {
   const categoryId = cleanText(row?.category_id || row?.categoryId);
   if (!categoryId) return null;
+  const budgetBehavior = cleanText(row?.budget_behavior || row?.budgetBehavior).toLowerCase();
 
   return {
     user_id: cleanText(row?.user_id || row?.userId) || null,
@@ -35,6 +36,10 @@ function buildUnavailablePreference(row) {
     icon: row?.icon != null ? cleanText(row.icon) || null : null,
     color: row?.color != null ? cleanText(row.color) || null : null,
     hidden: row?.hidden === true,
+    budget_behavior:
+      budgetBehavior === "fixed" || budgetBehavior === "essential" || budgetBehavior === "flexible"
+        ? budgetBehavior
+        : null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -59,7 +64,7 @@ export default async function handler(req, res) {
     if (req.method === "GET") {
       const { data, error } = await admin
         .from("category_preferences")
-        .select("user_id, category_id, name, icon, color, hidden, updated_at")
+        .select("user_id, category_id, name, icon, color, hidden, budget_behavior, updated_at")
         .eq("user_id", auth.user.id)
         .order("updated_at", { ascending: false });
 
@@ -88,13 +93,19 @@ export default async function handler(req, res) {
         icon: body?.icon != null ? cleanText(body.icon) || null : null,
         color: body?.color != null ? cleanText(body.color) || null : null,
         hidden: body?.hidden === true,
+        budget_behavior:
+          cleanText(body?.budgetBehavior || body?.budget_behavior).toLowerCase() === "fixed" ||
+          cleanText(body?.budgetBehavior || body?.budget_behavior).toLowerCase() === "essential" ||
+          cleanText(body?.budgetBehavior || body?.budget_behavior).toLowerCase() === "flexible"
+            ? cleanText(body?.budgetBehavior || body?.budget_behavior).toLowerCase()
+            : null,
       };
       requestedRow = row;
 
       const { data, error } = await admin
         .from("category_preferences")
         .upsert(row, { onConflict: "user_id,category_id" })
-        .select("user_id, category_id, name, icon, color, hidden, updated_at")
+        .select("user_id, category_id, name, icon, color, hidden, budget_behavior, updated_at")
         .single();
 
       if (error) throw error;

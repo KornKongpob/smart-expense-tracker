@@ -49,6 +49,7 @@ export function normalizeCategoryPreferences(rows) {
       icon: cleanText(row?.icon),
       color: cleanText(row?.color),
       hidden: row?.hidden === true,
+      budgetBehavior: cleanText(row?.budget_behavior || row?.budgetBehavior).toLowerCase(),
       updatedAt: row?.updated_at || row?.updatedAt || null,
     }))
     .filter((row) => row.categoryId);
@@ -111,6 +112,12 @@ export function mergeCategoryState(categoryRows, preferenceRows) {
       color: cleanText(preference?.color, row.color),
       isHiddenSelf: !row.isSystem && preference?.hidden === true,
       isHidden: computeHidden(row.id),
+      budgetBehavior:
+        preference?.budgetBehavior === "fixed" ||
+        preference?.budgetBehavior === "essential" ||
+        preference?.budgetBehavior === "flexible"
+          ? preference.budgetBehavior
+          : null,
     };
   });
 

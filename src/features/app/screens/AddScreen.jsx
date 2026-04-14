@@ -16,7 +16,7 @@ import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
 import LineItemEditorSection from "../LineItemEditorSection.jsx";
 import { lineItemsFromDraft } from "../lineItemDraftState.js";
 import { ScreenShell, StatusPill, useKeyboardViewportState } from "../ui.jsx";
-import { getCurrentLocalTimeHHmm, toISODate } from "../../../utils/format.js";
+import { formatCurrency, getCurrentLocalTimeHHmm, toISODate } from "../../../utils/format.js";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
 
 const MANUAL_KIND_OPTIONS = [
@@ -81,6 +81,7 @@ export default function AddScreen() {
     scanUploads,
     saving,
     isOnline,
+    getBudgetHintForDraft,
     createManualTransaction,
     uploadScanFiles,
     retryScanUpload,
@@ -99,6 +100,7 @@ export default function AddScreen() {
   const kindCategories = (
     draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense
   ).filter((category) => category?.isHidden !== true);
+  const budgetHint = getBudgetHintForDraft?.(draft) || null;
 
   useKeyboardViewportState(mode === "manual" && hasAccounts);
 
@@ -516,6 +518,24 @@ export default function AddScreen() {
                       placeholder="เช่น ค่าอาหาร"
                     />
                   </label>
+
+                  {budgetHint ? (
+                    <div
+                      className={`ui-toast finance-inline-note ${
+                        budgetHint.status === "over"
+                          ? "ui-toast--error"
+                          : budgetHint.status === "warning"
+                            ? "ui-toast--warning"
+                            : "ui-toast--info"
+                      }`}
+                    >
+                      <div className="finance-toast-copy">
+                        {budgetHint.scope === "child" ? "งบหมวดย่อย" : "งบหมวดหลัก"} {formatCurrency(budgetHint.plannedLimitSatang)} · ใช้ไปแล้ว {formatCurrency(budgetHint.spentSatang)} · หลังบันทึกจะเป็น {formatCurrency(budgetHint.projectedSatang)}
+                        {budgetHint.status === "over" ? ` · เกิน ${formatCurrency(budgetHint.overBySatang)}` : ""}
+                        {budgetHint.status === "warning" ? ` · ใกล้แตะเตือน ${budgetHint.alertPct}%` : ""}
+                      </div>
+                    </div>
+                  ) : null}
                 </section>
 
                 <details className="finance-details" open={showMore}>
