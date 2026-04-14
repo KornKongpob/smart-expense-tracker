@@ -12,7 +12,7 @@ import {
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
-import { EmptyPanel, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
+import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import {
   DEBT_STRATEGY_OPTIONS,
   INCOME_MODE_OPTIONS,
@@ -35,6 +35,12 @@ const DEBT_STATUS_OPTIONS = [
   { id: "paid_off", label: "ปิดหนี้แล้ว" },
 ];
 
+const BUDGET_FILTER_OPTIONS = [
+  { id: "attention", label: "ควรดูต่อ" },
+  { id: "active", label: "มีการใช้งาน" },
+  { id: "all", label: "ทั้งหมด" },
+];
+
 function toMoneyInput(satang, allowEmpty = true) {
   const amount = Number(satang || 0) / 100;
   if (!Number.isFinite(amount)) return allowEmpty ? "" : "0.00";
@@ -52,6 +58,22 @@ function parsePercentToBps(value) {
   const number = Number(String(value || "").replace(/,/g, "").trim());
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.min(10000, Math.round(number * 100)));
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function formatPlannerMonthLabel(monthKey) {
+  const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return String(monthKey || "").trim();
+  const year = Number(match[1]);
+  const monthIndex = Math.max(0, Math.min(11, Number(match[2]) - 1));
+  return new Intl.DateTimeFormat("th-TH", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, monthIndex, 1));
 }
 
 function createPlanningDraft(config = null) {
@@ -154,6 +176,7 @@ export default function PlannerScreen() {
   const [planningDraft, setPlanningDraft] = useState(createPlanningDraft(planningConfig));
   const [rootBudgetInputs, setRootBudgetInputs] = useState({});
   const [childBudgetInputs, setChildBudgetInputs] = useState({});
+  const [budgetFilter, setBudgetFilter] = useState("active");
   const [goalEditorOpen, setGoalEditorOpen] = useState(false);
   const [goalDeleteConfirmOpen, setGoalDeleteConfirmOpen] = useState(false);
   const [goalDraft, setGoalDraft] = useState(createGoalDraft());
@@ -211,6 +234,182 @@ export default function PlannerScreen() {
   const debtTargetHint = budgetPlanSnapshot?.debtTarget
     ? `${accountNameMap.get(Number(budgetPlanSnapshot.debtTarget.accountId)) || "บัญชีหนี้"} · APR ${(Number(budgetPlanSnapshot.debtTarget.aprBps || 0) / 100).toFixed(2)}%`
     : "";
+  const planningMonthLabel = formatPlannerMonthLabel(budgetMonthKey);
+  const incomeReady = Number(budgetPlanSnapshot?.selectedIncomeSatang || 0) > 0;
+  const debtPlanReady = debtAccounts.length === 0 || debtPlans.length > 0;
+  const budgetsApplied = !usingSuggestedPlan;
+  const hasDebtAccountsWithoutPlan = debtAccounts.length > 0 && debtPlans.length === 0;
+  const totalDebtBalanceSatang = debtPlans.reduce(
+    (sum, plan) => sum + Number(plan?.current_balance_satang || 0),
+    0,
+  );
+
+  const budgetPlanRows = useMemo(() => {
+    const plans = Array.isArray(budgetPlanSnapshot?.categoryPlans) ? budgetPlanSnapshot.categoryPlans : [];
+    return plans
+      .map((plan) => {
+        const draftInput = String(rootBudgetInputs[plan.categoryId] || "").trim();
+        const draftLimitSatang = draftInput ? parseMoneyToSatang(draftInput) : 0;
+        const appliedLimitSatang = Number(plan?.appliedLimitSatang || 0);
+        const suggestedLimitSatang = Number(plan?.suggestedLimitSatang || 0);
+        const displayedLimitSatang = draftInput
+          ? draftLimitSatang
+          : appliedLimitSatang > 0
+            ? appliedLimitSatang
+            : suggestedLimitSatang;
+        const spentMonthSatang = Number(plan?.spentMonthSatang || 0);
+        const childPlans = Array.isArray(plan.childPlans) ? plan.childPlans : [];
+        const hasChildrenActivity = childPlans.some(
+          (child) =>
+            Number(child?.averageSpendSatang || 0) > 0 ||
+            Number(child?.appliedLimitSatang || 0) > 0 ||
+            Number(child?.spentMonthSatang || 0) > 0,
+        );
+        const isActive =
+          displayedLimitSatang > 0 ||
+          spentMonthSatang > 0 ||
+          Number(plan?.averageSpendSatang || 0) > 0 ||
+          plan?.manualOverride === true ||
+          hasChildrenActivity;
+        const needsAttention =
+          displayedLimitSatang <= 0 ||
+          spentMonthSatang > displayedLimitSatang ||
+          (displayedLimitSatang > 0 && spentMonthSatang >= Math.round(displayedLimitSatang * 0.85));
+
+        return {
+          ...plan,
+          displayedLimitSatang,
+          remainingSatang: Math.max(0, displayedLimitSatang - spentMonthSatang),
+          overSatang: Math.max(0, spentMonthSatang - displayedLimitSatang),
+          utilizationPct: clampPercent(
+            displayedLimitSatang > 0 ? (spentMonthSatang / displayedLimitSatang) * 100 : 0,
+          ),
+          isActive,
+          needsAttention,
+          hasChildrenActivity,
+        };
+      })
+      .filter((plan) => {
+        if (budgetFilter === "all") return true;
+        if (budgetFilter === "active") return plan.isActive;
+        return plan.needsAttention || plan.manualOverride === true;
+      })
+      .sort((left, right) => {
+        const attentionScore =
+          (right.needsAttention ? 1 : 0) - (left.needsAttention ? 1 : 0) ||
+          (right.manualOverride ? 1 : 0) - (left.manualOverride ? 1 : 0);
+        if (attentionScore !== 0) return attentionScore;
+
+        const spendDelta =
+          Number(right.spentMonthSatang || 0) - Number(left.spentMonthSatang || 0) ||
+          Number(right.averageSpendSatang || 0) - Number(left.averageSpendSatang || 0);
+        if (spendDelta !== 0) return spendDelta;
+        return String(left.name || "").localeCompare(String(right.name || ""), "th");
+      });
+  }, [budgetFilter, budgetPlanSnapshot, rootBudgetInputs]);
+
+  const budgetFilterCounts = useMemo(() => {
+    const plans = Array.isArray(budgetPlanSnapshot?.categoryPlans) ? budgetPlanSnapshot.categoryPlans : [];
+    const counts = { all: plans.length, active: 0, attention: 0 };
+
+    for (const plan of plans) {
+      const displayedLimitSatang =
+        Number(plan?.appliedLimitSatang || 0) > 0
+          ? Number(plan.appliedLimitSatang || 0)
+          : Number(plan?.suggestedLimitSatang || 0);
+      const spentMonthSatang = Number(plan?.spentMonthSatang || 0);
+      const childPlans = Array.isArray(plan.childPlans) ? plan.childPlans : [];
+      const isActive =
+        displayedLimitSatang > 0 ||
+        spentMonthSatang > 0 ||
+        Number(plan?.averageSpendSatang || 0) > 0 ||
+        plan?.manualOverride === true ||
+        childPlans.some(
+          (child) =>
+            Number(child?.averageSpendSatang || 0) > 0 ||
+            Number(child?.appliedLimitSatang || 0) > 0 ||
+            Number(child?.spentMonthSatang || 0) > 0,
+        );
+      const needsAttention =
+        displayedLimitSatang <= 0 ||
+        spentMonthSatang > displayedLimitSatang ||
+        (displayedLimitSatang > 0 && spentMonthSatang >= Math.round(displayedLimitSatang * 0.85));
+
+      if (isActive) counts.active += 1;
+      if (needsAttention || plan?.manualOverride === true) counts.attention += 1;
+    }
+
+    return counts;
+  }, [budgetPlanSnapshot]);
+
+  const allocationRows = useMemo(() => {
+    const selectedIncomeSatang = Number(budgetPlanSnapshot?.selectedIncomeSatang || 0);
+    const denominator = Math.max(selectedIncomeSatang, 1);
+    return [
+      {
+        id: "income",
+        label: "รายได้ที่ใช้คำนวณ",
+        amountSatang: selectedIncomeSatang,
+        tone: "default",
+      },
+      {
+        id: "savings",
+        label: "กันเงินออม",
+        amountSatang: Number(budgetPlanSnapshot?.savingsReserveSatang || 0),
+        tone: "success",
+      },
+      {
+        id: "debt-minimum",
+        label: "หนี้ขั้นต่ำ",
+        amountSatang: Number(budgetPlanSnapshot?.debtMinimumSatang || 0),
+        tone: "warning",
+      },
+      {
+        id: "expense",
+        label: usingSuggestedPlan ? "งบรายจ่ายแนะนำ" : "งบรายจ่ายที่ใช้อยู่",
+        amountSatang: displayExpenseBudgetSatang,
+        tone: "default",
+      },
+      {
+        id: "leftover",
+        label: displayShortfallSatang > 0 ? "ยอดที่ยังขาด" : planningConfig?.debtStrategyMode === "paydown" ? "เงินโปะหนี้เพิ่ม" : "Buffer",
+        amountSatang: displayShortfallSatang > 0 ? displayShortfallSatang : displaySurplusSatang,
+        tone: displayShortfallSatang > 0 ? "danger" : "success",
+      },
+    ].map((row) => ({
+      ...row,
+      percent: clampPercent((Number(row.amountSatang || 0) / denominator) * 100),
+    }));
+  }, [budgetPlanSnapshot, displayExpenseBudgetSatang, displayShortfallSatang, displaySurplusSatang, planningConfig?.debtStrategyMode, usingSuggestedPlan]);
+
+  const plannerSteps = [
+    {
+      id: "income",
+      title: "ล็อกกรอบรายได้",
+      detail: incomeReady
+        ? `${getIncomeModeLabel(planningConfig?.incomeMode)} · ${formatCurrency(budgetPlanSnapshot?.selectedIncomeSatang || 0)}`
+        : "ยังไม่มีรายได้พอสำหรับคำนวณแผน",
+      done: incomeReady,
+    },
+    {
+      id: "debt",
+      title: "เช็กแผนหนี้",
+      detail: hasDebtAccountsWithoutPlan
+        ? "มีบัญชีหนี้ แต่ยังไม่ได้ตั้งขั้นต่ำ/เป้าจ่าย"
+        : debtPlans.length
+          ? `${debtPlans.length} แผน · ยอดคงเหลือ ${formatCurrency(totalDebtBalanceSatang)}`
+          : "ไม่มีบัญชีหนี้ที่ต้องวางแผนเพิ่ม",
+      done: debtPlanReady,
+    },
+    {
+      id: "budget",
+      title: "ยืนยันงบรายหมวด",
+      detail: budgetsApplied
+        ? `ใช้งบ ${formatCurrency(displayExpenseBudgetSatang)} แล้ว`
+        : `ยังใช้ชุดงบแนะนำ ${formatCurrency(displayExpenseBudgetSatang)}`,
+      done: budgetsApplied,
+    },
+  ];
 
   const openGoalEditor = (goal = null) => {
     setGoalDraft(createGoalDraft(goal));
@@ -320,35 +519,98 @@ export default function PlannerScreen() {
 
   return (
     <ScreenShell title="วางแผนการเงิน" subtitle="ติดตามเป้าหมายและแผนชำระในที่เดียว">
-      <section className="finance-grid finance-planner-summary-grid">
-        <MetricCard
-          label="รายได้ที่ใช้คำนวณ"
-          value={formatCurrency(budgetPlanSnapshot?.selectedIncomeSatang || 0)}
-          hint={
-            planningConfig?.incomeMode === "fixed"
-              ? "ใช้รายได้คงที่รายเดือน"
-              : `เฉลี่ยย้อนหลัง ${planningConfig?.incomeLookbackMonths || 3} เดือน · ${formatCurrency(budgetPlanSnapshot?.rollingAverageIncomeSatang || 0)}`
-          }
-        />
-        <MetricCard
-          label="งบรายจ่ายเดือนนี้"
-          value={formatCurrency(displayExpenseBudgetSatang)}
-          hint={`ใช้ไปแล้ว ${formatCurrency(budgetPlanSnapshot?.spentMonthSatang || 0)} · เฉลี่ยวันละ ${formatCurrency(displayDailyBudgetSatang)}`}
-          tone={displayShortfallSatang > 0 ? "warning" : "default"}
-        />
-        <MetricCard
-          label={displayShortfallSatang > 0 ? "แผนยังขาด" : planningConfig?.debtStrategyMode === "paydown" ? "เงินโปะหนี้เพิ่ม" : "Buffer"}
-          value={formatCurrency(displayShortfallSatang > 0 ? displayShortfallSatang : displaySurplusSatang)}
-          hint={
-            displayShortfallSatang > 0
-              ? `เงินออม ${formatCurrency(budgetPlanSnapshot?.savingsReserveSatang || 0)} · หนี้ขั้นต่ำ ${formatCurrency(budgetPlanSnapshot?.debtMinimumSatang || 0)}`
-              : planningConfig?.debtStrategyMode === "paydown"
-                ? debtTargetHint || `หนี้ขั้นต่ำ ${formatCurrency(budgetPlanSnapshot?.debtMinimumSatang || 0)}`
-                : `เงินออม ${formatCurrency(budgetPlanSnapshot?.savingsReserveSatang || 0)} · หนี้ขั้นต่ำ ${formatCurrency(budgetPlanSnapshot?.debtMinimumSatang || 0)}`
-          }
-          tone={displayShortfallSatang > 0 ? "danger" : displaySurplusSatang > 0 ? "success" : "default"}
-        />
-      </section>
+      <article className="ui-card finance-panel finance-planner-hero">
+        <div className="finance-planner-hero-grid">
+          <section className="finance-planner-hero-copy">
+            <div className="finance-chip-grid">
+              <StatusPill tone={displayShortfallSatang > 0 ? "danger" : budgetsApplied ? "success" : "warning"}>
+                {displayShortfallSatang > 0 ? "แผนยังไม่สมดุล" : budgetsApplied ? "แผนพร้อมใช้งาน" : "รอ Apply ชุดงบ"}
+              </StatusPill>
+              <StatusPill tone="default">{planningMonthLabel || budgetMonthKey}</StatusPill>
+            </div>
+
+            <div>
+              <div className="finance-planner-hero-title">
+                {displayShortfallSatang > 0
+                  ? `แผนเดือนนี้ยังขาด ${formatCurrency(displayShortfallSatang)}`
+                  : budgetsApplied
+                    ? `งบเดือนนี้ล็อกไว้ที่ ${formatCurrency(displayExpenseBudgetSatang)}`
+                    : `มีชุดงบแนะนำ ${formatCurrency(displayExpenseBudgetSatang)} รอใช้งาน`}
+              </div>
+              <div className="finance-panel-copy finance-planner-hero-text">
+                {displayShortfallSatang > 0
+                  ? "เริ่มจากลดเงินออม เปลี่ยนกลยุทธ์หนี้ หรือปรับงบหมวดที่ยืดหยุ่นได้ก่อน เพื่อให้แผนอยู่ในกรอบ"
+                  : budgetsApplied
+                    ? `วันนี้เหลืองบเฉลี่ย ${formatCurrency(displayDailyBudgetSatang)} ต่อวัน และ${planningConfig?.debtStrategyMode === "paydown" ? "มีเงินสำหรับโปะหนี้เพิ่ม" : "ยังมี buffer เหลือ"} ${formatCurrency(displaySurplusSatang)}`
+                    : "ระบบคำนวณจากรายได้ เงินออม และหนี้ขั้นต่ำให้แล้ว คุณสามารถ Apply งบทั้งชุด หรือปรับเฉพาะหมวดที่อยากคุมเพิ่มได้"}
+              </div>
+            </div>
+
+            <div className="finance-inline-actions">
+              {!incomeReady ? (
+                <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={submitPlanningConfig}>
+                  <Wallet size={16} />
+                  บันทึกกรอบคำนวณ
+                </button>
+              ) : null}
+              {hasDebtAccountsWithoutPlan ? (
+                <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => openDebtEditor()}>
+                  <CreditCard size={16} />
+                  เพิ่มแผนหนี้
+                </button>
+              ) : null}
+              {incomeReady && debtPlanReady && usingSuggestedPlan ? (
+                <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => applySuggestedBudgets()}>
+                  <PiggyBank size={16} />
+                  ใช้ชุดงบแนะนำ
+                </button>
+              ) : null}
+            </div>
+
+            <div className="finance-planner-step-list">
+              {plannerSteps.map((step, index) => (
+                <div key={step.id} className={`finance-planner-step ${step.done ? "is-done" : "is-pending"}`}>
+                  <div className="finance-planner-step-badge">{step.done ? "✓" : String(index + 1)}</div>
+                  <div className="finance-planner-step-copy">
+                    <div className="finance-row-title">{step.title}</div>
+                    <div className="finance-row-meta">{step.detail}</div>
+                  </div>
+                  <StatusPill tone={step.done ? "success" : "warning"}>{step.done ? "พร้อม" : "รอตั้งค่า"}</StatusPill>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="finance-planner-breakdown">
+            <div className="finance-panel-head">
+              <div>
+                <div className="finance-panel-title">Money Flow</div>
+                <div className="finance-panel-copy">อ่านจากบนลงล่างเพื่อดูว่าเงินถูกแบ่งไปตรงไหนก่อนบ้าง</div>
+              </div>
+            </div>
+
+            <div className="finance-planner-breakdown-list">
+              {allocationRows.map((row) => (
+                <div key={row.id} className={`finance-planner-breakdown-row tone-${row.tone}`}>
+                  <div className="finance-planner-breakdown-top">
+                    <span>{row.label}</span>
+                    <strong>{formatCurrency(row.amountSatang)}</strong>
+                  </div>
+                  <div className="finance-progress-bar">
+                    <span style={{ width: `${row.percent}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="finance-chip-grid">
+              <StatusPill tone="default">ใช้ไปแล้ว {formatCurrency(budgetPlanSnapshot?.spentMonthSatang || 0)}</StatusPill>
+              <StatusPill tone="default">เหลือเฉลี่ย {formatCurrency(displayDailyBudgetSatang)} / วัน</StatusPill>
+              {debtTargetHint ? <StatusPill tone="default">{debtTargetHint}</StatusPill> : null}
+            </div>
+          </section>
+        </div>
+      </article>
 
       <article className="ui-card finance-panel">
         <div className="finance-panel-head">
@@ -529,21 +791,47 @@ export default function PlannerScreen() {
           <div>
             <div className="finance-panel-title">Category Budget Editor</div>
             <div className="finance-panel-copy">
-              บันทึกงบหมวดหลัก แล้ว override บางหมวดย่อยตามต้องการ โดย child รวมกันต้องไม่เกิน parent
+              โฟกัสหมวดที่ควรดูต่อก่อน แล้วค่อยลงรายละเอียดหมวดย่อยเมื่อจำเป็น โดย child รวมกันต้องไม่เกิน parent
             </div>
           </div>
           <div className="finance-inline-actions">
             <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => applySuggestedBudgets()}>
               <PiggyBank size={16} />
-              Apply Suggested Budgets
+              ใช้ชุดงบแนะนำ
             </button>
           </div>
         </div>
 
+        <div className="finance-planner-toolbar">
+          <div className="finance-chip-grid">
+            {BUDGET_FILTER_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={`finance-filter-chip ${budgetFilter === option.id ? "is-active" : ""}`}
+                onClick={() => setBudgetFilter(option.id)}
+              >
+                {option.label}
+                <span>{budgetFilterCounts[option.id] || 0}</span>
+              </button>
+            ))}
+          </div>
+          <div className="finance-chip-grid">
+            <StatusPill tone="default">แสดง {budgetPlanRows.length} จาก {budgetFilterCounts.all || 0} หมวด</StatusPill>
+            <StatusPill tone="default">ใช้อยู่ {formatCurrency(displayExpenseBudgetSatang)}</StatusPill>
+          </div>
+        </div>
+
         <div className="finance-planner-list">
-          {(Array.isArray(budgetPlanSnapshot?.categoryPlans) ? budgetPlanSnapshot.categoryPlans : []).map((plan) => {
+          {budgetPlanRows.length ? budgetPlanRows.map((plan) => {
             const childCategories = childCategoriesByRoot.get(plan.categoryId) || [];
             const childPlanMap = new Map((Array.isArray(plan.childPlans) ? plan.childPlans : []).map((child) => [child.categoryId, child]));
+            const hasChildOverrides = childCategories.some((child) => (childPlanMap.get(child.id)?.appliedLimitSatang || 0) > 0);
+            const childDraftTotalSatang = childCategories.reduce((sum, child) => {
+              const value = String(childBudgetInputs[child.id] || "").trim();
+              if (value) return sum + parseMoneyToSatang(value);
+              return sum + Number(childPlanMap.get(child.id)?.appliedLimitSatang || 0);
+            }, 0);
 
             return (
               <div key={plan.categoryId} className="ui-card finance-panel">
@@ -558,6 +846,19 @@ export default function PlannerScreen() {
                     <div className="finance-chip-grid">
                       <StatusPill tone="default">{plan.behavior}</StatusPill>
                       {plan.manualOverride ? <StatusPill tone="warning">manual</StatusPill> : null}
+                      {plan.needsAttention ? <StatusPill tone="danger">ควรดูต่อ</StatusPill> : null}
+                    </div>
+                  </div>
+
+                  <div className="finance-planner-item-progress">
+                    <div className="finance-progress-bar">
+                      <span style={{ width: `${plan.utilizationPct}%` }} />
+                    </div>
+                    <div className="finance-planner-progress-meta">
+                      <span>กรอบที่กำลังแก้ {formatCurrency(plan.displayedLimitSatang)}</span>
+                      <span>
+                        {plan.overSatang > 0 ? `เกิน ${formatCurrency(plan.overSatang)}` : `เหลือ ${formatCurrency(plan.remainingSatang)}`}
+                      </span>
                     </div>
                   </div>
 
@@ -590,6 +891,19 @@ export default function PlannerScreen() {
                     </label>
 
                     <div className="finance-inline-actions">
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-secondary"
+                        disabled={saving}
+                        onClick={() =>
+                          setRootBudgetInputs((current) => ({
+                            ...current,
+                            [plan.categoryId]: toMoneyInput(plan.suggestedLimitSatang, false),
+                          }))
+                        }
+                      >
+                        ใช้แนะนำ
+                      </button>
                       <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => handleSaveRootBudget(plan)}>
                         บันทึกหมวดหลัก
                       </button>
@@ -607,63 +921,86 @@ export default function PlannerScreen() {
                   </div>
 
                   {childCategories.length ? (
-                    <div className="finance-list">
-                      {childCategories.map((childCategory) => {
-                        const childPlan = childPlanMap.get(childCategory.id) || null;
-                        const childAverageSatang = Number(childPlan?.averageSpendSatang || 0);
-                        const childAppliedSatang = Number(childPlan?.appliedLimitSatang || 0);
-                        const shouldShow = childAverageSatang > 0 || childAppliedSatang > 0 || String(childBudgetInputs[childCategory.id] || "").trim();
-                        if (!shouldShow) return null;
+                    <details className="finance-planner-child-details" open={hasChildOverrides}>
+                      <summary>
+                        หมวดย่อย {childCategories.length} รายการ · override รวม {formatCurrency(childDraftTotalSatang)}
+                      </summary>
+                      <div className="finance-list">
+                        {childCategories.map((childCategory) => {
+                          const childPlan = childPlanMap.get(childCategory.id) || null;
+                          const childAverageSatang = Number(childPlan?.averageSpendSatang || 0);
+                          const childAppliedSatang = Number(childPlan?.appliedLimitSatang || 0);
+                          const shouldShow = childAverageSatang > 0 || childAppliedSatang > 0 || String(childBudgetInputs[childCategory.id] || "").trim();
+                          if (!shouldShow) return null;
 
-                        return (
-                          <div key={childCategory.id} className="finance-row">
-                            <div className="finance-row-main">
-                              <div>
-                                <div className="finance-row-title">{childCategory.name}</div>
-                                <div className="finance-row-meta">
-                                  เฉลี่ย {formatCurrency(childAverageSatang)} · ใช้ไปแล้ว {formatCurrency(childPlan?.spentMonthSatang || 0)}
+                          return (
+                            <div key={childCategory.id} className="finance-row">
+                              <div className="finance-row-main">
+                                <div>
+                                  <div className="finance-row-title">{childCategory.name}</div>
+                                  <div className="finance-row-meta">
+                                    เฉลี่ย {formatCurrency(childAverageSatang)} · ใช้ไปแล้ว {formatCurrency(childPlan?.spentMonthSatang || 0)}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            <div className="finance-inline-actions">
-                              <input
-                                className="ui-input"
-                                inputMode="decimal"
-                                value={childBudgetInputs[childCategory.id] || ""}
-                                onChange={(event) =>
-                                  setChildBudgetInputs((current) => ({ ...current, [childCategory.id]: event.target.value }))
-                                }
-                                placeholder="override"
-                              />
-                              <button
-                                type="button"
-                                className="ui-btn ui-btn-secondary"
-                                disabled={saving || !String(childBudgetInputs[childCategory.id] || "").trim()}
-                                onClick={() => handleSaveChildBudget(plan, childCategory.id)}
-                              >
-                                บันทึก
-                              </button>
-                              {childAppliedSatang > 0 ? (
+                              <div className="finance-inline-actions">
                                 <button
                                   type="button"
                                   className="ui-btn ui-btn-secondary"
-                                  disabled={saving}
-                                  onClick={() => deleteBudgetRow({ categoryId: childCategory.id, monthKey: budgetMonthKey })}
+                                  disabled={saving || !(childAverageSatang > 0)}
+                                  onClick={() =>
+                                    setChildBudgetInputs((current) => ({
+                                      ...current,
+                                      [childCategory.id]: toMoneyInput(childAverageSatang, false),
+                                    }))
+                                  }
                                 >
-                                  ลบ
+                                  ใช้เฉลี่ย
                                 </button>
-                              ) : null}
+                                <input
+                                  className="ui-input"
+                                  inputMode="decimal"
+                                  value={childBudgetInputs[childCategory.id] || ""}
+                                  onChange={(event) =>
+                                    setChildBudgetInputs((current) => ({ ...current, [childCategory.id]: event.target.value }))
+                                  }
+                                  placeholder="override"
+                                />
+                                <button
+                                  type="button"
+                                  className="ui-btn ui-btn-secondary"
+                                  disabled={saving || !String(childBudgetInputs[childCategory.id] || "").trim()}
+                                  onClick={() => handleSaveChildBudget(plan, childCategory.id)}
+                                >
+                                  บันทึก
+                                </button>
+                                {childAppliedSatang > 0 ? (
+                                  <button
+                                    type="button"
+                                    className="ui-btn ui-btn-secondary"
+                                    disabled={saving}
+                                    onClick={() => deleteBudgetRow({ categoryId: childCategory.id, monthKey: budgetMonthKey })}
+                                  >
+                                    ลบ
+                                  </button>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    </details>
                   ) : null}
                 </div>
               </div>
             );
-          })}
+          }) : (
+            <EmptyPanel
+              title="ไม่มีหมวดที่ตรงกับตัวกรองนี้"
+              copy="ลองสลับไปดูหมวดที่มีการใช้งาน หรือดูทั้งหมดเพื่อปรับงบเพิ่ม"
+            />
+          )}
         </div>
       </article>
 
