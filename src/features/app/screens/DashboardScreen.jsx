@@ -215,6 +215,8 @@ export default function DashboardScreen() {
     hasValue(snapshot.net_satang) ||
     pendingReviewCount > 0 ||
     unmatchedCount > 0;
+  const showStarterCardFirst = !hasAccounts || !hasActivity;
+  const hideSummaryMetrics = !hasAccounts && !hasActivity;
   const editCategories = (
     editDraft.kind === "income"
       ? Array.isArray(categories?.income)
@@ -299,8 +301,53 @@ export default function DashboardScreen() {
     setDeleteTarget(null);
   };
 
+  const starterCard = (
+    <article
+      className={[
+        "ui-card",
+        "finance-panel",
+        "finance-dashboard-next",
+        showStarterCardFirst ? "finance-dashboard-next-primary" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <div className="finance-panel-head">
+        <div className="finance-panel-title">{hasAccounts ? (hasActivity ? "ทางลัด" : "เริ่มบันทึก") : "เริ่มต้น"}</div>
+      </div>
+      <div className="finance-dashboard-next-copy">
+        {hasAccounts
+          ? hasActivity
+            ? "เพิ่มรายการวันนี้หรือเปิด Planner เพื่อดูแผนหนี้และเป้าหมาย"
+            : "เริ่มบันทึกรายการแรกหรือวางเป้าหมายการเงินได้เลย"
+          : "สร้างบัญชีก่อนเพื่อเริ่มวางแผนและติดตามการเงิน"}
+      </div>
+      <div className="finance-dashboard-actions">
+        {hasAccounts ? (
+          <>
+            <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateToView("add")}>
+              <PlusCircle size={16} />
+              เพิ่มรายการ
+            </button>
+            <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateToView("planner")}>
+              <Target size={16} />
+              เปิด Planner
+            </button>
+          </>
+        ) : (
+          <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateToView("accounts")}>
+            <CreditCard size={16} />
+            สร้างบัญชี
+          </button>
+        )}
+      </div>
+    </article>
+  );
+
   return (
     <ScreenShell title="ภาพรวม">
+      {showStarterCardFirst ? starterCard : null}
+
       <article className="ui-card finance-panel finance-month-card">
         <div className="finance-month-card-copy">
           <div className="finance-panel-title">เดือนที่กำลังดู</div>
@@ -316,7 +363,9 @@ export default function DashboardScreen() {
         </label>
       </article>
 
-      <article className="ui-card finance-panel finance-dashboard-hero">
+      {!hideSummaryMetrics ? (
+        <>
+          <article className="ui-card finance-panel finance-dashboard-hero">
         <div className="finance-dashboard-hero-head">
           <div>
             <div className="finance-panel-title">ใช้ไป</div>
@@ -351,9 +400,9 @@ export default function DashboardScreen() {
             </div>
           ) : null}
         </div>
-      </article>
+          </article>
 
-      <section className="finance-grid finance-dashboard-planner-grid">
+          <section className="finance-grid finance-dashboard-planner-grid">
         <MetricCard
           label="งบรายวัน"
           value={formatCurrency(displayDailyBudgetSatang)}
@@ -377,39 +426,11 @@ export default function DashboardScreen() {
           hint={displayShortfallSatang > 0 ? "ควรลดงบหรือปรับแผน" : "แผนยังอยู่ในกรอบ"}
           tone={displayShortfallSatang > 0 ? "danger" : "success"}
         />
-      </section>
+          </section>
+        </>
+      ) : null}
 
-      <article className="ui-card finance-panel finance-dashboard-next">
-        <div className="finance-panel-head">
-          <div className="finance-panel-title">{hasAccounts ? (hasActivity ? "ทางลัด" : "เริ่มบันทึก") : "เริ่มต้น"}</div>
-        </div>
-        <div className="finance-dashboard-next-copy">
-          {hasAccounts
-            ? hasActivity
-              ? "เพิ่มรายการวันนี้หรือเปิด planner เพื่อดูแผนหนี้และเป้าหมาย"
-              : "เริ่มบันทึกรายการแรกหรือวางเป้าหมายการเงินได้เลย"
-            : "สร้างบัญชีก่อนเพื่อเริ่มวางแผนและติดตามการเงิน"}
-        </div>
-        <div className="finance-dashboard-actions">
-          {hasAccounts ? (
-            <>
-              <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateToView("add")}>
-                <PlusCircle size={16} />
-                เพิ่มรายการ
-              </button>
-              <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateToView("planner")}>
-                <Target size={16} />
-                เปิด Planner
-              </button>
-            </>
-          ) : (
-            <button type="button" className="ui-btn ui-btn-primary" onClick={() => navigateToView("accounts")}>
-              <CreditCard size={16} />
-              สร้างบัญชี
-            </button>
-          )}
-        </div>
-      </article>
+      {!showStarterCardFirst ? starterCard : null}
 
       {hasCashflow ? (
         <article className="ui-card finance-panel">

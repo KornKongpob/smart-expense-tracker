@@ -197,8 +197,11 @@ export function ToastBar({ toast, onClose }) {
   if (!toast?.message) return null;
 
   return (
-    <div className="finance-toast-wrap">
-      <div className={["ui-toast", "finance-toast-card", `finance-toast-${toast.tone || "info"}`].join(" ")}>
+    <div className="finance-toast-wrap" aria-live="polite" aria-atomic="true">
+      <div
+        role="status"
+        className={["ui-toast", "finance-toast-card", `finance-toast-${toast.tone || "info"}`].join(" ")}
+      >
         <div>
           <div className="finance-toast-label">{getToastLabel(toast.tone)}</div>
           <div className="finance-toast-copy">{toast.message}</div>

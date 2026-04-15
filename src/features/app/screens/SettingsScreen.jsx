@@ -46,6 +46,20 @@ export default function SettingsScreen() {
     (!budgetPlanSnapshot?.hasAppliedBudget && !budgetPlanSnapshot?.usesLegacyMonthlyTarget)
       ? budgetPlanSnapshot?.suggestedExpenseBudgetSatang || 0
       : budgetPlanSnapshot?.activeExpenseBudgetSatang || 0;
+  const plannerSummaryItems = [
+    {
+      label: "รายได้",
+      value: planningConfig?.incomeMode === "fixed" ? "คงที่" : "เฉลี่ยย้อนหลัง",
+    },
+    {
+      label: "เงินออม",
+      value: planningConfig?.savingsMode === "percent" ? "เปอร์เซ็นต์" : "จำนวนเงิน",
+    },
+    {
+      label: "หนี้",
+      value: planningConfig?.debtStrategyMode === "survival" ? "ประคองรายเดือน" : "เน้นปิดหนี้",
+    },
+  ];
 
   return (
     <ScreenShell title="ตั้งค่า">
@@ -61,13 +75,20 @@ export default function SettingsScreen() {
               <input className="ui-input" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
             </label>
 
-            <div className="ui-toast ui-toast--info finance-inline-note">
-              <div className="finance-toast-copy">
-                Planner เป็นจุดตั้งค่าหลักของรายได้ เงินออม และงบรายเดือน
-                <br />
-                รายได้: {planningConfig?.incomeMode === "fixed" ? "คงที่" : "เฉลี่ยย้อนหลัง"} · เงินออม: {planningConfig?.savingsMode === "percent" ? "เปอร์เซ็นต์" : "จำนวนเงิน"} · หนี้: {planningConfig?.debtStrategyMode === "survival" ? "ประคองรายเดือน" : "เน้นปิดหนี้"}
-                <br />
-                งบเดือนนี้: {formatCurrency(plannerBudgetSatang)} · เงินออม {formatCurrency(budgetPlanSnapshot?.savingsReserveSatang || 0)} · หนี้ขั้นต่ำ {formatCurrency(budgetPlanSnapshot?.debtMinimumSatang || 0)}
+            <div className="finance-settings-summary">
+              <div className="finance-settings-summary-copy">
+                Planner เป็นจุดตั้งค่าหลักของรายได้ เงินออม หนี้ และงบรายเดือน
+              </div>
+              <div className="finance-settings-summary-grid">
+                {plannerSummaryItems.map((item) => (
+                  <div key={item.label} className="finance-settings-summary-pill">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="finance-settings-summary-footnote">
+                งบเดือนนี้ {formatCurrency(plannerBudgetSatang)} · เงินออม {formatCurrency(budgetPlanSnapshot?.savingsReserveSatang || 0)} · หนี้ขั้นต่ำ {formatCurrency(budgetPlanSnapshot?.debtMinimumSatang || 0)}
               </div>
             </div>
 
@@ -102,9 +123,9 @@ export default function SettingsScreen() {
                   <span className="finance-category-icon finance-account-icon">
                     <Target size={18} />
                   </span>
-                  <div>
+                  <div className="finance-settings-row-copy">
                     <div className="finance-row-title">วางแผนการเงิน</div>
-                    <div className="finance-row-meta">ตั้งค่ารายได้ เงินออม หนี้ และ budget รายหมวดจากหน้าหลักเดียว</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">ตั้งค่ารายได้ เงินออม หนี้ และ budget รายหมวดจากหน้าหลักเดียว</div>
                   </div>
                 </div>
 
@@ -125,9 +146,9 @@ export default function SettingsScreen() {
                   <span className="finance-category-icon finance-account-icon">
                     <FolderTree size={18} />
                   </span>
-                  <div>
+                  <div className="finance-settings-row-copy">
                     <div className="finance-row-title">หมวดหมู่</div>
-                    <div className="finance-row-meta">จัดการหมวดหลักและหมวดย่อย</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">จัดการหมวดหลักและหมวดย่อย</div>
                   </div>
                 </div>
 

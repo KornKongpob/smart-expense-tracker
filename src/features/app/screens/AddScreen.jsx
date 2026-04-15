@@ -25,6 +25,21 @@ const MANUAL_KIND_OPTIONS = [
   { id: "transfer", label: "โอน", icon: Repeat2 },
 ];
 
+const SCAN_FLOW_STEPS = [
+  {
+    title: "เลือกภาพหรือ PDF",
+    copy: "อัปโหลดได้หลายไฟล์ในครั้งเดียวเพื่อคิวงานต่อเนื่อง",
+  },
+  {
+    title: "ตรวจต่อใน Inbox",
+    copy: "เช็กชื่อร้าน หมวด และยอดที่ระบบอ่านได้ก่อนบันทึก",
+  },
+  {
+    title: "สรุปเข้าบัญชีทันที",
+    copy: "ยืนยันแล้วรายการจะไปโผล่บนภาพรวมและแผนการเงินต่อทันที",
+  },
+];
+
 function defaultDraft(accounts) {
   const firstAccountId = accounts[0] ? String(accounts[0].id) : "";
 
@@ -95,8 +110,11 @@ export default function AddScreen() {
   const fileInputRef = useRef(null);
 
   const hasAccounts = accounts.length > 0;
-  const queueCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
+  const queuedScanCount = Number(queue.scans.length || 0);
+  const queuedManualCount = Number(queue.manual.length || 0);
+  const queueCount = queuedScanCount + queuedManualCount;
   const activeUploads = (Array.isArray(scanUploads) ? scanUploads : []).slice(0, 6);
+  const canOpenInbox = queuedScanCount > 0 || activeUploads.some((upload) => upload.stage === "done");
   const kindCategories = (
     draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense
   ).filter((category) => category?.isHidden !== true);
@@ -293,83 +311,136 @@ export default function AddScreen() {
       </div>
 
       {mode === "scan" ? (
-        <section className="finance-grid">
+        <section className="finance-grid finance-add-scan-grid">
           <article className="ui-card finance-panel finance-dropzone-panel">
             <div className="finance-dropzone">
-              <div className="finance-dropzone-icon">
-                <FileUp size={24} />
-              </div>
-              <div className="finance-panel-title">สแกนใบเสร็จหรือสลิป</div>
-              <div className="finance-dropzone-actions">
-                <button
-                  type="button"
-                  className="ui-btn ui-btn-primary"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={saving}
-                >
-                  เลือกไฟล์
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  hidden
-                  multiple
-                  accept="image/*,application/pdf"
-                  onChange={async (event) => {
-                    const files = Array.from(event.target.files || []);
-                    if (!files.length) return;
-                    await uploadScanFiles(files);
-                    event.target.value = "";
-                  }}
-                />
-              </div>
-
-              {queueCount ? (
-                <div className="finance-chip-grid">
-                  {queue.scans.length ? <StatusPill tone="warning">สแกนรอ {queue.scans.length}</StatusPill> : null}
-                  {queue.manual.length ? <StatusPill tone="warning">ฟอร์มรอ {queue.manual.length}</StatusPill> : null}
-                </div>
-              ) : null}
-
-              {activeUploads.length ? (
-                <div className="finance-upload-list">
-                  {activeUploads.map((upload) => (
-                    <div key={upload.id} className="finance-upload-row">
-                      <div className="finance-upload-copy">
-                        <div className="finance-upload-title">{upload.fileName}</div>
-                        <div className="finance-upload-meta">{upload.detailText || upload.label}</div>
-                      </div>
-
-                      <div className="finance-upload-side">
-                        <StatusPill tone={getUploadTone(upload.stage)}>
-                          {upload.badgeText || `${upload.progress}%`}
-                        </StatusPill>
-                        <div className="finance-upload-progress" aria-hidden="true">
-                          <span style={{ width: `${upload.progress}%` }} />
-                        </div>
-                        {upload.stage === "error" ? (
-                          <button
-                            type="button"
-                            className="ui-btn ui-btn-secondary finance-upload-action"
-                            onClick={() => retryScanUpload(upload.id)}
-                            disabled={saving}
-                          >
-                            ลองอีกครั้ง
-                          </button>
-                        ) : null}
-                        {upload.stage === "done" ? (
-                          <button
-                            type="button"
-                            className="ui-btn ui-btn-secondary finance-upload-action"
-                            onClick={() => navigateToView("inbox")}
-                          >
-                            เปิด Inbox
-                          </button>
-                        ) : null}
-                        {upload.error ? <div className="finance-upload-error">{upload.error}</div> : null}
-                      </div>
+              <div className="finance-dropzone-main">
+                <div className="finance-dropzone-header">
+                  <div className="finance-dropzone-icon">
+                    <FileUp size={24} />
+                  </div>
+                  <div className="finance-dropzone-copy-block">
+                    <div className="finance-panel-title">สแกนใบเสร็จหรือสลิป</div>
+                    <div className="finance-panel-copy finance-dropzone-copy">
+                      อัปโหลดภาพหรือ PDF แล้วระบบจะส่งไปที่ Inbox เพื่อให้คุณตรวจยอดและหมวดอีกครั้งก่อนบันทึก
                     </div>
-                  ))}
+                  </div>
+                </div>
+
+                <div className="finance-dropzone-actions">
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-primary"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={saving}
+                  >
+                    เลือกไฟล์
+                  </button>
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-secondary"
+                    onClick={() => setMode("manual")}
+                    disabled={saving}
+                  >
+                    กรอกเองตอนนี้
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    hidden
+                    multiple
+                    accept="image/*,application/pdf"
+                    onChange={async (event) => {
+                      const files = Array.from(event.target.files || []);
+                      if (!files.length) return;
+                      await uploadScanFiles(files);
+                      event.target.value = "";
+                    }}
+                  />
+                </div>
+
+                {queueCount ? (
+                  <div className="finance-chip-grid">
+                    {queuedScanCount ? <StatusPill tone="warning">สแกนรอ {queuedScanCount}</StatusPill> : null}
+                    {queuedManualCount ? <StatusPill tone="warning">ฟอร์มรอ {queuedManualCount}</StatusPill> : null}
+                  </div>
+                ) : null}
+
+                {activeUploads.length ? (
+                  <div className="finance-upload-list">
+                    {activeUploads.map((upload) => (
+                      <div key={upload.id} className="finance-upload-row">
+                        <div className="finance-upload-copy">
+                          <div className="finance-upload-title">{upload.fileName}</div>
+                          <div className="finance-upload-meta">{upload.detailText || upload.label}</div>
+                        </div>
+
+                        <div className="finance-upload-side">
+                          <StatusPill tone={getUploadTone(upload.stage)}>
+                            {upload.badgeText || `${upload.progress}%`}
+                          </StatusPill>
+                          <div className="finance-upload-progress" aria-hidden="true">
+                            <span style={{ width: `${upload.progress}%` }} />
+                          </div>
+                          {upload.stage === "error" ? (
+                            <button
+                              type="button"
+                              className="ui-btn ui-btn-secondary finance-upload-action"
+                              onClick={() => retryScanUpload(upload.id)}
+                              disabled={saving}
+                            >
+                              ลองอีกครั้ง
+                            </button>
+                          ) : null}
+                          {upload.stage === "done" ? (
+                            <button
+                              type="button"
+                              className="ui-btn ui-btn-secondary finance-upload-action"
+                              onClick={() => navigateToView("inbox")}
+                            >
+                              เปิด Inbox
+                            </button>
+                          ) : null}
+                          {upload.error ? <div className="finance-upload-error">{upload.error}</div> : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {!activeUploads.length ? (
+                <div className="finance-dropzone-foot">
+                  <ol className="finance-dropzone-steps" aria-label="ขั้นตอนถัดไปหลังอัปโหลด">
+                    {SCAN_FLOW_STEPS.map((step, index) => (
+                      <li key={step.title} className="finance-dropzone-step">
+                        <span className="finance-dropzone-step-index" aria-hidden="true">
+                          {index + 1}
+                        </span>
+                        <span className="finance-dropzone-step-copy">
+                          <span className="finance-dropzone-step-title">{step.title}</span>
+                          <span className="finance-dropzone-step-detail">{step.copy}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+
+                  <div className="ui-toast ui-toast--info finance-inline-note finance-dropzone-note">
+                    <div className="finance-toast-copy">
+                      {canOpenInbox
+                        ? "มีรายการสแกนพร้อมตรวจต่อแล้ว เปิด Inbox เพื่อตรวจความถูกต้องก่อนบันทึก"
+                        : "รูปที่เห็นยอดเต็มใบจะอ่านได้แม่นขึ้น และถ้ายังไม่มีเอกสารตอนนี้ก็สลับไปกรอกเองได้ทันที"}
+                    </div>
+                    {canOpenInbox ? (
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn-secondary"
+                        onClick={() => navigateToView("inbox")}
+                      >
+                        เปิด Inbox
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </div>

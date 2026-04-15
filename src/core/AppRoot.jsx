@@ -78,6 +78,16 @@ const SCREEN_TITLES = {
   settings: "Settings | Smart Expense",
 };
 
+const SCREEN_HEADER_LABELS = {
+  dashboard: "ภาพรวม",
+  inbox: "กล่องรับ",
+  add: "เพิ่มรายการ",
+  accounts: "บัญชี",
+  categories: "หมวดหมู่",
+  planner: "วางแผนการเงิน",
+  settings: "ตั้งค่า",
+};
+
 function useStandaloneMode() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -205,6 +215,7 @@ function SignedInApp() {
   const headerRef = useRef(null);
   const mainRef = useRef(null);
   const canonicalPath = getCanonicalPathForPathname(pathname);
+  const activeScreenLabel = SCREEN_HEADER_LABELS[view] || SCREEN_HEADER_LABELS.dashboard;
 
   useStandaloneMode();
   useAppServiceWorker();
@@ -398,7 +409,10 @@ function SignedInApp() {
         <header ref={headerRef} className="finance-app-header">
           <div className="finance-app-page">
             <div className="finance-app-header-surface">
-              <div className="finance-brand">Smart Expense</div>
+              <div className="finance-brand-block">
+                <div className="finance-brand">Smart Expense</div>
+                <div className="finance-brand-context">{activeScreenLabel}</div>
+              </div>
               <div className="finance-header-state">
                 {updateReady ? (
                   <button
