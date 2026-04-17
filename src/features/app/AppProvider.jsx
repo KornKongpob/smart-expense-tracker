@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -45,6 +46,15 @@ import {
   normalizeDebtPlans,
   normalizeFinancialGoals,
 } from "./plannerState.js";
+import {
+  buildBudgetHintCompat,
+  buildBudgetPlanSnapshotCompat,
+  getActivePlannerScenarioKey,
+  buildPlannerDecisionSummary,
+  buildPlannerMonthlyPlanState,
+  normalizePlannerMonthlyPlanItems,
+  normalizePlannerMonthlyPlans,
+} from "./plannerMonthlyPlanState.js";
 import { normalizeAccountBalanceRows } from "./accountBalanceState.js";
 import { createScanUploadEntry, patchScanUploadEntry } from "./scanUploadState.js";
 import {
@@ -242,6 +252,11 @@ export function AppProvider({ children }) {
   const [debtPlans, setDebtPlans] = useState([]);
   const [budgetRows, setBudgetRows] = useState([]);
   const [planningTransactions, setPlanningTransactions] = useState([]);
+  const [plannerStorage, setPlannerStorage] = useState({
+    unavailable: false,
+    plans: [],
+    items: [],
+  });
   const [scanDocuments, setScanDocuments] = useState([]);
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [dashboardSnapshot, setDashboardSnapshot] = useState(null);
@@ -325,6 +340,7 @@ export function AppProvider({ children }) {
       setDebtPlans([]);
       setBudgetRows([]);
       setPlanningTransactions([]);
+      setPlannerStorage({ unavailable: false, plans: [], items: [] });
       setScanDocuments([]);
       setRecentTransactions([]);
       setScanUploads([]);
@@ -599,78 +615,269 @@ export function AppProvider({ children }) {
     return key || "บันทึกงบไม่สำเร็จ";
   }
 
+  function buildPlannerRange(monthKey) {
+    const currentMonthValue = todayMonth();
+    const planningStartMonth = compareMonthKeys(monthKey, currentMonthValue) <= 0
+      ? monthKey
+      : currentMonthValue;
+    const planningEndMonth = compareMonthKeys(monthKey, currentMonthValue) >= 0
+      ? monthKey
+      : currentMonthValue;
+
+    return {
+      planningRangeStart: monthStartIso(shiftMonthKey(planningStartMonth, -18)),
+      planningRangeEnd: monthEndIso(planningEndMonth),
+    };
+  }
+
+  function applyPlannerSliceState(slice) {
+    if (!slice) return;
+    setProfile(slice.profile || null);
+    setCategories(slice.categories || { expense: [], income: [] });
+    setCategoryPreferenceRows(Array.isArray(slice.categoryPreferenceRows) ? slice.categoryPreferenceRows : []);
+    setFinancialGoals(normalizeFinancialGoals(slice.financialGoals || []));
+    setDebtPlans(normalizeDebtPlans(slice.debtPlans || []));
+    setBudgetRows(normalizeBudgetRows(slice.budgetRows || []));
+    setPlanningTransactions(Array.isArray(slice.planningTransactions) ? slice.planningTransactions : []);
+    setPlannerStorage(
+      slice.plannerStorage || {
+        unavailable: false,
+        plans: [],
+        items: [],
+      },
+    );
+  }
+
+  async function fetchPlannerSlice({ monthKey = selectedMonth, nextProfile = null } = {}) {
+    if (!supabase || !session) return null;
+
+    const safeMonthKey = sanitizeMonthKey(monthKey || selectedMonth);
+    const { planningRangeStart, planningRangeEnd } = buildPlannerRange(safeMonthKey);
+
+    const [
+      profileResult,
+      categoriesResult,
+      categoryPreferencesResult,
+      goalsResult,
+      debtPlansResult,
+      budgetsResult,
+      planningTransactionsResult,
+      plannerMonthlyPlansResult,
+      plannerMonthlyPlanItemsResult,
+    ] = await Promise.all([
+      nextProfile
+        ? Promise.resolve({ data: nextProfile, error: null })
+        : supabase.from("profiles").select("*").eq("user_id", session.user.id).single(),
+      supabase
+        .from("categories")
+        .select("id, user_id, is_system, kind, name, icon, color, parent_id, sort_order")
+        .order("sort_order", { ascending: true }),
+      fetchCategoryPreferencesSafe(),
+      fetchOptionalPlannerRows(
+        supabase
+          .from("financial_goals")
+          .select(
+            "id, legacy_id, name, target_amount_satang, current_amount_satang, target_date, monthly_contribution_satang, linked_account_id, status, created_at",
+          )
+          .order("target_date", { ascending: true, nullsFirst: false }),
+        "financial_goals",
+      ),
+      fetchOptionalPlannerRows(
+        supabase
+          .from("debt_plans")
+          .select(
+            "id, legacy_id, account_id, current_balance_satang, minimum_payment_satang, target_payment_satang, apr_bps, due_day, payoff_target_date, status, note, created_at",
+          )
+          .order("created_at", { ascending: true }),
+        "debt_plans",
+      ),
+      fetchOptionalPlannerRows(
+        supabase
+          .from("budgets")
+          .select(
+            "id, user_id, month_key, category_id, limit_satang, alert_pct, source, manual_override, created_at, updated_at",
+          )
+          .order("month_key", { ascending: false })
+          .order("category_id", { ascending: true }),
+        "budgets",
+      ),
+      supabase
+        .from("transactions")
+        .select("id, kind, category_id, amount_satang, date, is_split_parent, is_split_child")
+        .eq("user_id", session.user.id)
+        .eq("status", "posted")
+        .gte("date", planningRangeStart)
+        .lte("date", planningRangeEnd)
+        .order("date", { ascending: false }),
+      fetchOptionalPlannerRows(
+        supabase
+          .from("planner_monthly_plans")
+          .select("*")
+          .eq("month_key", safeMonthKey)
+          .order("scenario_key", { ascending: true }),
+        "planner_monthly_plans",
+      ),
+      fetchOptionalPlannerRows(
+        supabase
+          .from("planner_monthly_plan_items")
+          .select("*")
+          .eq("month_key", safeMonthKey)
+          .order("scenario_key", { ascending: true })
+          .order("category_id", { ascending: true }),
+        "planner_monthly_plan_items",
+      ),
+    ]);
+
+    if (profileResult.error) throw profileResult.error;
+    if (categoriesResult.error) throw categoriesResult.error;
+    if (categoryPreferencesResult.error) throw categoryPreferencesResult.error;
+    if (goalsResult.error) throw goalsResult.error;
+    if (debtPlansResult.error) throw debtPlansResult.error;
+    if (budgetsResult.error) throw budgetsResult.error;
+    if (planningTransactionsResult.error) throw planningTransactionsResult.error;
+    if (plannerMonthlyPlansResult.error) throw plannerMonthlyPlansResult.error;
+    if (plannerMonthlyPlanItemsResult.error) throw plannerMonthlyPlanItemsResult.error;
+
+    const nextCategories = mergeCategoryState(
+      categoriesResult.data || [],
+      categoryPreferencesResult.data || [],
+    );
+    const nextProfileData = profileResult.data || nextProfile || null;
+    const nextDebtPlans = normalizeDebtPlans(debtPlansResult.data || []);
+    const nextBudgetRows = normalizeBudgetRows(budgetsResult.data || []);
+    const nextPlanningTransactions = Array.isArray(planningTransactionsResult.data)
+      ? planningTransactionsResult.data
+      : [];
+    const legacyBudgetSnapshot = buildBudgetPlanSnapshot({
+      profile: nextProfileData,
+      categories: nextCategories,
+      debtPlans: nextDebtPlans,
+      budgetRows: nextBudgetRows,
+      transactions: nextPlanningTransactions,
+      monthValue: safeMonthKey,
+      today: todayDate(),
+    });
+    const nextPlannerStorage = {
+      unavailable: plannerMonthlyPlansResult.unavailable === true || plannerMonthlyPlanItemsResult.unavailable === true,
+      plans: normalizePlannerMonthlyPlans(plannerMonthlyPlansResult.data || []),
+      items: normalizePlannerMonthlyPlanItems(plannerMonthlyPlanItemsResult.data || []),
+    };
+    const monthlyPlan = buildPlannerMonthlyPlanState({
+      profile: nextProfileData,
+      categories: nextCategories,
+      debtPlans: nextDebtPlans,
+      budgetRows: nextBudgetRows,
+      transactions: nextPlanningTransactions,
+      monthValue: safeMonthKey,
+      today: todayDate(),
+      storedPlans: nextPlannerStorage.plans,
+      storedItems: nextPlannerStorage.items,
+      legacySnapshot: legacyBudgetSnapshot,
+    });
+
+    return {
+      profile: nextProfileData,
+      categories: nextCategories,
+      categoryPreferenceRows: categoryPreferencesResult.data || [],
+      financialGoals: goalsResult.data || [],
+      debtPlans: nextDebtPlans,
+      budgetRows: nextBudgetRows,
+      planningTransactions: nextPlanningTransactions,
+      plannerStorage: nextPlannerStorage,
+      monthlyPlan,
+    };
+  }
+
+  async function syncPlannerMonthlyPlanRows(monthKey, monthlyPlan) {
+    if (!supabase || !session || !monthlyPlan?.syncPayload) return null;
+
+    const safeMonthKey = sanitizeMonthKey(monthKey || selectedMonth);
+    const planRows = (Array.isArray(monthlyPlan.syncPayload.plans) ? monthlyPlan.syncPayload.plans : []).map((row) => ({
+      ...row,
+      user_id: session.user.id,
+      month_key: safeMonthKey,
+    }));
+
+    if (!planRows.length) return null;
+
+    const { data: upsertedPlans, error: planError } = await supabase
+      .from("planner_monthly_plans")
+      .upsert(planRows, { onConflict: "user_id,month_key,scenario_key" })
+      .select("*");
+    if (planError) throw planError;
+
+    const planIdByScenario = new Map(
+      normalizePlannerMonthlyPlans(upsertedPlans || []).map((row) => [row.scenario_key, row.id]),
+    );
+    const itemRows = (Array.isArray(monthlyPlan.syncPayload.items) ? monthlyPlan.syncPayload.items : []).map((row) => ({
+      ...row,
+      user_id: session.user.id,
+      month_key: safeMonthKey,
+      plan_id: planIdByScenario.get(row.scenario_key) || null,
+    }));
+
+    const { data: upsertedItems, error: itemError } = await supabase
+      .from("planner_monthly_plan_items")
+      .upsert(itemRows, { onConflict: "user_id,month_key,scenario_key,category_id" })
+      .select("*");
+    if (itemError) throw itemError;
+
+    const nextPlannerStorage = {
+      unavailable: false,
+      plans: normalizePlannerMonthlyPlans(upsertedPlans || []),
+      items: normalizePlannerMonthlyPlanItems(upsertedItems || []),
+    };
+    setPlannerStorage(nextPlannerStorage);
+    return nextPlannerStorage;
+  }
+
+  async function refreshPlannerState(monthKey = selectedMonth, options = {}) {
+    if (!supabase || !session) return null;
+
+    const safeMonthKey = sanitizeMonthKey(monthKey || selectedMonth);
+    if (options.withLoading === true) {
+      startTransition(() => setLoading(true));
+    }
+
+    try {
+      const slice = await fetchPlannerSlice({
+        monthKey: safeMonthKey,
+        nextProfile: options.nextProfile || null,
+      });
+      applyPlannerSliceState(slice);
+      if (!slice?.plannerStorage?.unavailable && options.skipSync !== true) {
+        await syncPlannerMonthlyPlanRows(safeMonthKey, slice.monthlyPlan);
+      }
+      return slice;
+    } finally {
+      if (options.withLoading === true) {
+        startTransition(() => setLoading(false));
+      }
+    }
+  }
+
   async function refreshAll(nextProfile = null) {
     if (!supabase || !session) return;
 
     startTransition(() => setLoading(true));
     try {
       const monthDate = monthToDate(selectedMonth);
-      const currentMonthValue = todayMonth();
-      const planningStartMonth = compareMonthKeys(selectedMonth, currentMonthValue) <= 0
-        ? selectedMonth
-        : currentMonthValue;
-      const planningEndMonth = compareMonthKeys(selectedMonth, currentMonthValue) >= 0
-        ? selectedMonth
-        : currentMonthValue;
-      const planningRangeStart = monthStartIso(shiftMonthKey(planningStartMonth, -18));
-      const planningRangeEnd = monthEndIso(planningEndMonth);
       const [
-        profileResult,
-        categoriesResult,
-        categoryPreferencesResult,
+        plannerSlice,
         accountsResult,
-        goalsResult,
-        debtPlansResult,
-        budgetsResult,
         scansResult,
         snapshotResult,
         accountBalanceResult,
         cashflowResult,
         transactionsResult,
-        planningTransactionsResult,
       ] = await Promise.all([
-        nextProfile
-          ? Promise.resolve({ data: nextProfile, error: null })
-          : supabase.from("profiles").select("*").eq("user_id", session.user.id).single(),
-        supabase
-          .from("categories")
-          .select("id, user_id, is_system, kind, name, icon, color, parent_id, sort_order")
-          .order("sort_order", { ascending: true }),
-        fetchCategoryPreferencesSafe(),
+        fetchPlannerSlice({ monthKey: selectedMonth, nextProfile }),
         supabase
           .from("accounts")
           .select(
             "id, legacy_id, name, type, institution_label, currency, color, icon, opening_balance_satang, credit_limit_satang, last4, last6, digits_masked, statement_day, due_day, created_at",
           )
           .order("created_at", { ascending: true }),
-        fetchOptionalPlannerRows(
-          supabase
-            .from("financial_goals")
-            .select(
-              "id, legacy_id, name, target_amount_satang, current_amount_satang, target_date, monthly_contribution_satang, linked_account_id, status, created_at",
-            )
-            .order("target_date", { ascending: true, nullsFirst: false }),
-          "financial_goals",
-        ),
-        fetchOptionalPlannerRows(
-          supabase
-            .from("debt_plans")
-            .select(
-              "id, legacy_id, account_id, current_balance_satang, minimum_payment_satang, target_payment_satang, apr_bps, due_day, payoff_target_date, status, note, created_at",
-            )
-            .order("created_at", { ascending: true }),
-          "debt_plans",
-        ),
-        fetchOptionalPlannerRows(
-          supabase
-            .from("budgets")
-            .select(
-              "id, user_id, month_key, category_id, limit_satang, alert_pct, source, manual_override, created_at, updated_at",
-            )
-            .order("month_key", { ascending: false })
-            .order("category_id", { ascending: true }),
-          "budgets",
-        ),
         supabase
           .from("scan_documents")
           .select("*")
@@ -692,44 +899,25 @@ export function AppProvider({ children }) {
           .order("date", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(24),
-        supabase
-          .from("transactions")
-          .select("id, kind, category_id, amount_satang, date, is_split_parent, is_split_child")
-          .eq("user_id", session.user.id)
-          .eq("status", "posted")
-          .gte("date", planningRangeStart)
-          .lte("date", planningRangeEnd)
-          .order("date", { ascending: false }),
       ]);
 
-      if (profileResult.error) throw profileResult.error;
-      if (categoriesResult.error) throw categoriesResult.error;
-      if (categoryPreferencesResult.error) throw categoryPreferencesResult.error;
       if (accountsResult.error) throw accountsResult.error;
-      if (goalsResult.error) throw goalsResult.error;
-      if (debtPlansResult.error) throw debtPlansResult.error;
-      if (budgetsResult.error) throw budgetsResult.error;
       if (scansResult.error) throw scansResult.error;
       if (snapshotResult.error) throw snapshotResult.error;
       if (accountBalanceResult.error) throw accountBalanceResult.error;
       if (cashflowResult.error) throw cashflowResult.error;
       if (transactionsResult.error) throw transactionsResult.error;
-      if (planningTransactionsResult.error) throw planningTransactionsResult.error;
+      applyPlannerSliceState(plannerSlice);
+      if (!plannerSlice?.plannerStorage?.unavailable) {
+        await syncPlannerMonthlyPlanRows(selectedMonth, plannerSlice.monthlyPlan);
+      }
 
-      const nextCategories = mergeCategoryState(
-        categoriesResult.data || [],
-        categoryPreferencesResult.data || [],
+      const nextSnapshot = applyCategoryPresentationToSnapshot(
+        snapshotResult.data || null,
+        plannerSlice?.categories || { expense: [], income: [] },
       );
-      const nextSnapshot = applyCategoryPresentationToSnapshot(snapshotResult.data || null, nextCategories);
 
-      setProfile(profileResult.data || nextProfile || null);
-      setCategories(nextCategories);
-      setCategoryPreferenceRows(Array.isArray(categoryPreferencesResult.data) ? categoryPreferencesResult.data : []);
       setAccounts(Array.isArray(accountsResult.data) ? accountsResult.data : []);
-      setFinancialGoals(normalizeFinancialGoals(goalsResult.data || []));
-      setDebtPlans(normalizeDebtPlans(debtPlansResult.data || []));
-      setBudgetRows(normalizeBudgetRows(budgetsResult.data || []));
-      setPlanningTransactions(Array.isArray(planningTransactionsResult.data) ? planningTransactionsResult.data : []);
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
       setRecentTransactions(
         sortRuntimeTransactionsNewestFirst(
@@ -832,7 +1020,7 @@ export function AppProvider({ children }) {
 
       if (error) throw error;
       setProfile(data);
-      await refreshAll(data);
+      await refreshPlannerState(selectedMonth, { nextProfile: data });
       pushToast("success", "บันทึกโปรไฟล์แล้ว");
     } finally {
       setSaving(false);
@@ -853,7 +1041,7 @@ export function AppProvider({ children }) {
 
       if (error) throw error;
       setProfile(data);
-      await refreshAll(data);
+      await refreshPlannerState(selectedMonth, { nextProfile: data });
       pushToast("success", "บันทึกแผนรายรับแล้ว");
       return data;
     } finally {
@@ -873,7 +1061,7 @@ export function AppProvider({ children }) {
         categoryId: targetId,
         budgetBehavior: normalizedBehavior,
       });
-      await refreshAll();
+      await refreshPlannerState();
       pushToast("success", "บันทึกประเภทงบของหมวดแล้ว");
       return nextPreference;
     } catch (error) {
@@ -955,7 +1143,7 @@ export function AppProvider({ children }) {
       const { error } = await query;
       if (error) throw error;
 
-      await refreshAll();
+      await refreshPlannerState(monthKey);
       pushToast("success", "บันทึกงบรายเดือนแล้ว");
       return true;
     } catch (error) {
@@ -996,7 +1184,7 @@ export function AppProvider({ children }) {
       const { error } = await query;
       if (error) throw error;
 
-      await refreshAll();
+      await refreshPlannerState(safeMonthKey);
       pushToast("success", rootId === targetCategoryId ? "ลบงบของหมวดแล้ว" : "ลบ child override แล้ว");
       return true;
     } finally {
@@ -1005,7 +1193,8 @@ export function AppProvider({ children }) {
   }
 
   async function applySuggestedBudgets() {
-    if (!supabase || !session) return false;
+    return applyPlannerPlan({ scenarioKey: "baseline" });
+    /*
 
     const safeMonthKey = sanitizeMonthKey(selectedMonth);
     const { categoryMap } = buildRuntimeCategoryIndex();
@@ -1065,8 +1254,256 @@ export function AppProvider({ children }) {
         if (insertError) throw insertError;
       }
 
-      await refreshAll();
+      await refreshPlannerState(safeMonthKey);
       pushToast("success", "นำงบแนะนำมาใช้แล้ว");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+    */
+  }
+
+  function getPlannerScenario(scenarioKey = "baseline") {
+    return (Array.isArray(plannerMonthlyPlan?.scenarios) ? plannerMonthlyPlan.scenarios : []).find(
+      (scenario) => scenario.id === scenarioKey,
+    ) || null;
+  }
+
+  function buildPlannerRootRowsForScenario(scenarioKey = "baseline") {
+    const safeMonthKey = sanitizeMonthKey(selectedMonth);
+    const scenario = getPlannerScenario(scenarioKey);
+    if (!scenario) return { rootRows: [], rootCategoryIds: [], safeMonthKey, scenario: null };
+
+    const { categoryMap } = buildRuntimeCategoryIndex();
+    const childRows = normalizeBudgetRows(budgetRows).filter((row) => {
+      if (row.month_key !== safeMonthKey) return false;
+      return getBudgetRootCategoryId(row.category_id, categoryMap) !== row.category_id;
+    });
+    const childTotalsByRoot = childRows.reduce((map, row) => {
+      const rootId = getBudgetRootCategoryId(row.category_id, categoryMap);
+      map.set(rootId, (map.get(rootId) || 0) + Number(row.limit_satang || 0));
+      return map;
+    }, new Map());
+
+    const rootRows = scenario.items
+      .map((item) => {
+        const childTotalSatang = Number(childTotalsByRoot.get(item.categoryId) || 0);
+        const suggestedLimitSatang = item.lockedByUser
+          ? Number(item.currentLimitSatang || item.recommendedLimitSatang || 0)
+          : Number(item.recommendedLimitSatang || 0);
+        const nextLimitSatang = Math.max(childTotalSatang, suggestedLimitSatang);
+        if (nextLimitSatang <= 0) return null;
+        return {
+          user_id: session.user.id,
+          month_key: safeMonthKey,
+          category_id: item.categoryId,
+          limit_satang: nextLimitSatang,
+          alert_pct: Number(item.alertPct || DEFAULT_BUDGET_ALERT_PCT),
+          source: item.lockedByUser ? "manual" : "suggested",
+          manual_override: item.lockedByUser === true,
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      rootRows,
+      rootCategoryIds: scenario.items.map((item) => item.categoryId),
+      safeMonthKey,
+      scenario,
+    };
+  }
+
+  async function persistPlannerItemDecision(item, scenarioKey, overrides = {}) {
+    if (!supabase || !session || plannerStorage.unavailable === true) return null;
+
+    const safeMonthKey = sanitizeMonthKey(selectedMonth);
+    const syncedStorage = await syncPlannerMonthlyPlanRows(safeMonthKey, plannerMonthlyPlan);
+    const planId = (syncedStorage?.plans || []).find((row) => row.scenario_key === scenarioKey)?.id || null;
+    const { error } = await supabase.from("planner_monthly_plan_items").upsert(
+      {
+        user_id: session.user.id,
+        plan_id: planId,
+        month_key: safeMonthKey,
+        scenario_key: scenarioKey,
+        category_id: item.categoryId,
+        behavior: item.behavior,
+        baseline_spend_satang: item.baselineSpendSatang,
+        recent_spend_satang: item.recentSpendSatang,
+        current_pace_satang: item.currentPaceSatang,
+        volatility_score: item.volatilityScore,
+        recommended_limit_satang: item.recommendedLimitSatang,
+        delta_satang: item.deltaSatang,
+        confidence_score: item.confidenceScore,
+        reason_codes: item.reasonCodes,
+        locked_by_user: item.lockedByUser === true,
+        decision_status: item.decisionStatus || "pending",
+        applied_limit_satang: item.currentLimitSatang,
+        locked_limit_satang: item.lockedLimitSatang,
+        metadata: {
+          label: item.name,
+          projectedMonthEndSatang: item.projectedMonthEndSatang,
+          currentSpentSatang: item.currentSpentSatang,
+        },
+        ...overrides,
+      },
+      { onConflict: "user_id,month_key,scenario_key,category_id" },
+    );
+    if (error) throw error;
+    return true;
+  }
+
+  async function applyPlannerPlan({ scenarioKey = "baseline" } = {}) {
+    if (!supabase || !session) return false;
+
+    const { rootRows, rootCategoryIds, safeMonthKey, scenario } = buildPlannerRootRowsForScenario(scenarioKey);
+    if (!scenario) return false;
+
+    setSaving(true);
+    try {
+      if (rootCategoryIds.length) {
+        const { error: deleteError } = await supabase
+          .from("budgets")
+          .delete()
+          .eq("user_id", session.user.id)
+          .eq("month_key", safeMonthKey)
+          .in("category_id", rootCategoryIds);
+        if (deleteError) throw deleteError;
+      }
+
+      if (rootRows.length) {
+        const { error: insertError } = await supabase
+          .from("budgets")
+          .upsert(rootRows, { onConflict: "user_id,month_key,category_id" });
+        if (insertError) throw insertError;
+      }
+
+      if (plannerStorage.unavailable !== true) {
+        await syncPlannerMonthlyPlanRows(safeMonthKey, plannerMonthlyPlan);
+        const { error: resetPlanError } = await supabase
+          .from("planner_monthly_plans")
+          .update({ status: "draft" })
+          .eq("user_id", session.user.id)
+          .eq("month_key", safeMonthKey)
+          .neq("scenario_key", scenarioKey);
+        if (resetPlanError) throw resetPlanError;
+
+        const { error: planError } = await supabase
+          .from("planner_monthly_plans")
+          .update({ status: "applied" })
+          .eq("user_id", session.user.id)
+          .eq("month_key", safeMonthKey)
+          .eq("scenario_key", scenarioKey);
+        if (planError) throw planError;
+
+        for (const item of scenario.items) {
+          await persistPlannerItemDecision(item, scenarioKey, {
+            decision_status: item.lockedByUser ? item.decisionStatus || "accepted" : "accepted",
+            locked_by_user: item.lockedByUser === true,
+            locked_limit_satang: item.lockedByUser ? item.currentLimitSatang : 0,
+            applied_limit_satang: item.lockedByUser ? item.currentLimitSatang : item.recommendedLimitSatang,
+          });
+        }
+      }
+
+      await refreshPlannerState(safeMonthKey);
+      pushToast("success", `à¸™à¸³à¹à¸œà¸™ ${scenario.label} à¸¡à¸²à¹ƒà¸Šà¹‰à¹à¸¥à¹‰à¸§`);
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function acceptPlannerRecommendation({ scenarioKey = "baseline", categoryId } = {}) {
+    if (!supabase || !session || !categoryId) return false;
+
+    const scenario = getPlannerScenario(scenarioKey);
+    const item = (Array.isArray(scenario?.items) ? scenario.items : []).find((entry) => entry.categoryId === categoryId) || null;
+    if (!item) return false;
+
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("budgets").upsert(
+        {
+          user_id: session.user.id,
+          month_key: sanitizeMonthKey(selectedMonth),
+          category_id: item.categoryId,
+          limit_satang: item.recommendedLimitSatang,
+          alert_pct: Number(item.alertPct || DEFAULT_BUDGET_ALERT_PCT),
+          source: "suggested",
+          manual_override: false,
+        },
+        { onConflict: "user_id,month_key,category_id" },
+      );
+      if (error) throw error;
+
+      await persistPlannerItemDecision(item, scenarioKey, {
+        decision_status: "accepted",
+        locked_by_user: false,
+        locked_limit_satang: 0,
+        applied_limit_satang: item.recommendedLimitSatang,
+      });
+      await refreshPlannerState();
+      pushToast("success", "à¸£à¸±à¸šà¸„à¸³à¹à¸™à¸°à¸™à¸³à¹à¸¥à¹‰à¸§");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function dismissPlannerRecommendation({ scenarioKey = "baseline", categoryId } = {}) {
+    if (!supabase || !session || !categoryId) return false;
+
+    const scenario = getPlannerScenario(scenarioKey);
+    const item = (Array.isArray(scenario?.items) ? scenario.items : []).find((entry) => entry.categoryId === categoryId) || null;
+    if (!item) return false;
+
+    setSaving(true);
+    try {
+      await persistPlannerItemDecision(item, scenarioKey, {
+        decision_status: "dismissed",
+        applied_limit_satang: item.currentLimitSatang,
+      });
+      await refreshPlannerState();
+      pushToast("success", "à¸„à¸‡à¸‡à¸šà¹€à¸”à¸´à¸¡à¹„à¸§à¹‰à¹à¸¥à¹‰à¸§");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function lockPlannerRecommendation({ scenarioKey = "baseline", categoryId, limitSatang = null } = {}) {
+    if (!supabase || !session || !categoryId) return false;
+
+    const scenario = getPlannerScenario(scenarioKey);
+    const item = (Array.isArray(scenario?.items) ? scenario.items : []).find((entry) => entry.categoryId === categoryId) || null;
+    if (!item) return false;
+
+    const nextLimitSatang = Math.max(0, Number(limitSatang || item.currentLimitSatang || item.recommendedLimitSatang || 0));
+
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("budgets").upsert(
+        {
+          user_id: session.user.id,
+          month_key: sanitizeMonthKey(selectedMonth),
+          category_id: item.categoryId,
+          limit_satang: nextLimitSatang,
+          alert_pct: Number(item.alertPct || DEFAULT_BUDGET_ALERT_PCT),
+          source: "manual",
+          manual_override: true,
+        },
+        { onConflict: "user_id,month_key,category_id" },
+      );
+      if (error) throw error;
+
+      await persistPlannerItemDecision(item, scenarioKey, {
+        decision_status: "accepted",
+        locked_by_user: true,
+        locked_limit_satang: nextLimitSatang,
+        applied_limit_satang: nextLimitSatang,
+      });
+      await refreshPlannerState();
+      pushToast("success", "à¸¥à¹‡à¸­à¸à¸‡à¸šà¸«à¸¡à¸§à¸”à¸™à¸µà¹‰à¹à¸¥à¹‰à¸§");
       return true;
     } finally {
       setSaving(false);
@@ -1160,7 +1597,7 @@ export function AppProvider({ children }) {
       const { error } = await query;
       if (error) throw error;
 
-      await refreshAll();
+      await refreshPlannerState();
       pushToast("success", goal.id ? "อัปเดตเป้าหมายแล้ว" : "เพิ่มเป้าหมายแล้ว");
     } finally {
       setSaving(false);
@@ -1179,7 +1616,7 @@ export function AppProvider({ children }) {
 
       if (error) throw error;
 
-      await refreshAll();
+      await refreshPlannerState();
       pushToast("success", "ลบเป้าหมายแล้ว");
     } finally {
       setSaving(false);
@@ -1213,7 +1650,7 @@ export function AppProvider({ children }) {
       const { error } = await query;
       if (error) throw error;
 
-      await refreshAll();
+      await refreshPlannerState();
       pushToast("success", plan.id ? "อัปเดตแผนชำระแล้ว" : "เพิ่มแผนชำระแล้ว");
     } finally {
       setSaving(false);
@@ -1232,7 +1669,7 @@ export function AppProvider({ children }) {
 
       if (error) throw error;
 
-      await refreshAll();
+      await refreshPlannerState();
       pushToast("success", "ลบแผนชำระแล้ว");
     } finally {
       setSaving(false);
@@ -1956,37 +2393,120 @@ export function AppProvider({ children }) {
     }
   }
 
-  const accountsById = new Map(
-    (Array.isArray(accounts) ? accounts : []).map((account) => [Number(account.id), account]),
+  const plannerToday = todayDate();
+  const accountsById = useMemo(
+    () => new Map((Array.isArray(accounts) ? accounts : []).map((account) => [Number(account.id), account])),
+    [accounts],
   );
-  const plannerSummary = buildPlannerSnapshot({
-    goals: financialGoals,
-    debts: debtPlans,
-    monthValue: selectedMonth,
-    today: todayDate(),
-  });
-  const planningConfig = normalizePlanningConfig(profile);
-  const budgetPlanSnapshot = buildBudgetPlanSnapshot({
-    profile,
-    categories,
-    debtPlans,
-    budgetRows,
-    transactions: planningTransactions,
-    monthValue: selectedMonth,
-    today: todayDate(),
-  });
-  const plannerReminders = buildPlannerReminders({
-    goals: financialGoals,
-    debts: debtPlans,
-    today: todayDate(),
-    accountsById,
-  });
-  const getBudgetHintForDraft = (draft) =>
-    buildBudgetHint({
-      draft,
+  const plannerSummary = useMemo(
+    () =>
+      buildPlannerSnapshot({
+        goals: financialGoals,
+        debts: debtPlans,
+        monthValue: selectedMonth,
+        today: plannerToday,
+      }),
+    [debtPlans, financialGoals, plannerToday, selectedMonth],
+  );
+  const planningConfig = useMemo(() => normalizePlanningConfig(profile), [profile]);
+  const baseBudgetPlanSnapshot = useMemo(
+    () =>
+      buildBudgetPlanSnapshot({
+        profile,
+        categories,
+        debtPlans,
+        budgetRows,
+        transactions: planningTransactions,
+        monthValue: selectedMonth,
+        today: plannerToday,
+      }),
+    [budgetRows, categories, debtPlans, plannerToday, planningTransactions, profile, selectedMonth],
+  );
+  const plannerMonthlyPlan = useMemo(
+    () => ({
+      ...buildPlannerMonthlyPlanState({
+        profile,
+        categories,
+        debtPlans,
+        budgetRows,
+        transactions: planningTransactions,
+        monthValue: selectedMonth,
+        today: plannerToday,
+        storedPlans: plannerStorage.plans,
+        storedItems: plannerStorage.items,
+        legacySnapshot: baseBudgetPlanSnapshot,
+      }),
+      unavailable: plannerStorage.unavailable === true,
+    }),
+    [
+      baseBudgetPlanSnapshot,
       budgetRows,
       categories,
-      transactions: planningTransactions,
+      debtPlans,
+      plannerStorage,
+      plannerToday,
+      planningTransactions,
+      profile,
+      selectedMonth,
+    ],
+  );
+  const plannerActiveScenarioKey = useMemo(
+    () => getActivePlannerScenarioKey(plannerMonthlyPlan, "baseline"),
+    [plannerMonthlyPlan],
+  );
+  const plannerRecommendations = useMemo(() => {
+    const scenarios = Array.isArray(plannerMonthlyPlan?.scenarios) ? plannerMonthlyPlan.scenarios : [];
+    const activeScenario =
+      scenarios.find((scenario) => scenario.id === plannerActiveScenarioKey) ||
+      scenarios.find((scenario) => scenario.id === "baseline") ||
+      scenarios[0] ||
+      null;
+    const items = Array.isArray(activeScenario?.items) ? activeScenario.items.slice() : [];
+    return items.sort((left, right) => {
+      const attentionDelta = Number(right?.needsAttention === true) - Number(left?.needsAttention === true);
+      if (attentionDelta !== 0) return attentionDelta;
+      const lockDelta = Number(right?.lockedByUser === true) - Number(left?.lockedByUser === true);
+      if (lockDelta !== 0) return lockDelta;
+      const deltaGap = Math.abs(Number(right?.deltaSatang || 0)) - Math.abs(Number(left?.deltaSatang || 0));
+      if (deltaGap !== 0) return deltaGap;
+      return String(left?.name || "").localeCompare(String(right?.name || ""), "th");
+    });
+  }, [plannerActiveScenarioKey, plannerMonthlyPlan]);
+  const plannerDecisionSummary = useMemo(
+    () => buildPlannerDecisionSummary(plannerMonthlyPlan, plannerActiveScenarioKey),
+    [plannerActiveScenarioKey, plannerMonthlyPlan],
+  );
+  const budgetPlanSnapshot = useMemo(
+    () =>
+      buildBudgetPlanSnapshotCompat({
+        legacySnapshot: baseBudgetPlanSnapshot,
+        plannerMonthlyPlan,
+        scenarioKey: plannerActiveScenarioKey,
+      }),
+    [baseBudgetPlanSnapshot, plannerActiveScenarioKey, plannerMonthlyPlan],
+  );
+  const plannerReminders = useMemo(
+    () =>
+      buildPlannerReminders({
+        goals: financialGoals,
+        debts: debtPlans,
+        today: plannerToday,
+        accountsById,
+      }),
+    [accountsById, debtPlans, financialGoals, plannerToday],
+  );
+  const getBudgetHintForDraft = (draft) =>
+    buildBudgetHintCompat({
+      baseHint: buildBudgetHint({
+        draft,
+        budgetRows,
+        categories,
+        transactions: planningTransactions,
+      }),
+      plannerMonthlyPlan,
+      categories,
+      categoryId: draft?.categoryId ?? draft?.category_id,
+      scenarioKey: plannerActiveScenarioKey,
     });
 
   const refreshAllEvent = useEffectEvent((nextProfile = null) => {
@@ -2026,6 +2546,10 @@ export function AppProvider({ children }) {
     plannerReminders,
     planningConfig,
     budgetPlanSnapshot,
+    plannerMonthlyPlan,
+    plannerRecommendations,
+    plannerActiveScenarioKey,
+    plannerDecisionSummary,
     selectedMonth,
     queue,
     scanUploads,
@@ -2038,6 +2562,7 @@ export function AppProvider({ children }) {
     signInAnonymously,
     signOut,
     refreshAll,
+    refreshPlannerState,
     saveProfile,
     savePlanningConfig,
     saveAccount,
@@ -2053,6 +2578,10 @@ export function AppProvider({ children }) {
     saveBudgetRow,
     deleteBudgetRow,
     applySuggestedBudgets,
+    applyPlannerPlan,
+    acceptPlannerRecommendation,
+    dismissPlannerRecommendation,
+    lockPlannerRecommendation,
     getBudgetHintForDraft,
     createManualTransaction,
     updateTransaction,

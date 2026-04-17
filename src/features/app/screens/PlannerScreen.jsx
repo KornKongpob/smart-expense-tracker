@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CreditCard,
@@ -12,7 +12,7 @@ import {
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
-import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
+import { EmptyPanel, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
 import {
   DEBT_STRATEGY_OPTIONS,
   INCOME_MODE_OPTIONS,
@@ -136,6 +136,36 @@ function getSavingsModeLabel(mode) {
   return mode === "percent" ? "เปอร์เซ็นต์" : "จำนวนเงิน";
 }
 
+function getDecisionStatusLabel(status) {
+  if (status === "accepted") return "รับแล้ว";
+  if (status === "dismissed") return "คงของเดิม";
+  return "รอตัดสินใจ";
+}
+
+function getDecisionStatusTone(status) {
+  if (status === "accepted") return "success";
+  if (status === "dismissed") return "default";
+  return "warning";
+}
+
+function formatDeltaCurrency(deltaSatang) {
+  const amount = Math.abs(Number(deltaSatang || 0));
+  if (!amount) return "0.00";
+  return `${Number(deltaSatang || 0) > 0 ? "+" : "-"}${formatCurrency(amount)}`;
+}
+
+function getScenarioIntentCopy(scenarioId, debtStrategyMode) {
+  if (scenarioId === "tight") {
+    return "ลดงบหมวดยืดหยุ่นลงเพื่อรักษารายจ่ายจำเป็นและเคลียร์ shortfall เร็วขึ้น";
+  }
+  if (scenarioId === "comfort") {
+    return debtStrategyMode === "paydown"
+      ? "เปิดพื้นที่ใช้จ่ายได้สบายขึ้นโดยยังเหลือเงินสำหรับโปะหนี้เพิ่ม"
+      : "เปิดพื้นที่ใช้จ่ายได้สบายขึ้นและยังมี buffer หลังกันค่าใช้จ่ายหลัก";
+  }
+  return "ทางเลือกสมดุลระหว่างงบรายวัน ความเสี่ยง และพื้นที่ท้ายเดือน";
+}
+
 export default function PlannerScreen() {
   const { navigateToView } = useExpenseNavigation();
   const {
@@ -145,11 +175,17 @@ export default function PlannerScreen() {
     debtPlans,
     planningConfig,
     budgetPlanSnapshot,
+    plannerMonthlyPlan,
+    plannerActiveScenarioKey,
+    plannerDecisionSummary,
     savePlanningConfig,
     saveCategoryBudgetBehavior,
     saveBudgetRow,
     deleteBudgetRow,
-    applySuggestedBudgets,
+    applyPlannerPlan,
+    acceptPlannerRecommendation,
+    dismissPlannerRecommendation,
+    lockPlannerRecommendation,
     saveFinancialGoal,
     deleteFinancialGoal,
     saveDebtPlan,
@@ -176,6 +212,7 @@ export default function PlannerScreen() {
   const [planningDraft, setPlanningDraft] = useState(createPlanningDraft(planningConfig));
   const [rootBudgetInputs, setRootBudgetInputs] = useState({});
   const [childBudgetInputs, setChildBudgetInputs] = useState({});
+  const [scenarioKey, setScenarioKey] = useState(plannerActiveScenarioKey || "baseline");
   const [budgetFilter, setBudgetFilter] = useState("active");
   const [goalEditorOpen, setGoalEditorOpen] = useState(false);
   const [goalDeleteConfirmOpen, setGoalDeleteConfirmOpen] = useState(false);
@@ -183,10 +220,52 @@ export default function PlannerScreen() {
   const [debtEditorOpen, setDebtEditorOpen] = useState(false);
   const [debtDeleteConfirmOpen, setDebtDeleteConfirmOpen] = useState(false);
   const [debtDraft, setDebtDraft] = useState(createDebtDraft());
+  const scenarioSelectionRef = useRef(false);
 
   useEffect(() => {
     setPlanningDraft(createPlanningDraft(planningConfig));
   }, [planningConfig]);
+
+  const plannerScenarios = useMemo(
+    () => (Array.isArray(plannerMonthlyPlan?.scenarios) ? plannerMonthlyPlan.scenarios : []),
+    [plannerMonthlyPlan],
+  );
+  const baselineScenario = plannerScenarios.find((scenario) => scenario.id === "baseline") || plannerScenarios[0] || null;
+  const activeScenario = plannerScenarios.find((scenario) => scenario.id === scenarioKey) || plannerScenarios[0] || null;
+  const activeScenarioItems = useMemo(
+    () => (Array.isArray(activeScenario?.items) ? activeScenario.items : []),
+    [activeScenario],
+  );
+  const activeScenarioLabel = activeScenario?.label || "Baseline";
+  const activeRecommendationMap = useMemo(
+    () => new Map(activeScenarioItems.map((item) => [item.categoryId, item])),
+    [activeScenarioItems],
+  );
+  const activeRecommendationQueue = useMemo(
+    () =>
+      activeScenarioItems
+        .filter((item) => item.needsAttention || item.lockedByUser || item.decisionStatus !== "dismissed")
+        .sort((left, right) => {
+          const attentionDelta = Number(right.needsAttention === true) - Number(left.needsAttention === true);
+          if (attentionDelta !== 0) return attentionDelta;
+          const lockDelta = Number(right.lockedByUser === true) - Number(left.lockedByUser === true);
+          if (lockDelta !== 0) return lockDelta;
+          return Math.abs(Number(right.deltaSatang || 0)) - Math.abs(Number(left.deltaSatang || 0));
+        }),
+    [activeScenarioItems],
+  );
+
+  useEffect(() => {
+    if (!plannerScenarios.length) return;
+    const hasSelectedScenario = plannerScenarios.some((scenario) => scenario.id === scenarioKey);
+    if (!hasSelectedScenario) {
+      setScenarioKey(plannerActiveScenarioKey || plannerScenarios[0]?.id || "baseline");
+      return;
+    }
+    if (!scenarioSelectionRef.current && plannerActiveScenarioKey && scenarioKey !== plannerActiveScenarioKey) {
+      setScenarioKey(plannerActiveScenarioKey);
+    }
+  }, [plannerActiveScenarioKey, plannerScenarios, scenarioKey]);
 
   useEffect(() => {
     const nextRootInputs = {};
@@ -214,6 +293,9 @@ export default function PlannerScreen() {
   }, [budgetPlanSnapshot, childCategoriesByRoot]);
 
   const budgetMonthKey = budgetPlanSnapshot?.monthKey || "";
+  useEffect(() => {
+    scenarioSelectionRef.current = false;
+  }, [budgetMonthKey]);
   const usingSuggestedPlan = !budgetPlanSnapshot?.hasAppliedBudget && !budgetPlanSnapshot?.usesLegacyMonthlyTarget;
   const displayExpenseBudgetSatang = usingSuggestedPlan
     ? Number(budgetPlanSnapshot?.suggestedExpenseBudgetSatang || 0)
@@ -238,26 +320,74 @@ export default function PlannerScreen() {
   const incomeReady = Number(budgetPlanSnapshot?.selectedIncomeSatang || 0) > 0;
   const debtPlanReady = debtAccounts.length === 0 || debtPlans.length > 0;
   const budgetsApplied = !usingSuggestedPlan;
+  const reserveLabel = planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "Buffer";
   const hasDebtAccountsWithoutPlan = debtAccounts.length > 0 && debtPlans.length === 0;
   const totalDebtBalanceSatang = debtPlans.reduce(
     (sum, plan) => sum + Number(plan?.current_balance_satang || 0),
     0,
   );
+  const activeScenarioShortfallSatang = Number(
+    activeScenario?.shortfallSatang ?? plannerDecisionSummary?.shortfallSatang ?? 0,
+  );
+  const activeScenarioExpenseSatang = Number(
+    activeScenario?.recommendedExpenseSatang ?? plannerDecisionSummary?.recommendedExpenseSatang ?? displayExpenseBudgetSatang,
+  );
+  const activeScenarioDailyBudgetSatang = Number(
+    activeScenario?.dailyBudgetSatang ?? plannerDecisionSummary?.dailyBudgetSatang ?? displayDailyBudgetSatang,
+  );
+  const activeScenarioSurplusSatang = planningConfig?.debtStrategyMode === "paydown"
+    ? Number(activeScenario?.debtExtraSatang ?? plannerDecisionSummary?.debtExtraSatang ?? 0)
+    : Number(activeScenario?.bufferSatang ?? plannerDecisionSummary?.bufferSatang ?? 0);
+  const activeScenarioConfidencePct = clampPercent(
+    Number(activeScenario?.confidenceScore ?? plannerDecisionSummary?.confidenceScore ?? 0) * 100,
+  );
+  const compareBaseExpenseSatang = Number(
+    budgetPlanSnapshot?.activeExpenseBudgetSatang ||
+      baselineScenario?.recommendedExpenseSatang ||
+      budgetPlanSnapshot?.suggestedExpenseBudgetSatang ||
+      0,
+  );
+  const activeScenarioAttentionCount = Number(activeScenario?.attentionCount ?? activeRecommendationQueue.length);
+  const activeScenarioChangedCount = Number(
+    activeScenario?.changedCategoryCount ??
+      activeScenarioItems.filter((item) => Math.abs(Number(item.deltaSatang || 0)) > 0).length,
+  );
+  const activeScenarioAcceptedCount = activeScenarioItems.filter((item) => item.decisionStatus === "accepted").length;
+  const activeScenarioDismissedCount = activeScenarioItems.filter((item) => item.decisionStatus === "dismissed").length;
+  const activeScenarioLockedCount = activeScenarioItems.filter((item) => item.lockedByUser === true).length;
+  const decisionTone = activeScenarioShortfallSatang > 0 ? "danger" : activeScenarioAttentionCount > 0 ? "warning" : "success";
+  const decisionTitle = activeScenarioShortfallSatang > 0
+    ? `แผน ${activeScenarioLabel} ยังเกินกรอบ`
+    : activeScenarioAttentionCount > 0
+      ? `แผน ${activeScenarioLabel} ยังมีหมวดที่ต้องยืนยัน`
+      : `แผน ${activeScenarioLabel} พร้อมใช้งาน`;
+  const decisionCopy = activeScenarioShortfallSatang > 0
+    ? `ยังต้องลดงบอีก ${formatCurrency(activeScenarioShortfallSatang)} หรือเปลี่ยน inputs เพื่อให้แผนสมดุล`
+    : activeScenarioAttentionCount > 0
+      ? `มี ${activeScenarioAttentionCount} หมวดที่ควรตัดสินใจต่อ พร้อมงบเฉลี่ย ${formatCurrency(activeScenarioDailyBudgetSatang)} ต่อวัน`
+      : `ตอนนี้เหลือ ${formatCurrency(activeScenarioSurplusSatang)} สำหรับ ${planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "buffer"} และ confidence ${activeScenarioConfidencePct}%`;
+  const hasRecommendationQueue = activeRecommendationQueue.length > 0;
 
   const budgetPlanRows = useMemo(() => {
     const plans = Array.isArray(budgetPlanSnapshot?.categoryPlans) ? budgetPlanSnapshot.categoryPlans : [];
     return plans
       .map((plan) => {
+        const recommendation = activeRecommendationMap.get(plan.categoryId) || null;
         const draftInput = String(rootBudgetInputs[plan.categoryId] || "").trim();
         const draftLimitSatang = draftInput ? parseMoneyToSatang(draftInput) : 0;
         const appliedLimitSatang = Number(plan?.appliedLimitSatang || 0);
-        const suggestedLimitSatang = Number(plan?.suggestedLimitSatang || 0);
+        const suggestedLimitSatang = Number(
+          (recommendation?.recommendedLimitSatang ?? plan?.recommendedLimitSatang ?? plan?.suggestedLimitSatang) || 0,
+        );
         const displayedLimitSatang = draftInput
           ? draftLimitSatang
           : appliedLimitSatang > 0
             ? appliedLimitSatang
             : suggestedLimitSatang;
         const spentMonthSatang = Number(plan?.spentMonthSatang || 0);
+        const projectedMonthEndSatang = Number(
+          recommendation?.projectedMonthEndSatang ?? plan?.projectedMonthEndSatang ?? spentMonthSatang,
+        );
         const childPlans = Array.isArray(plan.childPlans) ? plan.childPlans : [];
         const hasChildrenActivity = childPlans.some(
           (child) =>
@@ -272,15 +402,18 @@ export default function PlannerScreen() {
           plan?.manualOverride === true ||
           hasChildrenActivity;
         const needsAttention =
+          recommendation?.needsAttention === true ||
           displayedLimitSatang <= 0 ||
           spentMonthSatang > displayedLimitSatang ||
           (displayedLimitSatang > 0 && spentMonthSatang >= Math.round(displayedLimitSatang * 0.85));
 
         return {
           ...plan,
+          recommendation,
           displayedLimitSatang,
           remainingSatang: Math.max(0, displayedLimitSatang - spentMonthSatang),
           overSatang: Math.max(0, spentMonthSatang - displayedLimitSatang),
+          projectedMonthEndSatang,
           utilizationPct: clampPercent(
             displayedLimitSatang > 0 ? (spentMonthSatang / displayedLimitSatang) * 100 : 0,
           ),
@@ -297,6 +430,8 @@ export default function PlannerScreen() {
       .sort((left, right) => {
         const attentionScore =
           (right.needsAttention ? 1 : 0) - (left.needsAttention ? 1 : 0) ||
+          Number((right.recommendation?.lockedByUser || right.lockedByUser) === true) -
+            Number((left.recommendation?.lockedByUser || left.lockedByUser) === true) ||
           (right.manualOverride ? 1 : 0) - (left.manualOverride ? 1 : 0);
         if (attentionScore !== 0) return attentionScore;
 
@@ -306,13 +441,14 @@ export default function PlannerScreen() {
         if (spendDelta !== 0) return spendDelta;
         return String(left.name || "").localeCompare(String(right.name || ""), "th");
       });
-  }, [budgetFilter, budgetPlanSnapshot, rootBudgetInputs]);
+  }, [activeRecommendationMap, budgetFilter, budgetPlanSnapshot, rootBudgetInputs]);
 
   const budgetFilterCounts = useMemo(() => {
     const plans = Array.isArray(budgetPlanSnapshot?.categoryPlans) ? budgetPlanSnapshot.categoryPlans : [];
     const counts = { all: plans.length, active: 0, attention: 0 };
 
     for (const plan of plans) {
+      const recommendation = activeRecommendationMap.get(plan.categoryId) || null;
       const displayedLimitSatang =
         Number(plan?.appliedLimitSatang || 0) > 0
           ? Number(plan.appliedLimitSatang || 0)
@@ -331,6 +467,7 @@ export default function PlannerScreen() {
             Number(child?.spentMonthSatang || 0) > 0,
         );
       const needsAttention =
+        recommendation?.needsAttention === true ||
         displayedLimitSatang <= 0 ||
         spentMonthSatang > displayedLimitSatang ||
         (displayedLimitSatang > 0 && spentMonthSatang >= Math.round(displayedLimitSatang * 0.85));
@@ -340,7 +477,7 @@ export default function PlannerScreen() {
     }
 
     return counts;
-  }, [budgetPlanSnapshot]);
+  }, [activeRecommendationMap, budgetPlanSnapshot]);
 
   const allocationRows = useMemo(() => {
     const selectedIncomeSatang = Number(budgetPlanSnapshot?.selectedIncomeSatang || 0);
@@ -517,8 +654,162 @@ export default function PlannerScreen() {
     });
   };
 
+  const handleAcceptRecommendation = async (categoryId) => {
+    await acceptPlannerRecommendation({ scenarioKey, categoryId });
+  };
+
+  const handleDismissRecommendation = async (categoryId) => {
+    await dismissPlannerRecommendation({ scenarioKey, categoryId });
+  };
+
+  const handleLockRecommendation = async (categoryId) => {
+    const inputValue = String(rootBudgetInputs[categoryId] || "").trim();
+    const limitSatang = inputValue ? parseMoneyToSatang(inputValue) : null;
+    await lockPlannerRecommendation({ scenarioKey, categoryId, limitSatang });
+  };
+
+  const handlePrimaryPlannerAction = async () => {
+    if (!incomeReady) {
+      await submitPlanningConfig();
+      return;
+    }
+    if (hasDebtAccountsWithoutPlan) {
+      openDebtEditor();
+      return;
+    }
+    if (activeScenarioShortfallSatang > 0) {
+      setBudgetFilter("attention");
+      return;
+    }
+    await applyPlannerPlan({ scenarioKey });
+  };
+
   return (
     <ScreenShell title="วางแผนการเงิน" subtitle="ติดตามเป้าหมายและแผนชำระในที่เดียว">
+      <article className="ui-card finance-panel finance-planner-decision">
+        <div className="finance-panel-head">
+          <div>
+            <div className="finance-panel-title">Monthly Decision Center</div>
+            <div className="finance-panel-copy">{decisionCopy}</div>
+          </div>
+          <div className="finance-chip-grid">
+            <StatusPill tone={decisionTone}>{decisionTitle}</StatusPill>
+            <StatusPill tone="default">{planningMonthLabel || budgetMonthKey}</StatusPill>
+            <StatusPill tone="default">confidence {activeScenarioConfidencePct}%</StatusPill>
+          </div>
+        </div>
+
+        <div className="finance-section-label">Scenario Compare</div>
+        <div className="finance-planner-scenario-tabs">
+          {plannerScenarios.map((scenario) => {
+            const isActive = scenario.id === activeScenario?.id;
+            const scenarioTone = Number(scenario.shortfallSatang || 0) > 0
+              ? "danger"
+              : Number(scenario.attentionCount || 0) > 0
+                ? "warning"
+                : "success";
+            const scenarioReserveSatang = planningConfig?.debtStrategyMode === "paydown"
+              ? Number(scenario.debtExtraSatang || 0)
+              : Number(scenario.bufferSatang || 0);
+            const scenarioVsCurrentSatang = Number(scenario.recommendedExpenseSatang || 0) - compareBaseExpenseSatang;
+
+            return (
+              <button
+                key={scenario.id}
+                type="button"
+                className={`finance-planner-scenario-tab ${isActive ? "is-active" : ""}`}
+                onClick={() => {
+                  scenarioSelectionRef.current = true;
+                  setScenarioKey(scenario.id);
+                }}
+              >
+                <div className="finance-row-title">{scenario.label}</div>
+                <div className="finance-row-meta">
+                  งบ {formatCurrency(scenario.recommendedExpenseSatang)} · ต่อวัน {formatCurrency(scenario.dailyBudgetSatang)}
+                </div>
+                <div className="finance-row-meta">
+                  {getScenarioIntentCopy(scenario.id, planningConfig?.debtStrategyMode)} · เทียบงบที่ใช้อยู่ {formatDeltaCurrency(scenarioVsCurrentSatang)}
+                </div>
+                <div className="finance-planner-scenario-stats">
+                  <div className="finance-planner-scenario-stat">
+                    <span>งบรายเดือน</span>
+                    <strong>{formatCurrency(scenario.recommendedExpenseSatang)}</strong>
+                  </div>
+                  <div className="finance-planner-scenario-stat">
+                    <span>งบต่อวัน</span>
+                    <strong>{formatCurrency(scenario.dailyBudgetSatang)}</strong>
+                  </div>
+                  <div className="finance-planner-scenario-stat">
+                    <span>{reserveLabel}</span>
+                    <strong>{formatCurrency(scenarioReserveSatang)}</strong>
+                  </div>
+                  <div className="finance-planner-scenario-stat">
+                    <span>หมวดที่เปลี่ยน</span>
+                    <strong>{scenario.changedCategoryCount || 0} หมวด</strong>
+                  </div>
+                </div>
+                <div className="finance-chip-grid">
+                  <StatusPill tone="default">confidence {clampPercent(Number(scenario.confidenceScore || 0) * 100)}%</StatusPill>
+                  {isActive ? <StatusPill tone="success">กำลังดู</StatusPill> : null}
+                </div>
+                <div className="finance-chip-grid">
+                  <StatusPill tone={scenarioTone}>
+                    {Number(scenario.shortfallSatang || 0) > 0 ? `ขาด ${formatCurrency(scenario.shortfallSatang)}` : `${scenario.attentionCount || 0} หมวด`}
+                  </StatusPill>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="finance-planner-summary-grid">
+          <MetricCard
+            label="งบรายเดือน"
+            value={formatCurrency(activeScenarioExpenseSatang)}
+            hint={`${activeScenarioChangedCount} หมวดเปลี่ยนจากงบปัจจุบัน`}
+          />
+          <MetricCard
+            label="งบต่อวัน"
+            value={formatCurrency(activeScenarioDailyBudgetSatang)}
+            hint={`${activeScenarioAttentionCount} หมวดควรตัดสินใจต่อ`}
+            tone={activeScenarioAttentionCount > 0 ? "warning" : "default"}
+          />
+          <MetricCard
+            label={planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "Buffer"}
+            value={formatCurrency(activeScenarioSurplusSatang)}
+            hint={activeScenarioShortfallSatang > 0 ? "ยังไม่มี buffer เหลือ" : "หลังกันรายจ่ายและรายการจำเป็นแล้ว"}
+            tone={activeScenarioShortfallSatang > 0 ? "danger" : "success"}
+          />
+        </div>
+
+        <div className="finance-inline-actions">
+          <button
+            type="button"
+            className="ui-btn ui-btn-primary"
+            disabled={saving || !activeScenario}
+            onClick={handlePrimaryPlannerAction}
+          >
+            <PiggyBank size={16} />
+            {!incomeReady
+              ? "บันทึกกรอบคำนวณ"
+              : hasDebtAccountsWithoutPlan
+                ? "ตั้งแผนหนี้ก่อน"
+                : activeScenarioShortfallSatang > 0
+                  ? "ดูหมวดที่ควรปรับ"
+                  : `ใช้แผน ${activeScenarioLabel}`}
+          </button>
+          <button type="button" className="ui-btn ui-btn-secondary" onClick={() => setBudgetFilter("attention")}>
+            <AlertTriangle size={16} />
+            ดู recommendation
+          </button>
+          <div className="finance-chip-grid">
+            {activeScenarioAcceptedCount ? <StatusPill tone="success">รับแล้ว {activeScenarioAcceptedCount}</StatusPill> : null}
+            {activeScenarioDismissedCount ? <StatusPill tone="default">คงเดิม {activeScenarioDismissedCount}</StatusPill> : null}
+            {activeScenarioLockedCount ? <StatusPill tone="warning">manual lock {activeScenarioLockedCount}</StatusPill> : null}
+          </div>
+        </div>
+      </article>
+
       <article className="ui-card finance-panel finance-planner-hero">
         <div className="finance-planner-hero-grid">
           <section className="finance-planner-hero-copy">
@@ -559,8 +850,8 @@ export default function PlannerScreen() {
                   เพิ่มแผนหนี้
                 </button>
               ) : null}
-              {incomeReady && debtPlanReady && usingSuggestedPlan ? (
-                <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => applySuggestedBudgets()}>
+              {incomeReady && debtPlanReady && activeScenario && activeScenarioShortfallSatang <= 0 ? (
+                <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => applyPlannerPlan({ scenarioKey })}>
                   <PiggyBank size={16} />
                   ใช้ชุดงบแนะนำ
                 </button>
@@ -615,7 +906,111 @@ export default function PlannerScreen() {
       <article className="ui-card finance-panel">
         <div className="finance-panel-head">
           <div>
-            <div className="finance-panel-title">Income, Saving, Debt</div>
+            <div className="finance-panel-title">Recommendation Queue</div>
+            <div className="finance-panel-copy">
+              ตัดสินใจทีละหมวดแล้ว Planner จะเก็บสถานะให้ว่าอะไรรับแล้ว อะไรคงของเดิม และอะไรล็อกเอง
+            </div>
+          </div>
+          <div className="finance-chip-grid">
+            <StatusPill tone={hasRecommendationQueue ? "warning" : "success"}>
+              {hasRecommendationQueue ? `${activeRecommendationQueue.length} หมวดรอตัดสินใจ` : "คิวว่างแล้ว"}
+            </StatusPill>
+            <StatusPill tone="default">{activeScenarioLabel}</StatusPill>
+          </div>
+        </div>
+
+        {hasRecommendationQueue ? (
+          <div className="finance-planner-list">
+            {activeRecommendationQueue.map((item) => (
+              <div key={`${activeScenario?.id || "baseline"}:${item.categoryId}`} className="ui-card finance-panel">
+                <div className="finance-planner-item finance-planner-item-queue">
+                  <div className="finance-planner-item-top">
+                    <div className="finance-planner-item-copy">
+                      <div className="finance-row-title">{item.name}</div>
+                      <div className="finance-row-meta">
+                        applied {formatCurrency(item.currentLimitSatang)} · recommended {formatCurrency(item.recommendedLimitSatang)} · delta {formatDeltaCurrency(item.deltaSatang)}
+                      </div>
+                    </div>
+                    <div className="finance-chip-grid">
+                      <StatusPill tone={getDecisionStatusTone(item.decisionStatus)}>
+                        {getDecisionStatusLabel(item.decisionStatus)}
+                      </StatusPill>
+                      <StatusPill tone="default">confidence {clampPercent(Number(item.confidenceScore || 0) * 100)}%</StatusPill>
+                      {item.lockedByUser ? <StatusPill tone="warning">manual lock</StatusPill> : null}
+                    </div>
+                  </div>
+
+                  <div className="finance-planner-mini-stats">
+                    <div className="finance-planner-mini-stat">
+                      <span>ใช้ไปแล้ว</span>
+                      <strong>{formatCurrency(item.currentSpentSatang)}</strong>
+                    </div>
+                    <div className="finance-planner-mini-stat">
+                      <span>คาดสิ้นเดือน</span>
+                      <strong>{formatCurrency(item.projectedMonthEndSatang)}</strong>
+                    </div>
+                    <div className="finance-planner-mini-stat">
+                      <span>baseline</span>
+                      <strong>{formatCurrency(item.baselineSpendSatang)}</strong>
+                    </div>
+                    <div className="finance-planner-mini-stat">
+                      <span>behavior</span>
+                      <strong>{item.behavior}</strong>
+                    </div>
+                  </div>
+
+                  {Array.isArray(item.reasonLabels) && item.reasonLabels.length ? (
+                    <div className="finance-chip-grid">
+                      {item.reasonLabels.map((label) => (
+                        <StatusPill key={`${item.categoryId}:${label}`} tone="default">
+                          {label}
+                        </StatusPill>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="finance-inline-actions">
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-primary"
+                      disabled={saving}
+                      onClick={() => handleAcceptRecommendation(item.categoryId)}
+                    >
+                      รับคำแนะนำ
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-secondary"
+                      disabled={saving}
+                      onClick={() => handleDismissRecommendation(item.categoryId)}
+                    >
+                      คงของเดิม
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-btn ui-btn-secondary"
+                      disabled={saving}
+                      onClick={() => handleLockRecommendation(item.categoryId)}
+                    >
+                      ล็อกงบนี้
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyPanel
+            title="ไม่มีหมวดที่ต้องยืนยันเพิ่ม"
+            copy="ตอนนี้ทุก recommendation ในแผนนี้ถูกตัดสินใจแล้ว หรือยังไม่พบหมวดที่ต้องคุมเป็นพิเศษ"
+          />
+        )}
+      </article>
+
+      <article className="ui-card finance-panel">
+        <div className="finance-panel-head">
+          <div>
+            <div className="finance-panel-title">Inputs & Strategy</div>
             <div className="finance-panel-copy">
               เลือกว่าจะใช้รายได้คงที่หรือค่าเฉลี่ยย้อนหลัง แล้วกันเงินออมกับหนี้ก่อนจัดสรรงบรายหมวด
             </div>
@@ -795,7 +1190,7 @@ export default function PlannerScreen() {
             </div>
           </div>
           <div className="finance-inline-actions">
-            <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => applySuggestedBudgets()}>
+            <button type="button" className="ui-btn ui-btn-primary" disabled={saving || !activeScenario} onClick={() => applyPlannerPlan({ scenarioKey })}>
               <PiggyBank size={16} />
               ใช้ชุดงบแนะนำ
             </button>
@@ -846,6 +1241,12 @@ export default function PlannerScreen() {
                     <div className="finance-chip-grid">
                       <StatusPill tone="default">{plan.behavior}</StatusPill>
                       {plan.manualOverride ? <StatusPill tone="warning">manual</StatusPill> : null}
+                      {plan.recommendation?.lockedByUser ? <StatusPill tone="warning">locked</StatusPill> : null}
+                      {plan.recommendation ? (
+                        <StatusPill tone={getDecisionStatusTone(plan.recommendation.decisionStatus)}>
+                          {getDecisionStatusLabel(plan.recommendation.decisionStatus)}
+                        </StatusPill>
+                      ) : null}
                       {plan.needsAttention ? <StatusPill tone="danger">ควรดูต่อ</StatusPill> : null}
                     </div>
                   </div>
@@ -859,6 +1260,25 @@ export default function PlannerScreen() {
                       <span>
                         {plan.overSatang > 0 ? `เกิน ${formatCurrency(plan.overSatang)}` : `เหลือ ${formatCurrency(plan.remainingSatang)}`}
                       </span>
+                    </div>
+                  </div>
+
+                  <div className="finance-planner-mini-stats">
+                    <div className="finance-planner-mini-stat">
+                      <span>ใช้ไปแล้ว</span>
+                      <strong>{formatCurrency(plan.spentMonthSatang)}</strong>
+                    </div>
+                    <div className="finance-planner-mini-stat">
+                      <span>คาดสิ้นเดือน</span>
+                      <strong>{formatCurrency(plan.projectedMonthEndSatang)}</strong>
+                    </div>
+                    <div className="finance-planner-mini-stat">
+                      <span>recommended</span>
+                      <strong>{formatCurrency(plan.recommendation?.recommendedLimitSatang || plan.suggestedLimitSatang)}</strong>
+                    </div>
+                    <div className="finance-planner-mini-stat">
+                      <span>applied</span>
+                      <strong>{formatCurrency(plan.appliedLimitSatang || 0)}</strong>
                     </div>
                   </div>
 
@@ -898,7 +1318,10 @@ export default function PlannerScreen() {
                         onClick={() =>
                           setRootBudgetInputs((current) => ({
                             ...current,
-                            [plan.categoryId]: toMoneyInput(plan.suggestedLimitSatang, false),
+                            [plan.categoryId]: toMoneyInput(
+                              plan.recommendation?.recommendedLimitSatang || plan.suggestedLimitSatang,
+                              false,
+                            ),
                           }))
                         }
                       >

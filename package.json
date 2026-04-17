@@ -10,8 +10,8 @@
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
     "preview": "next start",
     "supabase:setup": "node ./scripts/setup-supabase-project.mjs",
-    "test": "node --experimental-specifier-resolution=node --test tests/utils.edge.test.js",
-    "test:coverage": "node --experimental-specifier-resolution=node --test --experimental-test-coverage tests/utils.edge.test.js",
+    "test": "node --experimental-specifier-resolution=node --test tests/utils.edge.test.js tests/planner.monthly.test.js",
+    "test:coverage": "node --experimental-specifier-resolution=node --test --experimental-test-coverage tests/utils.edge.test.js tests/planner.monthly.test.js",
     "test:e2e": "node tests/e2e/run-e2e.mjs"
   },
   "dependencies": {

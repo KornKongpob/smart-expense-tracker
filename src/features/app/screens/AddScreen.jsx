@@ -119,6 +119,8 @@ export default function AddScreen() {
     draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense
   ).filter((category) => category?.isHidden !== true);
   const budgetHint = getBudgetHintForDraft?.(draft) || null;
+  const plannerHint = budgetHint?.planner || null;
+  const plannerConfidencePct = Math.max(0, Math.min(100, Math.round(Number(plannerHint?.confidenceScore || 0) * 100)));
 
   useKeyboardViewportState(mode === "manual" && hasAccounts);
 
@@ -605,6 +607,23 @@ export default function AddScreen() {
                         {budgetHint.status === "over" ? ` · เกิน ${formatCurrency(budgetHint.overBySatang)}` : ""}
                         {budgetHint.status === "warning" ? ` · ใกล้แตะเตือน ${budgetHint.alertPct}%` : ""}
                       </div>
+                      {plannerHint ? (
+                        <div className="finance-budget-hint-planner">
+                          <div className="finance-chip-grid">
+                            <StatusPill tone={plannerHint.needsAttention ? "warning" : "default"}>
+                              {plannerHint.needsAttention ? "Planner จับตาหมวดนี้" : "Planner ตรวจแล้ว"}
+                            </StatusPill>
+                            <StatusPill tone="default">confidence {plannerConfidencePct}%</StatusPill>
+                            {plannerHint.lockedByUser ? <StatusPill tone="warning">manual lock</StatusPill> : null}
+                          </div>
+                          <div className="finance-toast-copy">
+                            Planner แนะนำกรอบ {formatCurrency(plannerHint.recommendedLimitSatang)} · delta {plannerHint.deltaSatang > 0 ? "+" : ""}{formatCurrency(Math.abs(plannerHint.deltaSatang || 0))}
+                            {Array.isArray(plannerHint.reasonLabels) && plannerHint.reasonLabels.length
+                              ? ` · ${plannerHint.reasonLabels.join(" · ")}`
+                              : ""}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </section>

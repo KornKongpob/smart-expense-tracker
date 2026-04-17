@@ -141,6 +141,7 @@ export default function DashboardScreen() {
     loading,
     saving,
     plannerSummary,
+    plannerDecisionSummary,
     budgetPlanSnapshot,
     selectedMonth,
     setSelectedMonth,
@@ -170,6 +171,16 @@ export default function DashboardScreen() {
       ? Number(budgetPlanSnapshot?.suggestedBufferSatang || 0)
       : Number(budgetPlanSnapshot?.bufferSatang || 0);
   const progress = percentOf(snapshot.expense_satang, displayExpenseBudgetSatang);
+  const plannerAttentionCount = Number(
+    plannerDecisionSummary?.attentionCount ?? budgetPlanSnapshot?.plannerAttentionCount ?? 0,
+  );
+  const plannerConfidencePct = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(Number(plannerDecisionSummary?.confidenceScore ?? budgetPlanSnapshot?.plannerConfidenceScore ?? 0) * 100),
+    ),
+  );
   const pendingReviewCount = Number(snapshot.pending_review_count || 0);
   const unmatchedCount = Number(snapshot.unmatched_count || 0);
   const topCategories = Array.isArray(snapshot.top_categories) ? snapshot.top_categories : [];
@@ -397,6 +408,18 @@ export default function DashboardScreen() {
             <div className="finance-chip-grid">
               {pendingReviewCount ? <StatusPill tone="warning">รอตรวจ {pendingReviewCount}</StatusPill> : null}
               {unmatchedCount ? <StatusPill tone="warning">ยังไม่จับคู่ {unmatchedCount}</StatusPill> : null}
+            </div>
+          ) : null}
+          {(plannerAttentionCount || plannerConfidencePct) ? (
+            <div className="finance-chip-grid">
+              {plannerAttentionCount ? <StatusPill tone="warning">Planner {plannerAttentionCount} หมวดควรปรับ</StatusPill> : null}
+              {plannerConfidencePct ? <StatusPill tone="default">confidence {plannerConfidencePct}%</StatusPill> : null}
+            </div>
+          ) : null}
+          {(plannerDecisionSummary?.title || plannerDecisionSummary?.copy) ? (
+            <div className="finance-dashboard-planner-note">
+              {plannerDecisionSummary?.title ? <strong>{plannerDecisionSummary.title}</strong> : null}
+              {plannerDecisionSummary?.copy ? <span>{plannerDecisionSummary.copy}</span> : null}
             </div>
           ) : null}
         </div>

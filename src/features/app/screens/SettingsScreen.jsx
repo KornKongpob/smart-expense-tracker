@@ -24,6 +24,7 @@ export default function SettingsScreen() {
     plannerSummary,
     planningConfig,
     budgetPlanSnapshot,
+    plannerDecisionSummary,
     saving,
     saveProfile,
     exportBackup,
@@ -46,6 +47,16 @@ export default function SettingsScreen() {
     (!budgetPlanSnapshot?.hasAppliedBudget && !budgetPlanSnapshot?.usesLegacyMonthlyTarget)
       ? budgetPlanSnapshot?.suggestedExpenseBudgetSatang || 0
       : budgetPlanSnapshot?.activeExpenseBudgetSatang || 0;
+  const plannerAttentionCount = Number(
+    plannerDecisionSummary?.attentionCount ?? budgetPlanSnapshot?.plannerAttentionCount ?? 0,
+  );
+  const plannerConfidencePct = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(Number(plannerDecisionSummary?.confidenceScore ?? budgetPlanSnapshot?.plannerConfidenceScore ?? 0) * 100),
+    ),
+  );
   const plannerSummaryItems = [
     {
       label: "รายได้",
@@ -76,8 +87,19 @@ export default function SettingsScreen() {
             </label>
 
             <div className="finance-settings-summary">
+              <div className="finance-chip-grid">
+                {plannerAttentionCount ? <StatusPill tone="warning">ควรปรับ {plannerAttentionCount} หมวด</StatusPill> : null}
+                {plannerConfidencePct ? <StatusPill tone="default">confidence {plannerConfidencePct}%</StatusPill> : null}
+              </div>
+              {plannerDecisionSummary?.title ? (
+                <div className="finance-settings-summary-copy">
+                  <strong>{plannerDecisionSummary.title}</strong>
+                </div>
+              ) : null}
               <div className="finance-settings-summary-copy">
                 Planner เป็นจุดตั้งค่าหลักของรายได้ เงินออม หนี้ และงบรายเดือน
+                {plannerAttentionCount ? ` · ควรปรับ ${plannerAttentionCount} หมวด` : ""}
+                {plannerConfidencePct ? ` · confidence ${plannerConfidencePct}%` : ""}
               </div>
               <div className="finance-settings-summary-grid">
                 {plannerSummaryItems.map((item) => (
@@ -87,6 +109,9 @@ export default function SettingsScreen() {
                   </div>
                 ))}
               </div>
+              {plannerDecisionSummary?.copy ? (
+                <div className="finance-settings-summary-footnote">{plannerDecisionSummary.copy}</div>
+              ) : null}
               <div className="finance-settings-summary-footnote">
                 งบเดือนนี้ {formatCurrency(plannerBudgetSatang)} · เงินออม {formatCurrency(budgetPlanSnapshot?.savingsReserveSatang || 0)} · หนี้ขั้นต่ำ {formatCurrency(budgetPlanSnapshot?.debtMinimumSatang || 0)}
               </div>
@@ -125,12 +150,22 @@ export default function SettingsScreen() {
                   </span>
                   <div className="finance-settings-row-copy">
                     <div className="finance-row-title">วางแผนการเงิน</div>
-                    <div className="finance-row-meta finance-row-meta-wrap">ตั้งค่ารายได้ เงินออม หนี้ และ budget รายหมวดจากหน้าหลักเดียว</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      {plannerDecisionSummary?.copy || "ตั้งค่ารายได้ เงินออม หนี้ และ budget รายหมวดจากหน้าหลักเดียว"}
+                    </div>
                   </div>
                 </div>
 
                 <div className="finance-row-side">
-                  {plannerCount ? <StatusPill tone="default">{plannerCount} แผน</StatusPill> : <ChevronRight size={16} />}
+                  {plannerAttentionCount ? (
+                    <StatusPill tone="warning">ควรปรับ {plannerAttentionCount}</StatusPill>
+                  ) : plannerConfidencePct ? (
+                    <StatusPill tone="default">{plannerConfidencePct}%</StatusPill>
+                  ) : plannerCount ? (
+                    <StatusPill tone="default">{plannerCount} แผน</StatusPill>
+                  ) : (
+                    <ChevronRight size={16} />
+                  )}
                 </div>
               </div>
             </button>
