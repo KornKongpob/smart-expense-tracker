@@ -1406,7 +1406,7 @@ export function AppProvider({ children }) {
       }
 
       await refreshPlannerState(safeMonthKey);
-      pushToast("success", `à¸™à¸³à¹à¸œà¸™ ${scenario.label} à¸¡à¸²à¹ƒà¸Šà¹‰à¹à¸¥à¹‰à¸§`);
+      pushToast("success", `นำแผน ${scenario.label} มาใช้แล้ว`);
       return true;
     } finally {
       setSaving(false);
@@ -1443,7 +1443,7 @@ export function AppProvider({ children }) {
         applied_limit_satang: item.recommendedLimitSatang,
       });
       await refreshPlannerState();
-      pushToast("success", "à¸£à¸±à¸šà¸„à¸³à¹à¸™à¸°à¸™à¸³à¹à¸¥à¹‰à¸§");
+      pushToast("success", "รับคำแนะนำแล้ว");
       return true;
     } finally {
       setSaving(false);
@@ -1464,7 +1464,7 @@ export function AppProvider({ children }) {
         applied_limit_satang: item.currentLimitSatang,
       });
       await refreshPlannerState();
-      pushToast("success", "à¸„à¸‡à¸‡à¸šà¹€à¸”à¸´à¸¡à¹„à¸§à¹‰à¹à¸¥à¹‰à¸§");
+      pushToast("success", "คงงบเดิมไว้แล้ว");
       return true;
     } finally {
       setSaving(false);
@@ -1503,7 +1503,7 @@ export function AppProvider({ children }) {
         applied_limit_satang: nextLimitSatang,
       });
       await refreshPlannerState();
-      pushToast("success", "à¸¥à¹‡à¸­à¸à¸‡à¸šà¸«à¸¡à¸§à¸”à¸™à¸µà¹‰à¹à¸¥à¹‰à¸§");
+      pushToast("success", "ล็อกงบหมวดนี้แล้ว");
       return true;
     } finally {
       setSaving(false);

@@ -61,21 +61,6 @@ function buildTransactionTitle(transaction) {
   return String(transaction?.kind || "").trim().toLowerCase() === "transfer" ? "โอนเงิน" : `รายการ${getTransactionKindLabel(transaction?.kind)}`;
 }
 
-function _buildTransactionMeta(transaction, accountMap, categoryMap) {
-  const date = String(transaction?.date || "").slice(0, 10);
-  const kind = String(transaction?.kind || "").trim().toLowerCase();
-
-  if (kind === "transfer") {
-    const fromName = accountMap.get(toId(transaction?.from_account_id))?.name || "ไม่พบบัญชีต้นทาง";
-    const toName = accountMap.get(toId(transaction?.to_account_id))?.name || "ไม่พบบัญชีปลายทาง";
-    return [date, `${fromName} → ${toName}`].filter(Boolean).join(" • ");
-  }
-
-  const accountName = accountMap.get(toId(transaction?.account_id))?.name || "";
-  const categoryName = categoryMap.get(toId(transaction?.category_id))?.name || "";
-  return [date, accountName, categoryName].filter(Boolean).join(" • ");
-}
-
 function buildTransactionAccountLabel(transaction, accountMap) {
   const kind = String(transaction?.kind || "").trim().toLowerCase();
 
@@ -186,17 +171,9 @@ export default function DashboardScreen() {
   const topCategories = Array.isArray(snapshot.top_categories) ? snapshot.top_categories : [];
   const snapshotAccounts = Array.isArray(snapshot.accounts) ? snapshot.accounts : [];
   const allAccounts = useMemo(() => (Array.isArray(accounts) ? accounts : []), [accounts]);
-  const allCategories = useMemo(
-    () => [...(Array.isArray(categories?.expense) ? categories.expense : []), ...(Array.isArray(categories?.income) ? categories.income : [])],
-    [categories],
-  );
   const accountMap = useMemo(
     () => new Map(allAccounts.map((account) => [toId(account?.id), account])),
     [allAccounts],
-  );
-  const _categoryMap = useMemo(
-    () => new Map(allCategories.map((category) => [toId(category?.id), category])),
-    [allCategories],
   );
   const history = Array.isArray(recentTransactions) ? recentTransactions.slice(0, 12) : [];
   const hasAccounts = snapshotAccounts.length > 0;
