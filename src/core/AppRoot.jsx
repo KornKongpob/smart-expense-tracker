@@ -440,8 +440,12 @@ function SignedInApp() {
           <div className="finance-app-page">
             <div className="finance-app-header-surface">
               <div className="finance-brand-block">
-                <div className="finance-brand">Smart Expense</div>
-                <div className="finance-brand-context">{activeScreenLabel}</div>
+                <div className="finance-brand-kicker">Personal Finance Tracker</div>
+                <div className="finance-brand-row">
+                  <div className="finance-brand">Smart Expense</div>
+                  <span className="finance-brand-separator" aria-hidden="true" />
+                  <div className="finance-brand-context">{activeScreenLabel}</div>
+                </div>
               </div>
               <div className="finance-header-state">
                 <button
