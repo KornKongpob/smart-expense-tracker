@@ -39,7 +39,15 @@ export default function AuthScreen() {
     <main className="finance-auth">
       <section className="ui-card-strong finance-auth-panel finance-auth-panel-single">
         <div className="finance-auth-brand">Smart Expense</div>
-        <h1 className="finance-auth-title">{mode === "signup" ? "สมัคร" : "เข้าใช้"}</h1>
+
+        <div className="finance-auth-title-group">
+          <h1 className="finance-auth-title">{mode === "signup" ? "สมัคร" : "เข้าใช้"}</h1>
+          <p className="finance-auth-copy">
+            {mode === "signup"
+              ? "เริ่มจัดระเบียบรายจ่าย งบประมาณ และบัญชีของคุณในที่เดียว"
+              : "ดูรายจ่าย งบประมาณ และภาพรวมการเงินของคุณในมุมมองที่ชัดเจน"}
+          </p>
+        </div>
 
         <div className="view-segmented finance-auth-switch">
           <button
@@ -96,22 +104,27 @@ export default function AuthScreen() {
 
           <label className="finance-field">
             <span className="ui-label">รหัสผ่าน</span>
-              <input
-                className="ui-input"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="อย่างน้อย 6 ตัว"
-                autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                minLength={6}
-                required
-                data-testid="login-password"
-              />
+            <input
+              className="ui-input"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="อย่างน้อย 6 ตัว"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              minLength={6}
+              required
+              data-testid="login-password"
+            />
           </label>
 
           {error ? <div className="ui-error">{error}</div> : null}
 
-          <button type="submit" className="ui-btn ui-btn-primary finance-submit" disabled={!hasSupabaseConfig || saving} data-testid="login-submit">
+          <button
+            type="submit"
+            className="ui-btn ui-btn-primary finance-submit"
+            disabled={!hasSupabaseConfig || saving}
+            data-testid="login-submit"
+          >
             {saving ? "กำลังดำเนินการ..." : mode === "signup" ? "สร้างบัญชี" : "เข้าสู่ระบบ"}
           </button>
 
