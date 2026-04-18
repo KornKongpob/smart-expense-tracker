@@ -136,6 +136,7 @@ export default function AccountsScreen() {
     syncMoneyInputs(nextDraft);
     syncAdjustmentInputs(nextDraft);
     setShowMore(false);
+    setDeleteConfirmOpen(false);
     setEditorOpen(true);
   };
 
@@ -150,7 +151,7 @@ export default function AccountsScreen() {
   };
 
   useEffect(() => {
-    if (editorOpen || typeof window === "undefined") return;
+    if (typeof window === "undefined") return;
     const requestedId = consumePendingAccountDeepLink();
     if (!requestedId) return;
     const nextAccount = accounts.find((account) => String(account?.id || "") === requestedId);
@@ -165,8 +166,9 @@ export default function AccountsScreen() {
     setAdjustMode("transaction");
     setAdjustDate(new Date().toISOString().slice(0, 10));
     setShowMore(false);
+    setDeleteConfirmOpen(false);
     setEditorOpen(true);
-  }, [accounts, balanceMap, editorOpen]);
+  }, [accounts, balanceMap]);
 
   const applyTypePreset = (type) => {
     const nextDraft = applyPresetToAccountDraft(draft, getDefaultPresetIdForAccountType(type), type);

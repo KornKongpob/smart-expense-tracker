@@ -447,6 +447,28 @@ test('recurring: monthly rollover clamps to end of month without losing anchor d
   assert.equal(nextDue, '2026-03-31');
 });
 
+test('recurring: daily frequency advances by interval days', () => {
+  const nextDue = advanceRecurringDate(new Date(2026, 3, 18), 'daily', 3, 18);
+  assert.equal(nextDue.getFullYear(), 2026);
+  assert.equal(nextDue.getMonth(), 3);
+  assert.equal(nextDue.getDate(), 21);
+});
+
+test('recurring: yearly frequency preserves anchor day when possible', () => {
+  const nextDue = getNextRecurringDueISO(
+    {
+      start_date: '2024-02-29',
+      last_generated_date: '2024-02-29',
+      frequency: 'yearly',
+      interval_count: 1,
+      anchor_day: 29,
+    },
+    '2025-02-28',
+  );
+
+  assert.equal(nextDue, '2025-02-28');
+});
+
 test('duplicate helpers: normalize comparable entries and duplicate reasons consistently', () => {
   const comparable = toDuplicateComparable({
     id: 'q-1',

@@ -292,6 +292,13 @@ export default function PlannerScreen() {
     setChildBudgetInputs(nextChildInputs);
   }, [budgetPlanSnapshot, childCategoriesByRoot]);
 
+  const goalName = String(goalDraft.name || "").trim();
+  const goalTargetAmountSatang = parseMoneyToSatang(goalDraft.targetAmount || "0");
+  const canSubmitGoal = Boolean(goalName) && goalTargetAmountSatang > 0 && !saving;
+  const debtAccountId = String(debtDraft.accountId || "").trim();
+  const debtTargetPaymentSatang = parseMoneyToSatang(debtDraft.targetPayment || "0");
+  const canSubmitDebtPlan = Boolean(debtAccountId) && debtTargetPaymentSatang > 0 && !saving;
+
   const budgetMonthKey = budgetPlanSnapshot?.monthKey || "";
   useEffect(() => {
     scenarioSelectionRef.current = false;
@@ -585,12 +592,12 @@ export default function PlannerScreen() {
   };
 
   const submitGoal = async () => {
-    if (!String(goalDraft.name || "").trim()) return;
+    if (!canSubmitGoal) return;
 
-    await saveFinancialGoal({
+    const saved = await saveFinancialGoal({
       id: goalDraft.id,
-      name: goalDraft.name,
-      targetAmountSatang: parseMoneyToSatang(goalDraft.targetAmount),
+      name: goalName,
+      targetAmountSatang: goalTargetAmountSatang,
       currentAmountSatang: parseMoneyToSatang(goalDraft.currentAmount || "0"),
       monthlyContributionSatang: parseMoneyToSatang(goalDraft.monthlyContribution || "0"),
       targetDate: goalDraft.targetDate,
@@ -598,18 +605,18 @@ export default function PlannerScreen() {
       status: goalDraft.status,
     });
 
-    closeGoalEditor();
+    if (saved !== false) closeGoalEditor();
   };
 
   const submitDebtPlan = async () => {
-    if (!debtDraft.accountId) return;
+    if (!canSubmitDebtPlan) return;
 
-    await saveDebtPlan({
+    const saved = await saveDebtPlan({
       id: debtDraft.id,
-      accountId: debtDraft.accountId,
+      accountId: debtAccountId,
       currentBalanceSatang: parseMoneyToSatang(debtDraft.currentBalance),
       minimumPaymentSatang: parseMoneyToSatang(debtDraft.minimumPayment || "0"),
-      targetPaymentSatang: parseMoneyToSatang(debtDraft.targetPayment),
+      targetPaymentSatang: debtTargetPaymentSatang,
       aprBps: parsePercentToBps(debtDraft.aprPercent || "0"),
       dueDay: debtDraft.dueDay,
       payoffTargetDate: debtDraft.payoffTargetDate,
@@ -617,7 +624,7 @@ export default function PlannerScreen() {
       note: debtDraft.note,
     });
 
-    closeDebtEditor();
+    if (saved !== false) closeDebtEditor();
   };
 
   const handleDeleteGoal = async () => {
@@ -1617,7 +1624,7 @@ export default function PlannerScreen() {
             <button
               type="button"
               className="ui-btn ui-btn-primary"
-              disabled={saving || !String(goalDraft.name || "").trim()}
+              disabled={!canSubmitGoal}
               onClick={submitGoal}
             >
               {goalDraft.id ? "บันทึก" : "สร้างเป้าหมาย"}
@@ -1646,6 +1653,9 @@ export default function PlannerScreen() {
                 onChange={(event) => setGoalDraft((current) => ({ ...current, targetAmount: event.target.value }))}
                 placeholder="0.00"
               />
+              {goalDraft.targetAmount && goalTargetAmountSatang <= 0 ? (
+                <span className="finance-field-helper">กรอกยอดเป้าหมายมากกว่า 0 ก่อนบันทึก</span>
+              ) : null}
             </label>
           </div>
 
@@ -1757,7 +1767,7 @@ export default function PlannerScreen() {
             <button
               type="button"
               className="ui-btn ui-btn-primary"
-              disabled={saving || !debtDraft.accountId}
+              disabled={!canSubmitDebtPlan}
               onClick={submitDebtPlan}
             >
               {debtDraft.id ? "บันทึก" : "สร้างแผนชำระ"}
@@ -1800,6 +1810,9 @@ export default function PlannerScreen() {
                 onChange={(event) => setDebtDraft((current) => ({ ...current, targetPayment: event.target.value }))}
                 placeholder="0.00"
               />
+              {debtDraft.targetPayment && debtTargetPaymentSatang <= 0 ? (
+                <span className="finance-field-helper">กรอกยอดที่อยากจ่ายมากกว่า 0 ก่อนบันทึก</span>
+              ) : null}
             </label>
           </div>
 

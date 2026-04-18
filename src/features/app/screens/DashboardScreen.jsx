@@ -1,14 +1,22 @@
 import { useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, CreditCard, PlusCircle, Repeat2, Target, Trash2 } from "lucide-react";
+import { ArrowUpRight, CalendarClock, CreditCard, PlusCircle, Repeat2, Target } from "lucide-react";
 
 import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
-import CategoryPresetChooser from "../CategoryPresetChooser.jsx";
-import { AmountText, MetricCard, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
+import DashboardAnalyticsPanels from "../DashboardAnalyticsPanels.jsx";
+import TransactionEditSheet, {
+  TransactionKindIcon,
+  buildTransactionAccountLabel,
+  buildTransactionDateTimeLabel,
+  buildTransactionTitle,
+  getTransactionAmountTone,
+} from "../TransactionEditSheet.jsx";
+import { AmountText, MetricCard, ScreenShell, StatusPill } from "../ui.jsx";
 import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
-import { formatCurrency, formatTransactionDateTime, normalizeTimeHHmm, toISODate } from "../../../utils/format.js";
-import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
+import { formatCurrency } from "../../../utils/format.js";
+
+void AccountSheetPicker;
 
 function percentOf(value, total) {
   const numerator = Number(value || 0);
@@ -25,91 +33,6 @@ function toId(value) {
   return String(value || "").trim();
 }
 
-function toMoneyInput(satang, allowEmpty = true) {
-  const amount = Number(satang || 0) / 100;
-  if (!Number.isFinite(amount)) return allowEmpty ? "" : "0.00";
-  if (!amount && allowEmpty) return "";
-  return amount.toFixed(2);
-}
-
-function getTransactionKindLabel(kind) {
-  const key = String(kind || "expense").trim().toLowerCase();
-  if (key === "income") return "รายรับ";
-  if (key === "transfer") return "โอน";
-  return "รายจ่าย";
-}
-
-function getTransactionAmountTone(kind) {
-  const key = String(kind || "expense").trim().toLowerCase();
-  if (key === "income") return "success";
-  if (key === "expense") return "danger";
-  return "default";
-}
-
-function TransactionKindIcon({ kind }) {
-  const key = String(kind || "expense").trim().toLowerCase();
-  if (key === "income") return <ArrowUpRight size={16} />;
-  if (key === "transfer") return <Repeat2 size={16} />;
-  return <ArrowDownLeft size={16} />;
-}
-
-function buildTransactionTitle(transaction) {
-  const merchant = String(transaction?.merchant || "").trim();
-  const note = String(transaction?.note || "").trim();
-  if (merchant) return merchant;
-  if (note) return note;
-  return String(transaction?.kind || "").trim().toLowerCase() === "transfer" ? "โอนเงิน" : `รายการ${getTransactionKindLabel(transaction?.kind)}`;
-}
-
-function buildTransactionAccountLabel(transaction, accountMap) {
-  const kind = String(transaction?.kind || "").trim().toLowerCase();
-
-  if (kind === "transfer") {
-    const fromName = accountMap.get(toId(transaction?.from_account_id))?.name || "ไม่พบบัญชีต้นทาง";
-    const toName = accountMap.get(toId(transaction?.to_account_id))?.name || "ไม่พบบัญชีปลายทาง";
-    return `${fromName} -> ${toName}`;
-  }
-
-  return accountMap.get(toId(transaction?.account_id))?.name || "";
-}
-
-function buildTransactionDateTimeLabel(transaction) {
-  return formatTransactionDateTime(transaction?.date, transaction?.raw?.time || transaction?.time || "");
-}
-
-function canEditTransactionFromHistory(transaction) {
-  return Boolean(transaction) && transaction?.is_split_parent !== true && transaction?.is_split_child !== true;
-}
-
-function getReadOnlyTransactionNote(transaction) {
-  if (transaction?.is_split_parent) {
-    return "รายการนี้เป็นรายการแยกหมวด จึงเปิดแก้จากการ์ดนี้ไม่ได้ แต่ยังดูสรุปและลบทั้งชุดได้";
-  }
-  if (transaction?.is_split_child) {
-    return "รายการนี้เป็นรายการย่อยจากการแยกหมวด จึงต้องกลับไปแก้จากรายการหลัก";
-  }
-  return "รายการนี้ยังไม่รองรับการแก้ไขจากการ์ดล่าสุด แต่ยังดูสรุปและลบรายการได้";
-}
-
-function createTransactionEditDraft(transaction = null) {
-  const source = transaction && typeof transaction === "object" ? transaction : {};
-  const kind = String(source?.kind || "expense").trim().toLowerCase() || "expense";
-  return {
-    kind,
-    accountId: kind === "transfer" ? "" : toId(source?.account_id),
-    fromAccountId: toId(source?.from_account_id),
-    toAccountId: toId(source?.to_account_id),
-    categoryId: kind === "transfer" ? "" : toId(source?.category_id),
-    amountSatang: Number(source?.amount_satang || 0),
-    merchant: String(source?.merchant || ""),
-    note: String(source?.note || ""),
-    reference: String(source?.reference || ""),
-    paymentMethod: String(source?.payment_method || ""),
-    date: source?.date ? String(source.date).slice(0, 10) : toISODate(new Date()),
-    time: normalizeTimeHHmm(source?.raw?.time || source?.time) || "",
-  };
-}
-
 function getAccountMeta(account) {
   const presetLabel = getPresetLabel(resolvePresetForAccount(account), account.type);
   if (presetLabel && String(presetLabel).trim() !== String(account?.name || "").trim()) {
@@ -119,7 +42,7 @@ function getAccountMeta(account) {
 }
 
 export default function DashboardScreen() {
-  const { navigateToView, openAccountDetails } = useExpenseNavigation();
+  const { navigateToPath, navigateToView, openAccountDetails } = useExpenseNavigation();
   const {
     dashboardSnapshot,
     cashflowSeries,
@@ -133,8 +56,12 @@ export default function DashboardScreen() {
     accounts,
     categories,
     recentTransactions,
+    recurringDueToday,
+    dashboardPreviousSnapshot,
+    setTransactionsFilters,
     updateTransaction,
     deleteTransaction,
+    runRecurringNow,
   } = useExpenseApp();
 
   const snapshot = dashboardSnapshot || {};
@@ -176,15 +103,11 @@ export default function DashboardScreen() {
     [allAccounts],
   );
   const history = Array.isArray(recentTransactions) ? recentTransactions.slice(0, 12) : [];
+  const recurringDueCount = Array.isArray(recurringDueToday) ? recurringDueToday.length : 0;
   const hasAccounts = snapshotAccounts.length > 0;
   const hasCategories = topCategories.length > 0;
   const rawCashflow = Array.isArray(cashflowSeries) ? cashflowSeries : [];
-  const [editingTransaction, setEditingTransaction] = useState(null);
-  const [readOnlyTransaction, setReadOnlyTransaction] = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [editDraft, setEditDraft] = useState(createTransactionEditDraft());
-  const [editAmountInput, setEditAmountInput] = useState("");
-  const [editShowMore, setEditShowMore] = useState(false);
+  const [activeTransaction, setActiveTransaction] = useState(null);
   const hasCashflow = rawCashflow.some(
     (row) => hasValue(row?.income_satang) || hasValue(row?.expense_satang),
   );
@@ -205,22 +128,6 @@ export default function DashboardScreen() {
     unmatchedCount > 0;
   const showStarterCardFirst = !hasAccounts || !hasActivity;
   const hideSummaryMetrics = !hasAccounts && !hasActivity;
-  const editCategories = (
-    editDraft.kind === "income"
-      ? Array.isArray(categories?.income)
-        ? categories.income
-        : []
-      : editDraft.kind === "transfer"
-        ? []
-        : Array.isArray(categories?.expense)
-          ? categories.expense
-          : []
-  ).filter((category) => category?.isHidden !== true);
-  const canSaveEdit =
-    parseMoneyToSatang(editAmountInput || "0") > 0 &&
-    (editDraft.kind === "transfer"
-      ? Boolean(editDraft.fromAccountId && editDraft.toAccountId && editDraft.fromAccountId !== editDraft.toAccountId)
-      : Boolean(editDraft.accountId));
 
   const buildChartPath = (key) =>
     chartPoints
@@ -231,62 +138,16 @@ export default function DashboardScreen() {
       })
       .join(" ");
 
-  const openTransactionEditor = (transaction) => {
-    if (!canEditTransactionFromHistory(transaction)) return;
-    const nextDraft = createTransactionEditDraft(transaction);
-    setReadOnlyTransaction(null);
-    setEditingTransaction(transaction);
-    setEditDraft(nextDraft);
-    setEditAmountInput(toMoneyInput(nextDraft.amountSatang));
-    setEditShowMore(false);
-  };
-
-  const openTransactionFromHistory = (transaction) => {
-    if (!transaction) return;
-    if (canEditTransactionFromHistory(transaction)) {
-      openTransactionEditor(transaction);
-      return;
-    }
-    setEditingTransaction(null);
-    setReadOnlyTransaction(transaction);
-  };
-
-  const closeTransactionEditor = () => {
-    setEditingTransaction(null);
-    setEditDraft(createTransactionEditDraft());
-    setEditAmountInput("");
-    setEditShowMore(false);
-  };
-
-  const closeReadOnlyTransaction = () => {
-    setReadOnlyTransaction(null);
-  };
-
-  const submitEdit = async () => {
-    if (!editingTransaction) return;
-    const saved = await updateTransaction(editingTransaction, {
-      ...editDraft,
-      amountSatang: parseMoneyToSatang(editAmountInput || "0"),
-    });
-    if (saved) closeTransactionEditor();
-  };
-
-  const confirmDelete = (transaction) => {
-    if (!transaction) return;
-    setDeleteTarget(transaction);
-  };
-
-  const submitDelete = async () => {
-    if (!deleteTarget) return;
-    const deleted = await deleteTransaction(deleteTarget);
-    if (!deleted) return;
-    if (editingTransaction && String(editingTransaction?.id || "") === String(deleteTarget?.id || "")) {
-      closeTransactionEditor();
-    }
-    if (readOnlyTransaction && String(readOnlyTransaction?.id || "") === String(deleteTarget?.id || "")) {
-      closeReadOnlyTransaction();
-    }
-    setDeleteTarget(null);
+  const openFullHistory = () => {
+    setTransactionsFilters((current) => ({
+      ...current,
+      monthKey: selectedMonth,
+      kind: "all",
+      accountId: "",
+      categoryId: "",
+      query: "",
+    }));
+    navigateToPath("/transactions");
   };
 
   const starterCard = (
@@ -456,6 +317,39 @@ export default function DashboardScreen() {
         </article>
       ) : null}
 
+      <article className="ui-card finance-panel finance-recurring-summary-card">
+        <div className="finance-panel-head">
+          <div>
+            <div className="finance-panel-title">Recurring</div>
+            <div className="finance-panel-copy">
+              กฎรายการประจำจะช่วยสร้างรายการรายเดือน รายปี หรือรายวันให้อัตโนมัติ
+            </div>
+          </div>
+          {recurringDueCount ? <StatusPill tone="warning">ถึงรอบ {recurringDueCount}</StatusPill> : <StatusPill tone="default">ยังไม่มีคิววันนี้</StatusPill>}
+        </div>
+        <div className="finance-dashboard-actions">
+          <button
+            type="button"
+            className="ui-btn ui-btn-primary"
+            onClick={() => void runRecurringNow()}
+            disabled={saving}
+          >
+            <Repeat2 size={16} />
+            Run ตอนนี้
+          </button>
+          <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateToView("recurring")}>
+            <CalendarClock size={16} />
+            เปิด recurring
+          </button>
+        </div>
+      </article>
+
+      <DashboardAnalyticsPanels
+        snapshot={snapshot}
+        previousSnapshot={dashboardPreviousSnapshot}
+        cashflowSeries={cashflowSeries}
+      />
+
       {history.length ? (
         <article className="ui-card finance-panel" data-testid="dashboard-recent-history">
           <div className="finance-panel-head">
@@ -476,7 +370,7 @@ export default function DashboardScreen() {
                   key={transaction.id}
                   type="button"
                   className="finance-list-button finance-history-button"
-                  onClick={() => openTransactionFromHistory(transaction)}
+                  onClick={() => setActiveTransaction(transaction)}
                   data-testid={`dashboard-transaction-${transaction.id}`}
                 >
                   <div className="finance-row finance-history-row">
@@ -498,6 +392,11 @@ export default function DashboardScreen() {
                 </button>
               );
             })}
+          </div>
+          <div className="finance-dashboard-actions">
+            <button type="button" className="ui-btn ui-btn-secondary" onClick={openFullHistory}>
+              ดูทั้งหมด
+            </button>
           </div>
         </article>
       ) : null}
@@ -575,288 +474,16 @@ export default function DashboardScreen() {
         </section>
       ) : null}
 
-      <Sheet
-        open={Boolean(readOnlyTransaction)}
-        onClose={closeReadOnlyTransaction}
-        title="รายละเอียดรายการ"
-        subtitle={readOnlyTransaction ? buildTransactionTitle(readOnlyTransaction) : "ดูสรุปสั้นของรายการนี้"}
-        footer={
-          readOnlyTransaction ? (
-            <div className="finance-sheet-actions-compact">
-              <button
-                type="button"
-                className="ui-btn ui-btn-danger-outline ui-btn-compact finance-sheet-danger-trigger"
-                disabled={saving}
-                onClick={() => confirmDelete(readOnlyTransaction)}
-              >
-                <Trash2 size={16} />
-                ลบรายการ
-              </button>
-              <div className="finance-sheet-actions-end">
-                <button type="button" className="ui-btn ui-btn-secondary" onClick={closeReadOnlyTransaction}>
-                  ปิดหน้านี้
-                </button>
-              </div>
-            </div>
-          ) : null
-        }
-      >
-        {readOnlyTransaction ? (
-          <div className="finance-form">
-            <section className="finance-history-preview-sheet">
-              <div className="finance-history-preview-note">{getReadOnlyTransactionNote(readOnlyTransaction)}</div>
-              <div className="finance-list finance-history-preview-list">
-                <div className="finance-row finance-history-preview-row">
-                  <div className="finance-history-preview-copy">
-                    <div className="finance-history-preview-label">ประเภท</div>
-                    <div className="finance-history-preview-value">{getTransactionKindLabel(readOnlyTransaction.kind)}</div>
-                  </div>
-                  <AmountText value={readOnlyTransaction.amount_satang} tone={getTransactionAmountTone(readOnlyTransaction.kind)} />
-                </div>
-                <div className="finance-row finance-history-preview-row">
-                  <div className="finance-history-preview-copy">
-                    <div className="finance-history-preview-label">บัญชี</div>
-                    <div className="finance-history-preview-value finance-history-preview-value-muted">
-                      {buildTransactionAccountLabel(readOnlyTransaction, accountMap) || "-"}
-                    </div>
-                  </div>
-                </div>
-                <div className="finance-row finance-history-preview-row">
-                  <div className="finance-history-preview-copy">
-                    <div className="finance-history-preview-label">วันเวลา</div>
-                    <div className="finance-history-preview-value finance-history-preview-value-muted">
-                      {buildTransactionDateTimeLabel(readOnlyTransaction) || "-"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-        ) : null}
-      </Sheet>
-
-      <Sheet
-        open={Boolean(editingTransaction)}
-        onClose={closeTransactionEditor}
-        title="แก้ไขรายการ"
-        subtitle={editingTransaction ? buildTransactionTitle(editingTransaction) : "ปรับรายละเอียดรายการล่าสุด"}
-        footer={
-          editingTransaction ? (
-            <div className="finance-sheet-actions-compact">
-              <button
-                type="button"
-                className="ui-btn ui-btn-danger-outline ui-btn-compact finance-sheet-danger-trigger"
-                disabled={saving}
-                onClick={() => confirmDelete(editingTransaction)}
-              >
-                <Trash2 size={16} />
-                ลบรายการ
-              </button>
-              <div className="finance-sheet-actions-end">
-                <button type="button" className="ui-btn ui-btn-secondary" onClick={closeTransactionEditor}>
-                  ยกเลิก
-                </button>
-                <button type="button" className="ui-btn ui-btn-primary" disabled={saving || !canSaveEdit} onClick={submitEdit}>
-                  บันทึก
-                </button>
-              </div>
-            </div>
-          ) : null
-        }
-      >
-        <div className="finance-form">
-          <section className="finance-form-section">
-            <div className="finance-grid finance-grid-3">
-              <label className="finance-field">
-                <span className="ui-label">จำนวนเงิน</span>
-                <input
-                  className="ui-input"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  value={editAmountInput}
-                  onChange={(event) => setEditAmountInput(sanitizeMoneyInput(event.target.value))}
-                />
-              </label>
-
-              <label className="finance-field">
-                <span className="ui-label">วันที่</span>
-                <input
-                  className="ui-input"
-                  type="date"
-                  value={editDraft.date}
-                  onChange={(event) => setEditDraft((current) => ({ ...current, date: event.target.value }))}
-                />
-              </label>
-
-              <label className="finance-field">
-                <span className="ui-label">เวลา</span>
-                <input
-                  className="ui-input"
-                  type="time"
-                  value={editDraft.time || ""}
-                  onChange={(event) => setEditDraft((current) => ({ ...current, time: event.target.value }))}
-                />
-              </label>
-            </div>
-
-            {editDraft.kind === "transfer" ? (
-              <div className="finance-grid finance-grid-2">
-                <div className="finance-field">
-                  <span className="ui-label">จากบัญชี</span>
-                  <AccountSheetPicker
-                    accounts={allAccounts}
-                    value={editDraft.fromAccountId}
-                    onChange={(fromAccountId) =>
-                      setEditDraft((current) => ({
-                        ...current,
-                        fromAccountId,
-                        toAccountId: String(current.toAccountId || "") === String(fromAccountId || "") ? "" : current.toAccountId,
-                      }))
-                    }
-                    title="เลือกบัญชีต้นทาง"
-                    placeholder="เลือกบัญชีต้นทาง"
-                  />
-                </div>
-
-                <div className="finance-field">
-                  <span className="ui-label">ไปบัญชี</span>
-                  <AccountSheetPicker
-                    accounts={allAccounts}
-                    value={editDraft.toAccountId}
-                    onChange={(toAccountId) =>
-                      setEditDraft((current) => ({
-                        ...current,
-                        toAccountId: String(toAccountId || "") === String(current.fromAccountId || "") ? "" : toAccountId,
-                      }))
-                    }
-                    title="เลือกบัญชีปลายทาง"
-                    placeholder="เลือกบัญชีปลายทาง"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="finance-grid finance-grid-2">
-                <div className="finance-field">
-                  <span className="ui-label">บัญชี</span>
-                  <AccountSheetPicker
-                    accounts={allAccounts}
-                    value={editDraft.accountId}
-                    onChange={(accountId) =>
-                      setEditDraft((current) => ({
-                        ...current,
-                        accountId,
-                        fromAccountId: accountId || current.fromAccountId,
-                      }))
-                    }
-                    title="เลือกบัญชี"
-                    placeholder="เลือกบัญชี"
-                  />
-                </div>
-
-                <CategoryPresetChooser
-                  categories={editCategories}
-                  value={editDraft.categoryId}
-                  onChange={(categoryId) => setEditDraft((current) => ({ ...current, categoryId }))}
-                />
-              </div>
-            )}
-
-            <label className="finance-field">
-              <span className="ui-label">รายการ</span>
-              <input
-                className="ui-input"
-                value={editDraft.merchant}
-                onChange={(event) => setEditDraft((current) => ({ ...current, merchant: event.target.value }))}
-                placeholder="เช่น ค่าอาหาร"
-              />
-            </label>
-          </section>
-
-          <details className="finance-details" open={editShowMore}>
-            <summary
-              className="finance-details-summary bento-summary"
-              onClick={(event) => {
-                event.preventDefault();
-                setEditShowMore((current) => !current);
-              }}
-            >
-              <span>รายละเอียดเพิ่ม</span>
-              <span className="finance-details-caret">{editShowMore ? "ซ่อน" : "แสดง"}</span>
-            </summary>
-
-            {editShowMore ? (
-              <div className="finance-details-body">
-                <div className="finance-grid finance-grid-2">
-                  <label className="finance-field">
-                    <span className="ui-label">อ้างอิง</span>
-                    <input
-                      className="ui-input"
-                      value={editDraft.reference}
-                      onChange={(event) => setEditDraft((current) => ({ ...current, reference: event.target.value }))}
-                    />
-                  </label>
-
-                  <label className="finance-field">
-                    <span className="ui-label">วิธีจ่าย</span>
-                    <input
-                      className="ui-input"
-                      value={editDraft.paymentMethod}
-                      onChange={(event) => setEditDraft((current) => ({ ...current, paymentMethod: event.target.value }))}
-                    />
-                  </label>
-                </div>
-
-                <label className="finance-field">
-                  <span className="ui-label">บันทึกเพิ่ม</span>
-                  <textarea
-                    className="ui-input finance-textarea"
-                    value={editDraft.note}
-                    onChange={(event) => setEditDraft((current) => ({ ...current, note: event.target.value }))}
-                  />
-                </label>
-              </div>
-            ) : null}
-          </details>
-        </div>
-      </Sheet>
-
-      <Sheet
-        open={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
-        title="ยืนยันการลบรายการ"
-        subtitle={deleteTarget ? buildTransactionTitle(deleteTarget) : "รายการนี้จะถูกลบออกจากประวัติ"}
-        footer={
-          <div className="finance-sheet-actions">
-            <button type="button" className="ui-btn ui-btn-secondary" onClick={() => setDeleteTarget(null)}>
-              กลับไปแก้ไข
-            </button>
-            <button type="button" className="ui-btn ui-btn-danger" disabled={saving} onClick={submitDelete}>
-              <Trash2 size={16} />
-              ยืนยันการลบ
-            </button>
-          </div>
-        }
-      >
-        <div className="finance-form">
-          <section className="finance-account-danger-sheet">
-            <div className="finance-account-danger-sheet-copy">
-              <div className="finance-panel-title">สิ่งที่จะเกิดขึ้นหลังลบ</div>
-              <div className="finance-panel-copy">
-                {deleteTarget?.is_split_parent
-                  ? "รายการหลักและรายการย่อยในชุดเดียวกันจะถูกลบออกจากประวัติทั้งหมด"
-                  : "รายการนี้จะถูกนำออกจากประวัติและยอดสรุปของหน้า Overview จะอัปเดตทันที"}
-              </div>
-            </div>
-            <div className="finance-account-danger-checklist">
-              <div className="finance-account-danger-check">ยอดสรุปจะคำนวณใหม่หลังลบ</div>
-              <div className="finance-account-danger-check">
-                {deleteTarget?.is_split_parent ? "รายการย่อยในชุดเดียวกันจะถูกลบพร้อมกัน" : "การลบรายการนี้ไม่สามารถย้อนกลับจากหน้านี้ได้"}
-              </div>
-              <div className="finance-account-danger-check">หากยังไม่แน่ใจ แนะนำให้ใช้การแก้ไขแทนการลบ</div>
-            </div>
-          </section>
-        </div>
-      </Sheet>
+      <TransactionEditSheet
+        transaction={activeTransaction}
+        open={Boolean(activeTransaction)}
+        onClose={() => setActiveTransaction(null)}
+        accounts={allAccounts}
+        categories={categories}
+        saving={saving}
+        updateTransaction={updateTransaction}
+        deleteTransaction={deleteTransaction}
+      />
     </ScreenShell>
   );
 }

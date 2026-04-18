@@ -58,6 +58,17 @@ import {
 import { normalizeAccountBalanceRows } from "./accountBalanceState.js";
 import { createScanUploadEntry, patchScanUploadEntry } from "./scanUploadState.js";
 import {
+  buildRecurringOccurrences,
+  buildRecurringRulePayload,
+  getRecurringDueState,
+  normalizeRecurringRules,
+} from "./recurringState.js";
+import {
+  buildRuntimeNotifications,
+  getNotificationDataKey,
+  normalizeNotifications,
+} from "./notificationState.js";
+import {
   buildApprovedSuggestion,
   buildTransactionSavePlan,
   sanitizeTransactionDraft,
@@ -65,11 +76,16 @@ import {
   todayDate,
 } from "./transactionDrafts.js";
 import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/supabase/client.js";
+import { downloadCsv, transactionsToCsv } from "../../utils/exportCsv.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
 import { compareTxNewestFirst } from "../../utils/transaction.js";
 
 const AppContext = createContext(null);
 const GUEST_DISPLAY_NAME = "Guest";
+const TRANSACTION_HISTORY_SELECT =
+  "id, kind, status, account_id, from_account_id, to_account_id, category_id, merchant, note, reference, payment_method, amount_satang, currency, date, is_split_parent, is_split_child, split_group_id, split_parent_id, split_index, split_count, raw, created_at";
+const TRANSACTIONS_PAGE_SIZE = 50;
+const TRANSACTIONS_EXPORT_BATCH_SIZE = 250;
 
 function monthToDate(monthValue) {
   const month = String(monthValue || "").trim();
@@ -237,6 +253,105 @@ function sortRuntimeTransactionsNewestFirst(list) {
     );
 }
 
+function createTransactionsPageState(overrides = {}) {
+  return {
+    items: [],
+    hasMore: false,
+    loading: false,
+    loadingMore: false,
+    error: "",
+    ...overrides,
+  };
+}
+
+function normalizeTransactionHistoryKind(value) {
+  const kind = String(value || "").trim().toLowerCase();
+  if (kind === "income" || kind === "expense" || kind === "transfer") return kind;
+  return "all";
+}
+
+function createTransactionsFiltersState(monthKey = todayMonth()) {
+  return {
+    monthKey: sanitizeMonthKey(monthKey || todayMonth()),
+    kind: "all",
+    accountId: "",
+    categoryId: "",
+    query: "",
+  };
+}
+
+function normalizeTransactionsFilters(filters, fallbackMonthKey = todayMonth()) {
+  const source = filters && typeof filters === "object" ? filters : {};
+  return {
+    monthKey: sanitizeMonthKey(source.monthKey || fallbackMonthKey || todayMonth()),
+    kind: normalizeTransactionHistoryKind(source.kind),
+    accountId: String(source.accountId || "").trim(),
+    categoryId: String(source.categoryId || "").trim(),
+    query: String(source.query || "").trim(),
+  };
+}
+
+function buildTransactionsMonthRange(monthKey) {
+  const safeMonthKey = sanitizeMonthKey(monthKey || todayMonth());
+  const [yearText, monthText] = safeMonthKey.split("-");
+  const year = Number(yearText);
+  const monthIndex = Math.max(0, Math.min(11, Number(monthText) - 1));
+  const startIso = `${safeMonthKey}-01`;
+  const endIso = new Date(Date.UTC(year, monthIndex + 1, 1)).toISOString().slice(0, 10);
+  return { monthKey: safeMonthKey, startIso, endIso };
+}
+
+function sanitizeTransactionSearchTerm(value) {
+  return String(value || "")
+    .replace(/[,%()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchesTransactionHistorySearch(transaction, query) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return [transaction?.merchant, transaction?.note, transaction?.reference]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .some((value) => value.includes(normalizedQuery));
+}
+
+function mergeTransactionsById(existing, nextItems) {
+  const merged = Array.isArray(existing) ? existing.slice() : [];
+  const seen = new Set(merged.map((transaction) => String(transaction?.id || "")));
+
+  for (const transaction of Array.isArray(nextItems) ? nextItems : []) {
+    const id = String(transaction?.id || "");
+    if (!id || seen.has(id)) continue;
+    merged.push(transaction);
+    seen.add(id);
+  }
+
+  return merged;
+}
+
+function getNotificationRuntimeKey(notification) {
+  const kind = String(notification?.kind || "info").trim().toLowerCase();
+  const dataKey = String(getNotificationDataKey(notification) || "").trim();
+  if (dataKey) return `${kind}:${dataKey}`;
+  const id = String(notification?.id || notification?.created_at || "").trim();
+  return `${kind}:${id}`;
+}
+
+function mergeNotificationKeys(existing, nextKey) {
+  const current = Array.isArray(existing) ? existing : [];
+  const key = String(nextKey || "").trim();
+  if (!key || current.includes(key)) return current;
+  return [...current, key];
+}
+
+function mergeNotificationKeyList(existing, nextKeys) {
+  return (Array.isArray(nextKeys) ? nextKeys : []).reduce(
+    (keys, key) => mergeNotificationKeys(keys, key),
+    Array.isArray(existing) ? existing : [],
+  );
+}
+
 export function AppProvider({ children }) {
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState(null);
@@ -246,12 +361,14 @@ export function AppProvider({ children }) {
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState(null);
   const [accounts, setAccounts] = useState([]);
+  const [merchantMappings, setMerchantMappings] = useState([]);
   const [categories, setCategories] = useState({ expense: [], income: [] });
   const [categoryPreferenceRows, setCategoryPreferenceRows] = useState([]);
   const [financialGoals, setFinancialGoals] = useState([]);
   const [debtPlans, setDebtPlans] = useState([]);
   const [budgetRows, setBudgetRows] = useState([]);
   const [planningTransactions, setPlanningTransactions] = useState([]);
+  const [recurringRules, setRecurringRules] = useState([]);
   const [plannerStorage, setPlannerStorage] = useState({
     unavailable: false,
     plans: [],
@@ -260,9 +377,16 @@ export function AppProvider({ children }) {
   const [scanDocuments, setScanDocuments] = useState([]);
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [dashboardSnapshot, setDashboardSnapshot] = useState(null);
+  const [dashboardPreviousSnapshot, setDashboardPreviousSnapshot] = useState(null);
   const [accountBalanceSnapshot, setAccountBalanceSnapshot] = useState([]);
   const [cashflowSeries, setCashflowSeries] = useState([]);
+  const [storedNotifications, setStoredNotifications] = useState([]);
+  const [notificationsUnavailable, setNotificationsUnavailable] = useState(false);
+  const [localNotificationReadKeys, setLocalNotificationReadKeys] = useState([]);
+  const [localNotificationDismissedKeys, setLocalNotificationDismissedKeys] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(todayMonth());
+  const [transactionsFilters, setTransactionsFiltersState] = useState(() => createTransactionsFiltersState());
+  const [transactionsPage, setTransactionsPage] = useState(() => createTransactionsPageState());
   const [toast, setToast] = useState(null);
   const [queue, setQueue] = useState(readOfflineQueue());
   const [scanUploads, setScanUploads] = useState([]);
@@ -272,6 +396,7 @@ export function AppProvider({ children }) {
   const [legacyAvailable, setLegacyAvailable] = useState(hasLegacySnapshot());
   const [migrationState, setMigrationState] = useState({ running: false, skipped: false, failures: [] });
   const authReadyRef = useRef(false);
+  const savingRef = useRef(false);
   const migrationAttemptedRef = useRef(false);
 
   const supabase = hasSupabaseBrowserConfig() ? getSupabaseBrowserClient() : null;
@@ -279,6 +404,16 @@ export function AppProvider({ children }) {
   useEffect(() => {
     authReadyRef.current = authReady;
   }, [authReady]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
+
+  useEffect(() => {
+    if (session) return;
+    setTransactionsFiltersState(createTransactionsFiltersState());
+    setTransactionsPage(createTransactionsPageState());
+  }, [session]);
 
   useEffect(() => {
     if (!supabase) {
@@ -334,19 +469,26 @@ export function AppProvider({ children }) {
     if (!session || !supabase) {
       setProfile(null);
       setAccounts([]);
+      setMerchantMappings([]);
       setCategories({ expense: [], income: [] });
       setCategoryPreferenceRows([]);
       setFinancialGoals([]);
       setDebtPlans([]);
       setBudgetRows([]);
       setPlanningTransactions([]);
+      setRecurringRules([]);
       setPlannerStorage({ unavailable: false, plans: [], items: [] });
       setScanDocuments([]);
       setRecentTransactions([]);
       setScanUploads([]);
       setDashboardSnapshot(null);
+      setDashboardPreviousSnapshot(null);
       setAccountBalanceSnapshot([]);
       setCashflowSeries([]);
+      setStoredNotifications([]);
+      setNotificationsUnavailable(false);
+      setLocalNotificationReadKeys([]);
+      setLocalNotificationDismissedKeys([]);
       return;
     }
 
@@ -862,14 +1004,19 @@ export function AppProvider({ children }) {
     startTransition(() => setLoading(true));
     try {
       const monthDate = monthToDate(selectedMonth);
+      const previousMonthDate = monthToDate(shiftMonthKey(selectedMonth, -1));
       const [
         plannerSlice,
         accountsResult,
+        merchantMappingsResult,
+        recurringRulesResult,
         scansResult,
         snapshotResult,
+        previousSnapshotResult,
         accountBalanceResult,
         cashflowResult,
         transactionsResult,
+        notificationsResult,
       ] = await Promise.all([
         fetchPlannerSlice({ monthKey: selectedMonth, nextProfile }),
         supabase
@@ -879,11 +1026,24 @@ export function AppProvider({ children }) {
           )
           .order("created_at", { ascending: true }),
         supabase
+          .from("merchant_mappings")
+          .select("*")
+          .order("last_used_at", { ascending: false, nullsFirst: false })
+          .order("updated_at", { ascending: false }),
+        fetchOptionalPlannerRows(
+          supabase
+            .from("recurring_rules")
+            .select("*")
+            .order("created_at", { ascending: true }),
+          "recurring_rules",
+        ),
+        supabase
           .from("scan_documents")
           .select("*")
           .order("created_at", { ascending: false })
           .limit(30),
         supabase.rpc("dashboard_snapshot", { target_month: monthDate }),
+        supabase.rpc("dashboard_snapshot", { target_month: previousMonthDate }),
         fetchOptionalRpcRows(
           supabase.rpc("account_balance_snapshot", { target_user: session.user.id }),
           "account_balance_snapshot",
@@ -899,14 +1059,27 @@ export function AppProvider({ children }) {
           .order("date", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(24),
+        fetchOptionalPlannerRows(
+          supabase
+            .from("notifications")
+            .select("*")
+            .eq("is_dismissed", false)
+            .order("created_at", { ascending: false })
+            .limit(40),
+          "notifications",
+        ),
       ]);
 
       if (accountsResult.error) throw accountsResult.error;
+      if (merchantMappingsResult.error) throw merchantMappingsResult.error;
+      if (recurringRulesResult.error) throw recurringRulesResult.error;
       if (scansResult.error) throw scansResult.error;
       if (snapshotResult.error) throw snapshotResult.error;
+      if (previousSnapshotResult.error) throw previousSnapshotResult.error;
       if (accountBalanceResult.error) throw accountBalanceResult.error;
       if (cashflowResult.error) throw cashflowResult.error;
       if (transactionsResult.error) throw transactionsResult.error;
+      if (notificationsResult.error) throw notificationsResult.error;
       applyPlannerSliceState(plannerSlice);
       if (!plannerSlice?.plannerStorage?.unavailable) {
         await syncPlannerMonthlyPlanRows(selectedMonth, plannerSlice.monthlyPlan);
@@ -916,8 +1089,14 @@ export function AppProvider({ children }) {
         snapshotResult.data || null,
         plannerSlice?.categories || { expense: [], income: [] },
       );
+      const nextPreviousSnapshot = applyCategoryPresentationToSnapshot(
+        previousSnapshotResult.data || null,
+        plannerSlice?.categories || { expense: [], income: [] },
+      );
 
       setAccounts(Array.isArray(accountsResult.data) ? accountsResult.data : []);
+      setMerchantMappings(Array.isArray(merchantMappingsResult.data) ? merchantMappingsResult.data : []);
+      setRecurringRules(normalizeRecurringRules(recurringRulesResult.data || []));
       setScanDocuments(Array.isArray(scansResult.data) ? scansResult.data : []);
       setRecentTransactions(
         sortRuntimeTransactionsNewestFirst(
@@ -927,12 +1106,200 @@ export function AppProvider({ children }) {
         ),
       );
       setDashboardSnapshot(nextSnapshot);
+      setDashboardPreviousSnapshot(nextPreviousSnapshot);
       setAccountBalanceSnapshot(normalizeAccountBalanceRows(accountBalanceResult.data || []));
       setCashflowSeries(Array.isArray(cashflowResult.data) ? cashflowResult.data : []);
+      setStoredNotifications(normalizeNotifications(notificationsResult.data || []));
+      setNotificationsUnavailable(notificationsResult.unavailable === true);
       setLegacyAvailable(hasLegacySnapshot());
       setQueue(readOfflineQueue());
     } finally {
       startTransition(() => setLoading(false));
+    }
+  }
+
+  function setTransactionsFilters(nextFilters) {
+    setTransactionsFiltersState((current) => {
+      const resolved =
+        typeof nextFilters === "function"
+          ? nextFilters(current)
+          : { ...current, ...(nextFilters && typeof nextFilters === "object" ? nextFilters : {}) };
+      return normalizeTransactionsFilters(resolved, current.monthKey || selectedMonth || todayMonth());
+    });
+  }
+
+  async function fetchTransactionsHistoryBatch(filters, { offset = 0, limit = TRANSACTIONS_PAGE_SIZE } = {}) {
+    if (!supabase || !session) {
+      return { items: [], hasMore: false, filters: normalizeTransactionsFilters(filters, selectedMonth) };
+    }
+
+    const normalizedFilters = normalizeTransactionsFilters(filters, selectedMonth);
+    const { startIso, endIso } = buildTransactionsMonthRange(normalizedFilters.monthKey);
+    const searchTerm = sanitizeTransactionSearchTerm(normalizedFilters.query);
+    const accountId = Number(normalizedFilters.accountId || 0);
+    const categoryId = Number(normalizedFilters.categoryId || 0);
+
+    let query = supabase
+      .from("transactions")
+      .select(TRANSACTION_HISTORY_SELECT)
+      .eq("user_id", session.user.id)
+      .eq("status", "posted")
+      .gte("date", startIso)
+      .lt("date", endIso)
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (normalizedFilters.kind !== "all") {
+      query = query.eq("kind", normalizedFilters.kind);
+    }
+
+    if (categoryId > 0) {
+      query = query.eq("category_id", categoryId);
+    }
+
+    if (accountId > 0) {
+      query = query.or(`account_id.eq.${accountId},from_account_id.eq.${accountId},to_account_id.eq.${accountId}`);
+    } else if (searchTerm) {
+      query = query.or(`merchant.ilike.%${searchTerm}%,note.ilike.%${searchTerm}%,reference.ilike.%${searchTerm}%`);
+    }
+
+    const { data, error } = await query.range(offset, offset + Math.max(1, limit) - 1);
+    if (error) throw error;
+
+    let items = sortRuntimeTransactionsNewestFirst(
+      (Array.isArray(data) ? data : []).filter((transaction) => transaction?.is_split_child !== true),
+    );
+
+    if (searchTerm) {
+      items = items.filter((transaction) => matchesTransactionHistorySearch(transaction, searchTerm));
+    }
+
+    return {
+      items,
+      hasMore: (Array.isArray(data) ? data : []).length === Math.max(1, limit),
+      filters: normalizedFilters,
+    };
+  }
+
+  async function refreshTransactionsPage(options = {}) {
+    const nextFilters =
+      options && options.filters && typeof options.filters === "object"
+        ? normalizeTransactionsFilters({ ...transactionsFilters, ...options.filters }, selectedMonth)
+        : normalizeTransactionsFilters(transactionsFilters, selectedMonth);
+
+    if (!supabase || !session) {
+      setTransactionsPage(createTransactionsPageState());
+      return createTransactionsPageState();
+    }
+
+    setTransactionsPage((current) =>
+      createTransactionsPageState({
+        ...current,
+        items: options.keepItems === true ? current.items : [],
+        loading: true,
+        error: "",
+      }),
+    );
+
+    try {
+      const result = await fetchTransactionsHistoryBatch(nextFilters, {
+        offset: 0,
+        limit: Number(options.limit || TRANSACTIONS_PAGE_SIZE),
+      });
+      setTransactionsPage(
+        createTransactionsPageState({
+          items: result.items,
+          hasMore: result.hasMore,
+        }),
+      );
+      return result;
+    } catch (error) {
+      setTransactionsPage((current) =>
+        createTransactionsPageState({
+          ...current,
+          error: String(error?.message || error || "load_transactions_failed"),
+        }),
+      );
+      if (options.silent !== true) {
+        pushToast("error", "โหลดรายการย้อนหลังไม่สำเร็จ");
+      }
+      return createTransactionsPageState({
+        error: String(error?.message || error || "load_transactions_failed"),
+      });
+    }
+  }
+
+  async function loadMoreTransactions() {
+    if (!supabase || !session) return createTransactionsPageState();
+    if (transactionsPage.loading || transactionsPage.loadingMore || !transactionsPage.hasMore) {
+      return transactionsPage;
+    }
+
+    setTransactionsPage((current) => ({
+      ...current,
+      loadingMore: true,
+      error: "",
+    }));
+
+    try {
+      const result = await fetchTransactionsHistoryBatch(transactionsFilters, {
+        offset: transactionsPage.items.length,
+        limit: TRANSACTIONS_PAGE_SIZE,
+      });
+      setTransactionsPage((current) =>
+        createTransactionsPageState({
+          items: mergeTransactionsById(current.items, result.items),
+          hasMore: result.hasMore,
+        }),
+      );
+      return result;
+    } catch (error) {
+      setTransactionsPage((current) => ({
+        ...current,
+        loadingMore: false,
+        error: String(error?.message || error || "load_more_transactions_failed"),
+      }));
+      pushToast("error", "โหลดรายการเพิ่มไม่สำเร็จ");
+      return createTransactionsPageState({
+        items: transactionsPage.items,
+        hasMore: transactionsPage.hasMore,
+        error: String(error?.message || error || "load_more_transactions_failed"),
+      });
+    }
+  }
+
+  async function exportTransactionsCsv(filters = transactionsFilters) {
+    if (!supabase || !session || savingRef.current) return false;
+
+    const normalizedFilters = normalizeTransactionsFilters(filters, selectedMonth);
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const exportedRows = [];
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const result = await fetchTransactionsHistoryBatch(normalizedFilters, {
+          offset,
+          limit: TRANSACTIONS_EXPORT_BATCH_SIZE,
+        });
+        exportedRows.push(...result.items);
+        hasMore = result.hasMore;
+        offset += TRANSACTIONS_EXPORT_BATCH_SIZE;
+        if (!result.items.length) break;
+      }
+
+      const csv = transactionsToCsv(exportedRows, {
+        categories,
+        accounts,
+      });
+      downloadCsv(csv, `transactions-${normalizedFilters.monthKey}.csv`);
+      pushToast("success", "ส่งออก CSV แล้ว");
+      return true;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }
 
@@ -1519,6 +1886,9 @@ export function AppProvider({ children }) {
         body: JSON.stringify(payload),
       });
       await refreshAll();
+      if (transactionsPage.items.length) {
+        await refreshTransactionsPage({ silent: true });
+      }
       pushToast("success", payload?.id ? "อัปเดตบัญชีแล้ว" : "เพิ่มบัญชีแล้ว");
     } finally {
       setSaving(false);
@@ -1534,6 +1904,9 @@ export function AppProvider({ children }) {
         body: JSON.stringify({ id: Number(accountId) }),
       });
       await refreshAll();
+      if (transactionsPage.items.length) {
+        await refreshTransactionsPage({ silent: true });
+      }
       pushToast("success", "ลบบัญชีแล้ว");
       return true;
     } finally {
@@ -1573,9 +1946,15 @@ export function AppProvider({ children }) {
   }
 
   async function saveFinancialGoal(payload) {
-    if (!supabase || !session) return;
+    if (!supabase || !session || savingRef.current) return false;
 
     const goal = buildFinancialGoalPayload(payload);
+    if (Number(goal.target_amount_satang || 0) <= 0) {
+      pushToast("warning", "กรอกยอดเป้าหมายมากกว่า 0");
+      return false;
+    }
+
+    savingRef.current = true;
     setSaving(true);
     try {
       const row = {
@@ -1599,7 +1978,9 @@ export function AppProvider({ children }) {
 
       await refreshPlannerState();
       pushToast("success", goal.id ? "อัปเดตเป้าหมายแล้ว" : "เพิ่มเป้าหมายแล้ว");
+      return true;
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -1624,9 +2005,15 @@ export function AppProvider({ children }) {
   }
 
   async function saveDebtPlan(payload) {
-    if (!supabase || !session) return;
+    if (!supabase || !session || savingRef.current) return false;
 
     const plan = buildDebtPlanPayload(payload);
+    if (Number(plan.target_payment_satang || 0) <= 0) {
+      pushToast("warning", "กรอกยอดที่อยากจ่ายมากกว่า 0");
+      return false;
+    }
+
+    savingRef.current = true;
     setSaving(true);
     try {
       const row = {
@@ -1652,7 +2039,9 @@ export function AppProvider({ children }) {
 
       await refreshPlannerState();
       pushToast("success", plan.id ? "อัปเดตแผนชำระแล้ว" : "เพิ่มแผนชำระแล้ว");
+      return true;
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -1807,6 +2196,61 @@ export function AppProvider({ children }) {
     }
   }
 
+  async function upsertMerchantMappingFromDraft(draft, metadata = {}) {
+    if (!supabase || !session) return null;
+
+    const sanitized = sanitizeTransactionDraft(draft);
+    const kind = String(sanitized?.kind || "").trim().toLowerCase();
+    const merchantName = String(sanitized?.merchant || "").trim();
+    const merchantKey = normalizeMerchantKey(merchantName);
+    const existing =
+      merchantMappings.find((item) => String(item?.merchant_key || "").trim() === merchantKey) || null;
+
+    if (!merchantKey || kind === "transfer") return null;
+
+    const accountId =
+      kind === "transfer"
+        ? sanitized.fromAccountId
+        : sanitized.accountId;
+    const payload = {
+      user_id: session.user.id,
+      merchant_key: merchantKey,
+      canonical_merchant: merchantName || merchantKey,
+      preferred_category_id: sanitized.categoryId || null,
+      preferred_account_id: accountId ? Number(accountId) : null,
+      usage_count: Math.max(1, Number(existing?.usage_count || 0) + 1),
+      last_used_at: new Date().toISOString(),
+      metadata: {
+        ...(existing?.metadata && typeof existing.metadata === "object" ? existing.metadata : {}),
+        kind,
+        ...metadata,
+      },
+    };
+
+    const { data, error } = await supabase
+      .from("merchant_mappings")
+      .upsert(payload, {
+        onConflict: "user_id,merchant_key",
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+    if (data) {
+      setMerchantMappings((current) => {
+        const next = [
+          ...current.filter((item) => String(item?.merchant_key || "").trim() !== merchantKey),
+          data,
+        ];
+        return next.sort(
+          (left, right) =>
+            Number(right?.usage_count || 0) - Number(left?.usage_count || 0) ||
+            String(right?.last_used_at || "").localeCompare(String(left?.last_used_at || "")),
+        );
+      });
+    }
+    return data || payload;
+  }
+
   async function saveTransactionDraft(draft, options = {}) {
     if (!supabase || !session) return null;
     const plan = buildTransactionSavePlan({
@@ -1826,6 +2270,7 @@ export function AppProvider({ children }) {
           .insert({
             ...plan.parentRow,
             merchant_key: normalizeMerchantKey(plan.sanitized.merchant || ""),
+            source_recurring_id: options.sourceRecurringId || null,
           })
           .select("id")
           .single();
@@ -1837,6 +2282,7 @@ export function AppProvider({ children }) {
           ...row,
           split_parent_id: parent.id,
           merchant_key: normalizeMerchantKey(plan.sanitized.merchant || ""),
+          source_recurring_id: options.sourceRecurringId || null,
         }));
 
         const { data: children, error: childError } = await supabase
@@ -1849,6 +2295,10 @@ export function AppProvider({ children }) {
         for (const child of Array.isArray(children) ? children : []) {
           if (child?.id != null) insertedIds.push(Number(child.id));
         }
+
+        await upsertMerchantMappingFromDraft(plan.sanitized, {
+          source: options.source || "manual",
+        });
 
         return {
           id: Number(parent.id),
@@ -1872,6 +2322,7 @@ export function AppProvider({ children }) {
       .insert({
         ...plan.row,
         merchant_key: normalizeMerchantKey(plan.sanitized.merchant || ""),
+        source_recurring_id: options.sourceRecurringId || null,
       })
       .select("id")
       .single();
@@ -1896,6 +2347,10 @@ export function AppProvider({ children }) {
         throw lineError;
       }
     }
+
+    await upsertMerchantMappingFromDraft(plan.sanitized, {
+      source: options.source || "manual",
+    });
 
     return {
       id: Number(data.id),
@@ -1973,6 +2428,11 @@ export function AppProvider({ children }) {
         })
         .eq("user_id", session.user.id)
         .eq("id", transactionId);
+      if (!error) {
+        await upsertMerchantMappingFromDraft(sanitized, {
+          source: existing?.raw?.source || "manual_update",
+        });
+      }
 
       if (error) throw error;
       await refreshAll();
@@ -2089,28 +2549,9 @@ export function AppProvider({ children }) {
       if (scanError) throw scanError;
 
       if (merchantKey) {
-        await supabase.from("merchant_mappings").upsert(
-          {
-            user_id: session.user.id,
-            merchant_key: merchantKey,
-            canonical_merchant: sanitized.merchant || merchantKey,
-            preferred_category_id: sanitized.kind === "transfer" ? null : sanitized.categoryId || null,
-            preferred_account_id:
-              sanitized.kind === "transfer"
-                ? sanitized.fromAccountId
-                  ? Number(sanitized.fromAccountId)
-                  : null
-                : sanitized.accountId
-                ? Number(sanitized.accountId)
-                : null,
-            usage_count: 1,
-            last_used_at: new Date().toISOString(),
-            metadata: {
-              source: "scan_approval",
-            },
-          },
-          { onConflict: "user_id,merchant_key" },
-        );
+        await upsertMerchantMappingFromDraft(sanitized, {
+          source: "scan_approval",
+        });
       }
 
       await refreshAll();
@@ -2118,6 +2559,282 @@ export function AppProvider({ children }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveRecurringRule(input) {
+    if (!supabase || !session || savingRef.current) return false;
+
+    const rule = buildRecurringRulePayload(input);
+    const isTransfer = rule.kind === "transfer";
+
+    if (Number(rule.amount_satang || 0) <= 0) {
+      pushToast("warning", "à¸à¸£à¸­à¸à¸¢à¸­à¸” recurring à¹ƒà¸«à¹‰à¸¡à¸²à¸à¸à¸§à¹ˆà¸² 0");
+      return false;
+    }
+
+    if (!rule.start_date || Number(rule.interval_count || 0) <= 0) {
+      pushToast("warning", "à¸à¸£à¸­à¸à¸£à¸­à¸šà¹à¸¥à¸°à¸§à¸±à¸™à¹€à¸£à¸´à¹ˆà¸¡à¹ƒà¸«à¹‰à¸„à¸£à¸š");
+      return false;
+    }
+
+    if (isTransfer) {
+      if (!rule.from_account_id || !rule.to_account_id || rule.from_account_id === rule.to_account_id) {
+        pushToast("warning", "à¹€à¸¥à¸·à¸­à¸à¸šà¸±à¸à¸Šà¸µà¸•à¹‰à¸™à¸—à¸²à¸‡à¹à¸¥à¸°à¸›à¸¥à¸²à¸¢à¸—à¸²à¸‡à¹ƒà¸«à¹‰à¸•à¹ˆà¸²à¸‡à¸à¸±à¸™");
+        return false;
+      }
+    } else if (!rule.account_id || !rule.category_id) {
+      pushToast("warning", "à¹€à¸¥à¸·à¸­à¸à¸šà¸±à¸à¸Šà¸µà¹à¸¥à¸°à¸«à¸¡à¸§à¸”à¹ƒà¸«à¹‰à¸„à¸£à¸š");
+      return false;
+    }
+
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const payload = {
+        user_id: session.user.id,
+        legacy_id: rule.legacy_id,
+        kind: rule.kind,
+        amount_satang: rule.amount_satang,
+        account_id: rule.account_id ? Number(rule.account_id) : null,
+        from_account_id: rule.from_account_id ? Number(rule.from_account_id) : null,
+        to_account_id: rule.to_account_id ? Number(rule.to_account_id) : null,
+        category_id: rule.category_id || null,
+        merchant: rule.merchant || null,
+        note: rule.note || null,
+        frequency: rule.frequency,
+        interval_count: rule.interval_count,
+        anchor_day: rule.anchor_day,
+        start_date: rule.start_date,
+        end_date: rule.end_date || null,
+        last_generated_date: rule.last_generated_date || null,
+        enabled: rule.enabled !== false,
+      };
+
+      const query = rule.id
+        ? supabase.from("recurring_rules").update(payload).eq("id", rule.id).eq("user_id", session.user.id)
+        : supabase.from("recurring_rules").insert(payload);
+      const { data, error } = await query.select("*").single();
+      if (error) throw error;
+
+      setRecurringRules((current) =>
+        normalizeRecurringRules([
+          ...current.filter((item) => Number(item?.id || 0) !== Number(rule.id || 0)),
+          data,
+        ]),
+      );
+      pushToast("success", rule.id ? "à¸šà¸±à¸™à¸—à¸¶à¸ recurring à¹à¸¥à¹‰à¸§" : "à¹€à¸žà¸´à¹ˆà¸¡ recurring à¹à¸¥à¹‰à¸§");
+      return data;
+    } catch (error) {
+      if (isMissingPlannerRelationError(error, "recurring_rules")) {
+        pushToast("error", "à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸žà¸šà¸•à¸²à¸£à¸²à¸‡ recurring_rules à¹ƒà¸™à¸à¸²à¸™à¸‚à¹‰à¸­à¸¡à¸¹à¸¥");
+        return false;
+      }
+      throw error;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function deleteRecurringRule(ruleId) {
+    if (!supabase || !session || !ruleId) return false;
+
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("recurring_rules")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("id", Number(ruleId));
+      if (error) throw error;
+
+      setRecurringRules((current) => current.filter((rule) => Number(rule?.id || 0) !== Number(ruleId)));
+      pushToast("success", "à¸¥à¸š recurring à¹à¸¥à¹‰à¸§");
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleRecurringRule(ruleLike, enabled = null) {
+    const rule =
+      ruleLike && typeof ruleLike === "object"
+        ? ruleLike
+        : recurringRules.find((item) => Number(item?.id || 0) === Number(ruleLike || 0)) || null;
+    if (!rule) return false;
+    const nextEnabled = enabled == null ? rule.enabled !== true : enabled === true;
+    return saveRecurringRule({
+      ...rule,
+      enabled: nextEnabled,
+    });
+  }
+
+  async function runRecurringNow(options = {}) {
+    if (!supabase || !session || savingRef.current) return false;
+
+    const todayISO = todayDate();
+    const requestedIds = new Set((Array.isArray(options.ruleIds) ? options.ruleIds : []).map((id) => Number(id || 0)));
+    const sourceRules = recurringRules.filter((rule) => {
+      if (requestedIds.size && !requestedIds.has(Number(rule?.id || 0))) return false;
+      return getRecurringDueState(rule, todayISO) === "due";
+    });
+
+    if (!sourceRules.length) {
+      pushToast("info", "à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸¡à¸µ recurring à¸—à¸µà¹ˆà¸–à¸¶à¸‡à¸£à¸­à¸š");
+      return false;
+    }
+
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      let createdCount = 0;
+      let truncatedCount = 0;
+
+      for (const rule of sourceRules) {
+        const occurrence = buildRecurringOccurrences(rule, todayISO);
+        if (!occurrence.drafts.length) continue;
+
+        for (const draft of occurrence.drafts) {
+          await saveTransactionDraft(draft, {
+            source: "recurring",
+            sourceRecurringId: rule.id,
+          });
+          createdCount += 1;
+        }
+
+        if (occurrence.truncated) truncatedCount += 1;
+
+        const { error } = await supabase
+          .from("recurring_rules")
+          .update({
+            last_generated_date: occurrence.nextRule.last_generated_date || rule.last_generated_date || null,
+          })
+          .eq("user_id", session.user.id)
+          .eq("id", Number(rule.id));
+        if (error) throw error;
+      }
+
+      await refreshAll();
+
+      if (createdCount <= 0) {
+        pushToast("info", "à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸¡à¸µà¸£à¸²à¸¢à¸à¸²à¸£ recurring à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸ªà¸£à¹‰à¸²à¸‡");
+        return false;
+      }
+
+      pushToast(
+        truncatedCount > 0 ? "warning" : "success",
+        truncatedCount > 0
+          ? `à¸ªà¸£à¹‰à¸²à¸‡ recurring à¹à¸¥à¹‰à¸§ ${createdCount} à¸£à¸²à¸¢à¸à¸²à¸£ à¹à¸¥à¸°à¸¡à¸µ ${truncatedCount} à¸à¸Žà¸—à¸µà¹ˆà¸¢à¸±à¸‡à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ`
+          : `à¸ªà¸£à¹‰à¸²à¸‡ recurring à¹à¸¥à¹‰à¸§ ${createdCount} à¸£à¸²à¸¢à¸à¸²à¸£`,
+      );
+      return true;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function markNotificationRead(notificationId) {
+    const target = notifications.find((item) => String(item?.id || "") === String(notificationId || "")) || null;
+    if (!target) return false;
+
+    const runtimeKey = getNotificationRuntimeKey(target);
+    if (notificationsUnavailable || Number(notificationId || 0) <= 0) {
+      setLocalNotificationReadKeys((current) => mergeNotificationKeys(current, runtimeKey));
+      return true;
+    }
+
+    const timestamp = new Date().toISOString();
+    const { error } = await supabase
+      .from("notifications")
+      .update({
+        is_read: true,
+        read_at: timestamp,
+      })
+      .eq("user_id", session.user.id)
+      .eq("id", Number(notificationId));
+    if (error) throw error;
+
+    setStoredNotifications((current) =>
+      normalizeNotifications(
+        current.map((item) =>
+          Number(item?.id || 0) === Number(notificationId)
+            ? {
+                ...item,
+                is_read: true,
+                read_at: timestamp,
+              }
+            : item,
+        ),
+      ),
+    );
+    return true;
+  }
+
+  async function markAllNotificationsRead() {
+    const unreadItems = notifications.filter((item) => item?.is_read !== true);
+    if (!unreadItems.length) return false;
+
+    const runtimeKeys = unreadItems.map((item) => getNotificationRuntimeKey(item));
+    const persistedIds = unreadItems
+      .map((item) => Number(item?.id || 0))
+      .filter((id) => id > 0);
+
+    if (!notificationsUnavailable && persistedIds.length) {
+      const timestamp = new Date().toISOString();
+      const { error } = await supabase
+        .from("notifications")
+        .update({
+          is_read: true,
+          read_at: timestamp,
+        })
+        .eq("user_id", session.user.id)
+        .in("id", persistedIds);
+      if (error) throw error;
+
+      setStoredNotifications((current) =>
+        normalizeNotifications(
+          current.map((item) =>
+            persistedIds.includes(Number(item?.id || 0))
+              ? {
+                  ...item,
+                  is_read: true,
+                  read_at: timestamp,
+                }
+              : item,
+          ),
+        ),
+      );
+    }
+
+    setLocalNotificationReadKeys((current) => mergeNotificationKeyList(current, runtimeKeys));
+    return true;
+  }
+
+  async function dismissNotification(notificationId) {
+    const target = notifications.find((item) => String(item?.id || "") === String(notificationId || "")) || null;
+    if (!target) return false;
+
+    const runtimeKey = getNotificationRuntimeKey(target);
+    if (notificationsUnavailable || Number(notificationId || 0) <= 0) {
+      setLocalNotificationDismissedKeys((current) => mergeNotificationKeys(current, runtimeKey));
+      return true;
+    }
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({
+        is_dismissed: true,
+        dismissed_at: new Date().toISOString(),
+      })
+      .eq("user_id", session.user.id)
+      .eq("id", Number(notificationId));
+    if (error) throw error;
+
+    setStoredNotifications((current) =>
+      normalizeNotifications(current.filter((item) => Number(item?.id || 0) !== Number(notificationId))),
+    );
+    return true;
   }
 
   async function uploadScanFile(file, options = {}) {
@@ -2495,6 +3212,52 @@ export function AppProvider({ children }) {
       }),
     [accountsById, debtPlans, financialGoals, plannerToday],
   );
+  const recurringDueToday = useMemo(
+    () => recurringRules.filter((rule) => getRecurringDueState(rule, plannerToday) === "due"),
+    [plannerToday, recurringRules],
+  );
+  const runtimeNotifications = useMemo(
+    () =>
+      buildRuntimeNotifications({
+        budgetPlanSnapshot,
+        plannerReminders,
+        recurringDueToday,
+        scanDocuments,
+      }),
+    [budgetPlanSnapshot, plannerReminders, recurringDueToday, scanDocuments],
+  );
+  const notifications = useMemo(() => {
+    const persisted = normalizeNotifications(storedNotifications);
+    const persistedByKey = new Map(
+      persisted.map((item) => [getNotificationRuntimeKey(item), item]),
+    );
+    const dismissedKeys = new Set(localNotificationDismissedKeys);
+    const readKeys = new Set(localNotificationReadKeys);
+    const merged = [];
+
+    for (const item of persisted) {
+      const key = getNotificationRuntimeKey(item);
+      if (dismissedKeys.has(key)) continue;
+      merged.push(readKeys.has(key) ? { ...item, is_read: true } : item);
+    }
+
+    for (const item of runtimeNotifications) {
+      const key = getNotificationRuntimeKey(item);
+      if (dismissedKeys.has(key) || persistedByKey.has(key)) continue;
+      merged.push({
+        ...item,
+        id: `runtime:${key}`,
+        is_read: readKeys.has(key),
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    return normalizeNotifications(merged);
+  }, [localNotificationDismissedKeys, localNotificationReadKeys, runtimeNotifications, storedNotifications]);
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((item) => item?.is_read !== true).length,
+    [notifications],
+  );
   const getBudgetHintForDraft = (draft) =>
     buildBudgetHintCompat({
       baseHint: buildBudgetHint({
@@ -2508,6 +3271,57 @@ export function AppProvider({ children }) {
       categoryId: draft?.categoryId ?? draft?.category_id,
       scenarioKey: plannerActiveScenarioKey,
     });
+
+  useEffect(() => {
+    if (!supabase || !session || notificationsUnavailable) return undefined;
+    if (!runtimeNotifications.length) return undefined;
+
+    const existingKeys = new Set(
+      normalizeNotifications(storedNotifications).map((item) => getNotificationRuntimeKey(item)),
+    );
+    const missingItems = runtimeNotifications.filter((item) => !existingKeys.has(getNotificationRuntimeKey(item)));
+    if (!missingItems.length) return undefined;
+
+    let cancelled = false;
+
+    const syncMissingNotifications = async () => {
+      const rows = missingItems.map((item) => ({
+        user_id: session.user.id,
+        kind: item.kind,
+        title: item.title,
+        body: item.body,
+        data: item.data,
+        data_key: getNotificationDataKey(item),
+        is_read: false,
+        is_dismissed: false,
+      }));
+
+      const { data, error } = await supabase
+        .from("notifications")
+        .upsert(rows, { onConflict: "user_id,kind,data_key" })
+        .select("*");
+      if (cancelled) return;
+      if (error) {
+        if (isMissingPlannerRelationError(error, "notifications")) {
+          setNotificationsUnavailable(true);
+        }
+        return;
+      }
+
+      setStoredNotifications((current) =>
+        normalizeNotifications([
+          ...current,
+          ...(Array.isArray(data) ? data : []),
+        ]),
+      );
+    };
+
+    void syncMissingNotifications();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [notificationsUnavailable, runtimeNotifications, session, storedNotifications, supabase]);
 
   const refreshAllEvent = useEffectEvent((nextProfile = null) => {
     void refreshAll(nextProfile);
@@ -2533,15 +3347,23 @@ export function AppProvider({ children }) {
     legacyAvailable,
     profile,
     accounts,
+    merchantMappings,
     categories,
     financialGoals,
     debtPlans,
     budgetRows,
+    recurringRules,
+    recurringDueToday,
     scanDocuments,
     recentTransactions,
+    transactionsPage,
+    transactionsFilters,
     dashboardSnapshot,
+    dashboardPreviousSnapshot,
     accountBalanceSnapshot,
     cashflowSeries,
+    notifications,
+    unreadNotificationCount,
     plannerSummary,
     plannerReminders,
     planningConfig,
@@ -2556,6 +3378,7 @@ export function AppProvider({ children }) {
     toast,
     migrationState,
     setSelectedMonth,
+    setTransactionsFilters,
     clearToast,
     signIn,
     signUp,
@@ -2577,15 +3400,25 @@ export function AppProvider({ children }) {
     saveCategoryBudgetBehavior,
     saveBudgetRow,
     deleteBudgetRow,
+    saveRecurringRule,
+    deleteRecurringRule,
+    toggleRecurringRule,
+    runRecurringNow,
     applySuggestedBudgets,
     applyPlannerPlan,
     acceptPlannerRecommendation,
     dismissPlannerRecommendation,
     lockPlannerRecommendation,
+    markNotificationRead,
+    markAllNotificationsRead,
+    dismissNotification,
     getBudgetHintForDraft,
     createManualTransaction,
     updateTransaction,
     deleteTransaction,
+    refreshTransactionsPage,
+    loadMoreTransactions,
+    exportTransactionsCsv,
     uploadScanFile,
     uploadScanFiles,
     retryScanUpload,

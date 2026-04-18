@@ -27,21 +27,30 @@ export function addMonthsClampedLocal(dateObj, months, anchorDay = parseDateSafe
 }
 
 export function getRecurringAnchorDay(recurring) {
-  const source = recurring?.startDate || recurring?.lastGenerated || new Date();
+  const source =
+    recurring?.startDate ||
+    recurring?.start_date ||
+    recurring?.lastGenerated ||
+    recurring?.last_generated_date ||
+    new Date();
   return parseDateSafe(source).getDate();
 }
 
 export function advanceRecurringDate(dateObj, frequency, interval, anchorDay = parseDateSafe(dateObj).getDate()) {
   const step = clampInt(interval, 1, 120, 1);
+  if (frequency === "daily") return addDaysLocal(dateObj, step);
   if (frequency === "weekly") return addDaysLocal(dateObj, 7 * step);
+  if (frequency === "yearly") return addMonthsClampedLocal(dateObj, 12 * step, anchorDay);
   return addMonthsClampedLocal(dateObj, step, anchorDay);
 }
 
 export function getNextRecurringDueDate(recurring, todayISO = toISODate(new Date())) {
-  const start = parseDateSafe(recurring?.startDate || todayISO);
+  const start = parseDateSafe(recurring?.startDate || recurring?.start_date || todayISO);
   const anchorDay = getRecurringAnchorDay(recurring);
-  return recurring?.lastGenerated
-    ? advanceRecurringDate(parseDateSafe(recurring.lastGenerated), recurring.frequency, recurring.interval, anchorDay)
+  const lastGenerated = recurring?.lastGenerated || recurring?.last_generated_date;
+  const interval = recurring?.interval ?? recurring?.interval_count;
+  return lastGenerated
+    ? advanceRecurringDate(parseDateSafe(lastGenerated), recurring.frequency, interval, anchorDay)
     : start;
 }
 

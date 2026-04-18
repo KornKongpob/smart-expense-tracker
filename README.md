@@ -6,8 +6,13 @@ Smart Expense Tracker is a mobile-first Next.js App Router expense app built for
 
 - Accounts with balance correction flows for cash, bank, credit card, and loan accounts
 - Manual transaction entry for expense, income, and transfer flows
+- Transactions history with month/kind/account/category filters, edit/delete, and CSV export
 - Receipt and transfer-slip scanning with Inbox review before approval
 - Split receipt persistence using one parent transaction plus linked child transactions
+- Planner flows for budgets, savings goals, debt payoff, and monthly recommendation snapshots
+- Recurring transaction rules for daily, weekly, monthly, and yearly automation
+- Dashboard analytics plus an in-app notification center for budget/debt/recurring/inbox alerts
+- Merchant autocomplete and per-kind account/category defaults on the Add screen
 - Supabase-backed runtime data plus offline queueing for manual entries and scans
 - PWA shell tuned for iPhone standalone mode
 
@@ -39,6 +44,9 @@ Useful scripts:
 - `src/features/app/AppProvider.jsx` is the runtime data layer and action surface.
 - The provider loads Supabase-backed resources, manages the offline queue, and exposes scan/manual/account actions to the runtime screens.
 - `src/features/app/transactionDrafts.js` now owns runtime transaction draft normalization, receipt grouping, baht-to-satang conversion, and split save-plan generation.
+- Recurring rule normalization lives in `src/features/app/recurringState.js`.
+- Runtime notification synthesis and dedupe helpers live in `src/features/app/notificationState.js`.
+- The history, recurring, and notification-center screens are all wired through the same provider surface.
 
 ### Scanning
 
@@ -75,6 +83,27 @@ The migration for this pass is:
 - `supabase/migrations/20260403_split_transactions_runtime.sql`
 
 It also updates dashboard/account balance SQL helpers so split parents are excluded from aggregates and receipt adjustments are signed correctly.
+
+## Recurring and Notifications
+
+- `/transactions` is the dedicated history screen with filters, edit/delete, pagination, and CSV export.
+- `/recurring` is the recurring-rules screen with create/edit/pause/delete actions and a manual `Run now` trigger.
+- The dashboard now includes month-over-month cards, category breakdown, a spend heatmap, and a recurring summary card.
+- The header bell opens a unified notification center for budget alerts, debt reminders, recurring due items, and pending inbox scans.
+
+## Database migrations
+
+Apply migrations in filename order. The current runtime expects at least:
+
+- `supabase/migrations/20260328_initial_redesign.sql`
+- `supabase/migrations/20260329_category_preferences.sql`
+- `supabase/migrations/20260401_finance_planner.sql`
+- `supabase/migrations/20260402_account_balance_snapshot.sql`
+- `supabase/migrations/20260403_split_transactions_runtime.sql`
+- `supabase/migrations/20260413_income_budget_planner.sql`
+- `supabase/migrations/20260415_planner_monthly_plans.sql`
+- `supabase/migrations/20260417_recurring_rules.sql`
+- `supabase/migrations/20260417_notifications.sql`
 
 ## Environment variables
 
@@ -131,6 +160,7 @@ Important deployment note:
 
 - money parsing and satang normalization
 - receipt grouping and adjustment balancing
+- recurring schedule helpers
 - scan request parsing and provider normalization helpers
 - planner/account helper logic
 - runtime transaction draft normalization and split save plans
@@ -138,6 +168,7 @@ Important deployment note:
 Run before shipping:
 
 ```bash
+npm run lint
 npm run test
 npm run build
 ```

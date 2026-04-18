@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { Bell } from "lucide-react";
 
 import { AppProvider, useExpenseApp } from "../features/app/AppProvider.jsx";
 import {
@@ -22,6 +23,7 @@ import {
   getPathForView,
   getViewForPathname,
 } from "../features/app/routes.js";
+import NotificationCenter from "../features/app/NotificationCenter.jsx";
 import AuthScreen from "../features/app/screens/AuthScreen.jsx";
 import LoadingScreen from "../features/app/screens/LoadingScreen.jsx";
 import { BottomNav, ToastBar } from "../features/app/ui.jsx";
@@ -30,14 +32,16 @@ const SCREEN_LOADERS = {
   dashboard: () => import("../features/app/screens/DashboardScreen.jsx"),
   inbox: () => import("../features/app/screens/InboxScreen.jsx"),
   add: () => import("../features/app/screens/AddScreen.jsx"),
+  transactions: () => import("../features/app/screens/TransactionsScreen.jsx"),
   accounts: () => import("../features/app/screens/AccountsScreen.jsx"),
   categories: () => import("../features/app/screens/CategoriesScreen.jsx"),
   planner: () => import("../features/app/screens/PlannerScreen.jsx"),
+  recurring: () => import("../features/app/screens/RecurringScreen.jsx"),
   settings: () => import("../features/app/screens/SettingsScreen.jsx"),
 };
 
 const PRELOADED_VIEWS = new Set();
-const IDLE_PRELOAD_VIEWS = ["inbox", "add", "accounts", "settings", "planner", "categories"];
+const IDLE_PRELOAD_VIEWS = ["inbox", "add", "transactions", "accounts", "settings", "planner", "categories", "recurring"];
 
 function preloadView(view) {
   const key = String(view || "").trim();
@@ -53,18 +57,22 @@ function preloadView(view) {
 const DashboardScreen = lazy(SCREEN_LOADERS.dashboard);
 const InboxScreen = lazy(SCREEN_LOADERS.inbox);
 const AddScreen = lazy(SCREEN_LOADERS.add);
+const TransactionsScreen = lazy(SCREEN_LOADERS.transactions);
 const AccountsScreen = lazy(SCREEN_LOADERS.accounts);
 const CategoriesScreen = lazy(SCREEN_LOADERS.categories);
 const PlannerScreen = lazy(SCREEN_LOADERS.planner);
+const RecurringScreen = lazy(SCREEN_LOADERS.recurring);
 const SettingsScreen = lazy(SCREEN_LOADERS.settings);
 
 const SCREEN_COMPONENTS = {
   dashboard: DashboardScreen,
   inbox: InboxScreen,
   add: AddScreen,
+  transactions: TransactionsScreen,
   accounts: AccountsScreen,
   categories: CategoriesScreen,
   planner: PlannerScreen,
+  recurring: RecurringScreen,
   settings: SettingsScreen,
 };
 
@@ -72,16 +80,20 @@ const SCREEN_TITLES = {
   dashboard: "Smart Expense",
   inbox: "Inbox | Smart Expense",
   add: "Add | Smart Expense",
+  transactions: "Transactions | Smart Expense",
   accounts: "Accounts | Smart Expense",
   categories: "Categories | Smart Expense",
   planner: "Planner | Smart Expense",
+  recurring: "Recurring | Smart Expense",
   settings: "Settings | Smart Expense",
 };
 
 const SCREEN_HEADER_LABELS = {
+  recurring: "รายการประจำ",
   dashboard: "ภาพรวม",
   inbox: "กล่องรับ",
   add: "เพิ่มรายการ",
+  transactions: "รายการย้อนหลัง",
   accounts: "บัญชี",
   categories: "หมวดหมู่",
   planner: "วางแผนการเงิน",
@@ -205,12 +217,26 @@ function useAppServiceWorker() {
 }
 
 function SignedInApp() {
-  const { authReady, session, bootstrapping, queue, toast, clearToast, isOnline } = useExpenseApp();
+  const {
+    authReady,
+    session,
+    bootstrapping,
+    queue,
+    toast,
+    clearToast,
+    isOnline,
+    notifications,
+    unreadNotificationCount,
+    markNotificationRead,
+    markAllNotificationsRead,
+    dismissNotification,
+  } = useExpenseApp();
   const router = useRouter();
   const pathname = usePathname();
   const view = getViewForPathname(pathname);
   const [appUpdateRegistration, setAppUpdateRegistration] = useState(null);
   const [updateReady, setUpdateReady] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
   const pendingCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
   const headerRef = useRef(null);
   const mainRef = useRef(null);
@@ -273,7 +299,7 @@ function SignedInApp() {
       window.removeEventListener("orientationchange", updateHeight);
       observer?.disconnect?.();
     };
-  }, [isOnline, pendingCount, view]);
+  }, [isOnline, pendingCount, unreadNotificationCount, view]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -312,6 +338,10 @@ function SignedInApp() {
     });
 
     return () => window.cancelAnimationFrame(frame);
+  }, [pathname]);
+
+  useEffect(() => {
+    setNotificationOpen(false);
   }, [pathname]);
 
   useEffect(() => {
@@ -414,6 +444,17 @@ function SignedInApp() {
                 <div className="finance-brand-context">{activeScreenLabel}</div>
               </div>
               <div className="finance-header-state">
+                <button
+                  type="button"
+                  className="ui-icon-btn finance-header-bell"
+                  onClick={() => setNotificationOpen(true)}
+                  aria-label="Open notifications"
+                >
+                  <Bell size={18} />
+                  {unreadNotificationCount ? (
+                    <span className="ui-badge finance-header-bell-badge">{unreadNotificationCount}</span>
+                  ) : null}
+                </button>
                 {updateReady ? (
                   <button
                     type="button"
@@ -444,6 +485,15 @@ function SignedInApp() {
           view={view}
           onChange={navigationValue.navigateToView}
           onIntent={navigationValue.prefetchView}
+        />
+        <NotificationCenter
+          open={notificationOpen}
+          onClose={() => setNotificationOpen(false)}
+          notifications={notifications}
+          unreadCount={unreadNotificationCount}
+          markNotificationRead={markNotificationRead}
+          markAllNotificationsRead={markAllNotificationsRead}
+          dismissNotification={dismissNotification}
         />
       </div>
     </ExpenseNavigationProvider>

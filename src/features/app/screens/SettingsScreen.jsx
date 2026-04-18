@@ -4,6 +4,7 @@ import {
   Download,
   FolderTree,
   LogOut,
+  Repeat2,
   RefreshCcw,
   Target,
   Upload,
@@ -25,6 +26,8 @@ export default function SettingsScreen() {
     planningConfig,
     budgetPlanSnapshot,
     plannerDecisionSummary,
+    recurringRules,
+    recurringDueToday,
     saving,
     saveProfile,
     exportBackup,
@@ -43,6 +46,8 @@ export default function SettingsScreen() {
   const pendingCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
   const migrationTone = profile?.migrated_at ? "success" : "warning";
   const plannerCount = Number(plannerSummary.activeGoalCount || 0) + Number(plannerSummary.activeDebtCount || 0);
+  const recurringCount = Array.isArray(recurringRules) ? recurringRules.length : 0;
+  const recurringDueCount = Array.isArray(recurringDueToday) ? recurringDueToday.length : 0;
   const plannerBudgetSatang =
     (!budgetPlanSnapshot?.hasAppliedBudget && !budgetPlanSnapshot?.usesLegacyMonthlyTarget)
       ? budgetPlanSnapshot?.suggestedExpenseBudgetSatang || 0
@@ -163,6 +168,37 @@ export default function SettingsScreen() {
                     <StatusPill tone="default">{plannerConfidencePct}%</StatusPill>
                   ) : plannerCount ? (
                     <StatusPill tone="default">{plannerCount} แผน</StatusPill>
+                  ) : (
+                    <ChevronRight size={16} />
+                  )}
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => navigateToView("recurring")}
+              data-testid="open-recurring"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <Repeat2 size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">Recurring</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      ตั้งกฎรายการประจำ เช่น เงินเดือน ค่าบ้าน หรือโอนเงินออม
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  {recurringDueCount ? (
+                    <StatusPill tone="warning">ถึงรอบ {recurringDueCount}</StatusPill>
+                  ) : recurringCount ? (
+                    <StatusPill tone="default">{recurringCount} กฎ</StatusPill>
                   ) : (
                     <ChevronRight size={16} />
                   )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -17,6 +17,7 @@ import LineItemEditorSection from "../LineItemEditorSection.jsx";
 import { lineItemsFromDraft } from "../lineItemDraftState.js";
 import { ScreenShell, StatusPill, useKeyboardViewportState } from "../ui.jsx";
 import { formatCurrency, getCurrentLocalTimeHHmm, toISODate } from "../../../utils/format.js";
+import { normalizeMerchantKey } from "../../../utils/merchantDictionary.js";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
 
 const MANUAL_KIND_OPTIONS = [
@@ -40,15 +41,25 @@ const SCAN_FLOW_STEPS = [
   },
 ];
 
-function defaultDraft(accounts) {
+function getKindCategories(categories, kind) {
+  if (kind === "income") {
+    return Array.isArray(categories?.income) ? categories.income.filter((category) => category?.isHidden !== true) : [];
+  }
+  if (kind === "transfer") return [];
+  return Array.isArray(categories?.expense) ? categories.expense.filter((category) => category?.isHidden !== true) : [];
+}
+
+function defaultDraft(accounts, latestDefaultsByKind = {}) {
   const firstAccountId = accounts[0] ? String(accounts[0].id) : "";
+  const expenseDefaults = latestDefaultsByKind?.expense || {};
+  const defaultAccountId = String(expenseDefaults.accountId || "").trim() || firstAccountId;
 
   return {
     kind: "expense",
-    accountId: firstAccountId,
-    fromAccountId: firstAccountId,
+    accountId: defaultAccountId,
+    fromAccountId: defaultAccountId,
     toAccountId: "",
-    categoryId: "",
+    categoryId: String(expenseDefaults.categoryId || "").trim(),
     amountSatang: 0,
     merchant: "",
     note: "",
@@ -87,12 +98,101 @@ function normalizeAccountId(accounts, value, fallback = "") {
   return accounts[0] ? String(accounts[0].id) : "";
 }
 
+function buildLatestDefaultsByKind(recentTransactions, accounts) {
+  const defaults = {
+    expense: null,
+    income: null,
+    transfer: null,
+  };
+
+  for (const transaction of Array.isArray(recentTransactions) ? recentTransactions : []) {
+    const kind = String(transaction?.kind || "").trim().toLowerCase();
+    if (!(kind in defaults) || defaults[kind]) continue;
+
+    if (kind === "transfer") {
+      const fromAccountId = normalizeAccountId(accounts, transaction?.from_account_id, transaction?.account_id);
+      const toAccountId = hasAccountId(accounts, transaction?.to_account_id) ? String(transaction.to_account_id) : "";
+      defaults.transfer = {
+        fromAccountId,
+        toAccountId: toAccountId && toAccountId !== fromAccountId ? toAccountId : "",
+      };
+      continue;
+    }
+
+    defaults[kind] = {
+      accountId: normalizeAccountId(accounts, transaction?.account_id),
+      categoryId: String(transaction?.category_id || "").trim(),
+    };
+  }
+
+  return defaults;
+}
+
+function buildMerchantSuggestions({ merchantMappings, recentTransactions, kind, query }) {
+  const normalizedQuery = normalizeMerchantKey(query);
+  if (!normalizedQuery) return [];
+
+  const suggestionsByKey = new Map();
+
+  const upsertSuggestion = (entry) => {
+    const key = String(entry?.key || "").trim();
+    if (!key) return;
+
+    const existing = suggestionsByKey.get(key);
+    if (!existing || Number(entry.score || 0) > Number(existing.score || 0)) {
+      suggestionsByKey.set(key, entry);
+    }
+  };
+
+  for (const mapping of Array.isArray(merchantMappings) ? merchantMappings : []) {
+    const mappingKind = String(mapping?.metadata?.kind || "").trim().toLowerCase();
+    if (mappingKind && mappingKind !== String(kind || "").trim().toLowerCase()) continue;
+    const merchant = String(mapping?.canonical_merchant || mapping?.merchant_key || "").trim();
+    const key = normalizeMerchantKey(merchant);
+    if (!key || !key.includes(normalizedQuery)) continue;
+    upsertSuggestion({
+      key,
+      merchant,
+      accountId: mapping?.preferred_account_id ? String(mapping.preferred_account_id) : "",
+      categoryId: String(mapping?.preferred_category_id || "").trim(),
+      fromAccountId: "",
+      toAccountId: "",
+      score: 1000 + Number(mapping?.usage_count || 0),
+    });
+  }
+
+  (Array.isArray(recentTransactions) ? recentTransactions : []).forEach((transaction, index) => {
+    const transactionKind = String(transaction?.kind || "").trim().toLowerCase();
+    if (transactionKind !== String(kind || "").trim().toLowerCase()) return;
+
+    const merchant = String(transaction?.merchant || "").trim();
+    const key = normalizeMerchantKey(merchant);
+    if (!key || !key.includes(normalizedQuery)) return;
+
+    upsertSuggestion({
+      key,
+      merchant,
+      accountId: transaction?.account_id ? String(transaction.account_id) : "",
+      categoryId: String(transaction?.category_id || "").trim(),
+      fromAccountId: transaction?.from_account_id ? String(transaction.from_account_id) : "",
+      toAccountId: transaction?.to_account_id ? String(transaction.to_account_id) : "",
+      score: 600 - index,
+    });
+  });
+
+  return Array.from(suggestionsByKey.values())
+    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0) || left.merchant.localeCompare(right.merchant, "th"))
+    .slice(0, 6);
+}
+
 export default function AddScreen() {
   const { navigateToView } = useExpenseNavigation();
   const {
     accounts,
     categories,
+    merchantMappings,
     queue,
+    recentTransactions,
     scanUploads,
     saving,
     isOnline,
@@ -102,6 +202,10 @@ export default function AddScreen() {
     retryScanUpload,
   } = useExpenseApp();
 
+  const latestDefaultsByKind = useMemo(
+    () => buildLatestDefaultsByKind(recentTransactions, accounts),
+    [accounts, recentTransactions],
+  );
   const [mode, setMode] = useState("scan");
   const [draft, setDraft] = useState(defaultDraft(accounts));
   const [amountInput, setAmountInput] = useState("");
@@ -110,14 +214,36 @@ export default function AddScreen() {
   const fileInputRef = useRef(null);
 
   const hasAccounts = accounts.length > 0;
+  const accountNameById = useMemo(
+    () => new Map((Array.isArray(accounts) ? accounts : []).map((account) => [String(account?.id || ""), account?.name || ""])),
+    [accounts],
+  );
+  const categoryNameById = useMemo(
+    () =>
+      new Map(
+        [...getKindCategories(categories, "expense"), ...getKindCategories(categories, "income")].map((category) => [
+          String(category?.id || ""),
+          category?.name || "",
+        ]),
+      ),
+    [categories],
+  );
   const queuedScanCount = Number(queue.scans.length || 0);
   const queuedManualCount = Number(queue.manual.length || 0);
   const queueCount = queuedScanCount + queuedManualCount;
   const activeUploads = (Array.isArray(scanUploads) ? scanUploads : []).slice(0, 6);
   const canOpenInbox = queuedScanCount > 0 || activeUploads.some((upload) => upload.stage === "done");
-  const kindCategories = (
-    draft.kind === "income" ? categories.income : draft.kind === "transfer" ? [] : categories.expense
-  ).filter((category) => category?.isHidden !== true);
+  const kindCategories = getKindCategories(categories, draft.kind);
+  const merchantSuggestions = useMemo(
+    () =>
+      buildMerchantSuggestions({
+        merchantMappings,
+        recentTransactions,
+        kind: draft.kind,
+        query: draft.merchant,
+      }),
+    [draft.kind, draft.merchant, merchantMappings, recentTransactions],
+  );
   const budgetHint = getBudgetHintForDraft?.(draft) || null;
   const plannerHint = budgetHint?.planner || null;
   const plannerConfidencePct = Math.max(0, Math.min(100, Math.round(Number(plannerHint?.confidenceScore || 0) * 100)));
@@ -159,8 +285,56 @@ export default function AddScreen() {
     });
   }, [accounts]);
 
+  useEffect(() => {
+    setDraft((current) => {
+      const isPristine =
+        Number(current.amountSatang || 0) <= 0 &&
+        !String(current.merchant || "").trim() &&
+        !String(current.note || "").trim() &&
+        !String(current.reference || "").trim() &&
+        !String(current.paymentMethod || "").trim();
+      if (!isPristine) return current;
+
+      const defaults = latestDefaultsByKind?.[current.kind] || null;
+      if (!defaults) return current;
+
+      if (current.kind === "transfer") {
+        const nextFromAccountId = normalizeAccountId(accounts, defaults.fromAccountId, current.fromAccountId || current.accountId);
+        const nextToAccountId =
+          hasAccountId(accounts, defaults.toAccountId) && String(defaults.toAccountId || "") !== String(nextFromAccountId || "")
+            ? String(defaults.toAccountId)
+            : current.toAccountId;
+        if (
+          nextFromAccountId === String(current.fromAccountId || "") &&
+          nextToAccountId === String(current.toAccountId || "")
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          accountId: nextFromAccountId || current.accountId,
+          fromAccountId: nextFromAccountId,
+          toAccountId: nextToAccountId,
+        };
+      }
+
+      const nextAccountId = normalizeAccountId(accounts, defaults.accountId, current.accountId);
+      const nextCategoryId = String(defaults.categoryId || "").trim() || current.categoryId;
+      if (nextAccountId === String(current.accountId || "") && nextCategoryId === String(current.categoryId || "")) {
+        return current;
+      }
+
+      return {
+        ...current,
+        accountId: nextAccountId,
+        fromAccountId: nextAccountId,
+        categoryId: nextCategoryId,
+      };
+    });
+  }, [accounts, latestDefaultsByKind]);
+
   const resetDraft = (nextAccounts = accounts) => {
-    const nextDraft = defaultDraft(nextAccounts);
+    const nextDraft = defaultDraft(nextAccounts, latestDefaultsByKind);
     setDraft(nextDraft);
     setAmountInput(toInputAmount(nextDraft.amountSatang));
     setShowMore(false);
@@ -168,6 +342,7 @@ export default function AddScreen() {
   };
 
   const applyKind = (kind) => {
+    const kindDefaults = latestDefaultsByKind?.[kind] || {};
     const firstAccountId = accounts[0] ? String(accounts[0].id) : "";
 
     setDraft((current) => {
@@ -175,19 +350,28 @@ export default function AddScreen() {
       const currentFromAccountId = normalizeAccountId(accounts, current.fromAccountId, currentAccountId || firstAccountId);
       const currentToAccountId = hasAccountId(accounts, current.toAccountId) ? String(current.toAccountId) : "";
       const nextLineItems = kind === "transfer" ? [] : lineItemsFromDraft(current);
+      const defaultCategoryId = String(kindDefaults.categoryId || "").trim();
+      const defaultAccountId = normalizeAccountId(accounts, kindDefaults.accountId, currentAccountId || currentFromAccountId || firstAccountId);
+      const defaultFromAccountId = normalizeAccountId(accounts, kindDefaults.fromAccountId, currentFromAccountId || currentAccountId || firstAccountId);
+      const defaultToAccountId = hasAccountId(accounts, kindDefaults.toAccountId) ? String(kindDefaults.toAccountId) : "";
       const nextDraft = {
         ...current,
         kind,
-        categoryId: kind === "transfer" ? "" : current.categoryId,
+        categoryId:
+          kind === "transfer"
+            ? ""
+            : defaultCategoryId || current.categoryId,
         accountId:
           kind === "transfer"
-            ? currentFromAccountId || currentAccountId || firstAccountId
+            ? defaultFromAccountId || currentFromAccountId || currentAccountId || firstAccountId
             : current.kind === "transfer"
-              ? currentFromAccountId || currentAccountId || firstAccountId
-              : currentAccountId || currentFromAccountId || firstAccountId,
-        fromAccountId: currentFromAccountId || currentAccountId || firstAccountId,
+              ? defaultAccountId || currentFromAccountId || currentAccountId || firstAccountId
+              : defaultAccountId || currentAccountId || currentFromAccountId || firstAccountId,
+        fromAccountId: defaultFromAccountId || currentFromAccountId || currentAccountId || firstAccountId,
         toAccountId:
-          kind === "transfer" && currentToAccountId && currentToAccountId !== (currentFromAccountId || currentAccountId || firstAccountId)
+          kind === "transfer" && defaultToAccountId && defaultToAccountId !== (defaultFromAccountId || currentFromAccountId || currentAccountId || firstAccountId)
+            ? defaultToAccountId
+            : kind === "transfer" && currentToAccountId && currentToAccountId !== (defaultFromAccountId || currentFromAccountId || currentAccountId || firstAccountId)
             ? currentToAccountId
             : "",
         lineItems: nextLineItems,
@@ -246,6 +430,43 @@ export default function AddScreen() {
       return {
         ...current,
         toAccountId: nextToAccountId,
+      };
+    });
+  };
+
+  const applyMerchantSuggestion = (suggestion) => {
+    setDraft((current) => {
+      if (current.kind === "transfer") {
+        const nextFromAccountId = normalizeAccountId(
+          accounts,
+          suggestion?.fromAccountId,
+          current.fromAccountId || current.accountId,
+        );
+        const nextToAccountId =
+          hasAccountId(accounts, suggestion?.toAccountId) && String(suggestion?.toAccountId || "") !== String(nextFromAccountId || "")
+            ? String(suggestion.toAccountId)
+            : current.toAccountId;
+
+        return {
+          ...current,
+          merchant: suggestion?.merchant || current.merchant,
+          fromAccountId: nextFromAccountId,
+          accountId: nextFromAccountId || current.accountId,
+          toAccountId: nextToAccountId,
+        };
+      }
+
+      const nextAccountId = normalizeAccountId(
+        accounts,
+        suggestion?.accountId,
+        current.accountId || latestDefaultsByKind?.[current.kind]?.accountId,
+      );
+      return {
+        ...current,
+        merchant: suggestion?.merchant || current.merchant,
+        accountId: nextAccountId,
+        fromAccountId: nextAccountId,
+        categoryId: String(suggestion?.categoryId || "").trim() || current.categoryId,
       };
     });
   };
@@ -590,6 +811,27 @@ export default function AddScreen() {
                       onChange={(event) => setDraft((current) => ({ ...current, merchant: event.target.value }))}
                       placeholder="เช่น ค่าอาหาร"
                     />
+                    {merchantSuggestions.length ? (
+                      <div className="finance-merchant-suggestions">
+                        {merchantSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion.key}
+                            type="button"
+                            className="finance-merchant-suggestion"
+                            onClick={() => applyMerchantSuggestion(suggestion)}
+                          >
+                            <span className="finance-row-title">{suggestion.merchant}</span>
+                            {suggestion.categoryId || suggestion.accountId || suggestion.fromAccountId ? (
+                              <span className="finance-row-meta finance-row-meta-wrap">
+                                {suggestion.categoryId ? `หมวด ${categoryNameById.get(String(suggestion.categoryId)) || suggestion.categoryId}` : ""}
+                                {suggestion.accountId ? `${suggestion.categoryId ? " · " : ""}บัญชี ${accountNameById.get(String(suggestion.accountId)) || suggestion.accountId}` : ""}
+                                {suggestion.fromAccountId && !suggestion.accountId ? `บัญชี ${accountNameById.get(String(suggestion.fromAccountId)) || suggestion.fromAccountId}` : ""}
+                              </span>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </label>
 
                   {budgetHint ? (

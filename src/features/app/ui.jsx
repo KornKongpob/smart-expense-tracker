@@ -161,7 +161,7 @@ export function BottomNav({ view, onChange, onIntent }) {
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = item.id === "settings"
-            ? view === "settings" || view === "categories" || view === "planner"
+            ? view === "settings" || view === "categories" || view === "planner" || view === "recurring"
             : view === item.id;
           return (
             <button
