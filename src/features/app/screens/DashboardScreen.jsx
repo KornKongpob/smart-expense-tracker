@@ -167,7 +167,7 @@ export default function DashboardScreen() {
       <div className="finance-dashboard-next-copy">
         {hasAccounts
           ? hasActivity
-            ? "เพิ่มรายการวันนี้หรือเปิด Planner เพื่อดูแผนหนี้และเป้าหมาย"
+            ? "เพิ่มรายการวันนี้หรือเปิดแผนการเงินเพื่อดูเป้าหมายและแผนชำระหนี้"
             : "เริ่มบันทึกรายการแรกหรือวางเป้าหมายการเงินได้เลย"
           : "สร้างบัญชีก่อนเพื่อเริ่มวางแผนและติดตามการเงิน"}
       </div>
@@ -180,7 +180,7 @@ export default function DashboardScreen() {
             </button>
             <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateToView("planner")}>
               <Target size={16} />
-              เปิด Planner
+              เปิดแผนการเงิน
             </button>
           </>
         ) : (
@@ -206,6 +206,8 @@ export default function DashboardScreen() {
           <input
             className="ui-input"
             type="month"
+            name="dashboardMonth"
+            aria-label="เลือกเดือนสรุป"
             value={selectedMonth}
             onChange={(event) => setSelectedMonth(event.target.value)}
           />
@@ -250,8 +252,8 @@ export default function DashboardScreen() {
           ) : null}
           {(plannerAttentionCount || plannerConfidencePct) ? (
             <div className="finance-chip-grid">
-              {plannerAttentionCount ? <StatusPill tone="warning">Planner {plannerAttentionCount} หมวดควรปรับ</StatusPill> : null}
-              {plannerConfidencePct ? <StatusPill tone="default">confidence {plannerConfidencePct}%</StatusPill> : null}
+              {plannerAttentionCount ? <StatusPill tone="warning">ควรปรับ {plannerAttentionCount} หมวด</StatusPill> : null}
+              {plannerConfidencePct ? <StatusPill tone="default">ความมั่นใจ {plannerConfidencePct}%</StatusPill> : null}
             </div>
           ) : null}
           {(plannerDecisionSummary?.title || plannerDecisionSummary?.copy) ? (
@@ -276,9 +278,9 @@ export default function DashboardScreen() {
           tone="success"
         />
         <MetricCard
-          label={budgetPlanSnapshot?.debtStrategyMode === "paydown" ? "เงินโปะหนี้เพิ่ม" : "Buffer"}
+          label={budgetPlanSnapshot?.debtStrategyMode === "paydown" ? "เงินโปะหนี้เพิ่ม" : "เงินสำรอง"}
           value={formatCurrency(displaySurplusSatang)}
-          hint={budgetPlanSnapshot?.debtTarget ? "มี debt target สำหรับเดือนนี้" : `${plannerSummary.activeDebtCount} แผนหนี้`}
+          hint={budgetPlanSnapshot?.debtTarget ? "มีเป้าหมายชำระหนี้สำหรับเดือนนี้" : `${plannerSummary.activeDebtCount} แผนชำระหนี้`}
           tone="default"
         />
         <MetricCard
@@ -320,10 +322,8 @@ export default function DashboardScreen() {
       <article className="ui-card finance-panel finance-recurring-summary-card">
         <div className="finance-panel-head">
           <div>
-            <div className="finance-panel-title">Recurring</div>
-            <div className="finance-panel-copy">
-              กฎรายการประจำจะช่วยสร้างรายการรายเดือน รายปี หรือรายวันให้อัตโนมัติ
-            </div>
+            <div className="finance-panel-title">รายการประจำ</div>
+            <div className="finance-panel-copy">ตั้งกฎรายรับ รายจ่าย หรือโอนเงินที่เกิดซ้ำ แล้วให้ระบบสร้างรายการให้อัตโนมัติตามรอบ</div>
           </div>
           {recurringDueCount ? <StatusPill tone="warning">ถึงรอบ {recurringDueCount}</StatusPill> : <StatusPill tone="default">ยังไม่มีคิววันนี้</StatusPill>}
         </div>
@@ -335,11 +335,11 @@ export default function DashboardScreen() {
             disabled={saving}
           >
             <Repeat2 size={16} />
-            Run ตอนนี้
+            สร้างรายการตอนนี้
           </button>
           <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateToView("recurring")}>
             <CalendarClock size={16} />
-            เปิด recurring
+            จัดการรายการประจำ
           </button>
         </div>
       </article>

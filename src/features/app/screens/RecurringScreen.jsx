@@ -64,7 +64,7 @@ function createRecurringDraft(rule, accounts, categories) {
       toAccountId: "",
       categoryId: expenseCategories[0] ? String(expenseCategories[0].id) : incomeCategories[0] ? String(incomeCategories[0].id) : "",
       merchant: "",
-      note: "Recurring",
+      note: "รายการประจำ",
       frequency: "monthly",
       intervalCount: "1",
       startDate: new Date().toISOString().slice(0, 10),
@@ -92,7 +92,7 @@ function createRecurringDraft(rule, accounts, categories) {
         ? String(categoryList[0].id)
         : "",
     merchant: String(rule.merchant || ""),
-    note: String(rule.note || "Recurring"),
+    note: String(rule.note || "รายการประจำ"),
     frequency: String(rule.frequency || "monthly"),
     intervalCount: String(rule.interval_count || 1),
     startDate: String(rule.start_date || new Date().toISOString().slice(0, 10)).slice(0, 10),
@@ -106,7 +106,7 @@ function getRuleTitle(rule) {
   const note = String(rule?.note || "").trim();
   if (merchant) return merchant;
   if (note) return note;
-  return "Recurring";
+  return "รายการประจำ";
 }
 
 function getRuleAccountLabel(rule, accountsById) {
@@ -296,15 +296,15 @@ export default function RecurringScreen() {
       <article className="ui-card finance-panel">
         <div className="finance-panel-head">
           <div>
-            <div className="finance-panel-title">Run recurring</div>
-            <div className="finance-panel-copy">สร้างรายการที่ถึงรอบตอนนี้ได้ทันที และระบบจะหยุดที่ 200 รายการต่อครั้งเพื่อกัน backfill พุ่ง</div>
+            <div className="finance-panel-title">สร้างรายการที่ถึงรอบ</div>
+            <div className="finance-panel-copy">สร้างรายการที่ถึงรอบตอนนี้ได้ทันที และระบบจะหยุดที่ 200 รายการต่อครั้งเพื่อกันการสร้างย้อนหลังจำนวนมากเกินไป</div>
           </div>
           {recurringDueToday.length ? <StatusPill tone="warning">ถึงรอบ {recurringDueToday.length}</StatusPill> : null}
         </div>
         <div className="finance-inline-actions">
           <button type="button" className="ui-btn ui-btn-primary" disabled={saving} onClick={() => void runRecurringNow()}>
             <PlayCircle size={16} />
-            Run ตอนนี้
+            สร้างรายการตอนนี้
           </button>
           <button type="button" className="ui-btn ui-btn-secondary" onClick={openNew}>
             <CalendarClock size={16} />
@@ -317,7 +317,7 @@ export default function RecurringScreen() {
         <article className="ui-card finance-panel">
           <div className="finance-panel-head">
             <div>
-              <div className="finance-panel-title">กฎ recurring</div>
+              <div className="finance-panel-title">กฎรายการประจำ</div>
               <div className="finance-panel-copy">แตะรายการเพื่อแก้ไข หรือสลับเปิดพักใช้งานได้จากตรงนี้</div>
             </div>
           </div>
@@ -351,7 +351,7 @@ export default function RecurringScreen() {
         </article>
       ) : (
         <EmptyPanel
-          title="ยังไม่มีกฎ recurring"
+          title="ยังไม่มีกฎรายการประจำ"
           copy="ตั้งรายการประจำอย่างเงินเดือน ค่าบ้าน หรือการโอนเข้าเงินออม แล้วให้ระบบสร้างรายการให้ตามรอบได้เลย"
           action={
             <button type="button" className="ui-btn ui-btn-primary" onClick={openNew}>
@@ -364,7 +364,7 @@ export default function RecurringScreen() {
       <Sheet
         open={editorOpen}
         onClose={closeEditor}
-        title={draft.id ? "แก้ไข recurring" : "เพิ่ม recurring"}
+        title={draft.id ? "แก้ไขรายการประจำ" : "เพิ่มรายการประจำ"}
         subtitle={previewNextDueISO ? `รอบถัดไป ${formatDateLong(previewNextDueISO)}` : "กำหนดข้อมูลของกฎรายจ่าย/รายรับ/โอน"}
         footer={
           <div className="finance-sheet-actions finance-sheet-actions-sticky">
@@ -512,7 +512,7 @@ export default function RecurringScreen() {
 
           <div className="finance-grid finance-grid-2">
             <label className="finance-field">
-              <span className="ui-label">Merchant</span>
+              <span className="ui-label">ชื่อรายการ/ร้านค้า</span>
               <input
                 className="ui-input"
                 value={draft.merchant}
@@ -526,7 +526,7 @@ export default function RecurringScreen() {
                 className="ui-input"
                 value={draft.note}
                 onChange={(event) => setDraft((current) => ({ ...current, note: event.target.value }))}
-                placeholder="Recurring"
+                placeholder="เช่น เงินเดือนเข้าบัญชีออม"
               />
             </label>
           </div>
@@ -558,7 +558,7 @@ export default function RecurringScreen() {
             <div className="finance-toast-copy">
               รอบถัดไป {previewNextDueISO ? formatDateLong(previewNextDueISO) : "ยังไม่คำนวณได้"} ·
               {previewOccurrences.drafts.length
-                ? ` ถ้ากด Run ตอนนี้จะสร้าง ${previewOccurrences.drafts.length} รายการ`
+                ? ` ถ้ากดสร้างตอนนี้จะสร้าง ${previewOccurrences.drafts.length} รายการ`
                 : " ยังไม่มีรายการที่ถึงรอบในวันนี้"}
             </div>
           </div>
@@ -568,7 +568,7 @@ export default function RecurringScreen() {
       <Sheet
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
-        title="ลบ recurring"
+        title="ลบรายการประจำ"
         subtitle={deleteTarget ? getRuleTitle(deleteTarget) : ""}
         footer={
           <div className="finance-sheet-actions finance-sheet-actions-sticky">

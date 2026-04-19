@@ -2,6 +2,29 @@ import { useState } from "react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
 
+function toFriendlyAuthError(nextError) {
+  const rawMessage = String(nextError?.message || nextError || "").trim();
+  const message = rawMessage.toLowerCase();
+
+  if (!message) return "ดำเนินการไม่สำเร็จ ลองใหม่อีกครั้ง";
+  if (message.includes("invalid login credentials")) {
+    return "อีเมลหรือรหัสผ่านไม่ถูกต้อง ลองตรวจข้อมูลแล้วเข้าสู่ระบบอีกครั้ง";
+  }
+  if (message.includes("email not confirmed")) {
+    return "อีเมลนี้ยังไม่ได้ยืนยันการสมัคร เปิดอีเมลยืนยันก่อนแล้วค่อยลองใหม่";
+  }
+  if (message.includes("user already registered")) {
+    return "อีเมลนี้ถูกใช้งานแล้ว ลองเข้าสู่ระบบหรือใช้อีเมลอื่น";
+  }
+  if (message.includes("password")) {
+    return "รหัสผ่านไม่ถูกต้องหรือสั้นเกินไป ควรมีอย่างน้อย 6 ตัว";
+  }
+  if (message.includes("network") || message.includes("fetch")) {
+    return "เชื่อมต่อบริการไม่ได้ ลองใหม่อีกครั้งเมื่ออินเทอร์เน็ตพร้อม";
+  }
+  return "ดำเนินการไม่สำเร็จ ลองใหม่อีกครั้ง";
+}
+
 export default function AuthScreen() {
   const { hasSupabaseConfig, signIn, signInAnonymously, signUp, saving } = useExpenseApp();
   const [mode, setMode] = useState("signin");
@@ -21,7 +44,7 @@ export default function AuthScreen() {
         await signIn({ email, password });
       }
     } catch (nextError) {
-      setError(String(nextError?.message || nextError || "Authentication failed"));
+      setError(toFriendlyAuthError(nextError));
     }
   };
 
@@ -31,7 +54,7 @@ export default function AuthScreen() {
     try {
       await signInAnonymously();
     } catch (nextError) {
-      setError(String(nextError?.message || nextError || "Authentication failed"));
+      setError(toFriendlyAuthError(nextError));
     }
   };
 
@@ -80,6 +103,7 @@ export default function AuthScreen() {
               <span className="ui-label">ชื่อที่แสดง</span>
               <input
                 className="ui-input"
+                name="displayName"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder="ชื่อของคุณ"
@@ -93,10 +117,13 @@ export default function AuthScreen() {
             <input
               className="ui-input"
               type="email"
+              name="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@example.com"
               autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
               required
               data-testid="login-email"
             />
@@ -107,6 +134,7 @@ export default function AuthScreen() {
             <input
               className="ui-input"
               type="password"
+              name="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="อย่างน้อย 6 ตัว"
@@ -117,7 +145,11 @@ export default function AuthScreen() {
             />
           </label>
 
-          {error ? <div className="ui-error">{error}</div> : null}
+          {error ? (
+            <div className="ui-toast ui-toast--error finance-inline-note" role="alert" aria-live="polite">
+              <div className="finance-toast-copy">{error}</div>
+            </div>
+          ) : null}
 
           <button
             type="submit"

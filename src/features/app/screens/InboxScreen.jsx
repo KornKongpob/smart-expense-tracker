@@ -186,6 +186,11 @@ export default function InboxScreen() {
             <Search size={16} />
             <input
               className="ui-input"
+              type="search"
+              name="inboxSearch"
+              aria-label="ค้นหารายการสแกน"
+              autoComplete="off"
+              spellCheck={false}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="ค้นหา"

@@ -479,7 +479,7 @@ export default function AddScreen() {
 
   const manualDock =
     mode === "manual" && hasAccounts ? (
-      <div className="finance-sheet-actions finance-screen-dock-actions">
+      <div className="finance-sheet-actions finance-screen-dock-actions finance-add-dock-actions">
         <button type="button" className="ui-btn ui-btn-secondary" onClick={() => resetDraft()}>
           <RotateCcw size={16} />
           ล้าง

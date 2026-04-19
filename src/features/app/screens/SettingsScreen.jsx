@@ -88,13 +88,19 @@ export default function SettingsScreen() {
           <div className="finance-form">
             <label className="finance-field">
               <span className="ui-label">ชื่อ</span>
-              <input className="ui-input" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+              <input
+                className="ui-input"
+                name="displayName"
+                autoComplete="nickname"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
             </label>
 
             <div className="finance-settings-summary">
               <div className="finance-chip-grid">
                 {plannerAttentionCount ? <StatusPill tone="warning">ควรปรับ {plannerAttentionCount} หมวด</StatusPill> : null}
-                {plannerConfidencePct ? <StatusPill tone="default">confidence {plannerConfidencePct}%</StatusPill> : null}
+                {plannerConfidencePct ? <StatusPill tone="default">ความมั่นใจ {plannerConfidencePct}%</StatusPill> : null}
               </div>
               {plannerDecisionSummary?.title ? (
                 <div className="finance-settings-summary-copy">
@@ -102,9 +108,9 @@ export default function SettingsScreen() {
                 </div>
               ) : null}
               <div className="finance-settings-summary-copy">
-                Planner เป็นจุดตั้งค่าหลักของรายได้ เงินออม หนี้ และงบรายเดือน
+                แผนการเงินเป็นจุดตั้งค่าหลักของรายได้ เงินออม หนี้ และงบรายเดือน
                 {plannerAttentionCount ? ` · ควรปรับ ${plannerAttentionCount} หมวด` : ""}
-                {plannerConfidencePct ? ` · confidence ${plannerConfidencePct}%` : ""}
+                {plannerConfidencePct ? ` · ความมั่นใจ ${plannerConfidencePct}%` : ""}
               </div>
               <div className="finance-settings-summary-grid">
                 {plannerSummaryItems.map((item) => (
@@ -156,7 +162,7 @@ export default function SettingsScreen() {
                   <div className="finance-settings-row-copy">
                     <div className="finance-row-title">วางแผนการเงิน</div>
                     <div className="finance-row-meta finance-row-meta-wrap">
-                      {plannerDecisionSummary?.copy || "ตั้งค่ารายได้ เงินออม หนี้ และ budget รายหมวดจากหน้าหลักเดียว"}
+                      {plannerDecisionSummary?.copy || "ตั้งค่ารายได้ เงินออม หนี้ และงบรายหมวดจากหน้าเดียว"}
                     </div>
                   </div>
                 </div>
@@ -187,7 +193,7 @@ export default function SettingsScreen() {
                     <Repeat2 size={18} />
                   </span>
                   <div className="finance-settings-row-copy">
-                    <div className="finance-row-title">Recurring</div>
+                    <div className="finance-row-title">รายการประจำ</div>
                     <div className="finance-row-meta finance-row-meta-wrap">
                       ตั้งกฎรายการประจำ เช่น เงินเดือน ค่าบ้าน หรือโอนเงินออม
                     </div>

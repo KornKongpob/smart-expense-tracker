@@ -136,6 +136,25 @@ function getSavingsModeLabel(mode) {
   return mode === "percent" ? "เปอร์เซ็นต์" : "จำนวนเงิน";
 }
 
+function getScenarioDisplayLabel(scenario) {
+  const id = String(scenario?.id || "").trim().toLowerCase();
+  const label = String(scenario?.label || "").trim();
+  const normalizedLabel = label.toLowerCase();
+
+  if (id === "baseline" || normalizedLabel === "baseline") return "สมดุล";
+  if (id === "tight" || normalizedLabel === "tight") return "รัดกุม";
+  if (id === "comfort" || normalizedLabel === "comfort") return "ผ่อนคลาย";
+  return label || "สมดุล";
+}
+
+function getBudgetBehaviorLabel(behavior) {
+  const key = String(behavior || "").trim().toLowerCase();
+  if (key === "fixed") return "คงที่";
+  if (key === "essential") return "จำเป็น";
+  if (key === "flexible") return "ยืดหยุ่น";
+  return key || "-";
+}
+
 function getDecisionStatusLabel(status) {
   if (status === "accepted") return "รับแล้ว";
   if (status === "dismissed") return "คงของเดิม";
@@ -161,7 +180,7 @@ function getScenarioIntentCopy(scenarioId, debtStrategyMode) {
   if (scenarioId === "comfort") {
     return debtStrategyMode === "paydown"
       ? "เปิดพื้นที่ใช้จ่ายได้สบายขึ้นโดยยังเหลือเงินสำหรับโปะหนี้เพิ่ม"
-      : "เปิดพื้นที่ใช้จ่ายได้สบายขึ้นและยังมี buffer หลังกันค่าใช้จ่ายหลัก";
+      : "เปิดพื้นที่ใช้จ่ายได้สบายขึ้นและยังมีเงินสำรองหลังกันค่าใช้จ่ายหลัก";
   }
   return "ทางเลือกสมดุลระหว่างงบรายวัน ความเสี่ยง และพื้นที่ท้ายเดือน";
 }
@@ -236,7 +255,7 @@ export default function PlannerScreen() {
     () => (Array.isArray(activeScenario?.items) ? activeScenario.items : []),
     [activeScenario],
   );
-  const activeScenarioLabel = activeScenario?.label || "Baseline";
+  const activeScenarioLabel = getScenarioDisplayLabel(activeScenario);
   const activeRecommendationMap = useMemo(
     () => new Map(activeScenarioItems.map((item) => [item.categoryId, item])),
     [activeScenarioItems],
@@ -327,7 +346,7 @@ export default function PlannerScreen() {
   const incomeReady = Number(budgetPlanSnapshot?.selectedIncomeSatang || 0) > 0;
   const debtPlanReady = debtAccounts.length === 0 || debtPlans.length > 0;
   const budgetsApplied = !usingSuggestedPlan;
-  const reserveLabel = planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "Buffer";
+  const reserveLabel = planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "เงินสำรอง";
   const hasDebtAccountsWithoutPlan = debtAccounts.length > 0 && debtPlans.length === 0;
   const totalDebtBalanceSatang = debtPlans.reduce(
     (sum, plan) => sum + Number(plan?.current_balance_satang || 0),
@@ -369,10 +388,10 @@ export default function PlannerScreen() {
       ? `แผน ${activeScenarioLabel} ยังมีหมวดที่ต้องยืนยัน`
       : `แผน ${activeScenarioLabel} พร้อมใช้งาน`;
   const decisionCopy = activeScenarioShortfallSatang > 0
-    ? `ยังต้องลดงบอีก ${formatCurrency(activeScenarioShortfallSatang)} หรือเปลี่ยน inputs เพื่อให้แผนสมดุล`
+    ? `ยังต้องลดงบอีก ${formatCurrency(activeScenarioShortfallSatang)} หรือเปลี่ยนข้อมูลตั้งต้นเพื่อให้แผนสมดุล`
     : activeScenarioAttentionCount > 0
       ? `มี ${activeScenarioAttentionCount} หมวดที่ควรตัดสินใจต่อ พร้อมงบเฉลี่ย ${formatCurrency(activeScenarioDailyBudgetSatang)} ต่อวัน`
-      : `ตอนนี้เหลือ ${formatCurrency(activeScenarioSurplusSatang)} สำหรับ ${planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "buffer"} และ confidence ${activeScenarioConfidencePct}%`;
+      : `ตอนนี้เหลือ ${formatCurrency(activeScenarioSurplusSatang)} สำหรับ ${planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "เงินสำรอง"} และความมั่นใจ ${activeScenarioConfidencePct}%`;
   const hasRecommendationQueue = activeRecommendationQueue.length > 0;
 
   const budgetPlanRows = useMemo(() => {
@@ -696,20 +715,21 @@ export default function PlannerScreen() {
       <article className="ui-card finance-panel finance-planner-decision">
         <div className="finance-panel-head">
           <div>
-            <div className="finance-panel-title">Monthly Decision Center</div>
+            <div className="finance-panel-title">ศูนย์ตัดสินใจรายเดือน</div>
             <div className="finance-panel-copy">{decisionCopy}</div>
           </div>
           <div className="finance-chip-grid">
             <StatusPill tone={decisionTone}>{decisionTitle}</StatusPill>
             <StatusPill tone="default">{planningMonthLabel || budgetMonthKey}</StatusPill>
-            <StatusPill tone="default">confidence {activeScenarioConfidencePct}%</StatusPill>
+            <StatusPill tone="default">ความมั่นใจ {activeScenarioConfidencePct}%</StatusPill>
           </div>
         </div>
 
-        <div className="finance-section-label">Scenario Compare</div>
+        <div className="finance-section-label">เปรียบเทียบแผน</div>
         <div className="finance-planner-scenario-tabs">
           {plannerScenarios.map((scenario) => {
             const isActive = scenario.id === activeScenario?.id;
+            const scenarioLabel = getScenarioDisplayLabel(scenario);
             const scenarioTone = Number(scenario.shortfallSatang || 0) > 0
               ? "danger"
               : Number(scenario.attentionCount || 0) > 0
@@ -730,7 +750,7 @@ export default function PlannerScreen() {
                   setScenarioKey(scenario.id);
                 }}
               >
-                <div className="finance-row-title">{scenario.label}</div>
+                <div className="finance-row-title">{scenarioLabel}</div>
                 <div className="finance-row-meta">
                   งบ {formatCurrency(scenario.recommendedExpenseSatang)} · ต่อวัน {formatCurrency(scenario.dailyBudgetSatang)}
                 </div>
@@ -756,7 +776,7 @@ export default function PlannerScreen() {
                   </div>
                 </div>
                 <div className="finance-chip-grid">
-                  <StatusPill tone="default">confidence {clampPercent(Number(scenario.confidenceScore || 0) * 100)}%</StatusPill>
+                  <StatusPill tone="default">ความมั่นใจ {clampPercent(Number(scenario.confidenceScore || 0) * 100)}%</StatusPill>
                   {isActive ? <StatusPill tone="success">กำลังดู</StatusPill> : null}
                 </div>
                 <div className="finance-chip-grid">
@@ -782,9 +802,9 @@ export default function PlannerScreen() {
             tone={activeScenarioAttentionCount > 0 ? "warning" : "default"}
           />
           <MetricCard
-            label={planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "Buffer"}
+            label={planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "เงินสำรอง"}
             value={formatCurrency(activeScenarioSurplusSatang)}
-            hint={activeScenarioShortfallSatang > 0 ? "ยังไม่มี buffer เหลือ" : "หลังกันรายจ่ายและรายการจำเป็นแล้ว"}
+            hint={activeScenarioShortfallSatang > 0 ? "ยังไม่มีเงินสำรองเหลือ" : "หลังกันรายจ่ายและรายการจำเป็นแล้ว"}
             tone={activeScenarioShortfallSatang > 0 ? "danger" : "success"}
           />
         </div>
@@ -807,12 +827,12 @@ export default function PlannerScreen() {
           </button>
           <button type="button" className="ui-btn ui-btn-secondary" onClick={() => setBudgetFilter("attention")}>
             <AlertTriangle size={16} />
-            ดู recommendation
+            ดูหมวดที่ควรปรับ
           </button>
           <div className="finance-chip-grid">
             {activeScenarioAcceptedCount ? <StatusPill tone="success">รับแล้ว {activeScenarioAcceptedCount}</StatusPill> : null}
             {activeScenarioDismissedCount ? <StatusPill tone="default">คงเดิม {activeScenarioDismissedCount}</StatusPill> : null}
-            {activeScenarioLockedCount ? <StatusPill tone="warning">manual lock {activeScenarioLockedCount}</StatusPill> : null}
+            {activeScenarioLockedCount ? <StatusPill tone="warning">ล็อกเอง {activeScenarioLockedCount}</StatusPill> : null}
           </div>
         </div>
       </article>
@@ -822,7 +842,7 @@ export default function PlannerScreen() {
           <section className="finance-planner-hero-copy">
             <div className="finance-chip-grid">
               <StatusPill tone={displayShortfallSatang > 0 ? "danger" : budgetsApplied ? "success" : "warning"}>
-                {displayShortfallSatang > 0 ? "แผนยังไม่สมดุล" : budgetsApplied ? "แผนพร้อมใช้งาน" : "รอ Apply ชุดงบ"}
+                {displayShortfallSatang > 0 ? "แผนยังไม่สมดุล" : budgetsApplied ? "แผนพร้อมใช้งาน" : "รอใช้ชุดงบ"}
               </StatusPill>
               <StatusPill tone="default">{planningMonthLabel || budgetMonthKey}</StatusPill>
             </div>
@@ -839,8 +859,8 @@ export default function PlannerScreen() {
                 {displayShortfallSatang > 0
                   ? "เริ่มจากลดเงินออม เปลี่ยนกลยุทธ์หนี้ หรือปรับงบหมวดที่ยืดหยุ่นได้ก่อน เพื่อให้แผนอยู่ในกรอบ"
                   : budgetsApplied
-                    ? `วันนี้เหลืองบเฉลี่ย ${formatCurrency(displayDailyBudgetSatang)} ต่อวัน และ${planningConfig?.debtStrategyMode === "paydown" ? "มีเงินสำหรับโปะหนี้เพิ่ม" : "ยังมี buffer เหลือ"} ${formatCurrency(displaySurplusSatang)}`
-                    : "ระบบคำนวณจากรายได้ เงินออม และหนี้ขั้นต่ำให้แล้ว คุณสามารถ Apply งบทั้งชุด หรือปรับเฉพาะหมวดที่อยากคุมเพิ่มได้"}
+                    ? `วันนี้เหลืองบเฉลี่ย ${formatCurrency(displayDailyBudgetSatang)} ต่อวัน และ${planningConfig?.debtStrategyMode === "paydown" ? "มีเงินสำหรับโปะหนี้เพิ่ม" : "ยังมีเงินสำรองเหลือ"} ${formatCurrency(displaySurplusSatang)}`
+                    : "ระบบคำนวณจากรายได้ เงินออม และหนี้ขั้นต่ำให้แล้ว คุณสามารถใช้ชุดงบนี้ทั้งหมด หรือปรับเฉพาะหมวดที่อยากคุมเพิ่มได้"}
               </div>
             </div>
 
@@ -882,7 +902,7 @@ export default function PlannerScreen() {
           <section className="finance-planner-breakdown">
             <div className="finance-panel-head">
               <div>
-                <div className="finance-panel-title">Money Flow</div>
+                <div className="finance-panel-title">สรุปการไหลของเงิน</div>
                 <div className="finance-panel-copy">อ่านจากบนลงล่างเพื่อดูว่าเงินถูกแบ่งไปตรงไหนก่อนบ้าง</div>
               </div>
             </div>
@@ -913,10 +933,8 @@ export default function PlannerScreen() {
       <article className="ui-card finance-panel">
         <div className="finance-panel-head">
           <div>
-            <div className="finance-panel-title">Recommendation Queue</div>
-            <div className="finance-panel-copy">
-              ตัดสินใจทีละหมวดแล้ว Planner จะเก็บสถานะให้ว่าอะไรรับแล้ว อะไรคงของเดิม และอะไรล็อกเอง
-            </div>
+            <div className="finance-panel-title">คิวที่ควรตัดสินใจ</div>
+            <div className="finance-panel-copy">ตัดสินใจทีละหมวดแล้วระบบจะจำให้ว่าอะไรรับแล้ว อะไรคงของเดิม และอะไรที่ล็อกเองไว้</div>
           </div>
           <div className="finance-chip-grid">
             <StatusPill tone={hasRecommendationQueue ? "warning" : "success"}>
@@ -935,15 +953,15 @@ export default function PlannerScreen() {
                     <div className="finance-planner-item-copy">
                       <div className="finance-row-title">{item.name}</div>
                       <div className="finance-row-meta">
-                        applied {formatCurrency(item.currentLimitSatang)} · recommended {formatCurrency(item.recommendedLimitSatang)} · delta {formatDeltaCurrency(item.deltaSatang)}
+                        ใช้อยู่ {formatCurrency(item.currentLimitSatang)} · แนะนำ {formatCurrency(item.recommendedLimitSatang)} · ส่วนต่าง {formatDeltaCurrency(item.deltaSatang)}
                       </div>
                     </div>
                     <div className="finance-chip-grid">
                       <StatusPill tone={getDecisionStatusTone(item.decisionStatus)}>
                         {getDecisionStatusLabel(item.decisionStatus)}
                       </StatusPill>
-                      <StatusPill tone="default">confidence {clampPercent(Number(item.confidenceScore || 0) * 100)}%</StatusPill>
-                      {item.lockedByUser ? <StatusPill tone="warning">manual lock</StatusPill> : null}
+                      <StatusPill tone="default">ความมั่นใจ {clampPercent(Number(item.confidenceScore || 0) * 100)}%</StatusPill>
+                      {item.lockedByUser ? <StatusPill tone="warning">ล็อกเอง</StatusPill> : null}
                     </div>
                   </div>
 
@@ -957,12 +975,12 @@ export default function PlannerScreen() {
                       <strong>{formatCurrency(item.projectedMonthEndSatang)}</strong>
                     </div>
                     <div className="finance-planner-mini-stat">
-                      <span>baseline</span>
+                      <span>ฐานเดิม</span>
                       <strong>{formatCurrency(item.baselineSpendSatang)}</strong>
                     </div>
                     <div className="finance-planner-mini-stat">
-                      <span>behavior</span>
-                      <strong>{item.behavior}</strong>
+                      <span>พฤติกรรม</span>
+                      <strong>{getBudgetBehaviorLabel(item.behavior)}</strong>
                     </div>
                   </div>
 
@@ -1009,7 +1027,7 @@ export default function PlannerScreen() {
         ) : (
           <EmptyPanel
             title="ไม่มีหมวดที่ต้องยืนยันเพิ่ม"
-            copy="ตอนนี้ทุก recommendation ในแผนนี้ถูกตัดสินใจแล้ว หรือยังไม่พบหมวดที่ต้องคุมเป็นพิเศษ"
+            copy="ตอนนี้ทุกคำแนะนำในแผนนี้ถูกตัดสินใจแล้ว หรือยังไม่พบหมวดที่ต้องคุมเป็นพิเศษ"
           />
         )}
       </article>
@@ -1017,17 +1035,17 @@ export default function PlannerScreen() {
       <article className="ui-card finance-panel">
         <div className="finance-panel-head">
           <div>
-            <div className="finance-panel-title">Inputs & Strategy</div>
+            <div className="finance-panel-title">ข้อมูลตั้งต้น & กลยุทธ์</div>
             <div className="finance-panel-copy">
               เลือกว่าจะใช้รายได้คงที่หรือค่าเฉลี่ยย้อนหลัง แล้วกันเงินออมกับหนี้ก่อนจัดสรรงบรายหมวด
             </div>
           </div>
           <div className="finance-chip-grid">
-            {usingSuggestedPlan ? <StatusPill tone="warning">ยังไม่ได้ Apply</StatusPill> : <StatusPill tone="success">ใช้งานอยู่</StatusPill>}
+            {usingSuggestedPlan ? <StatusPill tone="warning">ยังไม่นำมาใช้</StatusPill> : <StatusPill tone="success">ใช้งานอยู่</StatusPill>}
             {displayShortfallSatang > 0 ? <StatusPill tone="danger">ขาด {formatCurrency(displayShortfallSatang)}</StatusPill> : null}
             {displayShortfallSatang <= 0 && displaySurplusSatang > 0 ? (
               <StatusPill tone="default">
-                {planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "กันเป็น buffer"} {formatCurrency(displaySurplusSatang)}
+                {planningConfig?.debtStrategyMode === "paydown" ? "โปะหนี้เพิ่ม" : "กันเป็นเงินสำรอง"} {formatCurrency(displaySurplusSatang)}
               </StatusPill>
             ) : null}
           </div>
@@ -1246,9 +1264,9 @@ export default function PlannerScreen() {
                       </div>
                     </div>
                     <div className="finance-chip-grid">
-                      <StatusPill tone="default">{plan.behavior}</StatusPill>
-                      {plan.manualOverride ? <StatusPill tone="warning">manual</StatusPill> : null}
-                      {plan.recommendation?.lockedByUser ? <StatusPill tone="warning">locked</StatusPill> : null}
+                      <StatusPill tone="default">{getBudgetBehaviorLabel(plan.behavior)}</StatusPill>
+                      {plan.manualOverride ? <StatusPill tone="warning">กำหนดเอง</StatusPill> : null}
+                      {plan.recommendation?.lockedByUser ? <StatusPill tone="warning">ล็อกไว้</StatusPill> : null}
                       {plan.recommendation ? (
                         <StatusPill tone={getDecisionStatusTone(plan.recommendation.decisionStatus)}>
                           {getDecisionStatusLabel(plan.recommendation.decisionStatus)}
@@ -1280,27 +1298,27 @@ export default function PlannerScreen() {
                       <strong>{formatCurrency(plan.projectedMonthEndSatang)}</strong>
                     </div>
                     <div className="finance-planner-mini-stat">
-                      <span>recommended</span>
+                      <span>แนะนำ</span>
                       <strong>{formatCurrency(plan.recommendation?.recommendedLimitSatang || plan.suggestedLimitSatang)}</strong>
                     </div>
                     <div className="finance-planner-mini-stat">
-                      <span>applied</span>
+                      <span>ที่ใช้อยู่</span>
                       <strong>{formatCurrency(plan.appliedLimitSatang || 0)}</strong>
                     </div>
                   </div>
 
                   <div className="finance-grid finance-grid-3">
                     <label className="finance-field">
-                      <span className="ui-label">Budget behavior</span>
+                      <span className="ui-label">รูปแบบงบ</span>
                       <select
                         className="ui-select"
                         value={plan.behavior}
                         onChange={(event) => saveCategoryBudgetBehavior(plan.categoryId, event.target.value)}
                         disabled={saving}
                       >
-                        <option value="fixed">fixed</option>
-                        <option value="essential">essential</option>
-                        <option value="flexible">flexible</option>
+                        <option value="fixed">คงที่</option>
+                        <option value="essential">จำเป็น</option>
+                        <option value="flexible">ยืดหยุ่น</option>
                       </select>
                     </label>
 
@@ -1734,7 +1752,7 @@ export default function PlannerScreen() {
               <div className="finance-section-label">โซนอันตราย</div>
               <div className="ui-card finance-danger-card">
                 <div className="finance-danger-copy">
-                  <div className="finance-panel-title">ลบเป้าหมายนี้ออกจาก Planner</div>
+                  <div className="finance-panel-title">ลบเป้าหมายนี้ออกจากแผนการเงิน</div>
                   <div className="finance-panel-copy">
                     ความคืบหน้าและยอดติดตามของเป้าหมายนี้จะถูกลบออกจากรายการเป้าหมาย
                   </div>
@@ -1896,7 +1914,7 @@ export default function PlannerScreen() {
               <div className="finance-section-label">โซนอันตราย</div>
               <div className="ui-card finance-danger-card">
                 <div className="finance-danger-copy">
-                  <div className="finance-panel-title">ลบแผนชำระนี้ออกจาก Planner</div>
+                  <div className="finance-panel-title">ลบแผนชำระนี้ออกจากแผนการเงิน</div>
                   <div className="finance-panel-copy">
                     ระบบจะลบแผนติดตามงวดนี้ออก แต่บัญชีหนี้และรายการที่เคยบันทึกไว้จะยังอยู่
                   </div>
@@ -1921,7 +1939,7 @@ export default function PlannerScreen() {
         open={goalEditorOpen && goalDeleteConfirmOpen}
         onClose={() => setGoalDeleteConfirmOpen(false)}
         title="ยืนยันการลบเป้าหมาย"
-        subtitle={goalDraft.name ? `เป้าหมาย ${goalDraft.name}` : "เป้าหมายนี้จะถูกลบออกจาก Planner"}
+        subtitle={goalDraft.name ? `เป้าหมาย ${goalDraft.name}` : "เป้าหมายนี้จะถูกลบออกจากแผนการเงิน"}
         footer={
           <div className="finance-sheet-actions">
             <button
@@ -1949,7 +1967,7 @@ export default function PlannerScreen() {
             <div className="finance-danger-sheet-copy">
               <div className="finance-panel-title">สิ่งที่จะเกิดขึ้นหลังลบ</div>
               <div className="finance-panel-copy">
-                เป้าหมายนี้จะหายจากหน้า Planner และจะไม่ถูกนับรวมใน progress summary อีกต่อไป
+                เป้าหมายนี้จะหายจากหน้าแผนการเงิน และจะไม่ถูกนับรวมในสรุปความคืบหน้าอีกต่อไป
               </div>
             </div>
             <div className="finance-danger-checklist">
@@ -1993,7 +2011,7 @@ export default function PlannerScreen() {
             <div className="finance-danger-sheet-copy">
               <div className="finance-panel-title">สิ่งที่จะเกิดขึ้นหลังลบ</div>
               <div className="finance-panel-copy">
-                แผนชำระนี้จะหายจากหน้า Planner แต่บัญชีหนี้จริงและรายการธุรกรรมเดิมยังอยู่เหมือนเดิม
+                แผนชำระนี้จะหายจากหน้าแผนการเงิน แต่บัญชีหนี้จริงและรายการธุรกรรมเดิมยังอยู่เหมือนเดิม
               </div>
             </div>
             <div className="finance-danger-checklist">
