@@ -640,6 +640,10 @@ export function createInitialState(boot = {}) {
     ui: {
       view: normalized?.ui?.view || "dashboard",
       editingId: normalized?.ui?.editingId || null,
+      newEntryIntent:
+        normalized?.ui?.newEntryIntent && typeof normalized.ui.newEntryIntent === "object"
+          ? normalized.ui.newEntryIntent
+          : null,
     },
   };
 }

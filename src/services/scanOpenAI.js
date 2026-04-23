@@ -563,6 +563,10 @@ function normalizeItems(items) {
             const chQty = safeParseAmount(ch.qty);
             const chUnitPrice = safeParseAmount(ch.unit_price ?? ch.unitPrice ?? ch.price);
             const chLineTotal = safeParseAmount(ch.line_total ?? ch.lineTotal ?? ch.total ?? ch.amount ?? ch.price);
+            const chCategoryKey =
+              (ch.category_key ?? ch.categoryKey ?? ch.category ?? null) != null
+                ? String(ch.category_key ?? ch.categoryKey ?? ch.category).trim()
+                : null;
             return {
               name: chName,
               qty: Number.isFinite(chQty) ? chQty : null,
@@ -570,6 +574,8 @@ function normalizeItems(items) {
               total: Number.isFinite(chLineTotal) ? chLineTotal : null,
               price: Number.isFinite(chUnitPrice) ? chUnitPrice : (Number.isFinite(chLineTotal) ? chLineTotal : null),
               lineTotal: Number.isFinite(chLineTotal) ? chLineTotal : null,
+              category_key: chCategoryKey,
+              category: chCategoryKey,
             };
           })
           .filter(Boolean)
@@ -687,7 +693,9 @@ function normalizeScanResult({
   );
   const inferredDocType = d?.doc_type ?? d?.docType ?? detectScanTextDocType(textContext) ?? null;
   const normalizedItems = normalizeItems(base.items?.length ? base.items : d?.items);
-  const normalizedAdjustments = normalizeAdjustments(d?.adjustments ?? d?.adjustment_lines ?? d?.adjustments_lines ?? null);
+  const normalizedAdjustments = normalizeAdjustments(
+    base.adjustments?.length ? base.adjustments : d?.adjustments ?? d?.adjustment_lines ?? d?.adjustments_lines ?? null,
+  );
   const parsedAmount = safeParseAmount(base.amount ?? d?.amount);
   const textAmount = extractLikelyAmountFromScanText(textContext, { docType: inferredDocType });
   const itemsAmount = deriveAmountFromNormalizedLines(normalizedItems, normalizedAdjustments);
@@ -707,8 +715,8 @@ function normalizeScanResult({
     merchant: inferredMerchant,
     note: noteValue ?? null,
     ref: (d?.ref ?? d?.referenceId ?? d?.reference_id) ?? null,
-    category: d?.category ?? null,
-    category_key: d?.category_key ?? d?.category ?? null,
+    category: d?.category ?? base.category_key ?? null,
+    category_key: d?.category_key ?? d?.category ?? base.category_key ?? null,
     payment_method: d?.payment_method ?? d?.paymentMethod ?? null,
     account_id: d?.account_id ?? d?.accountId ?? null,
     from_account: d?.from_account ?? null,
@@ -725,11 +733,19 @@ function normalizeScanResult({
     to_account_variants: d?.to_account_variants ?? null,
     account_candidates: Array.isArray(d?.account_candidates) ? d.account_candidates : null,
 
-    confidence: d?.confidence && typeof d.confidence === 'object'
-      ? d.confidence
-      : (base.confidence != null ? { overall: base.confidence } : null),
+    confidence:
+      d?.confidence && typeof d.confidence === "object"
+        ? d.confidence
+        : base.confidence && typeof base.confidence === "object"
+          ? base.confidence
+          : null,
     errors: base.errors,
-    flags: d?.flags && typeof d.flags === 'object' ? d.flags : null,
+    flags:
+      d?.flags && typeof d.flags === "object"
+        ? d.flags
+        : base.flags && typeof base.flags === "object"
+          ? base.flags
+          : { needs_human_review: !!base.needs_human_review },
     scanDocumentId,
     matchedAccountId,
     matchedCategoryId,

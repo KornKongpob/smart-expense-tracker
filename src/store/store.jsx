@@ -24,6 +24,7 @@ import { setHash } from "../utils/hashRouter";
 import { clearAllBlobs, deleteBlob } from "../services/blobStore";
 import { DEFAULT_CATEGORIES } from "../constants/categories";
 import { generateId } from "../utils/id";
+import { normalizeBackupCore } from "../utils/backupPayload.js";
 import { calcAccountBalance, parseDateSafe } from "./selectors";
 import { toISODate } from "../utils/format";
 import { advanceRecurringDate, getRecurringAnchorDay } from "../utils/recurring";
@@ -34,6 +35,7 @@ import {
   learnMerchantMapping,
   normalizeMerchantKey,
 } from "../utils/merchantDictionary";
+import { normalizeNewEntryIntent } from "../views/add-transaction/helpers/entryIntent.js";
 
 const ONBOARDING_KEY = "onboarding_done_v1";
 const PIN_KEY = "privacy_pin_6";
@@ -185,7 +187,23 @@ export function reducer(state, action) {
     }
 
     case ACTIONS.START_NEW_TRANSACTION: {
-      return { ...state, ui: { ...state.ui, editingId: null, view: "add" } };
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          editingId: null,
+          view: "add",
+          newEntryIntent: normalizeNewEntryIntent(action.payload),
+        },
+      };
+    }
+
+    case ACTIONS.CONSUME_NEW_TRANSACTION_INTENT: {
+      if (!state?.ui?.newEntryIntent) return state;
+      return {
+        ...state,
+        ui: { ...state.ui, newEntryIntent: null },
+      };
     }
 
     case ACTIONS.START_EDIT_TRANSACTION: {
@@ -761,8 +779,10 @@ export function AppStoreProvider({ children }) {
       dispatch({ type: ACTIONS.NAVIGATE, payload: view });
     };
 
-    const startNewTransaction = () => dispatch({ type: ACTIONS.START_NEW_TRANSACTION });
+    const startNewTransaction = (intent = null) =>
+      dispatch({ type: ACTIONS.START_NEW_TRANSACTION, payload: normalizeNewEntryIntent(intent) });
     const startNew = startNewTransaction;
+    const consumeNewTransactionIntent = () => dispatch({ type: ACTIONS.CONSUME_NEW_TRANSACTION_INTENT });
 
     const startEditTransaction = (id) => dispatch({ type: ACTIONS.START_EDIT_TRANSACTION, payload: id });
     const startEdit = startEditTransaction;
@@ -1063,15 +1083,7 @@ export function AppStoreProvider({ children }) {
     };
 
     const importBackup = (payload) => {
-      const root = payload && typeof payload === "object" ? payload : {};
-      const hasWrappedData = root.data && typeof root.data === "object";
-      const source = hasWrappedData ? root.data : root;
-      const hasMoneyUnit = String(source?.moneyUnit || source?.amountUnit || "").trim().length > 0;
-      const normalizedPayload = hasWrappedData
-        ? { ...root, data: hasMoneyUnit ? source : { ...source, moneyUnit: "satang" } }
-        : hasMoneyUnit
-        ? root
-        : { ...root, moneyUnit: "satang" };
+      const normalizedPayload = normalizeBackupCore(payload);
 
       // ✅ Backup does not include binary attachments; clear old blobs to avoid orphans.
       try {
@@ -1138,12 +1150,15 @@ export function AppStoreProvider({ children }) {
     categories: state.categories ?? { expense: [], income: [] },
     budgets: state.budgets ?? [],
     recurring: state.recurring ?? [],
-    merchants: state.merchants ?? [],
+    merchants: normalizeMerchants(state.merchants ?? []),
     rules: state.rules ?? [],
     inbox: state.inbox ?? [],
     // backward compatibility
     scanInbox: state.inbox ?? [],
-    ui: state.ui ?? { view: "dashboard", editingId: null },
+    ui: {
+      view: state.ui?.view || "dashboard",
+      editingId: state.ui?.editingId || null,
+    },
   },
 });
 
@@ -1151,6 +1166,7 @@ export function AppStoreProvider({ children }) {
       navigate,
       startNewTransaction,
       startNew,
+      consumeNewTransactionIntent,
       startEditTransaction,
       startEdit,
       upsertTransaction,

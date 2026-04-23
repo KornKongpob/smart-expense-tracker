@@ -4,14 +4,18 @@
 
 const NOTIF_KEY = "budget_notif_last";
 
+export function getNotificationPermissionState() {
+  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
+  return Notification.permission || "default";
+}
+
 /**
  * Request notification permission (call once, e.g., from settings).
- * Returns "granted" | "denied" | "default"
+ * Returns "granted" | "denied" | "default" | "unsupported"
  */
 export async function requestNotificationPermission() {
-  if (typeof window === "undefined" || !("Notification" in window)) return "denied";
-  if (Notification.permission === "granted") return "granted";
-  if (Notification.permission === "denied") return "denied";
+  const current = getNotificationPermissionState();
+  if (current === "unsupported" || current === "granted" || current === "denied") return current;
   try {
     return await Notification.requestPermission();
   } catch {

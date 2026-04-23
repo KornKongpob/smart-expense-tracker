@@ -4,13 +4,16 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import LoadingScreen from "../src/features/app/screens/LoadingScreen.jsx";
-import { getPathForLegacyHash } from "../src/features/app/routes.js";
+import { getInitialHomePath } from "../src/features/app/routes.js";
 
 export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    const targetPath = getPathForLegacyHash(window.location.hash) || "/dashboard";
+    const targetPath = getInitialHomePath({
+      pathname: window.location.pathname,
+      hash: window.location.hash,
+    });
     router.replace(targetPath);
   }, [router]);
 

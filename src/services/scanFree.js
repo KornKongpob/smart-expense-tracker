@@ -531,17 +531,29 @@ export async function scanReceiptFree(file, { onStatus } = {}) {
     amount: amount ?? null,
     date: date ?? null,
     merchant,
+    category_key: category,
     items: [],
     confidence: passes.length ? Math.max(0, Math.min(1, (passes.reduce((s, p) => s + (p.conf || 0), 0) / passes.length) / 100)) : null,
+    flags: {
+      has_line_items: false,
+      has_zero_price_lines: false,
+      has_discount_lines: false,
+      needs_human_review: !merchant || amount == null,
+    },
   }, { defaultErrorCode: SCAN_PARSE_ERROR_CODE });
 
   if (normalized.amount == null && !normalized.date && !normalized.merchant) {
     normalized.errors = [SCAN_PARSE_ERROR_CODE];
+    normalized.flags = {
+      ...(normalized.flags || {}),
+      needs_human_review: true,
+    };
   }
 
   return {
     ...normalized,
     category,
+    category_key: normalized.category_key || category,
     rawText: allText,
   };
 }

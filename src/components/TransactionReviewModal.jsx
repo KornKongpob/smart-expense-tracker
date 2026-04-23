@@ -693,15 +693,50 @@ export default function TransactionReviewModal({
                     const effect = String(g?.adjustmentEffect || "").toLowerCase().trim();
                     const sign = isAdj ? (effect === "subtract" ? "-" : "+") : "";
                     const cat = (expenseCatsAll || []).find((c) => String(c?.id || "") === String(g?.categoryId || "")) || null;
-                    const title = String(g?.note || "").trim() || cat?.name || "—";
+                    const title = String(g?.note || g?.name || "").trim() || cat?.name || "—";
                     const subtitle =
-                      cat && title !== cat.name ? cat.name : isAdj ? (effect === "subtract" ? "ส่วนลด" : "ค่าธรรมเนียม") : "";
+                      cat && title !== cat.name ? cat.name : isAdj ? (effect === "subtract" ? "ส่วนลด" : "ค่าธรรมเนียม") : cat?.name || "";
+                    const children = Array.isArray(g?.children) ? g.children : [];
                     return (
                       <div key={idx} className="rounded-2xl bg-white/10 border border-white/15 p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="text-xs font-semibold text-gray-900/80 truncate">{title}</div>
                             {subtitle ? <div className="text-[11px] text-gray-900/55 truncate">{subtitle}</div> : null}
+                            {children.length ? (
+                              <div className="mt-2 space-y-1">
+                                {children.map((child, childIdx) => {
+                                  const childCat =
+                                    (expenseCatsAll || []).find(
+                                      (category) =>
+                                        String(category?.id || "") ===
+                                        String(
+                                          child?.categoryId ||
+                                            child?.category_key ||
+                                            child?.category ||
+                                            child?.key ||
+                                            "",
+                                        ),
+                                    ) || null;
+                                  const childName = String(child?.name || "").trim() || "—";
+                                  const childAmount = Number(child?.amount || 0);
+                                  return (
+                                    <div
+                                      key={`${idx}-${childIdx}`}
+                                      className="flex items-center justify-between gap-3 text-[11px] text-gray-900/60"
+                                    >
+                                      <div className="min-w-0 truncate">
+                                        {childName}
+                                        {childCat?.name ? ` • ${childCat.name}` : ""}
+                                      </div>
+                                      <div className="shrink-0">
+                                        {childAmount > 0 ? formatCurrency(Math.abs(childAmount)) : "รวมในบรรทัดหลัก"}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
                           </div>
                           <div className="shrink-0 text-[12px] font-semibold text-gray-900">
                             {sign}

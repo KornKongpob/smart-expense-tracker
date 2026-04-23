@@ -39,6 +39,16 @@ const PATH_TO_VIEW = new Map(
   Object.entries(VIEW_PATHS).map(([view, path]) => [path, view]),
 );
 
+export function normalizeLegacyHash(hash) {
+  const raw = String(hash || "").trim();
+  if (!raw) return "";
+  const withoutHash = raw.replace(/^#/, "").trim();
+  if (!withoutHash) return "";
+  const withoutQuery = withoutHash.split("?")[0].split("&")[0].trim();
+  const withoutSlash = withoutQuery.replace(/^\/+/, "").replace(/\/+$/, "");
+  return withoutSlash.toLowerCase();
+}
+
 export function normalizePathname(pathname) {
   const raw = String(pathname || "").trim();
   if (!raw) return "/";
@@ -67,7 +77,13 @@ export function getViewForPathname(pathname) {
 }
 
 export function getPathForLegacyHash(hash) {
-  const raw = String(hash || "").trim().replace(/^#/, "").toLowerCase();
+  const raw = normalizeLegacyHash(hash);
   if (!raw) return "";
   return LEGACY_HASH_PATHS[raw] || "";
+}
+
+export function getInitialHomePath({ pathname = "/", hash = "" } = {}) {
+  const currentPath = getCanonicalPathForPathname(pathname);
+  if (currentPath !== "/" && PATH_TO_VIEW.has(currentPath)) return currentPath;
+  return getPathForLegacyHash(hash) || VIEW_PATHS.dashboard;
 }

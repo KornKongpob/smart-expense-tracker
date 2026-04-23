@@ -28,6 +28,7 @@ import {
   extractMerchantFromScanText,
   normalizeScanText,
 } from "../../src/utils/scanPostprocess.js";
+import { deriveReceiptCategoryKey } from "../../src/utils/receiptCategorizer.js";
 import { getSupabaseAdmin, hasSupabaseServerConfig } from "../../lib/supabase/admin.js";
 import { getRequestUser } from "../../lib/supabase/auth.js";
 import { uploadUserDocument } from "../../lib/supabase/documents.js";
@@ -585,6 +586,7 @@ function normalizeItems(items) {
           qty: chQty != null ? chQty : null,
           unit_price: chUnit != null ? chUnit : null,
           total: chFinal != null ? chFinal : null,
+          category_key: normalizeCategoryKey(ch.category_key ?? ch.categoryKey ?? ch.category) || inferCategoryFromText(chName) || null,
         });
 
         if (chOut.length >= 12) break;
@@ -1126,7 +1128,7 @@ Schema (ALL keys must exist; use null if unknown):
       "line_total": number|null,
       "category_key": string|null,
       "children": [
-        { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null }
+        { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null }
       ]|null
     }
   ],
@@ -1672,6 +1674,10 @@ Output JSON schema:
                     qty: safeNumber(ch?.qty ?? ch?.quantity),
                     unit_price: safeNumber(ch?.unit_price ?? ch?.unitPrice ?? ch?.price),
                     total: safeNumber(ch?.line_total ?? ch?.lineTotal ?? ch?.total ?? ch?.amount),
+                    category_key:
+                      normalizeCategoryKey(ch?.category_key ?? ch?.categoryKey ?? ch?.category) ||
+                      inferCategoryFromText(ch?.name) ||
+                      null,
                   }))
                   .filter((ch) => (ch?.name || "") && Number.isFinite(ch?.total || 0) && (ch?.total || 0) > 0)
                   .slice(0, 10)
@@ -1752,6 +1758,16 @@ Output JSON schema:
   if (doc_type === "transfer_slip" || doc_type === "bill_payment" || refined.tx_type === "transfer") {
     finalItems = [];
     finalAdjustments = [];
+  }
+
+  if (refined.tx_type !== "transfer") {
+    const derivedCategory = deriveReceiptCategoryKey(
+      refined.tx_type === "income" ? "income" : "expense",
+      finalItems,
+      `${merchant || ""} ${note || ""} ${outputText || ""}`.trim(),
+      category || "",
+    );
+    if (derivedCategory) category = derivedCategory;
   }
 
   // ---- payment method + account id (may be refined again after account candidate extraction) ----
@@ -1906,8 +1922,20 @@ Output JSON schema:
   normalized.merchant = schemaNormalized.merchant;
   normalized.amount = schemaNormalized.amount;
   normalized.date = schemaNormalized.date;
+  normalized.category_key = normalized.category_key || schemaNormalized.category_key || null;
+  normalized.category = normalized.category || normalized.category_key || null;
   normalized.items = Array.isArray(normalized.items) && normalized.items.length ? normalized.items : schemaNormalized.items;
-  normalized.confidence = normalized.confidence || (schemaNormalized.confidence != null ? { overall: schemaNormalized.confidence } : null);
+  normalized.adjustments =
+    Array.isArray(normalized.adjustments) && normalized.adjustments.length ? normalized.adjustments : schemaNormalized.adjustments;
+  normalized.confidence =
+    normalized.confidence ||
+    (schemaNormalized.confidence && typeof schemaNormalized.confidence === "object" ? schemaNormalized.confidence : null);
+  normalized.flags =
+    normalized.flags && typeof normalized.flags === "object"
+      ? normalized.flags
+      : schemaNormalized.flags && typeof schemaNormalized.flags === "object"
+        ? schemaNormalized.flags
+        : normalized.flags;
   normalized.errors = schemaNormalized.errors;
 
   return {

@@ -4,6 +4,7 @@
 // Keeps the app resilient to corrupt/malformed data from scan, import, or legacy formats.
 
 import { z } from "zod";
+import { normalizeBackupCore } from "../utils/backupPayload.js";
 
 // ===== Primitives =====
 
@@ -289,9 +290,6 @@ export function validateAccount(acc) {
  * Strips invalid items instead of rejecting the whole backup.
  */
 export function validateBackupImport(raw) {
-  const obj = raw && typeof raw === "object" ? raw : {};
-  // Accept both { data: {...} } and flat shapes
-  const root = obj.data && typeof obj.data === "object" ? obj.data : obj;
-
+  const root = normalizeBackupCore(raw);
   return safeParse(AppStateSchema, root);
 }

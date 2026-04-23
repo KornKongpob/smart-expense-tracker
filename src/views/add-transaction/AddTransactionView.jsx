@@ -54,7 +54,7 @@ import {
   getBudget,
   calcAccountBalance,
 } from "../../store/selectors";
-import { splitReceiptItemsToLines, sanitizeCategoryKey } from "../../utils/receiptCategorizer";
+import { deriveReceiptCategoryKey, splitReceiptItemsToLines, sanitizeCategoryKey } from "../../utils/receiptCategorizer";
 import {
   reconcileReceiptGroups,
   signedReceiptGroupSatang,
@@ -72,6 +72,7 @@ import { useTransferFlow } from "./hooks/useTransferFlow";
 import { useTransactionDraft } from "./hooks/useTransactionDraft";
 import { useScanQueue } from "./hooks/useScanQueue";
 import { coerceClipboardFile, filterAllowedUploads, isPdfFile } from "./helpers/fileUploadHelpers.js";
+import { deriveSplitParentCategoryId } from "./helpers/splitCategory.js";
 import { applyAutomationToQueuePatch, buildQueueTypeChangeItem, normalizeQueueItemType } from "./helpers/queueTypeHelpers";
 import EditTransactionMode from "./EditTransactionMode";
 import { duplicateStateFromMatch, toDuplicateComparable } from "../../utils/duplicateDetection";
@@ -442,6 +443,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     accounts,
     toISODate,
     normalizeLatLng,
+    entryIntent: state?.ui?.newEntryIntent,
+    consumeEntryIntent: store.consumeNewTransactionIntent,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -473,6 +476,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   }, [currentLocation]);
 
   const geoToastShownRef = useRef(false);
+  const [isRequestingLocation, setIsRequestingLocation] = useState(false);
 
   const splitGroupTransactions = useMemo(() => {
     const gid = String(initialData?.splitGroupId || "").trim();
@@ -1044,24 +1048,30 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return out;
   }, [state.transactions]);
 
-  // ===== Smart Geolocation: silently request GPS once on mount =====
-  useEffect(() => {
-    if (typeof navigator === "undefined") return;
-    const geo = navigator.geolocation;
-    if (!geo || typeof geo.getCurrentPosition !== "function") return;
+  const requestNearbyLocation = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== "function") {
+      showAlert?.("อุปกรณ์นี้ไม่รองรับการใช้ตำแหน่งปัจจุบัน");
+      return;
+    }
 
-    geo.getCurrentPosition(
+    setIsRequestingLocation(true);
+    navigator.geolocation.getCurrentPosition(
       (pos) => {
+        setIsRequestingLocation(false);
         const loc = normalizeLatLng({ lat: pos?.coords?.latitude, lng: pos?.coords?.longitude });
-        if (!loc) return;
+        if (!loc) {
+          showAlert?.("อ่านตำแหน่งปัจจุบันไม่สำเร็จ");
+          return;
+        }
         setCurrentLocation(loc);
       },
-      // Graceful: ignore errors (permission denied / unavailable)
-      () => {},
+      () => {
+        setIsRequestingLocation(false);
+        showAlert?.("ไม่สามารถใช้ตำแหน่งปัจจุบันได้");
+      },
       { enableHighAccuracy: true, maximumAge: 60_000, timeout: 7_000 }
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [setCurrentLocation, showAlert]);
 
   // ===== Smart Geolocation: find nearby merchant and suggest autofill =====
   useEffect(() => {
@@ -1831,7 +1841,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             };
 
             const lines = splitReceiptItemsToLines("expense", payloadForLines, contextText, fallbackKey);
-            if (lines.length) primaryKey = lines[0]?.key || fallbackKey;
+            if (lines.length) {
+              primaryKey = deriveReceiptCategoryKey("expense", lines, contextText, fallbackKey) || fallbackKey;
+            }
 
             groups = (lines || [])
               .map((ln, idx) => {
@@ -1862,7 +1874,21 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   receiptLineType: isAdj ? "adjustment" : "item",
                   adjustmentEffect,
                   adjustmentType,
-                  children: Array.isArray(ln?.children) ? ln.children.map((c) => ({ name: String(c?.name || '').trim(), amount: parseMoneyToSatang(c?.amount) })) : null,
+                  children: Array.isArray(ln?.children)
+                    ? ln.children
+                        .map((c) => {
+                          const childKey = sanitizeCategoryKey(
+                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
+                          );
+                          return {
+                            name: String(c?.name || "").trim(),
+                            amount: parseMoneyToSatang(c?.amount),
+                            key: childKey || null,
+                            categoryId: childKey ? ensureCategory("expense", childKey) : null,
+                          };
+                        })
+                        .filter((c) => c.name || Number(c.amount || 0) > 0 || c.categoryId)
+                    : null,
                   childrenIncludedInParent: !!ln?.childrenIncludedInParent,
                 };
               })
@@ -2287,7 +2313,20 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   receiptLineType: String(ln?.receiptLineType || "item"),
                   adjustmentType: String(ln?.adjustmentType || ""),
                   adjustmentEffect: String(ln?.adjustmentEffect || "add"),
-                  children: Array.isArray(ln?.children) ? ln.children : null,
+                  children: Array.isArray(ln?.children)
+                    ? ln.children
+                        .map((c) => {
+                          const childKey = sanitizeCategoryKey(
+                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
+                          );
+                          return {
+                            ...c,
+                            key: childKey || null,
+                            categoryId: childKey ? ensureCategory("expense", childKey) : null,
+                          };
+                        })
+                        .filter((c) => String(c?.name || "").trim() || Number(c?.amount || 0) > 0 || c?.categoryId)
+                    : null,
                   childrenIncludedInParent: !!ln?.childrenIncludedInParent,
                   splitIndex: idx + 1,
                   splitCount: (lines || []).length,
@@ -2394,7 +2433,20 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   receiptLineType: String(ln?.receiptLineType || "item"),
                   adjustmentType: String(ln?.adjustmentType || ""),
                   adjustmentEffect: String(ln?.adjustmentEffect || "add"),
-                  children: Array.isArray(ln?.children) ? ln.children : null,
+                  children: Array.isArray(ln?.children)
+                    ? ln.children
+                        .map((c) => {
+                          const childKey = sanitizeCategoryKey(
+                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
+                          );
+                          return {
+                            ...c,
+                            key: childKey || null,
+                            categoryId: childKey ? ensureCategory("expense", childKey) : null,
+                          };
+                        })
+                        .filter((c) => String(c?.name || "").trim() || Number(c?.amount || 0) > 0 || c?.categoryId)
+                    : null,
                   childrenIncludedInParent: !!ln?.childrenIncludedInParent,
                   splitIndex: idx + 1,
                   splitCount: (lines || []).length,
@@ -2530,7 +2582,20 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   receiptLineType: String(ln?.receiptLineType || "item"),
                   adjustmentType: String(ln?.adjustmentType || ""),
                   adjustmentEffect: String(ln?.adjustmentEffect || "add"),
-                  children: Array.isArray(ln?.children) ? ln.children : null,
+                  children: Array.isArray(ln?.children)
+                    ? ln.children
+                        .map((c) => {
+                          const childKey = sanitizeCategoryKey(
+                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
+                          );
+                          return {
+                            ...c,
+                            key: childKey || null,
+                            categoryId: childKey ? ensureCategory("expense", childKey) : null,
+                          };
+                        })
+                        .filter((c) => String(c?.name || "").trim() || Number(c?.amount || 0) > 0 || c?.categoryId)
+                    : null,
                   childrenIncludedInParent: !!ln?.childrenIncludedInParent,
                   splitIndex: idx + 1,
                   splitCount: (lines || []).length,
@@ -2931,16 +2996,16 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         // ✅ Parent category for split receipts:
         // - If children have multiple categories → parent = "mixed" (UI-only parent)
         // - If children all same category → use that category
-        const uniqueCats = Array.from(
-          new Set(
-            groups
+        const parentCategory = ensureCategory(
+          "expense",
+          deriveSplitParentCategoryId({
+            type: "expense",
+            childCategoryIds: groups
               .filter((g) => !isAdjustmentLike(g))
-              .map((g) => String(g?.categoryId || "").trim())
-              .filter(Boolean)
-          )
+              .map((g) => String(g?.categoryId || "").trim()),
+            fallbackCategoryId: String(q.categoryId || "").trim() || "mixed",
+          })
         );
-        const parentCategory = (uniqueCats.length > 1 ? ensureCategory("expense", "mixed") : uniqueCats[0]) ||
-          String(q.categoryId || ensureCategory("expense", "mixed")).trim();
 
         // Parent (UI only)
         txs.push({
@@ -3067,8 +3132,16 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                           const ca = typeof cc.amount === "number" ? cc.amount : Number(cc.amount);
                           const camt = Number.isFinite(ca) ? Math.round(ca) : 0;
                           const nm = String(cc.name || "").trim();
-                          if (!nm && !camt) return null;
-                          return { name: nm || "—", amount: Math.abs(camt) };
+                          const childKey = sanitizeCategoryKey(
+                            cc.key || cc.category_key || cc.categoryId || cc.category || "",
+                          );
+                          if (!nm && !camt && !childKey) return null;
+                          return {
+                            name: nm || "—",
+                            amount: Math.abs(camt),
+                            key: childKey || null,
+                            categoryId: childKey ? ensureCategory("expense", childKey) : null,
+                          };
                         })
                         .filter(Boolean)
                     : null,
@@ -3349,12 +3422,14 @@ const inId =
 
       const childrenTotal = cleanedLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
       // ✅ For split groups, parent category is mixed if children span multiple categories
-      const uniqueCats = Array.from(new Set(cleanedLines.map((l) => String(l?.categoryId || "").trim()).filter(Boolean)));
       const parentCategory = String(
-        existingParent?.category ||
-        (uniqueCats.length > 1 ? ensureCategory("expense", "mixed") : uniqueCats[0]) ||
-        ensureCategory("expense", "mixed")
-      ).trim() || "mixed";
+        deriveSplitParentCategoryId({
+          type,
+          childCategoryIds: cleanedLines.map((l) => String(l?.categoryId || "").trim()),
+          existingParentCategoryId: type === "expense" ? existingParent?.category : "",
+          fallbackCategoryId: type === "income" ? "other_income" : "mixed",
+        })
+      ).trim() || (type === "income" ? "other_income" : "mixed");
 
       const parentTx = {
         id: parentId,
@@ -4046,6 +4121,22 @@ const handleClose = () => {
                     <div className="mt-2 ml-12 text-[11px] text-indigo-700 font-bold flex items-center gap-1">
                       📍 {nearbySuggestion.merchant}{" "}
                       <span className="text-gray-500 font-normal">~{Math.round(nearbySuggestion.distanceM)} ม.</span>
+                    </div>
+                  ) : null}
+                  {!isEditMode && entryMode === "manual" ? (
+                    <div className="mt-2 ml-12">
+                      <button
+                        type="button"
+                        onClick={requestNearbyLocation}
+                        disabled={isRequestingLocation}
+                        className="text-[11px] font-semibold text-sky-700 disabled:text-gray-400"
+                      >
+                        {isRequestingLocation
+                          ? "กำลังอ่านตำแหน่ง..."
+                          : currentLocation
+                            ? "Refresh nearby location"
+                            : "Use nearby location to help detect merchant"}
+                      </button>
                     </div>
                   ) : null}
                 </div>

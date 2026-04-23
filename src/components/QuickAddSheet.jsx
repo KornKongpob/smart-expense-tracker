@@ -127,13 +127,13 @@ export default function QuickAddSheet({ isOpen, onClose }) {
 
   const handleOpenFull = () => {
     onClose();
-    setTimeout(() => store.startNewTransaction(), 150);
+    setTimeout(() => store.startNewTransaction({ entryMode: "manual" }), 150);
   };
 
   const handleQuickScan = () => {
     onClose();
     setTimeout(() => {
-      store.startNewTransaction();
+      store.startNewTransaction({ entryMode: "scan", scanUploadKind: "receipt" });
     }, 150);
   };
 

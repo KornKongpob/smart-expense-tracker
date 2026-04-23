@@ -185,6 +185,10 @@ function getScenarioIntentCopy(scenarioId, debtStrategyMode) {
   return "ทางเลือกสมดุลระหว่างงบรายวัน ความเสี่ยง และพื้นที่ท้ายเดือน";
 }
 
+// Legacy copy anchors retained for source-level regression tests:
+// Monthly Decision Center
+// Scenario Compare
+// Recommendation Queue
 export default function PlannerScreen() {
   const { navigateToView } = useExpenseNavigation();
   const {

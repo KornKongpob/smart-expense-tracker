@@ -1,10 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { getCurrentLocalTimeHHmm } from "../../../utils/format.js";
+import {
+  LEGACY_ENTRY_INTENT_KEYS,
+  readLegacyNewEntryIntent,
+  resolveNewEntryIntent,
+} from "../helpers/entryIntent.js";
 
-export function useTransactionDraft({ initialData, isEditMode, transferKindForEdit, transferPair, accounts, toISODate, normalizeLatLng }) {
+function clearLegacyEntryIntent(storageLike) {
+  if (!storageLike || typeof storageLike.removeItem !== "function") return;
+  for (const key of LEGACY_ENTRY_INTENT_KEYS) {
+    try {
+      storageLike.removeItem(key);
+    } catch {
+      // ignore legacy cleanup failures
+    }
+  }
+}
+
+export function useTransactionDraft({
+  initialData,
+  isEditMode,
+  transferKindForEdit,
+  transferPair,
+  accounts,
+  toISODate,
+  normalizeLatLng,
+  entryIntent = null,
+  consumeEntryIntent = null,
+}) {
   const [entryMode, setEntryMode] = useState(isEditMode ? "manual" : "scan");
-
-const [scanUploadKind, setScanUploadKind] = useState("receipt");
+  const [scanUploadKind, setScanUploadKind] = useState("receipt");
 
   const initialType = useMemo(() => {
     if (initialData?.isTransfer) return transferKindForEdit === "credit_payment" ? "credit_payment" : "transfer";
@@ -40,31 +65,50 @@ const [scanUploadKind, setScanUploadKind] = useState("receipt");
   // One-shot entry mode override (e.g., from Inbox/Quick Add)
   useEffect(() => {
     if (isEditMode) return;
+    let legacyIntent = null;
     try {
-      const forced = String(sessionStorage.getItem("add.entryMode.force") || "").trim();
-      if (forced) {
-        setEntryMode(forced);
-        sessionStorage.removeItem("add.entryMode.force");
-      }
-
-      const forcedScanKind = String(sessionStorage.getItem("add.scanUploadKind.force") || "").trim();
-      if (forcedScanKind === "receipt" || forcedScanKind === "slip") {
-        setEntryMode("scan");
-        setScanUploadKind(forcedScanKind);
-        sessionStorage.removeItem("add.scanUploadKind.force");
-      }
-
-      const forcedType = String(sessionStorage.getItem("add.txType.force") || "").trim();
-      if (forcedType === "expense" || forcedType === "income" || forcedType === "transfer" || forcedType === "credit_payment") {
-        setEntryMode("manual");
-        setType(forcedType);
-        if (forcedType === "transfer" || forcedType === "credit_payment") setCategoryId("transfer");
-        sessionStorage.removeItem("add.txType.force");
+      if (typeof sessionStorage !== "undefined") {
+        legacyIntent = readLegacyNewEntryIntent(sessionStorage);
       }
     } catch {
       // ignore
     }
-  }, [isEditMode]);
+
+    const resolvedIntent = resolveNewEntryIntent({
+      isEditMode,
+      storeIntent: entryIntent,
+      legacyIntent,
+    });
+    if (!resolvedIntent) return;
+
+    if (resolvedIntent.entryMode === "manual") setEntryMode("manual");
+    if (resolvedIntent.entryMode === "scan") setEntryMode("scan");
+
+    if (resolvedIntent.scanUploadKind) {
+      setEntryMode("scan");
+      setScanUploadKind(resolvedIntent.scanUploadKind);
+    }
+
+    if (resolvedIntent.txType) {
+      setEntryMode("manual");
+      setType(resolvedIntent.txType);
+      if (resolvedIntent.txType === "transfer" || resolvedIntent.txType === "credit_payment") {
+        setCategoryId("transfer");
+      }
+    }
+
+    if (entryIntent && typeof consumeEntryIntent === "function") {
+      consumeEntryIntent();
+    }
+
+    try {
+      if (legacyIntent && typeof sessionStorage !== "undefined") {
+        clearLegacyEntryIntent(sessionStorage);
+      }
+    } catch {
+      // ignore
+    }
+  }, [consumeEntryIntent, entryIntent, isEditMode]);
 
   return {
     entryMode,

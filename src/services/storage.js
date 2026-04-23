@@ -9,6 +9,8 @@
  * - ไฟล์นี้ไม่ยุ่งกับ UX/UI โดยตรง แต่เป็นแกนสำคัญให้แอพ “ทำงานถูกต้องและสอดคล้องกัน”
  */
 
+import { normalizeBackupCore, resolveMoneyUnit } from "../utils/backupPayload.js";
+
 const STORAGE_KEY = "smart-expense-tracker_v1";
 const STORAGE_VERSION = 1;
 
@@ -77,74 +79,7 @@ function ensureCategoriesShape(v) {
 }
 
 function normalizeBoot(data, defaults = {}) {
-  const obj = isPlainObject(data) ? data : {};
-
-  // allow both legacy shape (plain state) and versioned shape
-  const root = isPlainObject(obj.data) ? obj.data : obj;
-
-  const transactions = Array.isArray(root.transactions)
-    ? root.transactions
-    : Array.isArray(defaults.defaultTransactions)
-    ? defaults.defaultTransactions
-    : [];
-
-  const accounts = Array.isArray(root.accounts)
-    ? root.accounts
-    : Array.isArray(defaults.defaultAccounts)
-    ? defaults.defaultAccounts
-    : [];
-
-  const categories = isPlainObject(root.categories)
-    ? ensureCategoriesShape(root.categories)
-    : isPlainObject(defaults.defaultCategories)
-    ? ensureCategoriesShape(defaults.defaultCategories)
-    : { expense: [], income: [] };
-
-  const budgets = Array.isArray(root.budgets)
-    ? root.budgets
-    : Array.isArray(defaults.defaultBudgets)
-    ? defaults.defaultBudgets
-    : [];
-
-  const recurring = Array.isArray(root.recurring)
-    ? root.recurring
-    : Array.isArray(defaults.defaultRecurring)
-    ? defaults.defaultRecurring
-    : [];
-
-  const scanInbox = Array.isArray(root.scanInbox)
-    ? root.scanInbox
-    : Array.isArray(defaults.defaultScanInbox)
-    ? defaults.defaultScanInbox
-    : [];
-
-  const inbox = Array.isArray(root.inbox)
-    ? root.inbox
-    : Array.isArray(defaults.defaultInbox)
-    ? defaults.defaultInbox
-    : [];
-
-  const ui = isPlainObject(root.ui)
-    ? root.ui
-    : isPlainObject(defaults.defaultUI)
-    ? defaults.defaultUI
-    : undefined;
-
-  const rules = Array.isArray(root.rules)
-    ? root.rules
-    : Array.isArray(defaults.defaultRules)
-    ? defaults.defaultRules
-    : [];
-
-  const merchants = Array.isArray(root.merchants)
-    ? root.merchants
-    : Array.isArray(defaults.defaultMerchants)
-    ? defaults.defaultMerchants
-    : [];
-  const moneyUnitRaw = String(root.moneyUnit || root.amountUnit || obj.moneyUnit || '').toLowerCase();
-  const moneyUnit = moneyUnitRaw === 'baht' ? 'baht' : 'satang';
-
-  return { transactions, accounts, categories, budgets, recurring, inbox, scanInbox, rules, merchants, ui, moneyUnit };
+  return normalizeBackupCore(data, defaults);
 }
 
 /**
@@ -175,7 +110,7 @@ export function saveAll(payload) {
   if (!hasWindow()) return;
 
   const data = isPlainObject(payload) ? payload : {};
-  const moneyUnit = String(data.moneyUnit || "satang").toLowerCase() === "baht" ? "baht" : "satang";
+  const moneyUnit = resolveMoneyUnit(data.moneyUnit, "satang");
 
   // บังคับ shape ขั้นต่ำ เพื่อลดโอกาส state เพี้ยน
   const record = {

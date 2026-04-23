@@ -8,8 +8,7 @@ import {
   reconcileReceiptGroups,
   signedReceiptGroupSatang,
 } from "../../utils/receiptAdjustments.js";
-
-const MIXED_CATEGORY_ID = "mixed";
+import { deriveReceiptCategoryKey, splitReceiptItemsToLines } from "../../utils/receiptCategorizer.js";
 
 function cleanText(value, fallback = "") {
   const text = String(value || "").trim();
@@ -151,6 +150,35 @@ function buildScanReceiptGroups(suggestion, kind, defaultAmountUnit = "baht") {
   const amountUnit = normalizeAmountUnit(source.group_amount_unit || source.amount_unit, defaultAmountUnit);
   if (Array.isArray(source.groups) && source.groups.length) {
     return normalizeDraftEntries(source.groups, kind, { amountUnit, fallbackName: "Item" });
+  }
+
+  if (kind === "expense") {
+    const fallbackText = `${cleanText(source.merchant)} ${cleanText(source.note)}`.trim();
+    const fallbackCategory = source.category_key || source.category || "";
+    const targetTotalSatang = toSatangAmount(source.amount, amountUnit, 0);
+    const splitLines = splitReceiptItemsToLines(
+      "expense",
+      {
+        items: Array.isArray(source.items) ? source.items : [],
+        adjustments: Array.isArray(source.adjustments) ? source.adjustments : [],
+        targetTotalSatang: targetTotalSatang > 0 ? targetTotalSatang : null,
+      },
+      fallbackText,
+      fallbackCategory,
+    );
+
+    if (splitLines.length) {
+      return normalizeDraftEntries(
+        splitLines.map((line) => ({
+          ...line,
+          categoryId: line?.categoryId || line?.category || line?.category_key || line?.key || fallbackCategory,
+          amount: line?.amount ?? 0,
+          note: line?.name || line?.note || "",
+        })),
+        kind,
+        { amountUnit: "baht", fallbackName: "Item" },
+      );
+    }
   }
 
   const items = (Array.isArray(source.items) ? source.items : []).map((item) => ({
@@ -464,15 +492,12 @@ export function buildTransactionSavePlan({
   const splitGroupId = cleanText(sanitized.splitGroupId, generateSplitGroupId());
   const splitLabel = cleanText(sanitized.splitLabel, sanitized.merchant || sanitized.note || "Split");
   const splitCount = groups.length;
-  const nonAdjustmentCategoryIds = Array.from(
-    new Set(
-      groups
-        .filter((group) => group.receiptLineType !== "adjustment")
-        .map((group) => cleanText(group.categoryId))
-        .filter(Boolean),
-    ),
+  const parentCategoryId = deriveReceiptCategoryKey(
+    "expense",
+    groups,
+    `${cleanText(sanitized.merchant)} ${cleanText(sanitized.note)}`.trim(),
+    sanitized.categoryId,
   );
-  const parentCategoryId = nonAdjustmentCategoryIds.length > 1 ? MIXED_CATEGORY_ID : nonAdjustmentCategoryIds[0] || sanitized.categoryId;
   const parentAmountSatang =
     Math.abs(groups.reduce((sum, group) => sum + signedReceiptGroupSatang({
       amount: group.amountSatang,
@@ -562,13 +587,15 @@ function buildSuggestionGroupsForStorage(groups) {
     name: group.name || null,
     note: group.note || null,
     amount: toBahtAmount(group.amountSatang),
-    category_key: group.categoryId || null,
+    category_key: group.categoryId || group.category_key || null,
     receipt_line_type: group.receiptLineType,
     adjustment_effect: group.adjustmentEffect,
     adjustment_type: group.adjustmentType || null,
     split_index: group.splitIndex || null,
     qty: group.qty ?? null,
     unit_price: group.unitPriceSatang != null ? toBahtAmount(group.unitPriceSatang) : null,
+    children_included_in_parent: group.childrenIncludedInParent === true,
+    children: Array.isArray(group.children) ? buildSuggestionGroupsForStorage(group.children) : null,
   }));
 }
 
@@ -578,6 +605,15 @@ export function buildApprovedSuggestion(scan, draft) {
   const groups = Array.isArray(sanitized.receiptGroups) ? sanitized.receiptGroups : [];
   const items = groups.filter((group) => group.receiptLineType !== "adjustment");
   const adjustments = groups.filter((group) => group.receiptLineType === "adjustment");
+  const derivedCategoryKey =
+    sanitized.kind === "transfer"
+      ? null
+      : deriveReceiptCategoryKey(
+          sanitized.kind,
+          groups,
+          `${cleanText(sanitized.merchant)} ${cleanText(sanitized.note)}`.trim(),
+          sanitized.categoryId || baseSuggestion.category_key || baseSuggestion.category || "",
+        );
 
   return {
     ...baseSuggestion,
@@ -591,7 +627,7 @@ export function buildApprovedSuggestion(scan, draft) {
     merchant: sanitized.merchant || null,
     note: sanitized.note || null,
     ref: sanitized.reference || null,
-    category_key: sanitized.kind === "transfer" ? null : sanitized.categoryId || null,
+    category_key: derivedCategoryKey || null,
     payment_method: sanitized.paymentMethod || null,
     account_id: sanitized.kind === "transfer" ? null : sanitized.accountId || null,
     from_account: sanitized.kind === "transfer" ? sanitized.fromAccountId || null : baseSuggestion.from_account || null,
@@ -634,6 +670,19 @@ export function scanToDraft(scan) {
     (group) => group.receiptLineType !== "adjustment" && group.amountSatang > 0,
   ).length;
   const splitByCategory = kind === "expense" && nonAdjustmentItemCount >= 2;
+  const derivedCategoryId =
+    kind === "transfer"
+      ? ""
+      : deriveReceiptCategoryKey(
+          kind,
+          receiptGroups,
+          `${cleanText(suggestion?.merchant)} ${cleanText(suggestion?.note)}`.trim(),
+          scan?.matched_category_id ||
+            scan?.matchedCategoryId ||
+            suggestion?.category_key ||
+            suggestion?.category ||
+            "",
+        );
 
   return sanitizeTransactionDraft({
     kind,
@@ -650,7 +699,7 @@ export function scanToDraft(scan) {
     categoryId:
       kind === "transfer"
         ? ""
-        : scan?.matched_category_id || scan?.matchedCategoryId || suggestion?.category_key || suggestion?.category || "",
+        : derivedCategoryId,
     amountSatang: resolveDraftTotalSatang({
       amountSatang: toSatangAmount(suggestion?.amount, amountUnit, 0),
       kind,

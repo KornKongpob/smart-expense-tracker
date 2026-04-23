@@ -63,3 +63,9 @@ export function isRecurringDue(recurring, todayISO = toISODate(new Date())) {
   const today = parseDateSafe(todayISO).getTime();
   return nextDue <= today;
 }
+
+export function getRecurringDueCount(list, todayISO = toISODate(new Date())) {
+  return (Array.isArray(list) ? list : []).filter(
+    (recurring) => recurring?.enabled !== false && isRecurringDue(recurring, todayISO),
+  ).length;
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Bell,
   ChevronRight,
   Download,
   FolderTree,
@@ -28,10 +29,13 @@ export default function SettingsScreen() {
     plannerDecisionSummary,
     recurringRules,
     recurringDueToday,
+    notificationPermission,
+    notificationsSupported,
     saving,
     saveProfile,
     exportBackup,
     importBackupFile,
+    requestBudgetNotificationPermission,
     runLegacyMigration,
     signOut,
   } = useExpenseApp();
@@ -76,6 +80,16 @@ export default function SettingsScreen() {
       value: planningConfig?.debtStrategyMode === "survival" ? "ประคองรายเดือน" : "เน้นปิดหนี้",
     },
   ];
+  const notificationStatusLabel =
+    notificationPermission === "granted"
+      ? "เปิดใช้งานแล้ว"
+      : notificationPermission === "denied"
+        ? "ถูกบล็อกในเบราว์เซอร์"
+        : notificationsSupported
+          ? "ยังไม่ได้ขอสิทธิ์"
+          : "เบราว์เซอร์ไม่รองรับ";
+  const notificationActionLabel =
+    notificationPermission === "granted" ? "เปิดแล้ว" : "เปิดการแจ้งเตือน";
 
   return (
     <ScreenShell title="ตั้งค่า">
@@ -276,6 +290,32 @@ export default function SettingsScreen() {
                 event.target.value = "";
               }}
             />
+          </div>
+
+          <div className="finance-inline-note">
+            <div className="finance-row">
+              <div className="finance-row-main">
+                <span className="finance-category-icon finance-account-icon">
+                  <Bell size={18} />
+                </span>
+                <div className="finance-settings-row-copy">
+                  <div className="finance-row-title">Budget notifications</div>
+                  <div className="finance-row-meta finance-row-meta-wrap">{notificationStatusLabel}</div>
+                </div>
+              </div>
+
+              <div className="finance-row-side">
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-secondary"
+                  disabled={saving || !notificationsSupported || notificationPermission === "granted"}
+                  onClick={() => requestBudgetNotificationPermission()}
+                >
+                  <Bell size={16} />
+                  {notificationActionLabel}
+                </button>
+              </div>
+            </div>
           </div>
 
           {migrationState.failures?.length ? (

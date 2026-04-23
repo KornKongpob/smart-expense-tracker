@@ -21,7 +21,7 @@ import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
 import { downloadBackupJSON } from "../services/storage";
 import { toISODate } from "../utils/format";
-import { isRecurringDue } from "../utils/recurring";
+import { getRecurringDueCount } from "../utils/recurring";
 import { validateBackupImport } from "../schemas/index.js";
 import { transactionsToCsv, downloadCsv } from "../utils/exportCsv";
 
@@ -231,11 +231,7 @@ export default function MoreView({ showAlert, showConfirm }) {
     if (!list.length) return "ยังไม่มี recurring rule";
 
     const todayISO = toISODate(new Date());
-    let dueish = 0;
-    for (const item of list) {
-      if (item?.enabled === false) continue;
-      if (isRecurringDue(item, todayISO)) dueish += 1;
-    }
+    const dueish = getRecurringDueCount(list, todayISO);
 
     if (!dueish) return "ยังไม่พบกฎที่ถึงรอบวันนี้";
     return `มีกฎถึงรอบ ${dueish} รายการ กด Run ได้ทันที`;
@@ -312,23 +308,13 @@ export default function MoreView({ showAlert, showConfirm }) {
       const hasMoneyUnit = (value) =>
         value && typeof value === "object" && String(value.moneyUnit || value.amountUnit || "").trim().length > 0;
 
-      let payload = json;
-      let assumedSatang = false;
-
-      if (payload && typeof payload === "object" && payload.data && typeof payload.data === "object") {
-        if (!hasMoneyUnit(payload.data)) {
-          payload = { ...payload, data: { ...payload.data, moneyUnit: "satang" } };
-          assumedSatang = true;
-        }
-      } else if (!hasMoneyUnit(payload)) {
-        payload = { ...(payload && typeof payload === "object" ? payload : {}), moneyUnit: "satang" };
-        assumedSatang = true;
+      const root = json && typeof json === "object" && json.data && typeof json.data === "object" ? json.data : json;
+      const assumedSatang = !hasMoneyUnit(root);
+      const validation = validateBackupImport(json);
+      if (!validation.success) {
+        showAlert?.(`ไฟล์สำรองไม่ถูกต้อง: ${String(validation.error || "").slice(0, 200)}`);
+        return;
       }
-
-      const validation = validateBackupImport(payload);
-      const validationWarn = validation.success
-        ? ""
-        : `\n\nพบข้อมูลที่อาจไม่สมบูรณ์: ${String(validation.error || "").slice(0, 200)}`;
 
       const warnText = assumedSatang
         ? "\n\nไฟล์นี้ไม่มี moneyUnit ระบบจึงตีความเป็น satang เพื่อป้องกันยอดเพี้ยน x100"
@@ -336,9 +322,9 @@ export default function MoreView({ showAlert, showConfirm }) {
 
       showConfirm?.(
         "นำเข้าข้อมูล (Import)",
-        `การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${warnText}${validationWarn}`,
+        `การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${warnText}`,
         () => {
-          importBackup(payload);
+          importBackup(validation.data);
           showAlert?.("นำเข้าข้อมูลสำเร็จ");
           navigate("dashboard");
         },

@@ -14,7 +14,10 @@ import {
   computeReceiptSumsSatang,
   signedReceiptGroupSatang,
 } from '../src/utils/receiptAdjustments.js';
-import { splitReceiptItemsToLines } from '../src/utils/receiptCategorizer.js';
+import {
+  deriveReceiptCategoryKey,
+  splitReceiptItemsToLines,
+} from '../src/utils/receiptCategorizer.js';
 import { getNextRecurringDueISO, advanceRecurringDate } from '../src/utils/recurring.js';
 import { duplicateStateFromMatch, toDuplicateComparable } from '../src/utils/duplicateDetection.js';
 import {
@@ -23,9 +26,11 @@ import {
   extractMerchantFromScanText,
 } from '../src/utils/scanPostprocess.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
+import { normalizeBackupCore } from '../src/utils/backupPayload.js';
 import { normalizeProviderScanResult } from '../server/legacy-api/scan.js';
 import { parseScanRequest, assertAllowedInputMime, assertBase64UnderLimit } from '../lib/scan/requestParse.js';
 import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from '../lib/scan/openaiModel.js';
+import { createRateLimiter } from '../lib/scan/rateLimit.js';
 import {
   extractResponsesOutputText,
   findFirstParsedObject,
@@ -65,6 +70,7 @@ import {
   normalizeAccountBalanceRows,
 } from '../src/features/app/accountBalanceState.js';
 import {
+  buildApprovedSuggestion,
   buildTransactionSavePlan,
   getScanDisplayAmountSatang,
   scanToDraft,
@@ -86,9 +92,17 @@ import {
 } from '../src/features/app/scanUploadState.js';
 import {
   getCanonicalPathForPathname,
+  getInitialHomePath,
   getPathForLegacyHash,
   getViewForPathname,
 } from '../src/features/app/routes.js';
+import { validateBackupImport } from '../src/schemas/index.js';
+import { normalizeScanResponse } from '../shared/scanSchema.js';
+import {
+  normalizeNewEntryIntent,
+  resolveNewEntryIntent,
+} from '../src/views/add-transaction/helpers/entryIntent.js';
+import { deriveSplitParentCategoryId } from '../src/views/add-transaction/helpers/splitCategory.js';
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
 import { importLegacySnapshot } from '../lib/import/local.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
@@ -428,6 +442,82 @@ test('receiptCategorizer: split lines parse mixed Thai/Arabic number strings', (
   assert.equal(discount.amount, 0.5);
 });
 
+test('receiptCategorizer: child lines flatten into counted split lines without double counting', () => {
+  const lines = splitReceiptItemsToLines(
+    'expense',
+    {
+      items: [
+        {
+          name: 'Breakfast set',
+          total: '150.00',
+          children: [
+            { name: 'Coffee', total: '40.00', category_key: 'coffee' },
+            { name: 'Sandwich', total: '110.00', category_key: 'food' },
+          ],
+        },
+      ],
+    },
+    'Cafe Bloom',
+    'food',
+  );
+
+  assert.equal(lines.length, 2);
+  assert.deepEqual(
+    lines.map((line) => ({ name: line.name, key: line.key, amount: line.amount })),
+    [
+      { name: 'Coffee', key: 'coffee', amount: 40 },
+      { name: 'Sandwich', key: 'food', amount: 110 },
+    ],
+  );
+  assert.equal(lines.reduce((sum, line) => sum + parseMoneyToSatang(line.amount), 0), 15000);
+});
+
+test('receiptCategorizer: top-level category prefers dominant category and only uses mixed for material multi-category receipts', () => {
+  assert.equal(
+    deriveReceiptCategoryKey(
+      'expense',
+      [
+        { name: 'Lunch set', amountSatang: 9000, categoryId: 'food' },
+        { name: 'Bottle water', amountSatang: 400, categoryId: 'drinks' },
+      ],
+      'Cafe Bloom',
+      'food',
+    ),
+    'food',
+  );
+
+  assert.equal(
+    deriveReceiptCategoryKey(
+      'expense',
+      [
+        { name: 'Lunch set', amountSatang: 6000, categoryId: 'food' },
+        { name: 'Phone cable', amountSatang: 5000, categoryId: 'gadgets' },
+      ],
+      'Mall receipt',
+      'shopping',
+    ),
+    'mixed',
+  );
+});
+
+test('receiptCategorizer: positive discount lines stay adjustments instead of purchased items', () => {
+  const lines = splitReceiptItemsToLines(
+    'expense',
+    {
+      items: [
+        { name: 'Americano', total: '60.00', category_key: 'coffee' },
+        { name: 'Member discount', total: '10.00' },
+      ],
+    },
+    'Cafe Amazon',
+    'coffee',
+  );
+
+  assert.equal(lines.filter((line) => line.receiptLineType === 'item').length, 1);
+  assert.equal(lines.filter((line) => line.receiptLineType === 'adjustment').length, 1);
+  assert.equal(lines.find((line) => line.receiptLineType === 'adjustment')?.adjustmentEffect, 'subtract');
+});
+
 test('recurring: monthly rollover clamps to end of month without losing anchor day', () => {
   const febDue = advanceRecurringDate(new Date(2026, 0, 31), 'monthly', 1, 31);
   assert.equal(febDue.getFullYear(), 2026);
@@ -570,6 +660,39 @@ test('storage: loadAll defaults missing moneyUnit to satang and preserves explic
   raw = JSON.stringify({ data: { moneyUnit: 'baht', transactions: [] } });
   const explicitState = loadAll();
   assert.equal(explicitState.moneyUnit, 'baht');
+});
+
+test('backup normalization: wrapped payloads preserve merchants and normalize amountUnit consistently', () => {
+  const normalized = normalizeBackupCore({
+    data: {
+      amountUnit: 'baht',
+      merchants: [
+        {
+          id: 'merchant-1',
+          canonical: 'Cafe Bloom',
+          aliases: ['Cafe Bloom ถนนสุขุมวิท'],
+          enabled: true,
+          prefs: {
+            expense: { categoryId: 'coffee', accountId: 'acc-1' },
+            income: { categoryId: '', accountId: '' },
+          },
+        },
+      ],
+      transactions: [],
+      accounts: [],
+      categories: { expense: [], income: [] },
+      budgets: [],
+      recurring: [],
+      rules: [],
+      scanInbox: [],
+    },
+  });
+
+  assert.equal(normalized.moneyUnit, 'baht');
+  assert.equal(normalized.merchants.length, 1);
+  assert.equal(normalized.merchants[0].canonical, 'Cafe Bloom');
+  assert.ok(Array.isArray(normalized.inbox));
+  assert.ok(Array.isArray(normalized.scanInbox));
 });
 
 test('storage: saveAll emits a storage failure event when serialization fails', (t) => {
@@ -718,6 +841,44 @@ test('boot: legacy baht backups convert nested inbox and receipt line amounts to
   assert.equal(state.inbox[0].groups[0].amount, 14500);
   assert.equal(state.inbox[0].groups[0].children[0].amount, 14500);
   assert.equal(state.inbox[0].lines[0].amount, 12000);
+});
+
+test('backup validation: deterministic repairs pass and materially malformed imports are blocked', () => {
+  const repaired = validateBackupImport({
+    data: {
+      amountUnit: 'baht',
+      transactions: [],
+      accounts: [],
+      categories: { expense: [], income: [] },
+      budgets: [],
+      recurring: [],
+      rules: [],
+      merchants: [
+        {
+          id: 'merchant-2',
+          canonical: 'Mini Big C',
+          aliases: ['Big C Mini'],
+          enabled: true,
+          prefs: {
+            expense: { categoryId: 'groceries', accountId: 'acc-cash' },
+            income: { categoryId: '', accountId: '' },
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(repaired.success, true);
+  assert.equal(repaired.data.moneyUnit, 'baht');
+  assert.equal(repaired.data.merchants[0].canonical, 'Mini Big C');
+
+  const blocked = validateBackupImport({
+    data: {
+      transactions: [{ amount: 'oops' }],
+    },
+  });
+
+  assert.equal(blocked.success, false);
 });
 
 test('import: legacy planner settings, debt fields, and budgets migrate into the new runtime shape', async () => {
@@ -919,6 +1080,83 @@ test('scan api: provider fallback normalization keeps success and error contract
   assert.equal(failure.body.message, 'Provider down');
 });
 
+test('scan schema: normalized responses keep child categories, adjustments, confidence, and flags', () => {
+  const normalized = normalizeScanResponse({
+    merchant: 'Cafe Bloom',
+    amount: 150,
+    date: '2026-04-04T10:30:00Z',
+    category: 'food',
+    items: [
+      {
+        name: 'Breakfast set',
+        line_total: 150,
+        category_key: 'food',
+        children: [
+          { name: 'Coffee', amount: 40, category: 'coffee' },
+          { name: 'Sandwich', line_total: 110, category_key: 'food' },
+        ],
+      },
+    ],
+    adjustments: [
+      { name: 'Member discount', value: 10, effect: 'subtract', adjustmentType: 'discount', category: 'discount' },
+    ],
+    confidence: { score: 0.82, merchant: 0.9, items: 0.74 },
+    flags: { has_line_items: true, needs_human_review: true },
+  });
+
+  assert.equal(normalized.category_key, 'food');
+  assert.equal(normalized.items[0].children[0].category_key, 'coffee');
+  assert.equal(normalized.adjustments[0].category_key, 'discount');
+  assert.equal(normalized.confidence.overall, 0.82);
+  assert.equal(normalized.flags.has_line_items, true);
+  assert.equal(normalized.flags.needs_human_review, true);
+});
+
+test('scan rate limiter: limit takes precedence but legacy limitPerMinute still works', () => {
+  const req = { headers: {}, socket: { remoteAddress: '127.0.0.1' } };
+
+  const legacyHeaders = {};
+  const legacyRes = {
+    setHeader(name, value) {
+      legacyHeaders[name] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return this;
+    },
+  };
+  const legacyLimiter = createRateLimiter({ limitPerMinute: 1, windowMs: 60_000 });
+  assert.equal(legacyLimiter(req, legacyRes), true);
+  assert.equal(legacyLimiter(req, legacyRes), false);
+  assert.equal(legacyRes.statusCode, 429);
+  assert.ok(legacyHeaders['Retry-After']);
+
+  const precedenceHeaders = {};
+  const precedenceRes = {
+    setHeader(name, value) {
+      precedenceHeaders[name] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return this;
+    },
+  };
+  const precedenceLimiter = createRateLimiter({ limit: 2, limitPerMinute: 1, windowMs: 60_000 });
+  assert.equal(precedenceLimiter(req, precedenceRes), true);
+  assert.equal(precedenceLimiter(req, precedenceRes), true);
+  assert.equal(precedenceLimiter(req, precedenceRes), false);
+  assert.equal(precedenceRes.statusCode, 429);
+  assert.ok(precedenceHeaders['Retry-After']);
+});
+
 test('queue type helpers: normalizeQueueItemType fixes credit payment account roles and clears split-only fields', () => {
   const accounts = [
     { id: 'bank-1', type: 'bank', digits: '1234' },
@@ -1069,12 +1307,45 @@ test('runtime transaction drafts: scanToDraft converts baht scans into satang an
 
   assert.equal(draft.kind, 'expense');
   assert.equal(draft.accountId, '12');
+  assert.equal(draft.categoryId, 'mixed');
   assert.equal(draft.amountSatang, 25500);
   assert.equal(draft.splitByCategory, true);
   assert.equal(draft.receiptGroups.length, 3);
   assert.equal(draft.receiptGroups[0].amountSatang, 14500);
   assert.equal(draft.receiptGroups[2].receiptLineType, 'adjustment');
   assert.equal(draft.receiptGroups[2].adjustmentEffect, 'subtract');
+});
+
+test('runtime transaction drafts: scanToDraft flattens receipt children and keeps dominant parent category', () => {
+  const draft = scanToDraft({
+    normalized_suggestion: {
+      tx_type: 'expense',
+      amount_unit: 'baht',
+      amount: 150,
+      merchant: 'Cafe Bloom',
+      items: [
+        {
+          name: 'Breakfast set',
+          total: 150,
+          children: [
+            { name: 'Coffee', total: 40, category_key: 'coffee' },
+            { name: 'Sandwich', total: 110, category_key: 'food' },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.equal(draft.amountSatang, 15000);
+  assert.equal(draft.categoryId, 'food');
+  assert.equal(draft.splitByCategory, true);
+  assert.deepEqual(
+    draft.receiptGroups.map((group) => ({ name: group.name, categoryId: group.categoryId, amountSatang: group.amountSatang })),
+    [
+      { name: 'Coffee', categoryId: 'coffee', amountSatang: 4000 },
+      { name: 'Sandwich', categoryId: 'food', amountSatang: 11000 },
+    ],
+  );
 });
 
 test('runtime transaction drafts: inbox amount display follows canonical scan draft normalization', () => {
@@ -1145,6 +1416,35 @@ test('runtime transaction drafts: split save plans create one parent plus ordere
   assert.equal(plan.childRows[2].adjustment_effect, 'subtract');
   assert.ok(plan.childRows.every((row) => row.is_split_child === true));
   assert.ok(plan.childRows.every((row) => row.split_group_id === plan.parentRow.split_group_id));
+});
+
+test('runtime transaction drafts: approved suggestions preserve child categories for non-flattened detail lines', () => {
+  const suggestion = buildApprovedSuggestion(
+    { normalized_suggestion: {} },
+    {
+      kind: 'expense',
+      amountSatang: 12000,
+      categoryId: 'food',
+      merchant: 'Cafe Bloom',
+      date: '2026-04-04',
+      receiptGroups: [
+        {
+          name: 'Burger set',
+          amountSatang: 12000,
+          categoryId: 'food',
+          childrenIncludedInParent: true,
+          children: [
+            { name: 'Coffee', amountSatang: 4000, categoryId: 'coffee' },
+            { name: 'Extra sauce', amountSatang: 0, categoryId: 'food' },
+          ],
+        },
+      ],
+    },
+  );
+
+  assert.equal(suggestion.category_key, 'food');
+  assert.equal(suggestion.groups[0].children_included_in_parent, true);
+  assert.equal(suggestion.groups[0].children[0].category_key, 'coffee');
 });
 
 test('runtime transaction drafts: transfer-like scans stay on the single transfer path', () => {
@@ -1499,6 +1799,51 @@ test('route helpers: canonical routes, aliases, and legacy hashes resolve to Nex
   assert.equal(getPathForLegacyHash('#dashboard'), '/dashboard');
   assert.equal(getPathForLegacyHash('#add-transaction'), '/add');
   assert.equal(getPathForLegacyHash('#stats'), '/planner');
+  assert.equal(getPathForLegacyHash('#/stats'), '/planner');
+  assert.equal(getPathForLegacyHash('#/recurring'), '/recurring');
+  assert.equal(getInitialHomePath({ pathname: '/', hash: '#/stats' }), '/planner');
+  assert.equal(getInitialHomePath({ pathname: '/accounts', hash: '#/stats' }), '/accounts');
+  assert.equal(getInitialHomePath({ pathname: '/', hash: '' }), '/dashboard');
+});
+
+test('entry intent helpers: explicit one-shot intents are normalized deterministically', () => {
+  assert.deepEqual(
+    normalizeNewEntryIntent({ scanUploadKind: 'receipt' }),
+    { entryMode: 'scan', scanUploadKind: 'receipt' },
+  );
+  assert.deepEqual(
+    resolveNewEntryIntent({
+      storeIntent: { entryMode: 'manual' },
+      legacyIntent: { entryMode: 'scan', scanUploadKind: 'receipt' },
+    }),
+    { entryMode: 'manual' },
+  );
+  assert.equal(
+    resolveNewEntryIntent({
+      isEditMode: true,
+      storeIntent: { entryMode: 'scan', scanUploadKind: 'receipt' },
+    }),
+    null,
+  );
+});
+
+test('split category helper: income parents never fall back to expense mixed', () => {
+  assert.equal(
+    deriveSplitParentCategoryId({
+      type: 'income',
+      childCategoryIds: ['salary', 'salary'],
+      existingParentCategoryId: 'mixed',
+    }),
+    'salary',
+  );
+  assert.equal(
+    deriveSplitParentCategoryId({
+      type: 'income',
+      childCategoryIds: ['salary', 'bonus'],
+      existingParentCategoryId: 'mixed',
+    }),
+    'other_income',
+  );
 });
 
 test('categories: duplicate income ids are canonicalized for Supabase storage', () => {

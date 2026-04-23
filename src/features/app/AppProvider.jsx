@@ -79,6 +79,15 @@ import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/su
 import { downloadCsv, transactionsToCsv } from "../../utils/exportCsv.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
 import { compareTxNewestFirst } from "../../utils/transaction.js";
+import { validateBackupImport } from "../../schemas/index.js";
+import { extractBackupSupplementalData } from "../../utils/backupPayload.js";
+import { STORAGE_SAVE_ERROR_EVENT } from "../../services/storage.js";
+import {
+  checkBudgetAndNotify,
+  getNotificationPermissionState,
+  requestNotificationPermission,
+} from "../../utils/budgetNotifications.js";
+import { formatCurrency } from "../../utils/format.js";
 
 const AppContext = createContext(null);
 const GUEST_DISPLAY_NAME = "Guest";
@@ -388,6 +397,7 @@ export function AppProvider({ children }) {
   const [transactionsFilters, setTransactionsFiltersState] = useState(() => createTransactionsFiltersState());
   const [transactionsPage, setTransactionsPage] = useState(() => createTransactionsPageState());
   const [toast, setToast] = useState(null);
+  const [notificationPermission, setNotificationPermission] = useState(() => getNotificationPermissionState());
   const [queue, setQueue] = useState(readOfflineQueue());
   const [scanUploads, setScanUploads] = useState([]);
   const [isOnline, setIsOnline] = useState(
@@ -540,6 +550,59 @@ export function AppProvider({ children }) {
 
   function clearToast() {
     setToast(null);
+  }
+
+  const handleStorageSaveErrorEvent = useEffectEvent((event) => {
+    const approxBytes = Number(event?.detail?.approxBytes || 0);
+    const sizeHint = approxBytes > 0 ? ` (${Math.round(approxBytes / 1024)} KB)` : "";
+    pushToast("warning", `บันทึกลงอุปกรณ์ไม่สำเร็จ${sizeHint} กรุณาส่งออกข้อมูลสำรองทันที`);
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const syncPermission = () => {
+      setNotificationPermission(getNotificationPermissionState());
+    };
+
+    syncPermission();
+    window.addEventListener("focus", syncPermission);
+    document.addEventListener("visibilitychange", syncPermission);
+    return () => {
+      window.removeEventListener("focus", syncPermission);
+      document.removeEventListener("visibilitychange", syncPermission);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleStorageSaveError = (event) => {
+      handleStorageSaveErrorEvent(event);
+    };
+
+    window.addEventListener(STORAGE_SAVE_ERROR_EVENT, handleStorageSaveError);
+    return () => {
+      window.removeEventListener(STORAGE_SAVE_ERROR_EVENT, handleStorageSaveError);
+    };
+  }, []);
+
+  async function requestBudgetNotificationPermissionEvent() {
+    const permission = await requestNotificationPermission();
+    const nextPermission = getNotificationPermissionState();
+    setNotificationPermission(nextPermission);
+
+    if (permission === "granted") {
+      pushToast("success", "เปิดสิทธิ์การแจ้งเตือนแล้ว");
+    } else if (permission === "denied") {
+      pushToast("warning", "เบราว์เซอร์บล็อกการแจ้งเตือนอยู่");
+    } else if (nextPermission === "unsupported") {
+      pushToast("warning", "เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");
+    } else {
+      pushToast("info", "ยังไม่ได้เปิดสิทธิ์การแจ้งเตือน");
+    }
+
+    return permission;
   }
 
   function appendScanUpload(file) {
@@ -3078,33 +3141,34 @@ export function AppProvider({ children }) {
 
   async function importBackupFile(file) {
     if (!file || !session) return;
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    const baseSnapshot = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
-    const snapshot = {
-      ...(baseSnapshot && typeof baseSnapshot === "object" ? baseSnapshot : {}),
-      profile:
-        baseSnapshot?.profile && typeof baseSnapshot.profile === "object"
-          ? baseSnapshot.profile
-          : parsed?.profile && typeof parsed.profile === "object"
-            ? parsed.profile
-            : null,
-      categoryPreferences: Array.isArray(baseSnapshot?.categoryPreferences)
-        ? baseSnapshot.categoryPreferences
-        : Array.isArray(parsed?.categoryPreferences)
-          ? parsed.categoryPreferences
-          : [],
-    };
-    const attachments = Array.isArray(parsed?.attachments) ? parsed.attachments : [];
-
-    setSaving(true);
     try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const validation = validateBackupImport(parsed);
+      if (!validation.success) {
+        pushToast("error", `ไฟล์สำรองไม่ถูกต้อง: ${String(validation.error || "backup_invalid").slice(0, 200)}`);
+        return false;
+      }
+
+      const extras = extractBackupSupplementalData(parsed);
+      const snapshot = {
+        ...(validation.data && typeof validation.data === "object" ? validation.data : {}),
+        profile: extras.profile,
+        categoryPreferences: extras.categoryPreferences,
+      };
+      const attachments = extras.attachments;
+
+      setSaving(true);
       await fetchWithSession(session, "/api/import/local", {
         method: "POST",
         body: JSON.stringify({ snapshot, attachments }),
       });
       await refreshAll();
       pushToast("success", "นำเข้าข้อมูลแล้ว");
+      return true;
+    } catch (error) {
+      pushToast("error", String(error?.message || error || "import_backup_failed"));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -3202,6 +3266,17 @@ export function AppProvider({ children }) {
       }),
     [baseBudgetPlanSnapshot, plannerActiveScenarioKey, plannerMonthlyPlan],
   );
+  useEffect(() => {
+    checkBudgetAndNotify({
+      monthSpent: Number(budgetPlanSnapshot?.spentMonthSatang || 0),
+      monthlyLimit: Number(
+        budgetPlanSnapshot?.activeExpenseBudgetSatang || budgetPlanSnapshot?.fallbackMonthlyTargetSatang || 0,
+      ),
+      alertPct: Number(budgetPlanSnapshot?.alertPct || 90),
+      monthKey: budgetPlanSnapshot?.monthKey || selectedMonth,
+      formatCurrency,
+    });
+  }, [budgetPlanSnapshot, selectedMonth]);
   const plannerReminders = useMemo(
     () =>
       buildPlannerReminders({
@@ -3364,6 +3439,8 @@ export function AppProvider({ children }) {
     cashflowSeries,
     notifications,
     unreadNotificationCount,
+    notificationPermission,
+    notificationsSupported: notificationPermission !== "unsupported",
     plannerSummary,
     plannerReminders,
     planningConfig,
@@ -3412,6 +3489,7 @@ export function AppProvider({ children }) {
     markNotificationRead,
     markAllNotificationsRead,
     dismissNotification,
+    requestBudgetNotificationPermission: requestBudgetNotificationPermissionEvent,
     getBudgetHintForDraft,
     createManualTransaction,
     updateTransaction,
