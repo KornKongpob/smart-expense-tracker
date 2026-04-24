@@ -6,6 +6,7 @@ import { parseDateSafe } from "./selectors.js";
 import { normalizeTimeHHmm, toISODate } from "../utils/format.js";
 import { parseMoneyToSatang, ensureSatangInt } from "../utils/money.js";
 import { normalizeMerchants } from "../utils/merchantDictionary.js";
+import { readMoneyUnit } from "../utils/moneyUnit.js";
 
 /**
  * Default account used when boot payload has no accounts.
@@ -343,7 +344,7 @@ const normalizeWrappedRoot = (boot) =>
 
 export function normalizeBootPayload(boot) {
   const root = normalizeWrappedRoot(boot);
-  const fromUnit = String(root?.moneyUnit || root?.amountUnit || "").toLowerCase() === "baht" ? "baht" : "satang";
+  const fromUnit = readMoneyUnit(root, "satang");
   const convertAmount = (v) => normalizeMoneyFromUnit(v, fromUnit);
 
   const transactions = toArray(root?.transactions).map((t) => {

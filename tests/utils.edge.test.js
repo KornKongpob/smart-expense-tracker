@@ -8,6 +8,7 @@ import {
   satangToBahtNumber,
   ensureSatangInt,
 } from '../src/utils/money.js';
+import { hasExplicitMoneyUnit, readMoneyUnit, resolveMoneyUnit } from '../src/utils/moneyUnit.js';
 import { getTransferPair } from '../src/utils/transferGrouping.js';
 import {
   reconcileReceiptGroups,
@@ -379,6 +380,15 @@ test('money: mixed Thai/Arabic digits parsing works', () => {
   assert.equal(parseMoneyToSatang('-๐.๐๙'), -9);
 });
 
+test('money unit: legacy aliases resolve consistently across boot, storage, and import paths', () => {
+  assert.equal(resolveMoneyUnit('THB'), 'baht');
+  assert.equal(resolveMoneyUnit('', 'baht'), 'baht');
+  assert.equal(readMoneyUnit({ amountUnit: 'thb' }), 'baht');
+  assert.equal(readMoneyUnit({ moneyUnit: 'satang', amountUnit: 'baht' }), 'satang');
+  assert.equal(hasExplicitMoneyUnit({ amountUnit: 'baht' }), true);
+  assert.equal(hasExplicitMoneyUnit({}), false);
+});
+
 test('transferGrouping: incomplete transfer pair returns single-leg fallback', () => {
   const tx = {
     id: 'tx-out-1',
@@ -532,6 +542,21 @@ test('recurring: monthly rollover clamps to end of month without losing anchor d
       interval: 1,
     },
     '2026-03-07',
+  );
+
+  assert.equal(nextDue, '2026-03-31');
+});
+
+test('recurring: explicit anchor_day keeps month-end rules aligned after February clamp', () => {
+  const nextDue = getNextRecurringDueISO(
+    {
+      startDate: '2026-01-31',
+      lastGenerated: '2026-02-28',
+      frequency: 'monthly',
+      interval: 1,
+      anchor_day: 31,
+    },
+    '2026-03-01',
   );
 
   assert.equal(nextDue, '2026-03-31');

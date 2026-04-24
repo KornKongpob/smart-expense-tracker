@@ -9,7 +9,8 @@
  * - ไฟล์นี้ไม่ยุ่งกับ UX/UI โดยตรง แต่เป็นแกนสำคัญให้แอพ “ทำงานถูกต้องและสอดคล้องกัน”
  */
 
-import { normalizeBackupCore, resolveMoneyUnit } from "../utils/backupPayload.js";
+import { normalizeBackupCore } from "../utils/backupPayload.js";
+import { resolveMoneyUnit } from "../utils/moneyUnit.js";
 
 const STORAGE_KEY = "smart-expense-tracker_v1";
 const STORAGE_VERSION = 1;

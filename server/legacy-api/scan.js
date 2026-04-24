@@ -28,6 +28,7 @@ import {
   extractMerchantFromScanText,
   normalizeScanText,
 } from "../../src/utils/scanPostprocess.js";
+import { DEFAULT_CATEGORIES } from "../../src/constants/categories.js";
 import { deriveReceiptCategoryKey } from "../../src/utils/receiptCategorizer.js";
 import { getSupabaseAdmin, hasSupabaseServerConfig } from "../../lib/supabase/admin.js";
 import { getRequestUser } from "../../lib/supabase/auth.js";
@@ -36,6 +37,28 @@ import { ensureSystemCategories } from "../../lib/supabase/systemCategories.js";
 import { normalizeMerchantKey } from "../../src/utils/merchantDictionary.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
+
+const categoryIdsForPrompt = (type) =>
+  Array.from(
+    new Set(
+      (DEFAULT_CATEGORIES[type] || [])
+        .map((category) => String(category?.id || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+const EXPENSE_SCAN_CATEGORY_KEYS = categoryIdsForPrompt("expense");
+const INCOME_SCAN_CATEGORY_KEYS = categoryIdsForPrompt("income");
+const SCAN_CATEGORY_KEY_SET = new Set([
+  ...EXPENSE_SCAN_CATEGORY_KEYS,
+  ...INCOME_SCAN_CATEGORY_KEYS,
+  "transfer",
+]);
+const SCAN_CATEGORY_PROMPT_TEXT = [
+  `- expense: ${EXPENSE_SCAN_CATEGORY_KEYS.join(", ")}`,
+  `- income: ${INCOME_SCAN_CATEGORY_KEYS.join(", ")}`,
+  "- transfer: transfer",
+].join("\n");
 
 // NOTE: harmless for Vercel Functions, required for Next API routes
 export const config = { api: { bodyParser: false } };
@@ -307,53 +330,7 @@ function normalizeCategoryKey(v) {
   const s = safeString(v).toLowerCase();
   if (!s) return null;
 
-  const allowed = new Set([
-    // expense
-    "food",
-    "drinks",
-    "groceries",
-    "transport",
-    "fuel",
-    "bills",
-    "rent",
-    "shopping",
-    "coffee",
-    "dining",
-    "entertainment",
-    "travel",
-    "health",
-    "fitness",
-    "beauty",
-    "pets",
-    "kids",
-    "home",
-    "education",
-    "work",
-    "phone_internet",
-    "subscriptions",
-    "fees",
-    "insurance",
-    "donation",
-    "gift",
-    "other",
-    "mixed",
-
-    // income
-    "salary",
-    "bonus",
-    "freelance",
-    "business",
-    "investment",
-    "interest",
-    "dividend",
-    "refund",
-    "gift_income",
-    "other_income",
-
-    // transfer
-    "transfer",
-  ]);
-  if (allowed.has(s)) return s;
+  if (SCAN_CATEGORY_KEY_SET.has(s)) return s;
 
   const alias = {
     utilities: "bills",
@@ -1097,13 +1074,12 @@ Accounts list (user's accounts; choose a matching id when possible):
 ${accountsText}
 
 Allowed category_key values:
-- expense: food, drinks, groceries, transport, fuel, bills, rent, shopping, coffee, dining, entertainment, travel, health, fitness, beauty, pets, kids, home, education, work, phone_internet, subscriptions, fees, insurance, donation, gift, other, mixed
-- income: salary, bonus, freelance, business, investment, interest, dividend, refund, gift_income, other_income
-- transfer: transfer
+${SCAN_CATEGORY_PROMPT_TEXT}
 
 Notes:
-- If a receipt contains multiple different categories, set the top-level category_key to "mixed".
+- Top-level receipt category_key should be the dominant category by positive item amount when one category clearly dominates. Use "mixed" only when two or more materially significant positive categories are present.
 - Each item in items[] MUST have its own category_key (use "other" if uncertain).
+- Each child item in children[] should also carry category_key when it can be inferred from the child text. Do not copy the parent category when the child clearly belongs elsewhere.
 
 Schema (ALL keys must exist; use null if unknown):
 {
@@ -1229,12 +1205,13 @@ ${accountsText}
                       items: {
                         type: "object",
                         additionalProperties: false,
-                        required: ["name", "qty", "unit_price", "line_total"],
+                        required: ["name", "qty", "unit_price", "line_total", "category_key"],
                         properties: {
                           name: { type: "string" },
                           qty: { anyOf: [{ type: "number" }, { type: "null" }] },
                           unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
-                          line_total: { anyOf: [{ type: "number" }, { type: "null" }] }
+                          line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          category_key: { anyOf: [{ type: "string" }, { type: "null" }] }
                         }
                       }
                     },
@@ -1553,12 +1530,13 @@ ${accountsText}
                         items: {
                           type: "object",
                           additionalProperties: false,
-                          required: ["name", "qty", "unit_price", "line_total"],
+                          required: ["name", "qty", "unit_price", "line_total", "category_key"],
                           properties: {
                             name: { type: "string" },
                             qty: { anyOf: [{ type: "number" }, { type: "null" }] },
                             unit_price: { anyOf: [{ type: "number" }, { type: "null" }] },
-                            line_total: { anyOf: [{ type: "number" }, { type: "null" }] }
+                            line_total: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            category_key: { anyOf: [{ type: "string" }, { type: "null" }] }
                           }
                         }
                       },
@@ -1617,10 +1595,11 @@ ${accountsText}
 
 Category:
 - For each item, output category_key from this allowed set:
-  food, drinks, groceries, transport, fuel, bills, rent, shopping, coffee, dining, entertainment, travel, health, fitness, beauty, pets, kids, home, education, work, phone_internet, subscriptions, fees, insurance, donation, gift, other, mixed
+  ${EXPENSE_SCAN_CATEGORY_KEYS.join(", ")}
+- For each child item, include category_key when available. Do not use child lines to double-count a parent total.
 
 Output JSON schema:
-{ "payment_method": "cash"|"card"|"promptpay"|"unknown", "account_id": string|null, "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null, "children": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null } ]|null } ], "adjustments": [ { "name": string, "amount": number|null, "effect": "subtract"|"add", "type": "discount"|"fee"|"tax"|"service_charge"|"rounding"|"other"|null } ] }
+{ "payment_method": "cash"|"card"|"promptpay"|"unknown", "account_id": string|null, "items": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null, "children": [ { "name": string, "qty": number|null, "unit_price": number|null, "line_total": number|null, "category_key": string|null } ]|null } ], "adjustments": [ { "name": string, "amount": number|null, "effect": "subtract"|"add", "type": "discount"|"fee"|"tax"|"service_charge"|"rounding"|"other"|null } ] }
 `;
 
     try {

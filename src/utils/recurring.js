@@ -27,6 +27,10 @@ export function addMonthsClampedLocal(dateObj, months, anchorDay = parseDateSafe
 }
 
 export function getRecurringAnchorDay(recurring) {
+  const explicitAnchor = recurring?.anchorDay ?? recurring?.anchor_day;
+  const anchoredDay = clampInt(explicitAnchor, 1, 31, NaN);
+  if (Number.isFinite(anchoredDay)) return anchoredDay;
+
   const source =
     recurring?.startDate ||
     recurring?.start_date ||

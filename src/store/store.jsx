@@ -28,6 +28,7 @@ import { normalizeBackupCore } from "../utils/backupPayload.js";
 import { calcAccountBalance, parseDateSafe } from "./selectors";
 import { toISODate } from "../utils/format";
 import { advanceRecurringDate, getRecurringAnchorDay } from "../utils/recurring";
+import { resolveMoneyUnit } from "../utils/moneyUnit.js";
 import {
   normalizeMerchants,
   normalizeMerchantEntry,
@@ -739,7 +740,7 @@ export function AppStoreProvider({ children }) {
   // ✅ persist (include ui to keep view/editingId stable)
   useEffect(() => {
     saveAll({
-      moneyUnit: state.moneyUnit || "satang",
+      moneyUnit: resolveMoneyUnit(state.moneyUnit, "satang"),
       transactions: state.transactions,
       accounts: state.accounts,
       categories: state.categories,
@@ -1144,7 +1145,7 @@ export function AppStoreProvider({ children }) {
   exportedAt: Date.now(),
   data: {
     // ✅ important: tells importer how to interpret all money fields
-    moneyUnit: state.moneyUnit || "satang",
+    moneyUnit: resolveMoneyUnit(state.moneyUnit, "satang"),
     transactions: state.transactions ?? [],
     accounts: state.accounts ?? [],
     categories: state.categories ?? { expense: [], income: [] },

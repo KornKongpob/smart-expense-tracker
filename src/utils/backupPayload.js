@@ -1,4 +1,7 @@
 import { normalizeBootPayload } from "../store/boot.js";
+import { resolveMoneyUnit } from "./moneyUnit.js";
+
+export { resolveMoneyUnit } from "./moneyUnit.js";
 
 const EMPTY_CATEGORIES = Object.freeze({ expense: [], income: [] });
 
@@ -8,13 +11,6 @@ function isPlainObject(value) {
 
 function ensureArray(value, fallback = []) {
   return Array.isArray(value) ? value : fallback;
-}
-
-export function resolveMoneyUnit(value, fallback = "satang") {
-  const unit = String(value || "").trim().toLowerCase();
-  if (unit === "baht" || unit === "thb") return "baht";
-  if (unit === "satang") return "satang";
-  return fallback === "baht" ? "baht" : "satang";
 }
 
 export function unwrapBackupPayload(raw) {

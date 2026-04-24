@@ -22,6 +22,7 @@ import AppHeader from "../components/AppHeader";
 import { downloadBackupJSON } from "../services/storage";
 import { toISODate } from "../utils/format";
 import { getRecurringDueCount } from "../utils/recurring";
+import { hasExplicitMoneyUnit } from "../utils/moneyUnit";
 import { validateBackupImport } from "../schemas/index.js";
 import { transactionsToCsv, downloadCsv } from "../utils/exportCsv";
 
@@ -305,11 +306,8 @@ export default function MoreView({ showAlert, showConfirm }) {
       const text = await file.text();
       const json = JSON.parse(text);
 
-      const hasMoneyUnit = (value) =>
-        value && typeof value === "object" && String(value.moneyUnit || value.amountUnit || "").trim().length > 0;
-
       const root = json && typeof json === "object" && json.data && typeof json.data === "object" ? json.data : json;
-      const assumedSatang = !hasMoneyUnit(root);
+      const assumedSatang = !hasExplicitMoneyUnit(root);
       const validation = validateBackupImport(json);
       if (!validation.success) {
         showAlert?.(`ไฟล์สำรองไม่ถูกต้อง: ${String(validation.error || "").slice(0, 200)}`);
