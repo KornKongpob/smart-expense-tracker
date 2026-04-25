@@ -1805,6 +1805,36 @@ test('runtime styles: mobile shell keeps app chrome in flow and preserves dock/a
   assert.doesNotMatch(cssSource, /\.finance-bottom-nav-wrap\s*\{[\s\S]*touch-action:\s*pan-y;/s);
 });
 
+test('runtime styles: app-wide stability pass prevents responsive overlap', () => {
+  const cssSource = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+
+  assert.match(cssSource, /\/\* App-wide UX stability pass \*\//);
+  assert.match(
+    cssSource,
+    /\/\* App-wide UX stability pass \*\/[\s\S]*\.finance-app-main\s*\{[\s\S]*padding-bottom:\s*calc\(var\(--finance-screen-dock-h,\s*0px\) \+ 0\.9rem\);/s,
+  );
+  assert.match(
+    cssSource,
+    /\/\* App-wide UX stability pass \*\/[\s\S]*\.finance-row-side\s*\{[\s\S]*min-width:\s*0;[\s\S]*max-width:\s*min\(46%,\s*15rem\);/s,
+  );
+  assert.match(
+    cssSource,
+    /\/\* App-wide UX stability pass \*\/[\s\S]*\.finance-sheet\s*\{[\s\S]*max-width:\s*calc\(100vw - 1rem\);/s,
+  );
+  assert.match(
+    cssSource,
+    /@media \(max-width:\s*520px\)[\s\S]*\.finance-sheet-actions,\s*\.finance-screen-dock-actions,\s*\.finance-dashboard-actions,\s*\.finance-inline-actions\s*\{[\s\S]*display:\s*grid;[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s,
+  );
+  assert.match(
+    cssSource,
+    /@media \(max-width:\s*380px\)[\s\S]*\.finance-row\s*\{[\s\S]*flex-direction:\s*column;[\s\S]*align-items:\s*stretch;/s,
+  );
+  assert.match(
+    cssSource,
+    /a:focus-visible,\s*button:focus-visible,\s*input:focus-visible,\s*select:focus-visible,\s*textarea:focus-visible,\s*\[tabindex\]:focus-visible\s*\{[\s\S]*outline:\s*2px solid rgba\(0,\s*122,\s*255,\s*0\.82\);/s,
+  );
+});
+
 test('runtime source: service worker only registers in production and clears old runtime caches in dev', () => {
   const appRootSource = readFileSync(new URL('../src/core/AppRoot.jsx', import.meta.url), 'utf8');
 
