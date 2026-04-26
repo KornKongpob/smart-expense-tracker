@@ -477,35 +477,36 @@ export default function AddScreen() {
       ? Boolean(draft.fromAccountId && draft.toAccountId && draft.fromAccountId !== draft.toAccountId)
       : Boolean(draft.accountId));
 
-  const manualDock =
+  const manualConfirmationBar =
     mode === "manual" && hasAccounts ? (
-      <div className="finance-sheet-actions finance-screen-dock-actions finance-add-dock-actions">
-        <button type="button" className="ui-btn ui-btn-secondary" onClick={() => resetDraft()}>
-          <RotateCcw size={16} />
-          ล้าง
-        </button>
+      <div className="finance-manual-confirmation-bar" data-testid="manual-confirmation-bar">
+        <div className="finance-manual-confirmation-actions">
+          <button type="button" className="ui-btn ui-btn-secondary" onClick={() => resetDraft()}>
+            <RotateCcw size={16} />
+            ล้าง
+          </button>
 
-        <button
-          type="button"
-          className="ui-btn ui-btn-primary"
-          disabled={saving || !canSave}
-          data-testid="manual-save"
-          onClick={async () => {
-            await createManualTransaction(draft);
-            resetDraft();
-            setMode("scan");
-          }}
-        >
-          <SendHorizonal size={16} />
-          บันทึก
-        </button>
+          <button
+            type="button"
+            className="ui-btn ui-btn-primary"
+            disabled={saving || !canSave}
+            data-testid="manual-save"
+            onClick={async () => {
+              await createManualTransaction(draft);
+              resetDraft();
+              setMode("scan");
+            }}
+          >
+            <SendHorizonal size={16} />
+            บันทึก
+          </button>
+        </div>
       </div>
     ) : null;
 
   return (
     <ScreenShell
       title="เพิ่ม"
-      dock={manualDock}
       actions={
         !isOnline ? (
           <StatusPill tone="warning">
@@ -670,7 +671,7 @@ export default function AddScreen() {
           </article>
         </section>
       ) : (
-        <article className="ui-card finance-panel">
+        <article className="ui-card finance-panel finance-manual-panel">
           <div className="finance-form">
             <section className="finance-form-section finance-form-section-compact">
               <div className="finance-section-label">ประเภท</div>
@@ -930,6 +931,7 @@ export default function AddScreen() {
                   />
                 ) : null}
 
+                {manualConfirmationBar}
               </>
             )}
           </div>

@@ -1,25 +1,20 @@
 import { createClient } from "@supabase/supabase-js";
 
+import { hasResolvedSupabaseBrowserConfig, resolveSupabaseBrowserConfig } from "./env.js";
+
 let browserClient = null;
 
-function readStaticEnvUrl() {
-  return String(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
-}
-
-function readStaticEnvKey() {
-  return String(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
-}
+const BROWSER_SUPABASE_ENV = {
+  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+};
 
 export function getSupabaseBrowserConfig() {
-  return {
-    url: readStaticEnvUrl(),
-    anonKey: readStaticEnvKey(),
-  };
+  return resolveSupabaseBrowserConfig(BROWSER_SUPABASE_ENV);
 }
 
 export function hasSupabaseBrowserConfig() {
-  const { url, anonKey } = getSupabaseBrowserConfig();
-  return !!url && !!anonKey;
+  return hasResolvedSupabaseBrowserConfig(BROWSER_SUPABASE_ENV);
 }
 
 export function getSupabaseBrowserClient() {

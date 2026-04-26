@@ -19,6 +19,12 @@ function toFriendlyAuthError(nextError) {
   if (message.includes("password")) {
     return "รหัสผ่านไม่ถูกต้องหรือสั้นเกินไป ควรมีอย่างน้อย 6 ตัว";
   }
+  if (message.includes("anonymous") || message.includes("anon")) {
+    return "ยังเข้าแบบ Guest ไม่ได้ ตรวจว่า Supabase เปิด Anonymous sign-ins และลองใหม่อีกครั้ง";
+  }
+  if (message.includes("supabase_browser_env_missing")) {
+    return "ยังไม่ได้ตั้งค่า Supabase สำหรับฝั่งเว็บ";
+  }
   if (message.includes("network") || message.includes("fetch")) {
     return "เชื่อมต่อบริการไม่ได้ ลองใหม่อีกครั้งเมื่ออินเทอร์เน็ตพร้อม";
   }
@@ -26,7 +32,7 @@ function toFriendlyAuthError(nextError) {
 }
 
 export default function AuthScreen() {
-  const { hasSupabaseConfig, signIn, signInAnonymously, signUp, saving } = useExpenseApp();
+  const { authError, hasSupabaseConfig, signIn, signInAnonymously, signUp, saving } = useExpenseApp();
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -94,6 +100,12 @@ export default function AuthScreen() {
         {!hasSupabaseConfig ? (
           <div className="ui-toast ui-toast--error">
             <div className="finance-toast-copy">ยังไม่ได้ตั้งค่า Supabase สำหรับฝั่งเว็บ</div>
+          </div>
+        ) : null}
+
+        {hasSupabaseConfig && authError ? (
+          <div className="ui-toast ui-toast--warning" role="status" aria-live="polite">
+            <div className="finance-toast-copy">{toFriendlyAuthError(authError)}</div>
           </div>
         ) : null}
 

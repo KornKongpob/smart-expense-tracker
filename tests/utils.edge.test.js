@@ -98,6 +98,11 @@ import {
   getViewForPathname,
 } from '../src/features/app/routes.js';
 import { validateBackupImport } from '../src/schemas/index.js';
+import {
+  createNextPublicSupabaseEnv,
+  hasResolvedSupabaseBrowserConfig,
+  resolveSupabaseBrowserConfig,
+} from '../src/lib/supabase/env.js';
 import { normalizeScanResponse } from '../shared/scanSchema.js';
 import {
   normalizeNewEntryIntent,
@@ -747,6 +752,35 @@ test('storage: saveAll emits a storage failure event when serialization fails', 
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0]?.type, STORAGE_SAVE_ERROR_EVENT);
   assert.equal(dispatched[0]?.detail?.message, 'serialize_failed');
+});
+
+test('auth config: Next exposes legacy Vite Supabase browser env for anonymous sign-in', () => {
+  const legacyViteEnv = {
+    VITE_SUPABASE_URL: 'https://example.supabase.co',
+    VITE_SUPABASE_ANON_KEY: 'anon-vite',
+  };
+
+  assert.deepEqual(resolveSupabaseBrowserConfig(legacyViteEnv), {
+    url: 'https://example.supabase.co',
+    anonKey: 'anon-vite',
+  });
+  assert.equal(hasResolvedSupabaseBrowserConfig(legacyViteEnv), true);
+  assert.deepEqual(createNextPublicSupabaseEnv(legacyViteEnv), {
+    NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-vite',
+  });
+
+  assert.deepEqual(
+    createNextPublicSupabaseEnv({
+      SUPABASE_URL: 'https://server.supabase.co',
+      SUPABASE_ANON_KEY: 'anon-server',
+      SUPABASE_SERVICE_ROLE_KEY: 'service-role-must-not-leak',
+    }),
+    {
+      NEXT_PUBLIC_SUPABASE_URL: 'https://server.supabase.co',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-server',
+    },
+  );
 });
 
 test('categories: custom ids are user-scoped and deterministic', () => {
@@ -1746,7 +1780,11 @@ test('runtime source: shared account picker is wired through add, inbox, dashboa
 
   assert.match(addSource, /import AccountSheetPicker/);
   assert.match(addSource, /useKeyboardViewportState/);
-  assert.match(addSource, /dock=\{manualDock\}/);
+  assert.match(addSource, /const manualConfirmationBar/);
+  assert.match(addSource, /data-testid="manual-confirmation-bar"/);
+  assert.match(addSource, /finance-manual-panel/);
+  assert.doesNotMatch(addSource, /dock=\{manualDock\}/);
+  assert.doesNotMatch(addSource, /const manualDock/);
   assert.match(addSource, /testId="manual-account-select"/);
   assert.match(addSource, /testId="manual-from-account-picker"/);
   assert.match(addSource, /testId="manual-to-account-picker"/);
@@ -1833,6 +1871,15 @@ test('runtime styles: app-wide stability pass prevents responsive overlap', () =
     cssSource,
     /a:focus-visible,\s*button:focus-visible,\s*input:focus-visible,\s*select:focus-visible,\s*textarea:focus-visible,\s*\[tabindex\]:focus-visible\s*\{[\s\S]*outline:\s*2px solid rgba\(0,\s*122,\s*255,\s*0\.82\);/s,
   );
+  assert.match(
+    cssSource,
+    /\.finance-manual-confirmation-bar\s*\{[\s\S]*position:\s*sticky;[\s\S]*bottom:\s*max\(0\.65rem,\s*env\(safe-area-inset-bottom\)\);/s,
+  );
+  assert.match(
+    cssSource,
+    /body\[data-keyboard-open="true"\] \.finance-manual-confirmation-bar\s*\{[\s\S]*position:\s*static;/s,
+  );
+  assert.doesNotMatch(cssSource, /finance-add-dock-actions/);
 });
 
 test('runtime source: service worker only registers in production and clears old runtime caches in dev', () => {
