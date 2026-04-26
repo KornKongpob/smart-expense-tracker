@@ -128,6 +128,56 @@ export default function DashboardScreen() {
     unmatchedCount > 0;
   const showStarterCardFirst = !hasAccounts || !hasActivity;
   const hideSummaryMetrics = !hasAccounts && !hasActivity;
+  const totalAccountBalanceSatang = snapshotAccounts.reduce(
+    (sum, account) => sum + Number(account?.balance_satang || 0),
+    0,
+  );
+  const budgetRemainingSatang = Number(displayExpenseBudgetSatang || 0) - Number(snapshot.expense_satang || 0);
+  const hasExpenseBudget = Number(displayExpenseBudgetSatang || 0) > 0;
+  const budgetOverviewTone = !hasExpenseBudget
+    ? "default"
+    : budgetRemainingSatang < 0
+      ? "danger"
+      : progress >= 85
+        ? "warning"
+        : "success";
+  const attentionCount = pendingReviewCount + unmatchedCount + recurringDueCount + plannerAttentionCount;
+  const dashboardOverviewCards = [
+    {
+      id: "accounts",
+      icon: CreditCard,
+      label: "ยอดบัญชีสุทธิ",
+      value: hasAccounts ? formatCurrency(totalAccountBalanceSatang) : "-",
+      detail: hasAccounts ? `${snapshotAccounts.length} บัญชีที่ติดตามอยู่` : "เพิ่มบัญชีเพื่อเริ่มสรุปยอด",
+      tone: totalAccountBalanceSatang < 0 ? "danger" : "default",
+    },
+    {
+      id: "expense",
+      icon: ArrowUpRight,
+      label: "ใช้เดือนนี้",
+      value: formatCurrency(snapshot.expense_satang || 0),
+      detail: hasValue(snapshot.income_satang)
+        ? `รับเข้า ${formatCurrency(snapshot.income_satang || 0)}`
+        : "ยังไม่มีรายรับในเดือนนี้",
+      tone: "danger",
+    },
+    {
+      id: "budget",
+      icon: Target,
+      label: hasExpenseBudget && budgetRemainingSatang < 0 ? "เกินงบ" : "เหลืองบ",
+      value: hasExpenseBudget ? formatCurrency(Math.abs(budgetRemainingSatang)) : formatCurrency(displayExpenseBudgetSatang || 0),
+      detail: hasExpenseBudget ? `ใช้ไป ${progress}% ของงบเดือนนี้` : "ตั้งงบเพื่อดู pace การใช้จ่าย",
+      tone: budgetOverviewTone,
+    },
+    {
+      id: "attention",
+      icon: CalendarClock,
+      label: "ต้องดูแล",
+      value: `${attentionCount}`,
+      detail: attentionCount ? "รายการรอตรวจ กฎถึงรอบ หรือหมวดที่ควรปรับ" : "ไม่มีงานค้างสำคัญตอนนี้",
+      tone: attentionCount ? "warning" : "success",
+    },
+  ];
 
   const buildChartPath = (key) =>
     chartPoints
@@ -216,11 +266,36 @@ export default function DashboardScreen() {
 
       {!hideSummaryMetrics ? (
         <>
+          <section className="finance-dashboard-overview-grid" data-testid="dashboard-money-overview">
+            {dashboardOverviewCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <article
+                  key={card.id}
+                  className={[
+                    "finance-dashboard-overview-card",
+                    `finance-dashboard-overview-card-${card.tone}`,
+                  ].join(" ")}
+                >
+                  <div className="finance-dashboard-overview-icon" aria-hidden="true">
+                    <Icon size={18} />
+                  </div>
+                  <div className="finance-dashboard-overview-copy">
+                    <span className="finance-dashboard-overview-label">{card.label}</span>
+                    <strong className="finance-dashboard-overview-value">{card.value}</strong>
+                    <span className="finance-dashboard-overview-detail">{card.detail}</span>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+
           <article className="ui-card finance-panel finance-dashboard-hero">
         <div className="finance-dashboard-hero-head">
           <div>
-            <div className="finance-panel-title">ใช้ไป</div>
+            <div className="finance-panel-title">สรุปเงินเดือนนี้</div>
             <div className="finance-dashboard-total">{formatCurrency(snapshot.expense_satang || 0)}</div>
+            <div className="finance-dashboard-hero-subtitle">รายจ่ายรวมที่บันทึกในเดือนนี้</div>
           </div>
           {loading ? <StatusPill tone="default">อัปเดต</StatusPill> : null}
         </div>

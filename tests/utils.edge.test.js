@@ -1802,6 +1802,10 @@ test('runtime source: shared account picker is wired through add, inbox, dashboa
   assert.doesNotMatch(inboxSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
 
   assert.match(dashboardSource, /import AccountSheetPicker/);
+  assert.match(dashboardSource, /dashboardOverviewCards/);
+  assert.match(dashboardSource, /data-testid="dashboard-money-overview"/);
+  assert.match(dashboardSource, /ยอดบัญชีสุทธิ/);
+  assert.match(dashboardSource, /สรุปเงินเดือนนี้/);
   assert.doesNotMatch(dashboardSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
 
   assert.match(plannerSource, /import AccountSheetPicker/);
@@ -1862,6 +1866,14 @@ test('runtime styles: app-wide stability pass prevents responsive overlap', () =
   assert.match(
     cssSource,
     /@media \(max-width:\s*520px\)[\s\S]*\.finance-sheet-actions,\s*\.finance-screen-dock-actions,\s*\.finance-dashboard-actions,\s*\.finance-inline-actions\s*\{[\s\S]*display:\s*grid;[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s,
+  );
+  assert.match(
+    cssSource,
+    /\.finance-dashboard-overview-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
+  );
+  assert.match(
+    cssSource,
+    /@media \(min-width:\s*760px\)[\s\S]*\.finance-dashboard-overview-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/s,
   );
   assert.match(
     cssSource,

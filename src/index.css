@@ -5419,6 +5419,81 @@ body[data-finance-shell="true"][data-keyboard-open="true"] .finance-toast-wrap {
     radial-gradient(circle at top right, rgba(11, 132, 255, 0.08), transparent 38%);
 }
 
+.finance-dashboard-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.finance-dashboard-overview-card {
+  min-width: 0;
+  min-height: 7.15rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.72rem;
+  padding: 0.88rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 18px 36px -30px rgba(15, 23, 42, 0.28);
+}
+
+.finance-dashboard-overview-icon {
+  flex: 0 0 auto;
+  width: 2.35rem;
+  height: 2.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.9rem;
+  background: rgba(0, 122, 255, 0.1);
+  color: var(--accent-ink);
+}
+
+.finance-dashboard-overview-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+
+.finance-dashboard-overview-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.finance-dashboard-overview-value {
+  color: var(--text);
+  font-size: clamp(1.05rem, 0.95rem + 0.7vw, 1.38rem);
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.finance-dashboard-overview-detail,
+.finance-dashboard-hero-subtitle {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.finance-dashboard-overview-card-success .finance-dashboard-overview-icon {
+  background: rgba(52, 199, 89, 0.12);
+  color: #1d9d4a;
+}
+
+.finance-dashboard-overview-card-warning .finance-dashboard-overview-icon {
+  background: rgba(255, 159, 10, 0.14);
+  color: #b76b00;
+}
+
+.finance-dashboard-overview-card-danger .finance-dashboard-overview-icon {
+  background: rgba(255, 69, 58, 0.12);
+  color: #d92d20;
+}
+
 .finance-dashboard-hero-head {
   display: flex;
   align-items: flex-start;
@@ -6200,6 +6275,10 @@ body[data-finance-shell="true"][data-keyboard-open="true"] .finance-toast-wrap {
 
   .finance-grid-main {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-dashboard-overview-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .finance-dashboard-planner-grid,
