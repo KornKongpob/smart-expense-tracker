@@ -1871,10 +1871,10 @@ test('runtime styles: app-wide stability pass prevents responsive overlap', () =
     cssSource,
     /a:focus-visible,\s*button:focus-visible,\s*input:focus-visible,\s*select:focus-visible,\s*textarea:focus-visible,\s*\[tabindex\]:focus-visible\s*\{[\s\S]*outline:\s*2px solid rgba\(0,\s*122,\s*255,\s*0\.82\);/s,
   );
-  assert.match(
-    cssSource,
-    /\.finance-manual-confirmation-bar\s*\{[\s\S]*position:\s*sticky;[\s\S]*bottom:\s*max\(0\.65rem,\s*env\(safe-area-inset-bottom\)\);/s,
-  );
+  const manualConfirmationBarBlock = cssSource.match(/\.finance-manual-confirmation-bar\s*\{[^}]*\}/)?.[0] || "";
+  assert.match(manualConfirmationBarBlock, /position:\s*static;/);
+  assert.match(manualConfirmationBarBlock, /background:\s*var\(--surface-strong\);/);
+  assert.doesNotMatch(manualConfirmationBarBlock, /position:\s*(fixed|sticky|absolute);/);
   assert.match(
     cssSource,
     /body\[data-keyboard-open="true"\] \.finance-manual-confirmation-bar\s*\{[\s\S]*position:\s*static;/s,
