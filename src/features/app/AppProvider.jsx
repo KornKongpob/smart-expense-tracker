@@ -79,6 +79,7 @@ import { getSupabaseBrowserClient, hasSupabaseBrowserConfig } from "../../lib/su
 import { downloadCsv, transactionsToCsv } from "../../utils/exportCsv.js";
 import { normalizeMerchantKey } from "../../utils/merchantDictionary.js";
 import { compareTxNewestFirst } from "../../utils/transaction.js";
+import { transactionMatchesQuery } from "../../domain/receipt/receiptSearchIndex.js";
 import { validateBackupImport } from "../../schemas/index.js";
 import { extractBackupSupplementalData } from "../../utils/backupPayload.js";
 import { STORAGE_SAVE_ERROR_EVENT } from "../../services/storage.js";
@@ -317,9 +318,10 @@ function sanitizeTransactionSearchTerm(value) {
     .trim();
 }
 
-function matchesTransactionHistorySearch(transaction, query) {
+function matchesTransactionHistorySearch(transaction, query, context = {}) {
   const normalizedQuery = String(query || "").trim().toLowerCase();
   if (!normalizedQuery) return true;
+  if (transactionMatchesQuery(transaction, normalizedQuery, context)) return true;
   return [transaction?.merchant, transaction?.note, transaction?.reference]
     .map((value) => String(value || "").trim().toLowerCase())
     .some((value) => value.includes(normalizedQuery));
@@ -1234,7 +1236,9 @@ export function AppProvider({ children }) {
     );
 
     if (searchTerm) {
-      items = items.filter((transaction) => matchesTransactionHistorySearch(transaction, searchTerm));
+      items = items.filter((transaction) =>
+        matchesTransactionHistorySearch(transaction, searchTerm, { accounts, categories }),
+      );
     }
 
     return {

@@ -1,4 +1,5 @@
 import { canonicalizeCategoryId } from "../../utils/categoryIds.js";
+import { buildReceiptSplitPlan, RECEIPT_SAVE_MODES } from "../../domain/receipt/receiptSplitBuilder.js";
 import { generateSplitGroupId } from "../../utils/id.js";
 import { normalizeTimeHHmm, toISODate } from "../../utils/format.js";
 import { ensureSatangInt, parseMoneyToSatang, satangToBahtNumber } from "../../utils/money.js";
@@ -6,7 +7,6 @@ import {
   chooseReceiptPaidTotalSatang,
   isAdjustmentLike,
   reconcileReceiptGroups,
-  signedReceiptGroupSatang,
 } from "../../utils/receiptAdjustments.js";
 import { deriveReceiptCategoryKey, splitReceiptItemsToLines } from "../../utils/receiptCategorizer.js";
 
@@ -59,6 +59,15 @@ function normalizeRuntimeKind(value) {
   if (kind === "income") return "income";
   if (kind === "transfer" || kind === "credit_payment") return "transfer";
   return "expense";
+}
+
+function normalizeReceiptSaveMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "split_by_item" || mode === "item" || mode === "items") return RECEIPT_SAVE_MODES.SPLIT_BY_ITEM;
+  if (mode === "split_by_category" || mode === "category" || mode === "categories") {
+    return RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY;
+  }
+  return RECEIPT_SAVE_MODES.SINGLE;
 }
 
 function sanitizeIsoDate(value) {
@@ -238,7 +247,20 @@ export function sanitizeTransactionDraft(input) {
   const positivePurchasedItemCount = receiptGroups.filter(
     (item) => item.receiptLineType !== "adjustment" && item.amountSatang > 0,
   ).length;
-  const splitByCategory = kind === "expense" && draft.splitByCategory === true && positivePurchasedItemCount >= 2;
+  const requestedReceiptSaveMode = normalizeReceiptSaveMode(
+    draft.receiptSaveMode || draft.receipt_save_mode || draft.saveMode || draft.save_mode || draft.splitMode || draft.split_mode,
+  );
+  const splitByItem =
+    kind === "expense" && requestedReceiptSaveMode === RECEIPT_SAVE_MODES.SPLIT_BY_ITEM && positivePurchasedItemCount >= 2;
+  const splitByCategory =
+    kind === "expense" &&
+    positivePurchasedItemCount >= 2 &&
+    (draft.splitByCategory === true || requestedReceiptSaveMode === RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY);
+  const receiptSaveMode = splitByItem
+    ? RECEIPT_SAVE_MODES.SPLIT_BY_ITEM
+    : splitByCategory
+      ? RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY
+      : RECEIPT_SAVE_MODES.SINGLE;
   const amountSatang = resolveDraftTotalSatang({
     amountSatang: toSatangAmount(draft.amountSatang ?? draft.amount, amountUnit, 0),
     kind,
@@ -268,8 +290,9 @@ export function sanitizeTransactionDraft(input) {
     docType: cleanText(draft.docType || draft.doc_type),
     lineItems,
     receiptGroups,
-    splitByCategory,
-    splitGroupId: splitByCategory ? cleanText(draft.splitGroupId || draft.split_group_id) : "",
+    splitByCategory: receiptSaveMode === RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY,
+    receiptSaveMode,
+    splitGroupId: receiptSaveMode !== RECEIPT_SAVE_MODES.SINGLE ? cleanText(draft.splitGroupId || draft.split_group_id) : "",
     splitCount: Math.max(0, toInt(draft.splitCount ?? draft.split_count, 0)),
     splitLabel: cleanText(draft.splitLabel || draft.split_label),
     amountUnit: "satang",
@@ -425,6 +448,7 @@ function buildBaseTransactionRow({
       docType: draft.docType || null,
       time: draft.time || null,
       splitByCategory: draft.splitByCategory === true,
+      receiptSaveMode: draft.receiptSaveMode || null,
       lineItems: draft.lineItems,
       receiptGroups: draft.receiptGroups,
       ...raw,
@@ -465,7 +489,7 @@ export function buildTransactionSavePlan({
 
   const shouldSplit =
     sanitized.kind === "expense" &&
-    sanitized.splitByCategory === true &&
+    sanitized.receiptSaveMode !== RECEIPT_SAVE_MODES.SINGLE &&
     sanitized.receiptGroups.filter((group) => group.receiptLineType !== "adjustment" && group.amountSatang > 0).length >= 2;
 
   if (!shouldSplit) {
@@ -491,18 +515,59 @@ export function buildTransactionSavePlan({
   const groups = normalizeSplitGroups(sanitized);
   const splitGroupId = cleanText(sanitized.splitGroupId, generateSplitGroupId());
   const splitLabel = cleanText(sanitized.splitLabel, sanitized.merchant || sanitized.note || "Split");
-  const splitCount = groups.length;
-  const parentCategoryId = deriveReceiptCategoryKey(
-    "expense",
-    groups,
-    `${cleanText(sanitized.merchant)} ${cleanText(sanitized.note)}`.trim(),
-    sanitized.categoryId,
-  );
-  const parentAmountSatang =
-    Math.abs(groups.reduce((sum, group) => sum + signedReceiptGroupSatang({
-      amount: group.amountSatang,
+  const receiptPlan = buildReceiptSplitPlan({
+    lines: groups.map((group) => ({
+      ...group,
+      amountSatang: group.amountSatang,
+      categoryId: group.categoryId || sanitized.categoryId,
+      name: group.name || group.note,
+      receiptLineType: group.receiptLineType,
       adjustmentEffect: group.adjustmentEffect,
-    }), 0)) || sanitized.amountSatang;
+      adjustmentType: group.adjustmentType,
+      children: group.children || null,
+      childrenIncludedInParent: group.childrenIncludedInParent === true,
+    })),
+    mode:
+      sanitized.receiptSaveMode === RECEIPT_SAVE_MODES.SPLIT_BY_ITEM
+        ? RECEIPT_SAVE_MODES.SPLIT_BY_ITEM
+        : RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY,
+    baseTransaction: {
+      amount: sanitized.amountSatang,
+      accountId: sanitized.accountId,
+      date: sanitized.date,
+      time: sanitized.time,
+      merchant: sanitized.merchant,
+      note: sanitized.note,
+      paymentMethod: sanitized.paymentMethod,
+      ref: sanitized.reference,
+      source,
+    },
+    fallbackCategoryId: sanitized.categoryId,
+    splitGroupId,
+    splitLabel,
+  });
+  const receiptParent = receiptPlan.parent || {};
+  const receiptChildren = Array.isArray(receiptPlan.children) ? receiptPlan.children : [];
+  const splitCount = receiptChildren.length;
+  const parentCategoryId = cleanText(receiptParent.categoryId || receiptParent.category, sanitized.categoryId);
+  const parentAmountSatang = Math.max(0, ensureSatangInt(receiptParent.amount, sanitized.amountSatang));
+  const parentReceiptLines = Array.isArray(receiptParent.receiptLines) ? receiptParent.receiptLines : groups;
+  const groupedReceiptGroups = receiptChildren.map((child, index) => {
+    const receiptLines = Array.isArray(child.receiptLines) ? child.receiptLines : [];
+    return {
+      key: child.categoryId || child.category || `split_${index + 1}`,
+      name: child.itemName || child.note || `Split ${index + 1}`,
+      note: child.note || child.itemName || "",
+      amountSatang: Math.max(0, ensureSatangInt(child.amount, 0)),
+      categoryId: child.categoryId || child.category || sanitized.categoryId,
+      splitIndex: index + 1,
+      receiptLineType: child.receiptLineType === "adjustment" ? "adjustment" : "item",
+      adjustmentEffect: child.adjustmentEffect === "subtract" ? "subtract" : "add",
+      adjustmentType: child.adjustmentType || null,
+      children: receiptLines,
+      childrenIncludedInParent: false,
+    };
+  });
 
   const parentRow = buildBaseTransactionRow({
     userId,
@@ -522,19 +587,17 @@ export function buildTransactionSavePlan({
       splitLabel,
     },
     raw: {
-      receiptItemsSubtotalSatang: groups
-        .filter((group) => group.receiptLineType !== "adjustment")
-        .reduce((sum, group) => sum + group.amountSatang, 0),
-      receiptDiscountSatang: groups
-        .filter((group) => group.receiptLineType === "adjustment" && group.adjustmentEffect === "subtract")
-        .reduce((sum, group) => sum + group.amountSatang, 0),
-      receiptSurchargeSatang: groups
-        .filter((group) => group.receiptLineType === "adjustment" && group.adjustmentEffect === "add")
-        .reduce((sum, group) => sum + group.amountSatang, 0),
+      receiptItemsSubtotalSatang: receiptPlan.reconciliation?.itemSubtotalSatang || 0,
+      receiptDiscountSatang: receiptPlan.reconciliation?.discountSatang || 0,
+      receiptSurchargeSatang: receiptPlan.reconciliation?.surchargeSatang || 0,
+      receiptDifferenceSatang: receiptPlan.reconciliation?.differenceSatang || 0,
+      receiptBalanced: receiptPlan.reconciliation?.balanced === true,
+      receiptSaveMode: sanitized.receiptSaveMode,
+      receiptLines: parentReceiptLines,
     },
   });
 
-  const childRows = groups.map((group, index) =>
+  const childRows = receiptChildren.map((child, index) =>
     buildBaseTransactionRow({
       userId,
       kind: "expense",
@@ -542,23 +605,24 @@ export function buildTransactionSavePlan({
       source,
       scanDocumentId,
       attachment,
-      amountSatang: group.amountSatang,
-      categoryId: group.categoryId || sanitized.categoryId,
-      note: group.note || group.name || sanitized.note,
+      amountSatang: child.amount,
+      categoryId: child.categoryId || child.category || sanitized.categoryId,
+      note: child.note || child.itemName || sanitized.note,
       accountId: sanitized.accountId,
       split: {
         isSplitChild: true,
         splitGroupId,
         splitParentId: null,
-        splitIndex: Math.max(1, toInt(group.splitIndex, 0) || index + 1),
+        splitIndex: Math.max(1, toInt(child.splitIndex, 0) || index + 1),
         splitCount,
         splitLabel,
       },
-      receiptLineType: group.receiptLineType,
-      adjustmentEffect: group.adjustmentEffect,
-      adjustmentType: group.adjustmentType,
+      receiptLineType: child.receiptLineType,
+      adjustmentEffect: child.adjustmentEffect,
+      adjustmentType: child.adjustmentType,
       raw: {
-        splitGroup: group,
+        receiptLines: Array.isArray(child.receiptLines) ? child.receiptLines : [],
+        splitGroup: groupedReceiptGroups[index] || null,
       },
     }),
   );
@@ -567,12 +631,13 @@ export function buildTransactionSavePlan({
     mode: "split",
     sanitized: {
       ...sanitized,
-      splitByCategory: true,
+      splitByCategory: sanitized.receiptSaveMode === RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY,
+      receiptSaveMode: sanitized.receiptSaveMode,
       splitGroupId,
       splitCount,
       splitLabel,
-      receiptGroups: groups,
-      lineItems: groups,
+      receiptGroups: groupedReceiptGroups,
+      lineItems: groupedReceiptGroups,
       amountSatang: parentAmountSatang,
     },
     parentRow,
@@ -632,10 +697,11 @@ export function buildApprovedSuggestion(scan, draft) {
     account_id: sanitized.kind === "transfer" ? null : sanitized.accountId || null,
     from_account: sanitized.kind === "transfer" ? sanitized.fromAccountId || null : baseSuggestion.from_account || null,
     to_account: sanitized.kind === "transfer" ? sanitized.toAccountId || null : baseSuggestion.to_account || null,
-    split_by_category: sanitized.splitByCategory === true,
-    split_group_id: sanitized.splitByCategory ? sanitized.splitGroupId || null : null,
-    split_count: sanitized.splitByCategory ? sanitized.receiptGroups.length : null,
-    split_label: sanitized.splitByCategory ? sanitized.splitLabel || null : null,
+    split_by_category: sanitized.receiptSaveMode === RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY,
+    receipt_save_mode: sanitized.receiptSaveMode,
+    split_group_id: sanitized.receiptSaveMode !== RECEIPT_SAVE_MODES.SINGLE ? sanitized.splitGroupId || null : null,
+    split_count: sanitized.receiptSaveMode !== RECEIPT_SAVE_MODES.SINGLE ? sanitized.receiptGroups.length : null,
+    split_label: sanitized.receiptSaveMode !== RECEIPT_SAVE_MODES.SINGLE ? sanitized.splitLabel || null : null,
     items: buildSuggestionGroupsForStorage(items),
     adjustments: adjustments.map((group) => ({
       name: group.note || group.name || null,
@@ -714,6 +780,7 @@ export function scanToDraft(scan) {
     docType: suggestion?.doc_type || suggestion?.docType || "",
     lineItems: receiptGroups,
     receiptGroups,
+    receiptSaveMode: splitByCategory ? RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY : RECEIPT_SAVE_MODES.SINGLE,
     splitByCategory,
     splitGroupId: suggestion?.split_group_id || suggestion?.splitGroupId || "",
     splitCount: suggestion?.split_count || suggestion?.splitCount || receiptGroups.length,

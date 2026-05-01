@@ -18,12 +18,14 @@ import CategoryPicker from "./CategoryPicker";
 import QuickSuggestions from "./QuickSuggestions";
 
 import SplitDetailsEditor from "./SplitDetailsEditor";
+import ReceiptReconcileSummary from "../views/receipt/ReceiptReconcileSummary.jsx";
 
 import { isCreditAccount } from "../utils/accountMatch";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput } from "../utils/money";
 import { isAdjustmentLike } from "../utils/receiptAdjustments";
 import { deriveMerchantAutofillPatch } from "../utils/merchantDictionary";
+import { reconcileReceiptLines, RECEIPT_SAVE_MODES } from "../domain/receipt/index.js";
 
 const isTombstoneCategory = (c) => !!(c?.deletedAt || c?.isDeleted);
 
@@ -40,6 +42,21 @@ function getAccountVisual(acc) {
   const icon = String(acc.icon || "").trim();
   if (isImageSrc(icon)) return { kind: "img", src: icon };
   return { kind: "emoji", value: icon || "💳" };
+}
+
+function receiptGroupsToLines(groups = []) {
+  return (Array.isArray(groups) ? groups : []).map((group, index) => {
+    const isAdjustment = isAdjustmentLike(group) || String(group?.receiptLineType || "").toLowerCase().trim() === "adjustment";
+    return {
+      id: String(group?.id || group?.key || `line_${index + 1}`),
+      name: String(group?.note || group?.name || group?.itemName || "").trim() || `Line ${index + 1}`,
+      amountSatang: Math.abs(Number(group?.amount ?? group?.amountSatang ?? 0) || 0),
+      categoryId: String(group?.categoryId || group?.category || group?.key || "").trim(),
+      receiptLineType: isAdjustment ? "adjustment" : "item",
+      adjustmentEffect: isAdjustment ? String(group?.adjustmentEffect || "add").toLowerCase().trim() : "add",
+      adjustmentType: isAdjustment ? String(group?.adjustmentType || "unknown").toLowerCase().trim() : null,
+    };
+  });
 }
 
 function StepPill({ active, done, index, label, icon, onClick }) {
@@ -106,6 +123,10 @@ export default function TransactionReviewModal({
   );
   const hasGroups = txType === "expense" && nonAdjGroupCount >= 2;
   const hasReceiptLines = txType === "expense" && Array.isArray(q?.groups) && q.groups.length > 0;
+  const receiptReconciliation = useMemo(() => {
+    if (!hasReceiptLines) return null;
+    return reconcileReceiptLines(receiptGroupsToLines(q?.groups || []), Number(q?.amount || 0));
+  }, [hasReceiptLines, q?.groups, q?.amount]);
 
   const [step, setStep] = useState(0);
   const [amountInput, setAmountInput] = useState("");
@@ -455,6 +476,34 @@ export default function TransactionReviewModal({
       // Multi-item receipt (expense)
       if (hasGroups) {
         // Enforce splitByCategory for multi-item (handled automatically in the store/flow, but we show UI for it here)
+        const receiptSaveMode = q?.receiptSaveMode || (q?.splitByCategory ? RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY : RECEIPT_SAVE_MODES.SINGLE);
+        const setReceiptSaveMode = (mode) => {
+          onUpdateItemRef.current?.(qid, {
+            receiptSaveMode: mode,
+            splitByCategory: mode !== RECEIPT_SAVE_MODES.SINGLE,
+          });
+        };
+        const addRoundingAdjustment = () => {
+          const difference = Number(receiptReconciliation?.differenceSatang || 0);
+          if (!difference) return;
+          const groups = Array.isArray(q?.groups) ? q.groups : [];
+          onUpdateItemRef.current?.(qid, {
+            groups: [
+              ...groups,
+              {
+                key: "rounding",
+                categoryId: "fees",
+                amount: Math.abs(difference),
+                note: "Rounding",
+                receiptLineType: "adjustment",
+                adjustmentType: "rounding",
+                adjustmentEffect: difference > 0 ? "add" : "subtract",
+                splitIndex: groups.length + 1,
+              },
+            ],
+          });
+        };
+
         return (
           <div className="space-y-3">
             <div className="glass-panel border border-white/20 rounded-2xl p-3">
@@ -464,6 +513,30 @@ export default function TransactionReviewModal({
               <div className="text-[11px] text-gray-900/55 mt-1">
                 ใบเสร็จนี้มีหลายรายการ ระบบจะให้เลือกหมวดหมู่แยกตามรายบรรทัด (Split details)
               </div>
+            </div>
+
+            <ReceiptReconcileSummary
+              reconciliation={receiptReconciliation}
+              onAddRounding={receiptReconciliation?.balanced ? null : addRoundingAdjustment}
+            />
+
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                [RECEIPT_SAVE_MODES.SINGLE, "Single"],
+                [RECEIPT_SAVE_MODES.SPLIT_BY_ITEM, "By item"],
+                [RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY, "By category"],
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setReceiptSaveMode(mode)}
+                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${
+                    receiptSaveMode === mode ? "border-gray-900 bg-gray-900 text-white" : "border-white/30 bg-white/40 text-gray-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
             <SplitDetailsEditor
@@ -859,6 +932,7 @@ export default function TransactionReviewModal({
     doneLabel,
     isOpen,
     hasReceiptLines,
+    receiptReconciliation,
     nonCreditAccounts,
     amountInput,
   ]);

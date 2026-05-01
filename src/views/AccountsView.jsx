@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { parseDigitsList, choosePrimaryDigits, digitsOnly } from "../utils/accountMatch";
 import { useAppStore } from "../store/store.jsx";
 import { calcAccountBalance } from "../store/selectors.js";
+import { selectAccountSummaries } from "../store/selectors/accountSelectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { ACCOUNT_COLORS, ACCOUNT_ICONS, EMOJI_PRESETS } from "../constants/presets.jsx";
@@ -578,7 +579,10 @@ const currencyLabel = (c) => {
 const typeLabel = (t) => {
   if (t === "cash") return "เงินสด";
   if (t === "bank") return "บัญชีธนาคาร";
+  if (t === "wallet" || t === "ewallet" || t === "e-wallet") return "E-wallet";
   if (t === "credit") return "บัตรเครดิต";
+  if (t === "investment") return "Investment";
+  if (t === "other") return "Other";
   return t || "-";
 };
 
@@ -1128,10 +1132,15 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     const txs = store.state.transactions || [];
     const allAccs = store.state.accounts || [];
 
-    const withBalance = accs.map((a) => ({
-      ...a,
-      balance: calcAccountBalance(allAccs, txs, a.id),
-    }));
+    const summaryById = new Map(selectAccountSummaries(allAccs, txs).map((summary) => [String(summary.id || ""), summary]));
+    const withBalance = accs.map((a) => {
+      const summary = summaryById.get(String(a?.id || ""));
+      return {
+        ...a,
+        ...(summary || {}),
+        balance: Number(summary?.balanceSatang ?? calcAccountBalance(allAccs, txs, a.id)) || 0,
+      };
+    });
 
     const normalizeType = (t) => {
       const s = String(t || "").toLowerCase().trim();
@@ -1297,6 +1306,26 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                               </span>
                             </div>
                           ) : null}
+                          {acc.type === "credit" ? (
+                            <div className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
+                              <span className="font-bold">Outstanding:</span>{" "}
+                              <span className="font-semibold text-gray-900">
+                                {formatMoney(acc.outstandingSatang || 0, acc.currency)}
+                              </span>
+                              <span className="mx-2">•</span>
+                              <span className="font-bold">Available:</span>{" "}
+                              <span className="font-semibold text-gray-900">
+                                {formatMoney(acc.availableCreditSatang || 0, acc.currency)}
+                              </span>
+                              {acc.nextDueDate ? (
+                                <>
+                                  <span className="mx-2">•</span>
+                                  <span className="font-bold">Next due:</span>{" "}
+                                  <span className="font-semibold text-gray-900">{acc.nextDueDate}</span>
+                                </>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
@@ -1304,7 +1333,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                         <div
                           className={[
                             "text-sm font-semibold tabular-nums",
-                            acc.type === "credit" && Number(acc.balance || 0) < 0 ? "text-red-700" : "text-gray-900",
+                            acc.type === "credit" && Number(acc.outstandingSatang || acc.balance || 0) > 0 ? "text-red-700" : "text-gray-900",
                           ].join(" ")}
                         >
                           {String(acc.currency || "THB").toUpperCase() === "THB"
@@ -1312,11 +1341,22 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                             : `${Number(acc.balance || 0).toLocaleString()} ${String(acc.currency || "").toUpperCase()}`}
                         </div>
 
-                        {acc.type === "credit" && Number(acc.balance || 0) < 0 ? (
+                        {acc.type === "credit" && Number(acc.outstandingSatang || acc.balance || 0) > 0 ? (
                           <div className="ui-chip border-red-200 bg-red-50/80 text-red-700">ยอดหนี้</div>
                         ) : null}
 
                         <div className="flex items-center gap-2">
+                          {acc.type === "credit" ? (
+                            <button
+                              onClick={() => store.startNewTransaction?.({ entryMode: "manual", txType: "credit_payment" })}
+                              data-testid={`account-pay-card-${acc.id}`}
+                              className="inline-flex min-h-[40px] items-center gap-2 rounded-2xl bg-emerald-50/90 border border-emerald-200 px-3 text-sm font-semibold text-emerald-800 active:scale-[0.98]"
+                              title="Pay card"
+                            >
+                              <CreditCard size={18} />
+                              <span>Pay</span>
+                            </button>
+                          ) : null}
                           <button
                             onClick={() => openEditModal(acc)}
                             data-testid={`account-edit-${acc.id}`}

@@ -4,7 +4,7 @@
 // Includes Quick Scan shortcut and "รายละเอียดเพิ่ม" to open full form.
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { X, Check, ChevronRight, ChevronDown, Camera, FileText, Search } from "lucide-react";
+import { X, Check, ChevronRight, ChevronDown, Camera, FileText, Search, ArrowRightLeft } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../utils/money";
 import { getCurrentLocalTimeHHmm, toISODate } from "../utils/format";
@@ -137,6 +137,13 @@ export default function QuickAddSheet({ isOpen, onClose }) {
     }, 150);
   };
 
+  const handleQuickTransfer = () => {
+    onClose();
+    setTimeout(() => {
+      store.startNewTransaction({ entryMode: "manual", txType: "transfer" });
+    }, 150);
+  };
+
   if (!isOpen) return null;
 
   const selectedMain = mainCats.find((c) => c.id === mainCatId);
@@ -161,6 +168,13 @@ export default function QuickAddSheet({ isOpen, onClose }) {
               className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-indigo-600/10 border border-indigo-600/15 text-indigo-700 text-xs font-semibold active:scale-95 transition-all"
             >
               <Camera size={14} /> สแกน
+            </button>
+            <button
+              type="button"
+              onClick={handleQuickTransfer}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold active:scale-95 transition-all"
+            >
+              <ArrowRightLeft size={14} /> Transfer
             </button>
             <button type="button" onClick={onClose} className="p-2 rounded-2xl hover:bg-gray-100 active:scale-95 transition-all" aria-label="close">
               <X size={18} className="text-gray-500" />

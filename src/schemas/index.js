@@ -15,6 +15,50 @@ const optionalStr = z.string().default("");
 const optionalBool = z.boolean().default(false);
 const timestamp = z.number().finite().default(0);
 
+// ===== Receipt Scan =====
+
+export const ReceiptAdjustmentSchema = z.object({
+  id: optionalStr,
+  type: z.enum(["discount", "service_charge", "tax", "rounding", "fee", "unknown"]).default("unknown"),
+  label: optionalStr,
+  amountSatang: satangInt,
+  effect: z.enum(["add", "subtract"]).default("add"),
+}).passthrough();
+
+export const ReceiptLineItemSchema = z.lazy(() =>
+  z.object({
+    id: optionalStr,
+    rawName: optionalStr,
+    normalizedName: optionalStr,
+    qty: z.number().finite().positive().default(1),
+    unitPriceSatang: z.number().int().finite().nullable().default(null),
+    totalSatang: satangInt,
+    suggestedCategoryId: z.string().nullable().default(null),
+    categoryConfidence: z.number().finite().min(0).max(100).nullable().default(null),
+    categoryReason: optionalStr,
+    userConfirmedCategory: optionalBool,
+    source: z.string().default("scan"),
+    children: z.array(ReceiptLineItemSchema).default([]),
+  }).passthrough()
+);
+
+export const ReceiptScanSchema = z.object({
+  merchant: z.string().nullable().default(null),
+  date: z.string().nullable().default(null),
+  paidTotalSatang: satangInt,
+  subtotalSatang: satangInt,
+  discountSatang: satangInt,
+  serviceChargeSatang: satangInt,
+  taxSatang: satangInt,
+  roundingSatang: satangInt,
+  paymentMethod: z.string().nullable().default(null),
+  referenceId: z.string().nullable().default(null),
+  confidence: z.number().finite().min(0).max(100).nullable().default(null),
+  items: z.array(ReceiptLineItemSchema).default([]),
+  adjustments: z.array(ReceiptAdjustmentSchema).default([]),
+  warnings: z.array(z.string()).default([]),
+}).passthrough();
+
 // ===== Transaction =====
 
 export const TransactionSchema = z.object({
@@ -63,6 +107,8 @@ export const TransactionSchema = z.object({
   attachmentId: z.string().nullable().default(null),
   fileHash: z.string().nullable().default(null),
   paymentMethod: optionalStr,
+  receipt: ReceiptScanSchema.nullable().default(null),
+  normalizedReceipt: ReceiptScanSchema.nullable().default(null),
 
   // GPS
   location: z
@@ -231,6 +277,8 @@ export const InboxItemSchema = z.object({
   attachmentId: z.string().nullable().default(null),
   fileHash: z.string().nullable().default(null),
   createdAt: timestamp,
+  receipt: ReceiptScanSchema.nullable().default(null),
+  normalizedReceipt: ReceiptScanSchema.nullable().default(null),
 }).passthrough();
 
 // ===== Full App State (for backup import validation) =====

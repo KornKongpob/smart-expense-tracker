@@ -3,6 +3,11 @@
 // Eliminates duplicated isTransferLike / signedExpenseSatang / sumExpense* / compareTx* / daysInMonthKey.
 
 import { combineLocalDateTime, normalizeTimeHHmm, parseDateSafe } from "./format.js";
+import {
+  isReportableExpenseTransaction,
+  isTransferTransaction,
+} from "../domain/ledger/transactionTypes.js";
+import { signedExpenseAmountSatang } from "../domain/ledger/ledgerMath.js";
 
 /**
  * Check if a transaction looks like a transfer (2-leg or credit payment).
@@ -10,12 +15,7 @@ import { combineLocalDateTime, normalizeTimeHHmm, parseDateSafe } from "./format
  * but also provides the simpler "inline" version used by views.
  */
 export function isTransferLike(t) {
-  if (!t) return false;
-  if (t.isTransfer) return true;
-  const c = String(t.category || "").toLowerCase().trim();
-  if (c === "transfer") return true;
-  if (String(t.transferId || "").trim()) return true;
-  return false;
+  return isTransferTransaction(t);
 }
 
 /**
@@ -24,10 +24,7 @@ export function isTransferLike(t) {
  * - Discount adjustment (adjustmentEffect='subtract') => -amount
  */
 export function signedExpenseSatang(t) {
-  const amt = Number(t?.amount || 0) || 0;
-  if (!(amt > 0)) return 0;
-  const eff = String(t?.adjustmentEffect || "").toLowerCase().trim();
-  return eff === "subtract" ? -Math.abs(amt) : Math.abs(amt);
+  return signedExpenseAmountSatang(t);
 }
 
 /**
@@ -39,9 +36,7 @@ export function sumExpenseForDate(transactions, dateISO) {
   let sum = 0;
   for (const t of transactions || []) {
     if (!t) continue;
-    if (isTransferLike(t)) continue;
-    if (t?.isSplitParent) continue;
-    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
+    if (!isReportableExpenseTransaction(t)) continue;
     const td = String(t?.date || "").slice(0, 10);
     if (td !== d) continue;
     sum += signedExpenseSatang(t);
@@ -58,9 +53,7 @@ export function sumExpenseForMonth(transactions, monthKey) {
   let sum = 0;
   for (const t of transactions || []) {
     if (!t) continue;
-    if (isTransferLike(t)) continue;
-    if (t?.isSplitParent) continue;
-    if (String(t?.type || "").toLowerCase().trim() !== "expense") continue;
+    if (!isReportableExpenseTransaction(t)) continue;
     const td = String(t?.date || "").slice(0, 7);
     if (td !== mk) continue;
     sum += signedExpenseSatang(t);

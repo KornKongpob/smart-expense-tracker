@@ -71,6 +71,9 @@ import { buildCategoryHierarchy } from "../../utils/categoryHierarchy";
 import { useTransferFlow } from "./hooks/useTransferFlow";
 import { useTransactionDraft } from "./hooks/useTransactionDraft";
 import { useScanQueue } from "./hooks/useScanQueue";
+import { createTransferPair } from "../../domain/ledger/createTransferPair.js";
+import { createCreditPaymentPair } from "../../domain/ledger/createCreditPaymentPair.js";
+import { categorizeReceiptItem } from "../../domain/categorization/index.js";
 import { coerceClipboardFile, filterAllowedUploads, isPdfFile } from "./helpers/fileUploadHelpers.js";
 import { deriveSplitParentCategoryId } from "./helpers/splitCategory.js";
 import { applyAutomationToQueuePatch, buildQueueTypeChangeItem, normalizeQueueItemType } from "./helpers/queueTypeHelpers";
@@ -1164,6 +1167,46 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     return id;
   }, [categories, addCategory]);
 
+  const categorizeReceiptGroups = useCallback((rawGroups, options = {}) => {
+    const merchantText = String(options.merchant || options.parentMerchant || "").trim();
+    const fallbackCategoryId = String(options.fallbackCategoryId || "other").trim() || "other";
+
+    return (Array.isArray(rawGroups) ? rawGroups : []).map((group) => {
+      const categorized = categorizeReceiptItem(
+        {
+          ...group,
+          rawName: group?.rawName || group?.name || group?.note || group?.itemName || "",
+          normalizedName: group?.normalizedName || group?.note || group?.name || "",
+          suggestedCategoryId: group?.suggestedCategoryId || group?.categoryId || group?.key || fallbackCategoryId,
+        },
+        {
+          categories: expenseCats,
+          merchant: merchantText,
+          parentMerchant: merchantText,
+          rules: state?.rules || [],
+          merchants: state?.merchants || [],
+          parentCategoryId: fallbackCategoryId,
+          fallbackCategoryId,
+        },
+      );
+      const categoryId = ensureCategory(
+        "expense",
+        categorized.categoryId || categorized.suggestedCategoryId || group?.categoryId || group?.key || fallbackCategoryId,
+      );
+
+      return {
+        ...group,
+        key: sanitizeCategoryKey(categoryId) || sanitizeCategoryKey(group?.key) || fallbackCategoryId,
+        categoryId,
+        suggestedCategoryId: categorized.suggestedCategoryId || categoryId,
+        categoryConfidence: categorized.categoryConfidence,
+        categoryReason: categorized.categoryReason,
+        categorySource: categorized.categorySource,
+        needsReview: categorized.needsReview,
+      };
+    });
+  }, [ensureCategory, expenseCats, state?.rules, state?.merchants]);
+
   // ✅ Async Debounced Duplicate Check
   // Prevents the UI from freezing while typing by running findFuzzyDuplicate outside of the synchronous state updater.
   useEffect(() => {
@@ -1893,6 +1936,11 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 };
               })
               .filter((g) => Number(g?.amount || 0) > 0);
+
+            groups = categorizeReceiptGroups(groups, {
+              merchant: merchant || mergedNote,
+              fallbackCategoryId: fallbackKey,
+            });
           }
 
           // ✅ Income slips normally have no item lines
@@ -2333,6 +2381,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 };
               })
               .filter((g) => isPositiveNumber(g.amount));
+            groups = categorizeReceiptGroups(groups, {
+              merchant: next?.merchant || next?.note,
+              fallbackCategoryId: fallbackKey,
+            });
           }
 
           // Persist groups for breakdown even when not splitting
@@ -2453,6 +2505,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 };
               })
               .filter((g) => isPositiveNumber(g.amount));
+            groups = categorizeReceiptGroups(groups, {
+              merchant: next?.merchant || next?.note,
+              fallbackCategoryId: fallbackKey,
+            });
           }
 
           // Persist groups for breakdown even when not splitting
@@ -2485,7 +2541,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
     return true;
     },
-    [queue, showAlert, ensureCategory, addScanInboxItems, removeQueueItems, setDupDecisionOpen, navigate]
+    [queue, showAlert, ensureCategory, categorizeReceiptGroups, addScanInboxItems, removeQueueItems, setDupDecisionOpen, navigate]
   );
 
   // ✅ Multi-files auto send: when scan finishes and all files are ready, auto-send that batch to Inbox
@@ -2602,6 +2658,10 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 };
               })
               .filter((g) => isPositiveNumber(g.amount));
+            groups = categorizeReceiptGroups(groups, {
+              merchant: next?.merchant || next?.note,
+              fallbackCategoryId: fallbackKey,
+            });
           }
 
           // Persist groups for breakdown even when not splitting
@@ -2859,6 +2919,18 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           kind === "credit_payment"
             ? `ชำระบัตรเครดิต • ${(accounts.find((a) => a.id === q.toAccountId)?.name || "Credit Card").trim()}`
             : "Transfer";
+        const createPair = kind === "credit_payment" ? createCreditPaymentPair : createTransferPair;
+        const [outLeg, inLeg] = createPair({
+          amount: Number(q.amount),
+          fromAccountId: q.fromAccountId,
+          toAccountId: q.toAccountId,
+          transferId,
+          date: d,
+          time: txTime,
+          note: baseNote || defaultNote,
+          ref: q.ref || null,
+          source: "scan",
+        });
 
         txs.push({
           id: generateId(),
@@ -2874,6 +2946,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           ref: q.ref || null,
           source: "scan",
           transferKind: kind,
+          ...outLeg,
           attachmentId: q.attachmentId || null,
           fileHash: String(q.fileHash || '').trim() || null,
 
@@ -2904,6 +2977,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           ref: q.ref || null,
           source: "scan",
           transferKind: kind,
+          ...inLeg,
           attachmentId: q.attachmentId || null,
           fileHash: String(q.fileHash || '').trim() || null,
 
@@ -3344,6 +3418,20 @@ const inId =
         kind === "credit_payment"
           ? `ชำระบัตรเครดิต • ${(toAcc?.name || "Credit Card").trim()}`
           : "Transfer";
+      const createPair = kind === "credit_payment" ? createCreditPaymentPair : createTransferPair;
+      const [outLeg, inLeg] = createPair({
+        outId,
+        inId,
+        amount: amountNumber,
+        fromAccountId,
+        toAccountId,
+        transferId,
+        date: d,
+        time: manualTime,
+        note: noteText || defaultNote,
+        ref: String(ref || "").trim() || null,
+        source: kind,
+      });
 
       if (!beginSaveLock()) return;
       try {
@@ -3362,6 +3450,7 @@ const inId =
           ref: String(ref || "").trim() || null,
           source: kind,
           transferKind: kind,
+          ...outLeg,
           attachmentId: initialAttachmentId || null,
 
           ...locationPatch,
@@ -3381,6 +3470,7 @@ const inId =
           ref: String(ref || "").trim() || null,
           source: kind,
           transferKind: kind,
+          ...inLeg,
           attachmentId: initialAttachmentId || null,
 
           ...locationPatch,

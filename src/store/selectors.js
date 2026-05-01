@@ -8,8 +8,17 @@
 
 import { digitsOnly } from "../utils/accountMatch.js";
 import { normalizeRefKey } from "../utils/refKey.js";
+import {
+  isBudgetRelevantTransaction,
+  isSplitParentTransaction,
+  isTransferTransaction,
+} from "../domain/ledger/transactionTypes.js";
+import {
+  calculateIncomeExpenseTotals,
+  signedExpenseAmountSatang,
+} from "../domain/ledger/ledgerMath.js";
 
-export const nonTransfer = (t) => !t?.isTransfer;
+export const nonTransfer = (t) => !isTransferTransaction(t);
 
 // -----------------------------
 // Safe date parsing utilities
@@ -641,30 +650,7 @@ export function findFuzzyDuplicate(transactions, candidate, opts = {}) {
 // Totals / balances
 // -----------------------------
 export function calcTotals(transactions) {
-  let income = 0;
-  let expense = 0;
-
-  for (const t of transactions || []) {
-    if (!t) continue;
-    if (t.isTransfer) continue; // transfers should not affect "income/expense totals"
-    if (t.isSplitParent) continue; // split parent is UI-only (avoid double count)
-
-    const amt = Number(t.amount) || 0;
-    if (t.type === "income") {
-      income += amt;
-    } else if (t.type === "expense") {
-      // ✅ Receipt adjustment: discount is stored as expense with adjustmentEffect="subtract"
-      // so it reduces total expense instead of increasing it.
-      const ae = String(t.adjustmentEffect || "").toLowerCase().trim();
-      expense += ae === "subtract" ? -amt : amt;
-    }
-  }
-
-  return {
-    income,
-    expense,
-    net: income - expense,
-  };
+  return calculateIncomeExpenseTotals(transactions);
 }
 
 /**
@@ -681,7 +667,7 @@ export function calcAccountTxNet(transactions, accountId) {
   return (transactions || [])
     .filter((t) => t?.accountId === accId)
     .reduce((sum, t) => {
-      if (t?.isSplitParent) return sum; // UI-only
+      if (isSplitParentTransaction(t)) return sum; // UI-only
       const amt = Number(t?.amount) || 0;
       if (t?.type === "income") return sum + amt;
       if (t?.type === "expense") {
@@ -757,9 +743,7 @@ export function calcSpentByCategoryInMonth(transactions, monthKey, categoriesFor
 
   for (const t of transactions || []) {
     if (!t) continue;
-    if (t.isTransfer) continue; // ✅ transfers should not count as spending
-    if (t.isSplitParent) continue; // split parent is UI-only
-    if (t.type !== "expense") continue;
+    if (!isBudgetRelevantTransaction(t)) continue;
 
     const iso = toISODateSafe(t.date);
     if (!iso.startsWith(mk)) continue;
@@ -767,9 +751,7 @@ export function calcSpentByCategoryInMonth(transactions, monthKey, categoriesFor
     const cat = String(t.category || "").trim();
     if (!cat) continue;
 
-    const amt = Number(t.amount) || 0;
-    const ae = String(t.adjustmentEffect || "").toLowerCase().trim();
-    const signed = ae === "subtract" ? -amt : amt;
+    const signed = signedExpenseAmountSatang(t);
 
     map.set(cat, (map.get(cat) || 0) + signed);
 

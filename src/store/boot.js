@@ -349,7 +349,7 @@ export function normalizeBootPayload(boot) {
 
   const transactions = toArray(root?.transactions).map((t) => {
     const tx = t && typeof t === "object" ? { ...t } : {};
-    tx.amount = convertAmount(tx.amount);
+    tx.amount = convertAmount(tx.amount ?? tx.amountSatang ?? tx.amount_satang);
     tx.receiptLines = normalizeNestedAmountEntries(tx.receiptLines, convertAmount);
     tx.groups = normalizeNestedAmountEntries(tx.groups, convertAmount);
     tx.lines = normalizeNestedAmountEntries(tx.lines, convertAmount);
@@ -487,21 +487,71 @@ function normalizeLocation(raw) {
 const normalizeNestedEntry = (raw) => {
   const entry = raw && typeof raw === "object" ? raw : {};
   const categoryId = String(entry.categoryId || entry.category || "").trim();
+  const amount = safeSatang(
+    entry.amount ?? entry.amountSatang ?? entry.amount_satang ?? entry.totalSatang ?? entry.total_satang,
+    0
+  );
+  const totalSatang = safeSatang(entry.totalSatang ?? entry.total_satang ?? entry.amount ?? entry.amountSatang, amount);
   const next = {
     ...entry,
+    id: entry.id || generateId(),
     categoryId,
     category: categoryId,
+    rawName: String(entry.rawName || entry.name || entry.label || "").trim(),
+    normalizedName: String(entry.normalizedName || entry.normalized_name || entry.name || entry.rawName || "").trim(),
+    qty: Number.isFinite(Number(entry.qty ?? entry.quantity)) && Number(entry.qty ?? entry.quantity) > 0
+      ? Number(entry.qty ?? entry.quantity)
+      : 1,
+    amount,
+    totalSatang,
   };
 
-  if (Object.prototype.hasOwnProperty.call(next, "amount")) {
-    next.amount = safeSatang(next.amount, 0);
+  if (entry.unitPriceSatang != null || entry.unit_price_satang != null || entry.unitPrice != null) {
+    next.unitPriceSatang = safeSatang(entry.unitPriceSatang ?? entry.unit_price_satang ?? entry.unitPrice, 0);
   }
 
   if (Array.isArray(next.children)) {
     next.children = next.children.map((child) => normalizeNestedEntry(child));
   }
 
+  if (Array.isArray(next.lines)) {
+    next.lines = next.lines.map((line) => normalizeNestedEntry(line));
+  }
+
+  if (Array.isArray(next.items)) {
+    next.items = next.items.map((item) => normalizeNestedEntry(item));
+  }
+
   return next;
+};
+
+const normalizeReceiptSummary = (raw) => {
+  const receipt = raw && typeof raw === "object" ? raw : null;
+  if (!receipt) return null;
+
+  return {
+    ...receipt,
+    merchant: String(receipt.merchant || "").trim(),
+    date: receipt.date ? String(receipt.date).slice(0, 10) : "",
+    paidTotalSatang: safeSatang(receipt.paidTotalSatang ?? receipt.paid_total_satang ?? receipt.total ?? receipt.amount, 0),
+    subtotalSatang: safeSatang(receipt.subtotalSatang ?? receipt.subtotal_satang ?? receipt.subtotal, 0),
+    discountSatang: safeSatang(receipt.discountSatang ?? receipt.discount_satang ?? receipt.discount, 0),
+    serviceChargeSatang: safeSatang(receipt.serviceChargeSatang ?? receipt.service_charge_satang ?? receipt.serviceCharge, 0),
+    taxSatang: safeSatang(receipt.taxSatang ?? receipt.tax_satang ?? receipt.tax, 0),
+    roundingSatang: safeSatang(receipt.roundingSatang ?? receipt.rounding_satang ?? receipt.rounding, 0),
+    paymentMethod: String(receipt.paymentMethod || receipt.payment_method || "").trim(),
+    referenceId: String(receipt.referenceId || receipt.reference_id || receipt.ref || "").trim(),
+    confidence: Number.isFinite(Number(receipt.confidence)) ? Number(receipt.confidence) : null,
+    items: Array.isArray(receipt.items) ? receipt.items.map((item) => normalizeNestedEntry(item)) : [],
+    adjustments: Array.isArray(receipt.adjustments)
+      ? receipt.adjustments.map((adjustment) => ({
+          ...normalizeNestedEntry(adjustment),
+          type: String(adjustment?.type || "unknown").trim() || "unknown",
+          effect: String(adjustment?.effect || (Number(adjustment?.amountSatang || adjustment?.amount || 0) < 0 ? "subtract" : "add")).trim() || "add",
+        }))
+      : [],
+    warnings: Array.isArray(receipt.warnings) ? receipt.warnings.map((warning) => String(warning || "").trim()).filter(Boolean) : [],
+  };
 };
 
 const readNestedTimeCandidates = (raw) => {
@@ -544,7 +594,7 @@ export function normalizeCanonicalInboxTime(raw) {
 function normalizeTransaction(raw) {
   const t = raw && typeof raw === "object" ? raw : {};
   const id = String(t.id || generateId());
-  const amount = safeSatang(t.amount, 0);
+  const amount = safeSatang(t.amount ?? t.amountSatang ?? t.amount_satang, 0);
   const date = t?.date ? String(t.date).slice(0, 10) : toISODate(new Date());
   const time = normalizeCanonicalTransactionTime(t);
   const dateMs = date ? parseDateSafe(date).getTime() : 0;
@@ -552,10 +602,21 @@ function normalizeTransaction(raw) {
   const updatedAt = Number(t.updatedAt || createdAt);
   const location = normalizeLocation(t.location);
   const categoryId = String(t.categoryId || t.category || "").trim();
+  const type = String(t.type || t.txType || t.tx_type || t.kind || "expense").toLowerCase().trim() || "expense";
+  const splitRole = String(t.splitRole || t.split_role || "").toLowerCase().trim();
+  const isSplitParent = t.isSplitParent === true || t.is_split_parent === true || splitRole === "parent";
+  const isSplitChild = t.isSplitChild === true || t.is_split_child === true || splitRole === "child";
+  const splitGroupId = String(t.splitGroupId || t.split_group_id || "").trim();
+  const transferId = String(t.transferId || t.transfer_id || "").trim();
+  const adjustmentEffect = String(t.adjustmentEffect || t.adjustment_effect || t.effect || "").toLowerCase().trim();
+  const receiptLineType = String(t.receiptLineType || t.receipt_line_type || t.lineType || t.line_type || "").toLowerCase().trim();
+  const receipt = normalizeReceiptSummary(t.receipt || t.normalizedReceipt || t.receiptData);
 
   return {
     ...t,
     id,
+    type,
+    txType: String(t.txType || t.tx_type || type).trim() || type,
     amount,
     date,
     time,
@@ -564,9 +625,27 @@ function normalizeTransaction(raw) {
     note: String(t.note || ""),
     createdAt,
     updatedAt,
-    isTransfer: !!t.isTransfer,
+    isTransfer: !!(t.isTransfer || t.is_transfer || transferId),
+    isSplitParent,
+    isSplitChild,
+    splitGroupId,
+    splitParentId: String(t.splitParentId || t.split_parent_id || t.parentTransactionId || "").trim(),
+    transferId,
+    transferKind: String(t.transferKind || t.transfer_kind || "").trim(),
+    isCreditCardPayment: !!(t.isCreditCardPayment || t.is_credit_card_payment),
+    adjustmentEffect,
+    receiptLineType,
+    paymentMethod: String(t.paymentMethod || t.payment_method || "").trim(),
+    referenceId: String(t.referenceId || t.reference_id || t.ref || "").trim(),
+    ref: String(t.ref || t.referenceId || t.reference_id || "").trim(),
     location: location || null,
-    receiptLines: Array.isArray(t.receiptLines) ? t.receiptLines.map((line) => normalizeNestedEntry(line)) : t.receiptLines ?? null,
+    receipt,
+    normalizedReceipt: receipt,
+    receiptLines: Array.isArray(t.receiptLines)
+      ? t.receiptLines.map((line) => normalizeNestedEntry(line))
+      : Array.isArray(receipt?.items)
+        ? receipt.items
+        : t.receiptLines ?? null,
   };
 }
 

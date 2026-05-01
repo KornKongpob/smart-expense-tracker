@@ -5,6 +5,7 @@ import AppHeader from "../components/AppHeader";
 import ModalShell from "../components/ModalShell";
 import { useAppStore } from "../store/store.jsx";
 import { toMonthKey, calcSpentByCategoryInMonth, getBudget } from "../store/selectors.js";
+import { selectBudgetSummary } from "../store/selectors/budgetSelectors.js";
 import { formatCurrency, toISODate } from "../utils/format";
 import { parseMoneyToSatang, sanitizeMoneyInput, formatMoneyInputFromSatang } from "../utils/money";
 import { sumExpenseForDate, daysInMonthKey } from "../utils/transaction";
@@ -53,12 +54,17 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
   const catsAll = useMemo(() => state.categories?.expense || [], [state.categories]);
   const catsActive = useMemo(() => (catsAll || []).filter((c) => !(c?.deletedAt || c?.isDeleted)), [catsAll]);
-  const catsMain = useMemo(
+  const categoryById = useMemo(() => new Map((catsActive || []).map((cat) => [String(cat?.id || ""), cat])), [catsActive]);
+  const catsBudgetable = useMemo(
     () =>
       (catsActive || [])
-        .filter((c) => !String(c?.parentId || "").trim())
         .slice()
-        .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "th")),
+        .sort((a, b) => {
+          const ap = String(a?.parentId || "").trim();
+          const bp = String(b?.parentId || "").trim();
+          if (!!ap !== !!bp) return ap ? 1 : -1;
+          return String(a?.name || "").localeCompare(String(b?.name || ""), "th");
+        }),
     [catsActive]
   );
 
@@ -68,8 +74,12 @@ export default function BudgetsView({ showAlert, showConfirm }) {
     [state.transactions, month, catsAll]
   );
 
-  const cats = catsMain;
+  const cats = catsBudgetable;
   const budgets = useMemo(() => state.budgets || [], [state.budgets]);
+  const budgetSummary = useMemo(
+    () => selectBudgetSummary(state.transactions || [], budgets, catsAll, month),
+    [state.transactions, budgets, catsAll, month]
+  );
 
   // ✅ Used for "Daily budget" preview (only meaningful for current month)
   const todayISO = toISODate(new Date());
@@ -114,18 +124,19 @@ export default function BudgetsView({ showAlert, showConfirm }) {
   }, [cats, spentMap, budgets, month]);
 
   const summary = useMemo(() => {
-    let totalSpent = 0;
-    let totalLimit = 0;
     let alertCount = 0;
 
     for (const r of rows) {
-      totalSpent += Number(r.spent || 0) || 0;
-      totalLimit += Number(r.lim || 0) || 0;
       if (r.alert) alertCount += 1;
     }
 
-    return { totalSpent, totalLimit, alertCount };
-  }, [rows]);
+    return {
+      totalSpent: Number(budgetSummary.actualSatang || 0) || 0,
+      totalLimit: Number(budgetSummary.totalLimitSatang || 0) || 0,
+      alertCount,
+      topOverBudget: budgetSummary.topOverBudget || null,
+    };
+  }, [rows, budgetSummary]);
 
   const openEdit = (catId) => {
     const b = getBudget(budgets, month, catId);
@@ -411,6 +422,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
           const remain = lim ? Math.max(0, lim - spent) : 0;
           const over = lim ? Math.max(0, spent - lim) : 0;
+          const parentCategory = categoryById.get(String(cat?.parentId || ""));
 
           return (
             <button
@@ -431,6 +443,11 @@ export default function BudgetsView({ showAlert, showConfirm }) {
 
                   <div className="min-w-0">
                     <div className="font-semibold text-gray-900 truncate">{cat.name}</div>
+                    {parentCategory ? (
+                      <div className="text-[11px] text-gray-800/50 mt-0.5 truncate">
+                        Subcategory of {parentCategory.name}
+                      </div>
+                    ) : null}
 
                     <div className="text-xs text-gray-700/80 mt-0.5">
                       ใช้แล้ว <span className="font-semibold">{formatCurrency(spent)}</span>

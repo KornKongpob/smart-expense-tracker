@@ -28,6 +28,11 @@ import {
 import { combineLocalDateTime, formatCurrency, formatDateShort, formatTransactionDateTime, normalizeTimeHHmm } from "../utils/format";
 import { useAppStore } from "../store/store.jsx";
 import { parseDateSafe } from "../store/selectors.js";
+import { signedExpenseAmountSatang } from "../domain/ledger/ledgerMath.js";
+import {
+  isReportableExpenseTransaction,
+  isReportableIncomeTransaction,
+} from "../domain/ledger/transactionTypes.js";
 import AppHeader from "../components/AppHeader";
 import ModalShell from "../components/ModalShell";
 import AccountPill from "../components/AccountPill";
@@ -69,16 +74,7 @@ function useIsSmallScreen() {
 // - normal expense line => +amount
 // - discount adjustment (adjustmentEffect='subtract') => -amount
 function signedExpenseAmount(tx) {
-  const t = tx && typeof tx === "object" ? tx : {};
-  if (String(t?.type || "").toLowerCase().trim() !== "expense") return 0;
-  const amt = safeNumber(t?._amt ?? t?.amount);
-  const eff = String(t?.adjustmentEffect || "").toLowerCase().trim();
-  return eff === "subtract" ? -amt : amt;
-}
-
-function isSplitParentTx(tx) {
-  const t = tx && typeof tx === "object" ? tx : {};
-  return !!t?.isSplitParent;
+  return signedExpenseAmountSatang(tx);
 }
 
 function toISODateFromDate(d) {
@@ -325,8 +321,7 @@ export default function StatsView() {
   const todayExpense = useMemo(() => {
     let sum = 0;
     for (const t of normalizedTxs) {
-      if (t?.isTransfer) continue;
-      if (isSplitParentTx(t)) continue;
+      if (!isReportableExpenseTransaction(t)) continue;
       if (t?._iso !== todayIso) continue;
       sum += signedExpenseAmount(t);
     }
@@ -337,8 +332,7 @@ export default function StatsView() {
   const filtered = useMemo(() => {
     const out = [];
     for (const t of normalizedTxs) {
-      if (t?.isTransfer) continue;
-      if (isSplitParentTx(t)) continue;
+      if (!isReportableExpenseTransaction(t) && !isReportableIncomeTransaction(t)) continue;
 
       if (period === "today") {
         if (t._iso === todayIso) out.push(t);
@@ -375,12 +369,12 @@ export default function StatsView() {
     let discountSaved = 0;
 
     for (const t of filtered) {
-      if (t.type === "income") {
+      if (isReportableIncomeTransaction(t)) {
         income += t._amt;
         continue;
       }
 
-      if (t.type === "expense") {
+      if (isReportableExpenseTransaction(t)) {
         const s = signedExpenseAmount(t);
         expenseSigned += s;
         if (String(t?.adjustmentEffect || "").toLowerCase().trim() === "subtract") {
@@ -404,7 +398,7 @@ export default function StatsView() {
   const pieData = useMemo(() => {
     const map = new Map();
     for (const t of deferredFiltered) {
-      if (t.type !== "expense") continue;
+      if (!isReportableExpenseTransaction(t)) continue;
       // Exclude discount adjustments from category distribution (they are savings)
       // but keep them in overall expense totals (totals.expense).
       const s = signedExpenseAmount(t);
@@ -450,8 +444,8 @@ export default function StatsView() {
       const iso = t._iso;
       const prev = map.get(iso) || { iso, date: formatDateShort(iso), income: 0, expense: 0, net: 0 };
 
-      if (t.type === "income") prev.income += t._amt;
-      else if (t.type === "expense") prev.expense += signedExpenseAmount(t);
+      if (isReportableIncomeTransaction(t)) prev.income += t._amt;
+      else if (isReportableExpenseTransaction(t)) prev.expense += signedExpenseAmount(t);
 
       // Don't let expense go below 0 on chart (e.g., discount-only day)
       if (prev.expense < 0) prev.expense = 0;
@@ -499,7 +493,7 @@ export default function StatsView() {
   const catTxs = useMemo(() => {
     if (!selectedCatId) return [];
     const txs = filtered
-      .filter((t) => t.type === "expense" && t.category === selectedCatId)
+      .filter((t) => isReportableExpenseTransaction(t) && t.category === selectedCatId)
       .slice()
       .sort((a, b) => getTxOrderKey(b) - getTxOrderKey(a));
     return txs;

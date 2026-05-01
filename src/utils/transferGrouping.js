@@ -8,6 +8,7 @@
 // It uses multiple strategies to pair legs: transferId, ref, and heuristics (amount/date/type).
 
 import { isCreditAccount } from "./accountMatch.js";
+import { isTransferTransaction } from "../domain/ledger/transactionTypes.js";
 
 const EPS = 1; // 1 satang
 
@@ -57,12 +58,7 @@ function normalizeLooseText(s) {
 }
 
 export function isTransferLike(tx) {
-  if (!tx || typeof tx !== "object") return false;
-  if (tx.isTransfer) return true;
-  // fallback for older data
-  if (safeString(tx.category) === "transfer") return true;
-  if (safeString(tx.transferId)) return true;
-  return false;
+  return isTransferTransaction(tx);
 }
 
 function getAccountById(accounts, id) {
