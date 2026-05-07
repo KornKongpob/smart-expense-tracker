@@ -29,6 +29,7 @@ import {
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
 import { normalizeBackupCore } from '../src/utils/backupPayload.js';
 import { normalizeProviderScanResult } from '../server/legacy-api/scan.js';
+import { scanWithProvider, normalizeProviderName } from '../lib/scan/providers/index.js';
 import { parseScanRequest, assertAllowedInputMime, assertBase64UnderLimit } from '../lib/scan/requestParse.js';
 import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from '../lib/scan/openaiModel.js';
 import { createRateLimiter } from '../lib/scan/rateLimit.js';
@@ -46,7 +47,7 @@ import {
 } from '../src/views/add-transaction/helpers/queueTypeHelpers.js';
 import { canonicalizeCategoryId } from '../src/utils/categoryIds.js';
 import { buildCustomCategoryId } from '../src/utils/categoryCustomId.js';
-import { createInitialState } from '../src/store/boot.js';
+import { applyGoalContribution, createInitialState, normalizeGoal } from '../src/store/boot.js';
 import {
   applyCategoryPresentationToSnapshot,
   mergeCategoryState,
@@ -91,6 +92,11 @@ import {
   getScanUploadMeta,
   patchScanUploadEntry,
 } from '../src/features/app/scanUploadState.js';
+import {
+  calculateGoalProgressPercent,
+  calculateMonthlyNeeded,
+  summarizeGoals,
+} from '../src/features/goals/goalCalculators.js';
 import {
   getCanonicalPathForPathname,
   getInitialHomePath,
@@ -721,8 +727,140 @@ test('backup normalization: wrapped payloads preserve merchants and normalize am
   assert.equal(normalized.moneyUnit, 'baht');
   assert.equal(normalized.merchants.length, 1);
   assert.equal(normalized.merchants[0].canonical, 'Cafe Bloom');
+  assert.deepEqual(normalized.goals, []);
   assert.ok(Array.isArray(normalized.inbox));
   assert.ok(Array.isArray(normalized.scanInbox));
+});
+
+test('goals: boot normalization keeps satang integers and legacy backups default to empty goals', () => {
+  const empty = createInitialState({ transactions: [], accounts: [], categories: { expense: [], income: [] } });
+  assert.deepEqual(empty.goals, []);
+
+  const state = createInitialState({
+    moneyUnit: 'satang',
+    transactions: [],
+    accounts: [],
+    categories: { expense: [], income: [] },
+    goals: [
+      {
+        id: 'goal_trip',
+        name: 'Japan trip',
+        type: 'travel',
+        targetAmount: 1500000,
+        currentAmount: 250000,
+        dueDate: '2026-12-01',
+        linkedAccountIds: ['acc_cash', 'acc_cash', ''],
+        priority: 4,
+        monthlyContribution: 125000,
+        autoReserveRule: { percent: 10 },
+        status: 'active',
+        createdAt: 100,
+        updatedAt: 100,
+      },
+    ],
+  });
+
+  assert.equal(state.goals.length, 1);
+  assert.equal(state.goals[0].targetAmount, 1500000);
+  assert.equal(state.goals[0].currentAmount, 250000);
+  assert.equal(state.goals[0].monthlyContribution, 125000);
+  assert.deepEqual(state.goals[0].linkedAccountIds, ['acc_cash']);
+});
+
+test('goals: contribution is satang-safe and marks target as completed', () => {
+  const goal = normalizeGoal({
+    id: 'goal_emergency',
+    name: 'Emergency fund',
+    type: 'emergency_fund',
+    targetAmount: 100000,
+    currentAmount: 40000,
+    monthlyContribution: 10000,
+    status: 'active',
+    createdAt: 100,
+    updatedAt: 100,
+  });
+
+  const next = applyGoalContribution(goal, 60000, { now: 200 });
+
+  assert.equal(next.currentAmount, 100000);
+  assert.equal(next.status, 'completed');
+  assert.equal(next.updatedAt, 200);
+});
+
+test('goals UI helpers: summarize active goals and monthly amount without baht floats', () => {
+  const goals = [
+    {
+      id: 'goal_1',
+      name: 'Emergency fund',
+      type: 'emergency_fund',
+      targetAmount: 120000,
+      currentAmount: 30000,
+      dueDate: '2026-08-01',
+      monthlyContribution: 10000,
+      status: 'active',
+    },
+    {
+      id: 'goal_2',
+      name: 'Paused trip',
+      type: 'travel',
+      targetAmount: 50000,
+      currentAmount: 10000,
+      dueDate: '',
+      monthlyContribution: 5000,
+      status: 'paused',
+    },
+  ];
+
+  const summary = summarizeGoals(goals, { today: '2026-05-01' });
+
+  assert.equal(summary.activeCount, 1);
+  assert.equal(summary.totalTarget, 120000);
+  assert.equal(summary.totalCurrent, 30000);
+  assert.equal(calculateGoalProgressPercent(goals[0]), 25);
+  assert.equal(calculateMonthlyNeeded(goals[0], '2026-05-01'), 30000);
+  assert.equal(summary.monthlyContributionNeeded, 30000);
+});
+
+test('storage: saveAll persists savings goals in versioned payload', (t) => {
+  const writes = [];
+  installBrowserGlobals(t, {
+    setItem: (_key, value) => writes.push(JSON.parse(value)),
+  });
+
+  saveAll({
+    moneyUnit: 'satang',
+    transactions: [],
+    accounts: [],
+    categories: { expense: [], income: [] },
+    budgets: [],
+    recurring: [],
+    goals: [
+      {
+        id: 'goal_buffer',
+        name: 'Buffer',
+        type: 'debt_buffer',
+        targetAmount: 300000,
+        currentAmount: 100000,
+        dueDate: '',
+        linkedAccountIds: [],
+        priority: 1,
+        monthlyContribution: 50000,
+        autoReserveRule: null,
+        status: 'active',
+        createdAt: 100,
+        updatedAt: 100,
+      },
+    ],
+    rules: [],
+    merchants: [],
+    inbox: [],
+    scanInbox: [],
+    ui: { view: 'dashboard', editingId: null },
+  });
+
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].data.goals[0].id, 'goal_buffer');
+  assert.equal(writes[0].data.goals[0].targetAmount, 300000);
 });
 
 test('storage: saveAll emits a storage failure event when serialization fails', (t) => {
@@ -912,6 +1050,23 @@ test('backup validation: deterministic repairs pass and materially malformed imp
       budgets: [],
       recurring: [],
       rules: [],
+      goals: [
+        {
+          id: 'goal_schema',
+          name: 'Schema goal',
+          type: 'custom',
+          targetAmount: 500000,
+          currentAmount: 125000,
+          dueDate: '',
+          linkedAccountIds: [],
+          priority: 1,
+          monthlyContribution: 25000,
+          autoReserveRule: null,
+          status: 'active',
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      ],
       merchants: [
         {
           id: 'merchant-2',
@@ -929,6 +1084,7 @@ test('backup validation: deterministic repairs pass and materially malformed imp
 
   assert.equal(repaired.success, true);
   assert.equal(repaired.data.moneyUnit, 'baht');
+  assert.equal(repaired.data.goals[0].targetAmount, 50000000);
   assert.equal(repaired.data.merchants[0].canonical, 'Mini Big C');
 
   const blocked = validateBackupImport({
@@ -1107,6 +1263,83 @@ test('scan request parse: enforces allowed mime types and base64 byte limits', (
   assert.equal(assertAllowedInputMime('application/pdf', { allowPdf: false }), '');
   assert.deepEqual(assertBase64UnderLimit('QUJDRA==', 4), { ok: true, bytes: 4 });
   assert.deepEqual(assertBase64UnderLimit('QUJDRA==', 3), { ok: false, bytes: 4 });
+});
+
+test('scan provider: local handlers receive payload and return normalized provider result', async () => {
+  const payload = {
+    base64: 'QUJDRA==',
+    mimeType: 'image/jpeg',
+    filename: 'receipt.jpg',
+    accounts: [{ id: 'acc_cash', name: 'Cash' }],
+  };
+
+  const seen = [];
+  const result = await scanWithProvider({
+    provider: 'openai',
+    payload,
+    scanOpenAI: async (input) => {
+      seen.push(input);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          suggestion: { amount: 123, merchant: 'Cafe Bloom' },
+        },
+      };
+    },
+  });
+
+  assert.equal(normalizeProviderName('google'), 'gemini');
+  assert.deepEqual(seen[0], payload);
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.json.suggestion.amount, 123);
+});
+
+test('scan provider: legacy HTTP JSON mode is injectable and preserves Gemini proxy behavior', async () => {
+  const calls = [];
+  const result = await scanWithProvider({
+    url: 'https://example.test/gemini',
+    payload: { contents: [{ parts: [{ text: 'prompt' }] }] },
+    timeoutMs: 50,
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: '{"amount":123}' }] } }] }),
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://example.test/gemini');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { contents: [{ parts: [{ text: 'prompt' }] }] });
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.json.candidates[0].content.parts[0].text, '{"amount":123}');
+});
+
+test('scan provider: unsupported providers return normalized errors', async () => {
+  const result = await scanWithProvider({ provider: 'unknown-model', payload: {} });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 400);
+  assert.equal(result.json.ok, false);
+  assert.equal(result.json.code, 'invalid_scan_provider');
+  assert.match(result.json.message, /unknown-model/);
+});
+
+test('scan api: JSON/base64 OpenAI provider payload keeps account and filename context', () => {
+  const source = readFileSync(new URL('../server/legacy-api/scan.js', import.meta.url), 'utf8');
+  const providerCall = source.slice(source.indexOf('const out = await scanWithProvider({'));
+
+  assert.match(providerCall, /provider:\s*process\.env\.SCAN_PROVIDER \|\| "openai"/);
+  assert.match(providerCall, /accounts,/);
+  assert.match(providerCall, /\{\s*filename,\s*fileName:\s*filename\s*\}/);
+  assert.match(providerCall, /scanOpenAI:\s*callOpenAI/);
 });
 
 test('scan api: provider fallback normalization keeps success and error contracts distinct', () => {
@@ -1908,14 +2141,28 @@ test('runtime source: service worker only registers in production and clears old
 test('route helpers: canonical routes, aliases, and legacy hashes resolve to Next paths', () => {
   assert.equal(getCanonicalPathForPathname('/add-transaction'), '/add');
   assert.equal(getCanonicalPathForPathname('/budgets'), '/planner');
+  assert.equal(getCanonicalPathForPathname('/debt-planner'), '/debts');
+  assert.equal(getCanonicalPathForPathname('/subscriptions'), '/bills');
   assert.equal(getViewForPathname('/accounts'), 'accounts');
+  assert.equal(getViewForPathname('/plan'), 'plan');
+  assert.equal(getViewForPathname('/assistant'), 'assistant');
+  assert.equal(getViewForPathname('/goals'), 'goals');
+  assert.equal(getViewForPathname('/debts'), 'debts');
+  assert.equal(getViewForPathname('/bills'), 'bills');
   assert.equal(getViewForPathname('/stats'), 'planner');
   assert.equal(getPathForLegacyHash('#dashboard'), '/dashboard');
   assert.equal(getPathForLegacyHash('#add-transaction'), '/add');
   assert.equal(getPathForLegacyHash('#stats'), '/planner');
   assert.equal(getPathForLegacyHash('#/stats'), '/planner');
+  assert.equal(getPathForLegacyHash('#/plan'), '/plan');
+  assert.equal(getPathForLegacyHash('#/assistant'), '/assistant');
   assert.equal(getPathForLegacyHash('#/recurring'), '/recurring');
+  assert.equal(getPathForLegacyHash('#/goals'), '/goals');
+  assert.equal(getPathForLegacyHash('#/debts'), '/debts');
+  assert.equal(getPathForLegacyHash('#/bills'), '/bills');
   assert.equal(getInitialHomePath({ pathname: '/', hash: '#/stats' }), '/planner');
+  assert.equal(getInitialHomePath({ pathname: '/', hash: '#/plan' }), '/plan');
+  assert.equal(getInitialHomePath({ pathname: '/', hash: '#/assistant' }), '/assistant');
   assert.equal(getInitialHomePath({ pathname: '/accounts', hash: '#/stats' }), '/accounts');
   assert.equal(getInitialHomePath({ pathname: '/', hash: '' }), '/dashboard');
 });

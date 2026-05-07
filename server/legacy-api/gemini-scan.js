@@ -73,7 +73,8 @@ export default async function handler(req, res) {
     const json = provider.json;
     if (!provider.ok) {
       const msg = json?.error?.message || "Gemini request failed";
-      res.status(provider.status).json({ ok: false, code: "gemini_error", message: msg });
+      const err = normalizeErrorResponse({ status: provider.status, code: "gemini_error", message: msg });
+      res.status(err.status).json(err.body);
       return;
     }
 

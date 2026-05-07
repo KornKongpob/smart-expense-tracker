@@ -202,6 +202,26 @@ export const clampInt = (v, min, max, fallback) => {
   return Math.min(max, Math.max(min, n));
 };
 
+const GOAL_TYPES = new Set(["emergency_fund", "travel", "purchase", "debt_buffer", "custom"]);
+const GOAL_STATUSES = new Set(["active", "paused", "completed"]);
+
+const normalizeISODateString = (value) => {
+  const s = String(value || "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+};
+
+const uniqueStringList = (list) => {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(list) ? list : []) {
+    const token = String(value || "").trim();
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+};
+
 const hasValidIconId = (iconId) => {
   const id = String(iconId || "").trim();
   return !!id;
@@ -402,6 +422,33 @@ export function normalizeBootPayload(boot) {
     return rr;
   });
 
+  const readGoalAmount = (goal, valueKeys, satangKeys = []) => {
+    const source = goal && typeof goal === "object" ? goal : {};
+    for (const key of satangKeys) {
+      if (source[key] != null && String(source[key]).trim() !== "") return safeSatang(source[key], 0);
+    }
+    for (const key of valueKeys) {
+      if (source[key] != null && String(source[key]).trim() !== "") return convertAmount(source[key]);
+    }
+    return 0;
+  };
+
+  const goals = toArray(root?.goals).map((g) => {
+    const goal = g && typeof g === "object" ? { ...g } : {};
+    goal.targetAmount = readGoalAmount(goal, ["targetAmount", "target_amount"], ["targetAmountSatang", "target_amount_satang"]);
+    goal.currentAmount = readGoalAmount(
+      goal,
+      ["currentAmount", "current_amount"],
+      ["currentAmountSatang", "current_amount_satang"]
+    );
+    goal.monthlyContribution = readGoalAmount(
+      goal,
+      ["monthlyContribution", "monthly_contribution"],
+      ["monthlyContributionSatang", "monthly_contribution_satang"]
+    );
+    return goal;
+  });
+
   const merchants = toArray(root?.merchants).map((m) => ({ ...(m && typeof m === "object" ? m : {}) }));
   const ui = root?.ui && typeof root.ui === "object" ? root.ui : undefined;
 
@@ -411,6 +458,7 @@ export function normalizeBootPayload(boot) {
     categories,
     budgets,
     recurring,
+    goals,
     merchants,
     inbox,
     scanInbox,
@@ -468,6 +516,69 @@ export function normalizeRules(list) {
   const withP = arr.map((r, idx) => normalizeRule(r, 1000 + idx));
   withP.sort((a, b) => (a.priority || 0) - (b.priority || 0));
   return withP.map((r, idx) => ({ ...r, priority: idx + 1 }));
+}
+
+export function normalizeGoal(raw, fallbackPriority = 1) {
+  const g = raw && typeof raw === "object" ? raw : {};
+  const now = Date.now();
+  const id = String(g.id || generateId()).trim() || generateId();
+  const name = String(g.name || "").trim() || "Savings goal";
+  const type = GOAL_TYPES.has(String(g.type || "")) ? String(g.type) : "custom";
+  const targetAmount = Math.max(0, safeSatang(g.targetAmount ?? g.targetAmountSatang ?? g.target_amount_satang, 0));
+  const currentAmount = Math.max(0, safeSatang(g.currentAmount ?? g.currentAmountSatang ?? g.current_amount_satang, 0));
+  const monthlyContribution = Math.max(
+    0,
+    safeSatang(g.monthlyContribution ?? g.monthlyContributionSatang ?? g.monthly_contribution_satang, 0)
+  );
+  const rawStatus = String(g.status || "").trim();
+  const status = GOAL_STATUSES.has(rawStatus)
+    ? rawStatus
+    : targetAmount > 0 && currentAmount >= targetAmount
+      ? "completed"
+      : "active";
+  const createdAt = Number.isFinite(Number(g.createdAt)) ? Number(g.createdAt) : now;
+  const updatedAt = Number.isFinite(Number(g.updatedAt)) ? Number(g.updatedAt) : createdAt;
+
+  return {
+    ...g,
+    id,
+    name,
+    type,
+    targetAmount,
+    currentAmount,
+    dueDate: normalizeISODateString(g.dueDate ?? g.due_date),
+    linkedAccountIds: uniqueStringList(g.linkedAccountIds ?? g.linked_account_ids),
+    priority: clampInt(g.priority, 1, 9999, fallbackPriority),
+    monthlyContribution,
+    autoReserveRule: g.autoReserveRule && typeof g.autoReserveRule === "object" ? g.autoReserveRule : null,
+    status,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function normalizeGoals(list) {
+  const arr = toArray(list).filter(Boolean);
+  const byId = new Map();
+  for (let idx = 0; idx < arr.length; idx += 1) {
+    const goal = normalizeGoal(arr[idx], idx + 1);
+    byId.set(String(goal.id), goal);
+  }
+  const normalized = [...byId.values()].sort((a, b) => {
+    const byPriority = (Number(a?.priority) || 0) - (Number(b?.priority) || 0);
+    if (byPriority) return byPriority;
+    return String(a?.createdAt || "").localeCompare(String(b?.createdAt || ""));
+  });
+  return normalized.map((goal, idx) => normalizeGoal({ ...goal, priority: idx + 1 }, idx + 1));
+}
+
+export function applyGoalContribution(rawGoal, amountSatang, { now = Date.now() } = {}) {
+  const amount = Math.max(0, safeSatang(amountSatang, 0));
+  const goal = normalizeGoal(rawGoal);
+  if (amount <= 0) return goal;
+  const currentAmount = goal.currentAmount + amount;
+  const status = goal.targetAmount > 0 && currentAmount >= goal.targetAmount ? "completed" : goal.status;
+  return normalizeGoal({ ...goal, currentAmount, status, updatedAt: Number(now) || Date.now() }, goal.priority);
 }
 
 function normalizeLocation(raw) {
@@ -713,6 +824,7 @@ export function createInitialState(boot = {}) {
     categories: cats,
     budgets: toArray(normalized?.budgets),
     recurring: toArray(normalized?.recurring),
+    goals: normalizeGoals(normalized?.goals),
     merchants: normalizeMerchants(normalized?.merchants),
     inbox,
     scanInbox: inbox,

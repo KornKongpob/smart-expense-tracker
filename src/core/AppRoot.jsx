@@ -34,14 +34,19 @@ const SCREEN_LOADERS = {
   add: () => import("../features/app/screens/AddScreen.jsx"),
   transactions: () => import("../features/app/screens/TransactionsScreen.jsx"),
   accounts: () => import("../features/app/screens/AccountsScreen.jsx"),
+  plan: () => import("../features/app/screens/PlanScreen.jsx"),
+  assistant: () => import("../features/app/screens/AssistantScreen.jsx"),
   categories: () => import("../features/app/screens/CategoriesScreen.jsx"),
   planner: () => import("../features/app/screens/PlannerScreen.jsx"),
+  goals: () => import("../features/app/screens/GoalsScreen.jsx"),
+  debts: () => import("../features/app/screens/DebtPlannerScreen.jsx"),
+  bills: () => import("../features/app/screens/BillsScreen.jsx"),
   recurring: () => import("../features/app/screens/RecurringScreen.jsx"),
   settings: () => import("../features/app/screens/SettingsScreen.jsx"),
 };
 
 const PRELOADED_VIEWS = new Set();
-const IDLE_PRELOAD_VIEWS = ["inbox", "add", "transactions", "accounts", "settings", "planner", "categories", "recurring"];
+const IDLE_PRELOAD_VIEWS = ["plan", "assistant", "inbox", "add", "transactions", "accounts", "settings", "planner", "goals", "debts", "bills", "categories", "recurring"];
 
 function preloadView(view) {
   const key = String(view || "").trim();
@@ -59,8 +64,13 @@ const InboxScreen = lazy(SCREEN_LOADERS.inbox);
 const AddScreen = lazy(SCREEN_LOADERS.add);
 const TransactionsScreen = lazy(SCREEN_LOADERS.transactions);
 const AccountsScreen = lazy(SCREEN_LOADERS.accounts);
+const PlanScreen = lazy(SCREEN_LOADERS.plan);
+const AssistantScreen = lazy(SCREEN_LOADERS.assistant);
 const CategoriesScreen = lazy(SCREEN_LOADERS.categories);
 const PlannerScreen = lazy(SCREEN_LOADERS.planner);
+const GoalsScreen = lazy(SCREEN_LOADERS.goals);
+const DebtPlannerScreen = lazy(SCREEN_LOADERS.debts);
+const BillsScreen = lazy(SCREEN_LOADERS.bills);
 const RecurringScreen = lazy(SCREEN_LOADERS.recurring);
 const SettingsScreen = lazy(SCREEN_LOADERS.settings);
 
@@ -70,8 +80,13 @@ const SCREEN_COMPONENTS = {
   add: AddScreen,
   transactions: TransactionsScreen,
   accounts: AccountsScreen,
+  plan: PlanScreen,
+  assistant: AssistantScreen,
   categories: CategoriesScreen,
   planner: PlannerScreen,
+  goals: GoalsScreen,
+  debts: DebtPlannerScreen,
+  bills: BillsScreen,
   recurring: RecurringScreen,
   settings: SettingsScreen,
 };
@@ -82,19 +97,29 @@ const SCREEN_TITLES = {
   add: "Add | Smart Expense",
   transactions: "Transactions | Smart Expense",
   accounts: "Accounts | Smart Expense",
+  plan: "Plan | Smart Expense",
+  assistant: "Assistant | Smart Expense",
   categories: "Categories | Smart Expense",
   planner: "Planner | Smart Expense",
+  goals: "Savings Goals | Smart Expense",
+  debts: "Debt Planner | Smart Expense",
+  bills: "Bills | Smart Expense",
   recurring: "Recurring | Smart Expense",
   settings: "Settings | Smart Expense",
 };
 
 const SCREEN_HEADER_LABELS = {
+  debts: "แผนจัดการหนี้",
+  goals: "เป้าหมายการออม",
+  bills: "บิล & Subscription",
   recurring: "รายการประจำ",
   dashboard: "ภาพรวม",
   inbox: "กล่องรับ",
   add: "เพิ่มรายการ",
   transactions: "รายการย้อนหลัง",
   accounts: "บัญชี",
+  plan: "แผนการเงิน",
+  assistant: "ผู้ช่วยการเงิน",
   categories: "หมวดหมู่",
   planner: "วางแผนการเงิน",
   settings: "ตั้งค่า",

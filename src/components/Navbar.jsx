@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef } from "react";
-import { Camera, CreditCard, Home, Inbox, MoreHorizontal } from "lucide-react";
+import { Camera, CreditCard, Home, MoreHorizontal, Target } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 
 function NavItem({ active, icon, label, onClick, testId, primary = false }) {
@@ -26,7 +26,8 @@ export default function Navbar() {
   const currentView = state?.ui?.view || "dashboard";
   const navRef = useRef(null);
 
-  const isHubView = ["more", "stats", "budgets", "categories", "recurring", "rules", "merchants"].includes(currentView);
+  const isPlanView = ["plan", "assistant", "budgets", "goals", "debts", "bills", "recurring"].includes(currentView);
+  const isHubView = ["more", "stats", "categories", "rules", "merchants", "inbox"].includes(currentView);
 
   useLayoutEffect(() => {
     const el = navRef.current;
@@ -75,11 +76,11 @@ export default function Navbar() {
             testId="nav-today"
           />
           <NavItem
-            active={currentView === "inbox"}
-            onClick={() => actions.navigate("inbox")}
-            icon={<Inbox size={20} />}
-            label="Inbox"
-            testId="nav-inbox"
+            active={isPlanView}
+            onClick={() => actions.navigate("plan")}
+            icon={<Target size={20} />}
+            label="แผน"
+            testId="nav-plan"
           />
           <NavItem
             active={currentView === "add"}

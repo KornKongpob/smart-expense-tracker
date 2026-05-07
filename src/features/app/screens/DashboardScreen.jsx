@@ -5,6 +5,8 @@ import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import DashboardAnalyticsPanels from "../DashboardAnalyticsPanels.jsx";
+import AssistantPanel from "../../assistant/AssistantPanel.jsx";
+import { generatePersonalMoneyRecommendations } from "../../assistant/recommendationEngine.js";
 import TransactionEditSheet, {
   TransactionKindIcon,
   buildTransactionAccountLabel,
@@ -14,7 +16,7 @@ import TransactionEditSheet, {
 } from "../TransactionEditSheet.jsx";
 import { AmountText, MetricCard, ScreenShell, StatusPill } from "../ui.jsx";
 import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
-import { formatCurrency } from "../../../utils/format.js";
+import { formatCurrency, toISODate } from "../../../utils/format.js";
 
 void AccountSheetPicker;
 
@@ -55,7 +57,10 @@ export default function DashboardScreen() {
     setSelectedMonth,
     accounts,
     categories,
+    budgetRows,
+    financialGoals,
     recentTransactions,
+    recurringRules,
     recurringDueToday,
     dashboardPreviousSnapshot,
     setTransactionsFilters,
@@ -65,6 +70,7 @@ export default function DashboardScreen() {
   } = useExpenseApp();
 
   const snapshot = dashboardSnapshot || {};
+  const todayISO = useMemo(() => toISODate(new Date()), []);
   const usingSuggestedPlan = !budgetPlanSnapshot?.hasAppliedBudget && !budgetPlanSnapshot?.usesLegacyMonthlyTarget;
   const displayExpenseBudgetSatang = usingSuggestedPlan
     ? Number(budgetPlanSnapshot?.suggestedExpenseBudgetSatang || 0)
@@ -98,6 +104,21 @@ export default function DashboardScreen() {
   const topCategories = Array.isArray(snapshot.top_categories) ? snapshot.top_categories : [];
   const snapshotAccounts = Array.isArray(snapshot.accounts) ? snapshot.accounts : [];
   const allAccounts = useMemo(() => (Array.isArray(accounts) ? accounts : []), [accounts]);
+  const assistantState = useMemo(
+    () => ({
+      accounts: allAccounts,
+      categories,
+      budgetRows,
+      financialGoals,
+      recentTransactions,
+      recurringRules,
+    }),
+    [allAccounts, budgetRows, categories, financialGoals, recentTransactions, recurringRules],
+  );
+  const assistantRecommendations = useMemo(
+    () => generatePersonalMoneyRecommendations(assistantState, { today: todayISO, maxItems: 5 }),
+    [assistantState, todayISO],
+  );
   const accountMap = useMemo(
     () => new Map(allAccounts.map((account) => [toId(account?.id), account])),
     [allAccounts],
@@ -246,6 +267,12 @@ export default function DashboardScreen() {
   return (
     <ScreenShell title="ภาพรวม">
       {showStarterCardFirst ? starterCard : null}
+
+      <AssistantPanel
+        recommendations={assistantRecommendations}
+        onNavigate={(view) => navigateToView(view)}
+        actionViewAliases={{ planner: "planner", budgets: "planner" }}
+      />
 
       <article className="ui-card finance-panel finance-month-card">
         <div className="finance-month-card-copy">

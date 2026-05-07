@@ -44,6 +44,7 @@ export function normalizeBackupCore(raw, defaults = {}) {
     moneyUnit: resolvedMoneyUnit,
     inbox: pickInboxList(source.inbox, source.scanInbox, ensureArray(defaults.defaultInbox, [])),
     scanInbox: pickInboxList(source.scanInbox, source.inbox, ensureArray(defaults.defaultScanInbox, [])),
+    goals: ensureArray(source.goals, ensureArray(defaults.defaultGoals, [])),
     merchants: ensureArray(source.merchants, ensureArray(defaults.defaultMerchants, [])),
   };
 
@@ -61,6 +62,7 @@ export function normalizeBackupCore(raw, defaults = {}) {
     ),
     budgets: ensureArray(normalized.budgets, ensureArray(defaults.defaultBudgets, [])),
     recurring: ensureArray(normalized.recurring, ensureArray(defaults.defaultRecurring, [])),
+    goals: ensureArray(normalized.goals, ensureArray(defaults.defaultGoals, [])),
     rules: ensureArray(normalized.rules, ensureArray(defaults.defaultRules, [])),
     merchants: ensureArray(normalized.merchants, ensureArray(defaults.defaultMerchants, [])),
     inbox,

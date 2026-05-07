@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import {
   BarChart3,
   CreditCard,
-  Inbox,
   PlusCircle,
   Settings,
+  Target,
   X,
 } from "lucide-react";
 
@@ -14,11 +14,14 @@ import { useLockBodyScroll } from "../../utils/useLockBodyScroll.js";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "ภาพรวม", icon: BarChart3 },
-  { id: "inbox", label: "กล่องรับ", icon: Inbox },
+  { id: "plan", label: "แผน", icon: Target },
   { id: "add", label: "เพิ่ม", icon: PlusCircle },
   { id: "accounts", label: "บัญชี", icon: CreditCard },
   { id: "settings", label: "ตั้งค่า", icon: Settings },
 ];
+
+const PLAN_NAV_VIEWS = new Set(["plan", "assistant", "planner", "goals", "debts", "bills", "recurring"]);
+const SETTINGS_NAV_VIEWS = new Set(["settings", "categories"]);
 
 function getToastLabel(tone) {
   const key = String(tone || "info").trim().toLowerCase();
@@ -160,9 +163,11 @@ export function BottomNav({ view, onChange, onIntent }) {
       <div className="finance-bottom-nav-surface">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const active = item.id === "settings"
-            ? view === "settings" || view === "categories" || view === "planner" || view === "recurring"
-            : view === item.id;
+          const active = item.id === "plan"
+            ? PLAN_NAV_VIEWS.has(view)
+            : item.id === "settings"
+              ? SETTINGS_NAV_VIEWS.has(view)
+              : view === item.id;
           return (
             <button
               key={item.id}

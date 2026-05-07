@@ -207,6 +207,24 @@ export const RecurringSchema = z.object({
   lastGenerated: z.string().nullable().default(null),
 }).passthrough();
 
+// ===== Savings Goal =====
+
+export const GoalSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).default("Savings goal"),
+  type: z.enum(["emergency_fund", "travel", "purchase", "debt_buffer", "custom"]).default("custom"),
+  targetAmount: satangInt,
+  currentAmount: satangInt,
+  dueDate: isoDateStr,
+  linkedAccountIds: z.array(z.string()).default([]),
+  priority: z.number().int().finite().default(1),
+  monthlyContribution: satangInt,
+  autoReserveRule: z.object({}).passthrough().nullable().default(null),
+  status: z.enum(["active", "paused", "completed"]).default("active"),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+}).passthrough();
+
 // ===== Automation Rule =====
 
 export const RuleConditionsSchema = z.object({
@@ -290,6 +308,7 @@ export const AppStateSchema = z.object({
   categories: CategoriesSchema.default({ expense: [], income: [] }),
   budgets: z.array(BudgetSchema).default([]),
   recurring: z.array(RecurringSchema).default([]),
+  goals: z.array(GoalSchema).default([]),
   rules: z.array(RuleSchema).default([]),
   merchants: z.array(MerchantSchema).default([]),
   inbox: z.array(InboxItemSchema).default([]),

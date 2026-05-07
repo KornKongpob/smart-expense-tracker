@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  BarChart3,
   Bell,
   ChevronRight,
+  CreditCard,
   Download,
   FolderTree,
+  Inbox,
   LogOut,
+  ReceiptText,
   Repeat2,
   RefreshCcw,
+  Sparkles,
   Target,
   Upload,
 } from "lucide-react";
@@ -17,7 +22,7 @@ import { ScreenShell, StatusPill } from "../ui.jsx";
 import { formatCurrency } from "../../../utils/format.js";
 
 export default function SettingsScreen() {
-  const { navigateToView } = useExpenseNavigation();
+  const { navigateToPath, navigateToView } = useExpenseNavigation();
   const {
     profile,
     queue,
@@ -165,6 +170,56 @@ export default function SettingsScreen() {
             <button
               type="button"
               className="finance-list-button"
+              onClick={() => navigateToView("plan")}
+              data-testid="open-plan"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <Target size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">แผนการเงิน</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      งบ ออม หนี้ บิล และเงินเหลือใช้ในหน้าเดียว
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  <ChevronRight size={16} />
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => navigateToView("assistant")}
+              data-testid="open-assistant"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <Sparkles size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">ผู้ช่วยการเงิน</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      ถามเรื่องเงินเหลือใช้ บิล หนี้ และ action ต่อไปจากข้อมูลในเครื่อง
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  <ChevronRight size={16} />
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
               onClick={() => navigateToView("planner")}
               data-testid="open-planner"
             >
@@ -198,6 +253,110 @@ export default function SettingsScreen() {
             <button
               type="button"
               className="finance-list-button"
+              onClick={() => navigateToPath("/stats")}
+              data-testid="open-stats"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <BarChart3 size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">สถิติ/รายงาน</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      เส้นทางรายงานเดิมยังเปิดได้จากตรงนี้
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  <ChevronRight size={16} />
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => navigateToView("inbox")}
+              data-testid="open-inbox"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <Inbox size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">กล่องรับ</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      ตรวจรายการสแกนและรายการรออนุมัติ
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  {pendingCount ? <StatusPill tone="warning">{pendingCount}</StatusPill> : <ChevronRight size={16} />}
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => navigateToView("debts")}
+              data-testid="open-debts"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <CreditCard size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">แผนจัดการหนี้</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      ดูยอดหนี้ วันครบกำหนด และจำลองลำดับปิดหนี้จากบัตรเครดิต
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  {plannerSummary.activeDebtCount ? (
+                    <StatusPill tone="warning">{plannerSummary.activeDebtCount} แผน</StatusPill>
+                  ) : (
+                    <ChevronRight size={16} />
+                  )}
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => navigateToView("goals")}
+              data-testid="open-goals"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <Target size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">เป้าหมายการออม</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      วางแผนเงินก้อน กองทุนฉุกเฉิน เที่ยว ซื้อของใหญ่ และเงินสำรองจ่ายหนี้
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  <ChevronRight size={16} />
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
               onClick={() => navigateToView("recurring")}
               data-testid="open-recurring"
             >
@@ -222,6 +381,31 @@ export default function SettingsScreen() {
                   ) : (
                     <ChevronRight size={16} />
                   )}
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
+              onClick={() => navigateToView("bills")}
+              data-testid="open-bills"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <ReceiptText size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">บิล & Subscription</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      ดูบิลข้างหน้า subscription ที่ตรวจพบ และยอดที่อาจแพงขึ้น
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  <ChevronRight size={16} />
                 </div>
               </div>
             </button>

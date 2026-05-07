@@ -3,8 +3,8 @@
 // Syncs URL hash ↔ app view state. Supports browser back/forward.
 
 const VALID_VIEWS = new Set([
-  "dashboard", "add", "accounts", "stats", "budgets",
-  "categories", "recurring", "rules", "inbox",
+  "dashboard", "add", "accounts", "stats", "plan", "assistant", "budgets",
+  "categories", "goals", "debts", "bills", "recurring", "rules", "inbox",
   "merchants", "more",
 ]);
 

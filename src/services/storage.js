@@ -105,7 +105,7 @@ export function loadAll(defaults = {}) {
 
 /**
  * ✅ Primary API used by src/store/store.jsx
- * saveAll({ transactions, accounts, categories, budgets, recurring, ui })
+ * saveAll({ transactions, accounts, categories, budgets, recurring, goals, ui })
  */
 export function saveAll(payload) {
   if (!hasWindow()) return;
@@ -124,6 +124,7 @@ export function saveAll(payload) {
       categories: ensureCategoriesShape(data.categories),
       budgets: ensureArray(data.budgets, []),
       recurring: ensureArray(data.recurring, []),
+      goals: ensureArray(data.goals, []),
       rules: ensureArray(data.rules, []),
       merchants: ensureArray(data.merchants, []),
       inbox: ensureArray(data.inbox, ensureArray(data.scanInbox, [])),

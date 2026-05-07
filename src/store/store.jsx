@@ -8,10 +8,13 @@ import React, { createContext, useContext, useEffect, useMemo, useReducer } from
 import { ACTIONS } from "./actions";
 import {
   DEFAULT_ACCOUNTS,
+  applyGoalContribution,
   clampInt,
   createInitialState,
   normalizeAccount,
   normalizeCanonicalTransactionTime,
+  normalizeGoal as normalizeGoalModel,
+  normalizeGoals,
   normalizeInboxItem,
   normalizeRule,
   normalizeRules,
@@ -44,6 +47,10 @@ const RESET_ALL_EVENT = "app:after-reset-all";
 
 const AppStoreContext = createContext(null);
 export { createInitialState } from "./boot.js";
+
+export function normalizeGoal(raw, fallbackPriority = 1) {
+  return normalizeGoalModel(raw, fallbackPriority);
+}
 
 const slugifyId = (s) =>
   String(s || "")
@@ -548,6 +555,41 @@ export function reducer(state, action) {
       return { ...state, transactions, recurring: nextRecurring };
     }
 
+    // ----- savings goals -----
+    case ACTIONS.GOAL_UPSERT: {
+      const incoming = action.payload || {};
+      const existing = (state.goals || []).find((goal) => String(goal?.id || "") === String(incoming?.id || ""));
+      const nextGoal = normalizeGoal({ ...(existing || {}), ...incoming }, existing?.priority || (state.goals || []).length + 1);
+      const goals = normalizeGoals(upsertById(state.goals || [], nextGoal));
+      return { ...state, goals };
+    }
+
+    case ACTIONS.GOAL_DELETE: {
+      const id = action.payload;
+      const goals = normalizeGoals((state.goals || []).filter((goal) => String(goal?.id || "") !== String(id || "")));
+      return { ...state, goals };
+    }
+
+    case ACTIONS.GOAL_CONTRIBUTE: {
+      const { id, amountSatang } = action.payload || {};
+      const amount = safeSatang(amountSatang, 0);
+      if (!id || amount <= 0) return state;
+      let changed = false;
+      const goals = normalizeGoals(
+        (state.goals || []).map((goal) => {
+          if (String(goal?.id || "") !== String(id)) return goal;
+          changed = true;
+          return applyGoalContribution(goal, amount);
+        })
+      );
+      return changed ? { ...state, goals } : state;
+    }
+
+    case ACTIONS.GOAL_SET_ORDER: {
+      const next = Array.isArray(action.payload) ? action.payload : [];
+      return { ...state, goals: normalizeGoals(next) };
+    }
+
 
     // ----- automation rules -----
     case ACTIONS.RULE_UPSERT: {
@@ -727,6 +769,7 @@ export function AppStoreProvider({ children }) {
       defaultCategories: DEFAULT_CATEGORIES,
       defaultBudgets: [],
       defaultRecurring: [],
+      defaultGoals: [],
       defaultMerchants: [],
       defaultRules: [],
       defaultInbox: [],
@@ -746,6 +789,7 @@ export function AppStoreProvider({ children }) {
       categories: state.categories,
       budgets: state.budgets,
       recurring: state.recurring,
+      goals: state.goals,
       merchants: state.merchants,
       rules: state.rules,
       inbox: state.inbox,
@@ -759,6 +803,7 @@ export function AppStoreProvider({ children }) {
     state.categories,
     state.budgets,
     state.recurring,
+    state.goals,
     state.merchants,
     state.rules,
     state.inbox,
@@ -1040,6 +1085,13 @@ export function AppStoreProvider({ children }) {
       return { createdCount: created.length, truncatedRules, cap: MAX_RECURRING_CREATE_PER_RUN, todayISO };
     };
 
+    // savings goals
+    const upsertGoal = (goal) => dispatch({ type: ACTIONS.GOAL_UPSERT, payload: goal });
+    const deleteGoal = (id) => dispatch({ type: ACTIONS.GOAL_DELETE, payload: id });
+    const contributeToGoal = (id, amountSatang) =>
+      dispatch({ type: ACTIONS.GOAL_CONTRIBUTE, payload: { id, amountSatang } });
+    const setGoalOrder = (nextGoals) => dispatch({ type: ACTIONS.GOAL_SET_ORDER, payload: nextGoals });
+
     const resetAll = () => {
       // clear persistent attachments as well
       try {
@@ -1069,6 +1121,7 @@ export function AppStoreProvider({ children }) {
           categories: DEFAULT_CATEGORIES,
           budgets: [],
           recurring: [],
+          goals: [],
           merchants: [],
           rules: [],
           inbox: [],
@@ -1151,6 +1204,7 @@ export function AppStoreProvider({ children }) {
     categories: state.categories ?? { expense: [], income: [] },
     budgets: state.budgets ?? [],
     recurring: state.recurring ?? [],
+    goals: normalizeGoals(state.goals ?? []),
     merchants: normalizeMerchants(state.merchants ?? []),
     rules: state.rules ?? [],
     inbox: state.inbox ?? [],
@@ -1189,6 +1243,12 @@ export function AppStoreProvider({ children }) {
       upsertRecurring,
       deleteRecurring,
       runRecurringNow,
+
+      upsertGoal,
+      deleteGoal,
+      contributeToGoal,
+      setGoalOrder,
+
       addInboxItems,
       updateInboxItem,
       removeInboxItems,

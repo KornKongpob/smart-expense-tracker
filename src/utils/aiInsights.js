@@ -2,7 +2,7 @@
 // Local AI-like spending insights — no external API needed.
 // Analyzes transaction history to generate actionable Thai-language insights.
 
-import { toISODate } from "./format";
+import { toISODate } from "./format.js";
 
 function monthKey(date) {
   const d = new Date(date);

@@ -203,7 +203,7 @@ export default function BudgetsView({ showAlert, showConfirm }) {
       <AppHeader
         title="งบประมาณ"
         subtitle={`${formatMonthLabelTH(month)} (${month})`}
-        onBack={() => navigate("more")}
+        onBack={() => navigate("plan")}
         right={
           <div className="flex items-center gap-2">
             <button

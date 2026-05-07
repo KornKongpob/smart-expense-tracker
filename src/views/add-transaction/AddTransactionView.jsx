@@ -77,6 +77,7 @@ import { categorizeReceiptItem } from "../../domain/categorization/index.js";
 import { coerceClipboardFile, filterAllowedUploads, isPdfFile } from "./helpers/fileUploadHelpers.js";
 import { deriveSplitParentCategoryId } from "./helpers/splitCategory.js";
 import { applyAutomationToQueuePatch, buildQueueTypeChangeItem, normalizeQueueItemType } from "./helpers/queueTypeHelpers";
+import { buildManualSplitTransactions, normalizeManualSplitLines } from "./helpers/manualSplitTransactions.js";
 import EditTransactionMode from "./EditTransactionMode";
 import { duplicateStateFromMatch, toDuplicateComparable } from "../../utils/duplicateDetection";
 import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromNote, appendEvidenceToNote, hashString, getScanStageMeta } from "./helpers/inputHelpers";
@@ -3487,14 +3488,7 @@ const inId =
     if (isSplitMode) {
       if (!accountId) return showAlert?.("กรุณาเลือกบัญชี");
 
-      const cleanedLines = (splitLines || [])
-        .map((l) => ({
-          txId: String(l?.txId || "").trim(),
-          categoryId: String(l?.categoryId || "").trim(),
-          amount: parseMoneyToSatang(l?.amountDigits),
-          lineNote: String(l?.lineNote || "").trim(),
-        }))
-        .filter((l) => l.amount > 0 || l.categoryId || l.lineNote || l.txId);
+      const cleanedLines = normalizeManualSplitLines(splitLines);
 
       if (cleanedLines.length < 2) return showAlert?.("Split ต้องมีอย่างน้อย 2 บรรทัด (ยอดเงิน > 0)");
       for (const l of cleanedLines) {
@@ -3502,92 +3496,24 @@ const inId =
         if (!Number.isFinite(l.amount) || l.amount <= 0) return showAlert?.("กรุณาระบุยอดเงินให้ถูกต้อง (ในรายการ Split)");
       }
 
-      const splitGroupId = String(initialData?.splitGroupId || "").trim() || generateSplitGroupId();
-      const splitCount = cleanedLines.length;
-      const groupLabel = String(splitLabel || "").trim().slice(0, 80) || null;
-
-      // existing group (for edit) may already have a parent
-      const existingParent = (splitGroupTransactions || []).find((t) => !!t?.isSplitParent) || (initialData?.isSplitParent ? initialData : null);
-      const parentId = String(existingParent?.id || "").trim() || (initialData?.isSplitParent ? String(initialData.id) : "") || generateId();
-
-      const childrenTotal = cleanedLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-      // ✅ For split groups, parent category is mixed if children span multiple categories
-      const parentCategory = String(
-        deriveSplitParentCategoryId({
-          type,
-          childCategoryIds: cleanedLines.map((l) => String(l?.categoryId || "").trim()),
-          existingParentCategoryId: type === "expense" ? existingParent?.category : "",
-          fallbackCategoryId: type === "income" ? "other_income" : "mixed",
-        })
-      ).trim() || (type === "income" ? "other_income" : "mixed");
-
-      const parentTx = {
-        id: parentId,
-        type: type === "income" ? "income" : "expense",
-        amount: childrenTotal,
-        category: parentCategory,
+      const { parentTx, childTxs, removedIds } = buildManualSplitTransactions({
+        cleanedLines,
+        type,
         accountId,
         date: d,
         time: manualTime,
-        note: noteText || groupLabel || "Split",
-        isTransfer: false,
-        transferId: null,
-        ref: refText || null,
-        source: "manual",
-        attachmentId: initialAttachmentId || null,
-
-        ...merchantPatch,
-        ...locationPatch,
-        ...metaPatch,
-
-        splitGroupId,
-        splitCount,
-        splitLabel: groupLabel,
-        isSplit: true,
-        isSplitParent: true,
-      };
-
-      const childTxs = cleanedLines.map((l, idx) => {
-        const itemName = l.lineNote || noteText || null;
-        return {
-          id: l.txId || generateId(),
-          type: type === "income" ? "income" : "expense",
-          amount: l.amount,
-          category: l.categoryId,
-          accountId,
-          date: d,
-          time: manualTime,
-          itemName: itemName || null,
-          note: itemName,
-          isTransfer: false,
-          transferId: null,
-          ref: null,
-          source: "manual",
-          attachmentId: initialAttachmentId || null,
-
-          ...merchantPatch,
-          ...locationPatch,
-          ...metaPatch,
-
-          splitGroupId,
-          splitIndex: idx + 1,
-          splitCount,
-          splitLabel: groupLabel,
-          isSplit: true,
-          isSplitChild: true,
-          splitParentId: parentId,
-        };
+        noteText,
+        refText,
+        splitLabel,
+        initialData,
+        splitGroupTransactions,
+        initialAttachmentId,
+        merchantPatch,
+        locationPatch,
+        metaPatch,
+        makeId: generateId,
+        makeSplitGroupId: generateSplitGroupId,
       });
-
-      // delete removed lines (when editing an existing split group)
-      const existingChildIds = new Set(
-        (splitGroupTransactions || [])
-          .filter((t) => !t?.isSplitParent)
-          .map((t) => String(t?.id || ""))
-          .filter(Boolean)
-      );
-      const nextIds = new Set(childTxs.map((t) => String(t.id)));
-      const removedIds = [...existingChildIds].filter((id) => !nextIds.has(id));
 
       if (!beginSaveLock()) return;
       try {

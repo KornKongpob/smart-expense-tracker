@@ -150,6 +150,8 @@ async function run() {
     await assertHtml("/add");
     await assertHtml("/accounts");
     await assertHtml("/categories");
+    await assertHtml("/plan");
+    await assertHtml("/assistant");
     await assertHtml("/planner");
     await assertHtml("/settings");
 

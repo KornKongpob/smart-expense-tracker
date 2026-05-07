@@ -159,7 +159,7 @@ export default function RecurringView({ showAlert, showConfirm }) {
       <AppHeader
         title="รายการประจำ"
         subtitle={`เปิดใช้งาน ${recurringStats.enabled}/${recurringStats.total}${recurringStats.due ? ` • ถึงรอบวันนี้ ~${recurringStats.due}` : ""}`}
-        onBack={() => navigate("more")}
+        onBack={() => navigate("plan")}
         right={
           <button
             onClick={openNew}

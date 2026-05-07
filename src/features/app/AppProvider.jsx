@@ -82,7 +82,7 @@ import { compareTxNewestFirst } from "../../utils/transaction.js";
 import { transactionMatchesQuery } from "../../domain/receipt/receiptSearchIndex.js";
 import { validateBackupImport } from "../../schemas/index.js";
 import { extractBackupSupplementalData } from "../../utils/backupPayload.js";
-import { STORAGE_SAVE_ERROR_EVENT } from "../../services/storage.js";
+import { STORAGE_SAVE_ERROR_EVENT, loadAll, saveAll } from "../../services/storage.js";
 import {
   checkBudgetAndNotify,
   getNotificationPermissionState,
@@ -3106,6 +3106,13 @@ export function AppProvider({ children }) {
         budgetPlanSnapshot,
         budgetRows: [],
       });
+      let localGoals = [];
+      try {
+        const localSnapshot = loadAll({ defaultGoals: [] });
+        localGoals = Array.isArray(localSnapshot?.goals) ? localSnapshot.goals : [];
+      } catch {
+        localGoals = [];
+      }
 
       const payload = {
         v: 3,
@@ -3117,6 +3124,7 @@ export function AppProvider({ children }) {
           categoryPreferences: categoryPreferenceRows,
           accounts,
           categories,
+          goals: localGoals,
           financialGoals,
           debtPlans,
           inbox: scanDocuments,
@@ -3167,6 +3175,15 @@ export function AppProvider({ children }) {
         method: "POST",
         body: JSON.stringify({ snapshot, attachments }),
       });
+      try {
+        const localSnapshot = loadAll({ defaultGoals: [] });
+        saveAll({
+          ...localSnapshot,
+          goals: Array.isArray(validation.data?.goals) ? validation.data.goals : [],
+        });
+      } catch {
+        // Local goals are best-effort during cloud import.
+      }
       await refreshAll();
       pushToast("success", "นำเข้าข้อมูลแล้ว");
       return true;

@@ -2257,7 +2257,8 @@ export default async function handler(req, res) {
         base64: b64,
         mimeType: mt,
         type: mt === "application/pdf" ? "pdf" : "image",
-        ...(filename ? { fileName: filename } : {}),
+        accounts,
+        ...(filename ? { filename, fileName: filename } : {}),
       },
       scanOpenAI: callOpenAI,
     });
@@ -2286,6 +2287,11 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.status(500).json({ ok: false, code: "server_error", message: IS_PROD ? "Internal server error" : msg });
+    const err = normalizeErrorResponse({
+      status: 500,
+      code: "server_error",
+      message: IS_PROD ? "Internal server error" : msg,
+    });
+    res.status(err.status).json(err.body);
   }
 }

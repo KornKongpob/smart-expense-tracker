@@ -155,6 +155,7 @@ export function readLegacySnapshot() {
     inbox: toArray(normalized?.inbox),
     merchants: toArray(normalized?.merchants),
     budgets: toArray(normalized?.budgets),
+    goals: toArray(normalized?.goals),
   };
 }
 

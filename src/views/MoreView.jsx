@@ -4,15 +4,19 @@ import {
   BarChart3,
   Bell,
   ChevronRight,
+  CreditCard,
   Home,
   Inbox,
   Lock,
   Moon,
   PlayCircle,
+  ReceiptText,
   Repeat,
   Settings,
+  Sparkles,
   Store,
   Sun,
+  Target,
   Trash2,
   Upload,
   Wand2,
@@ -223,6 +227,12 @@ export default function MoreView({ showAlert, showConfirm }) {
   }, [state?.rules]);
 
   const merchantCount = Array.isArray(state?.merchants) ? state.merchants.length : 0;
+  const activeGoalCount = Array.isArray(state?.goals)
+    ? state.goals.filter((goal) => String(goal?.status || "active") === "active").length
+    : 0;
+  const activeDebtAccountCount = Array.isArray(state?.accounts)
+    ? state.accounts.filter((account) => String(account?.type || "").toLowerCase() === "credit").length
+    : 0;
   const transactionCount = Array.isArray(state?.transactions) ? state.transactions.length : 0;
   const accountCount = Array.isArray(state?.accounts) ? state.accounts.length : 0;
   const isDark = theme === "dark";
@@ -397,14 +407,39 @@ export default function MoreView({ showAlert, showConfirm }) {
 
         <HubSection title="ทางลัด" subtitle="ไปยังหน้าที่ใช้บ่อยและมุมมองสรุปหลักของแอป">
           <MoreRow icon={<Home size={20} />} title="หน้าหลัก" subtitle="ภาพรวมรายรับรายจ่าย" onClick={() => navigate("dashboard")} testId="hub-dashboard" />
-          <MoreRow icon={<BarChart3 size={20} />} title="สถิติ" subtitle="กราฟและ breakdown" onClick={() => navigate("stats")} testId="hub-analytics" />
+          <MoreRow icon={<Target size={20} />} title="แผนการเงิน" subtitle="งบ ออม หนี้ บิล และเงินเหลือใช้" onClick={() => navigate("plan")} testId="hub-plan" />
+          <MoreRow icon={<Sparkles size={20} />} title="ผู้ช่วยการเงิน" subtitle="ถามเรื่องเงินเหลือใช้ บิล หนี้ และ action ต่อไป" onClick={() => navigate("assistant")} testId="hub-assistant" />
+          <MoreRow icon={<BarChart3 size={20} />} title="สถิติ/รายงาน" subtitle="กราฟและ breakdown" onClick={() => navigate("stats")} testId="hub-analytics" />
           <MoreRow icon={<Bell size={20} />} title="งบประมาณ" subtitle="ตั้งงบรายวัน รายเดือน และรายหมวด" onClick={() => navigate("budgets")} testId="hub-budgets" />
+          <MoreRow
+            icon={<Target size={20} />}
+            title="เป้าหมายการออม"
+            subtitle={activeGoalCount ? `กำลังออม ${activeGoalCount} เป้าหมาย` : "กองทุนฉุกเฉิน เที่ยว ซื้อของใหญ่ และสำรองจ่ายหนี้"}
+            badge={activeGoalCount}
+            onClick={() => navigate("goals")}
+            testId="hub-goals"
+          />
+          <MoreRow
+            icon={<CreditCard size={20} />}
+            title="แผนจัดการหนี้"
+            subtitle={activeDebtAccountCount ? `ติดตามบัตรเครดิต ${activeDebtAccountCount} บัญชี` : "ดูยอดหนี้ วันครบกำหนด และแผนปิดหนี้"}
+            badge={activeDebtAccountCount}
+            onClick={() => navigate("debts")}
+            testId="hub-debts"
+          />
         </HubSection>
 
         <HubSection title="ระบบอัตโนมัติ" subtitle="ตรวจงานที่ต้องอนุมัติ กฎประจำ และการทำงานอัตโนมัติของแอป">
           <MoreRow icon={<Settings size={20} />} title="หมวดหมู่" subtitle="จัดกลุ่มรายจ่ายและรายรับ" onClick={() => navigate("categories")} testId="hub-categories" />
           <MoreRow icon={<Inbox size={20} />} title="Inbox" subtitle={inboxSubtitle} badge={inboxPendingCount} onClick={() => navigate("inbox")} testId="hub-inbox" />
           <MoreRow icon={<Repeat size={20} />} title="รายการประจำ" subtitle={recurringHealth} onClick={() => navigate("recurring")} testId="hub-recurring" />
+          <MoreRow
+            icon={<ReceiptText size={20} />}
+            title="บิล & Subscription"
+            subtitle="ดูบิลข้างหน้า subscription ที่ตรวจพบ และยอดที่อาจแพงขึ้น"
+            onClick={() => navigate("bills")}
+            testId="hub-bills"
+          />
           <MoreRow icon={<PlayCircle size={20} />} title="รัน Recurring" subtitle="สร้างรายการที่ถึงรอบทันที" onClick={onRunRecurring} testId="hub-run-recurring" />
           <MoreRow
             icon={<Wand2 size={20} />}
