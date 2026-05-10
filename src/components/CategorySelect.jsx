@@ -1,6 +1,13 @@
 // src/components/CategorySelect.jsx
-import { useMemo } from "react";
-import { buildCategoryHierarchy, isDeletedCategory, splitSelection } from "../utils/categoryHierarchy";
+import { useMemo, useState } from "react";
+import {
+  buildCategoryHierarchy,
+  canSelectCategory,
+  hasCategoryChildren,
+  isDeletedCategory,
+  shouldShowCategoryInPicker,
+  splitSelection,
+} from "../utils/categoryHierarchy";
 
 function normalizeCats(categories = [], value = "") {
   const cleanCats = (Array.isArray(categories) ? categories : []).filter(Boolean);
@@ -54,12 +61,21 @@ export default function CategorySelect({
   const augmentedCats = useMemo(() => normalizeCats(categories, value), [categories, value]);
   const hierarchy = useMemo(() => buildCategoryHierarchy(augmentedCats), [augmentedCats]);
   const { mainId, subId } = useMemo(() => splitSelection(value, hierarchy), [value, hierarchy]);
+  const selectedId = String(value || "").trim();
+  const [focusedMainId, setFocusedMainId] = useState("");
 
-  const selectedMain = mainId ? hierarchy.byId.get(mainId) : null;
+  const displayedMainId = focusedMainId || mainId;
+  const selectedMain = displayedMainId ? hierarchy.byId.get(displayedMainId) : null;
   const children = useMemo(() => {
     if (!selectedMain) return [];
-    return hierarchy.childrenByParent.get(selectedMain.id) || [];
-  }, [hierarchy, selectedMain]);
+    return (hierarchy.childrenByParent.get(selectedMain.id) || []).filter((category) =>
+      shouldShowCategoryInPicker(category, hierarchy, { selectedId }),
+    );
+  }, [hierarchy, selectedMain, selectedId]);
+  const mainCategories = useMemo(
+    () => hierarchy.main.filter((category) => shouldShowCategoryInPicker(category, hierarchy, { selectedId })),
+    [hierarchy, selectedId],
+  );
 
   const emit = (nextValue) => {
     if (!onChange) return;
@@ -86,11 +102,26 @@ export default function CategorySelect({
 
       <div className="text-[11px] font-semibold text-gray-900/60 mb-2">หมวดหลัก</div>
       <div className="grid grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1 no-scrollbar">
-        {hierarchy.main.map((cat) => {
+        {mainCategories.map((cat) => {
           const id = String(cat?.id || "").trim();
-          const active = String(mainId || "") === id;
+          const active = String(displayedMainId || "") === id;
+          const hasKids = hasCategoryChildren(id, hierarchy);
+          const selectable = canSelectCategory(cat, hierarchy, { selectedId });
           return (
-            <ChipButton key={id} active={active} onClick={() => emit(id)}>
+            <ChipButton
+              key={id}
+              active={active}
+              onClick={() => {
+                if (hasKids) {
+                  setFocusedMainId(id);
+                  return;
+                }
+                if (selectable) {
+                  setFocusedMainId("");
+                  emit(id);
+                }
+              }}
+            >
               <span className="inline-flex items-center gap-2 min-w-0">
                 <span className="shrink-0 text-base">{cat?.icon || "🏷️"}</span>
                 <span className="truncate">{cat?.name}</span>
@@ -104,14 +135,27 @@ export default function CategorySelect({
         <div className="mt-3">
           <div className="text-[11px] font-semibold text-gray-900/60 mb-2">หมวดย่อย</div>
           <div className="grid grid-cols-2 gap-2 max-h-36 overflow-y-auto pr-1 no-scrollbar">
+            {canSelectCategory(selectedMain, hierarchy, { selectedId }) && !hasCategoryChildren(selectedMain.id, hierarchy) ? (
             <ChipButton active={!subId} onClick={() => emit(selectedMain.id)} compact>
               ใช้หมวดหลักนี้
             </ChipButton>
+            ) : null}
             {children.map((cat) => {
               const id = String(cat?.id || "").trim();
               const active = String(subId || "") === id;
+              const selectable = canSelectCategory(cat, hierarchy, { selectedId });
               return (
-                <ChipButton key={id} active={active} onClick={() => emit(id)} compact>
+                <ChipButton
+                  key={id}
+                  active={active}
+                  onClick={() => {
+                    if (selectable) {
+                      setFocusedMainId("");
+                      emit(id);
+                    }
+                  }}
+                  compact
+                >
                   <span className="inline-flex items-center gap-2 min-w-0">
                     <span className="shrink-0 text-sm">{cat?.icon || "🏷️"}</span>
                     <span className="truncate">{cat?.name}</span>

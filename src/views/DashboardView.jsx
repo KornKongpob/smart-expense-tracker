@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 
 import AppHeader from "../components/AppHeader";
+import MoneyCoachPanel from "../components/MoneyCoachPanel.jsx";
+import TransactionDetailModal from "../components/TransactionDetailModal.jsx";
 import { useAppStore } from "../store/store.jsx";
 import { formatCurrency, formatDateShort, toISODate } from "../utils/format";
 import { compareTxNewestFirst } from "../utils/transaction";
@@ -26,6 +28,7 @@ import {
 } from "../features/money-plan/moneyPlan.js";
 import AssistantPanel from "../features/assistant/AssistantPanel.jsx";
 import { generatePersonalMoneyRecommendations } from "../features/assistant/recommendationEngine.js";
+import { generateMoneyCoachInsights } from "../utils/moneyCoach.js";
 import MonthSummaryCards from "./dashboard/MonthSummaryCards.jsx";
 import PendingReceiptCard from "./dashboard/PendingReceiptCard.jsx";
 import CalendarMonthView from "./dashboard/CalendarMonthView.jsx";
@@ -88,6 +91,7 @@ export default function DashboardView() {
   const [monthKey, setMonthKey] = useState(() => toISODate(new Date()).slice(0, 7));
   const [viewMode, setViewMode] = useState("list");
   const [selectedDate, setSelectedDate] = useState("");
+  const [detailTransactionId, setDetailTransactionId] = useState("");
 
   const accounts = useMemo(() => asList(state.accounts), [state.accounts]);
   const transactions = useMemo(() => asList(state.transactions), [state.transactions]);
@@ -154,6 +158,18 @@ export default function DashboardView() {
     () => generatePersonalMoneyRecommendations(assistantState, { today: todayISO, maxItems: 5 }),
     [assistantState, todayISO],
   );
+  const moneyCoachInsights = useMemo(
+    () =>
+      generateMoneyCoachInsights({
+        transactions,
+        accounts,
+        categories,
+        budgets,
+        recurring,
+        todayISO,
+      }),
+    [transactions, accounts, categories, budgets, recurring, todayISO],
+  );
 
   const selectedDayTransactions = useMemo(() => {
     if (!selectedDate) return [];
@@ -164,6 +180,10 @@ export default function DashboardView() {
 
   const visibleTransactions =
     viewMode === "calendar" && selectedDate ? selectedDayTransactions : snapshot.recentTransactions;
+  const detailTransaction = useMemo(
+    () => transactions.find((tx) => String(tx?.id || "") === String(detailTransactionId || "")) || null,
+    [transactions, detailTransactionId],
+  );
   const budgetPercent = clampPercent(snapshot.budgetSummary?.percent || 0);
   const topOverCategory = snapshot.budgetSummary?.topOverBudget
     ? categoryById.get(String(snapshot.budgetSummary.topOverBudget.categoryId || ""))
@@ -171,6 +191,22 @@ export default function DashboardView() {
 
   const openManual = (txType) => store.startNewTransaction({ entryMode: "manual", txType });
   const openScan = () => store.startNewTransaction({ entryMode: "scan", scanUploadKind: "receipt" });
+  const openTransactionDetail = (tx) => {
+    const id = String(tx?.id || "").trim();
+    if (id) setDetailTransactionId(id);
+  };
+  const closeTransactionDetail = () => setDetailTransactionId("");
+  const editTransactionFromDetail = (id) => {
+    const editId = String(id || "").trim();
+    if (!editId) return;
+    setDetailTransactionId("");
+    store.startEditTransaction(editId);
+  };
+  const handleMoneyCoachAction = (target) => {
+    const view = String(target || "").trim();
+    if (!view || view === "transactions") return;
+    navigate(view === "planner" ? "budgets" : view);
+  };
   const changeMonth = (delta) => {
     setSelectedDate("");
     setMonthKey((current) => addMonthsToKey(current, delta));
@@ -240,6 +276,8 @@ export default function DashboardView() {
           recommendations={assistantRecommendations}
           onNavigate={(view) => navigate(view)}
         />
+
+        <MoneyCoachPanel insights={moneyCoachInsights} onAction={handleMoneyCoachAction} />
 
         <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2">
@@ -348,7 +386,7 @@ export default function DashboardView() {
             transactions={visibleTransactions}
             categoryById={categoryById}
             accountById={accountById}
-            onSelect={(tx) => store.startEditTransaction(tx.id)}
+            onSelect={openTransactionDetail}
           />
         </section>
 
@@ -393,6 +431,15 @@ export default function DashboardView() {
           </div>
         </section>
       </main>
+
+      <TransactionDetailModal
+        transaction={detailTransaction}
+        transactions={transactions}
+        accounts={accounts}
+        categories={categories}
+        onClose={closeTransactionDetail}
+        onEdit={editTransactionFromDetail}
+      />
     </div>
   );
 }

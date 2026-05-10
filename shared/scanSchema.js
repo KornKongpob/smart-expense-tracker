@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { normalizeTransactionTime } from "../src/utils/scanDateTime.js";
+import { sanitizeCategoryKey } from "../src/utils/receiptCategorizer.js";
 
 export const SCAN_PARSE_ERROR_CODE = "scan_parse_failed";
 
@@ -99,6 +101,8 @@ export const NormalizedReceiptScanSchema = z
   .object({
     merchant: nullableReceiptText,
     date: nullableReceiptText,
+    time: nullableReceiptText,
+    transactionTime: optionalReceiptText,
     paidTotalSatang: satangInt,
     subtotalSatang: satangInt,
     discountSatang: satangInt,
@@ -119,6 +123,8 @@ const normalizedResponseSchema = z
     merchant: z.string().nullable().default(null),
     amount: z.number().nullable().default(null),
     date: z.string().nullable().default(null),
+    time: z.string().nullable().default(null),
+    transactionTime: z.string().default(""),
     category_key: z.string().nullable().default(null),
     items: z.array(normalizedItemSchema).default([]),
     adjustments: z.array(normalizedAdjustmentSchema).default([]),
@@ -195,6 +201,10 @@ function cleanNullableText(value) {
   return text || null;
 }
 
+function cleanCategoryKey(value, options = {}) {
+  return cleanNullableText(sanitizeCategoryKey(value, options) || value);
+}
+
 function hasValue(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj || {}, key) && obj?.[key] != null && obj?.[key] !== "";
 }
@@ -204,6 +214,12 @@ function firstPresent(source, keys) {
     if (hasValue(source, key)) return source[key];
   }
   return null;
+}
+
+function normalizeScanTime(source) {
+  return normalizeTransactionTime(
+    firstPresent(source, ["time", "transaction_time", "transactionTime", "transaction_at", "transactionAt"]),
+  );
 }
 
 function toSatang(value, { unit = "baht", explicitSatang = false } = {}) {
@@ -518,6 +534,8 @@ export function normalizeReceiptScanResult(payload) {
   const parsed = NormalizedReceiptScanSchema.safeParse({
     merchant: cleanNullableText(source.merchant),
     date: source.date == null ? null : cleanText(source.date).slice(0, 10) || null,
+    time: normalizeScanTime(source) || null,
+    transactionTime: normalizeScanTime(source),
     paidTotalSatang,
     subtotalSatang,
     discountSatang,
@@ -537,6 +555,8 @@ export function normalizeReceiptScanResult(payload) {
   return {
     merchant: null,
     date: null,
+    time: null,
+    transactionTime: "",
     paidTotalSatang: 0,
     subtotalSatang: 0,
     discountSatang: 0,
@@ -598,7 +618,7 @@ function normalizeChildItems(children) {
           const qty = toNumber(child.qty ?? child.quantity);
           const unit_price = toNumber(child.unit_price ?? child.unitPrice ?? child.price);
           const total = toNumber(child.total ?? child.line_total ?? child.lineTotal ?? child.amount ?? child.price);
-          const category_key = cleanNullableText(child.category_key ?? child.categoryKey ?? child.category ?? child.key);
+          const category_key = cleanCategoryKey(child.category_key ?? child.categoryKey ?? child.category ?? child.key);
           if (!name && qty == null && unit_price == null && total == null && !category_key) return null;
           return { name, qty, unit_price, total, category_key };
         })
@@ -615,7 +635,7 @@ function normalizeItems(items) {
           const qty = toNumber(item.qty ?? item.quantity);
           const unit_price = toNumber(item.unit_price ?? item.unitPrice ?? item.price);
           const total = toNumber(item.total ?? item.line_total ?? item.lineTotal ?? item.amount ?? item.price);
-          const category_key = cleanNullableText(item.category_key ?? item.categoryKey ?? item.category ?? item.key);
+          const category_key = cleanCategoryKey(item.category_key ?? item.categoryKey ?? item.category ?? item.key);
           const children = normalizeChildItems(item.children);
           if (!name && qty == null && unit_price == null && total == null && !category_key && !children.length) return null;
           return {
@@ -647,8 +667,9 @@ function normalizeAdjustments(adjustments) {
           );
           const effect = cleanText(adjustment.effect).toLowerCase() === "subtract" ? "subtract" : "add";
           const type = cleanNullableText(adjustment.type ?? adjustment.adjustmentType ?? adjustment.adjustment_type);
-          const category_key = cleanNullableText(
+          const category_key = cleanCategoryKey(
             adjustment.category_key ?? adjustment.categoryKey ?? adjustment.category,
+            { allowAdjustmentCategories: true },
           );
           if (!name && amount == null && !type && !category_key) return null;
           return { name, amount, effect, type, category_key };
@@ -665,6 +686,7 @@ export function normalizeScanResponse(payload, { defaultErrorCode = SCAN_PARSE_E
   const source = payload && typeof payload === "object" ? payload : {};
   const confidence = normalizeConfidence(source.confidence);
   const receipt = normalizeReceiptScanResult(source);
+  const transactionTime = normalizeScanTime(source);
   const fallbackNeedsHumanReview =
     typeof source.needs_human_review === "boolean"
       ? source.needs_human_review
@@ -675,7 +697,9 @@ export function normalizeScanResponse(payload, { defaultErrorCode = SCAN_PARSE_E
     merchant: cleanNullableText(source.merchant),
     amount: toNumber(source.amount),
     date: source.date == null ? null : cleanText(source.date).slice(0, 10) || null,
-    category_key: cleanNullableText(source.category_key ?? source.category ?? source.categoryId),
+    time: transactionTime || null,
+    transactionTime,
+    category_key: cleanCategoryKey(source.category_key ?? source.category ?? source.categoryId, { allowMixed: true }),
     items: normalizeItems(source.items),
     adjustments: normalizeAdjustments(source.adjustments ?? source.adjustment_lines ?? source.adjustments_lines),
     confidence,
@@ -709,6 +733,8 @@ export function normalizeScanResponse(payload, { defaultErrorCode = SCAN_PARSE_E
     merchant: null,
     amount: null,
     date: null,
+    time: null,
+    transactionTime: "",
     category_key: null,
     items: [],
     adjustments: [],

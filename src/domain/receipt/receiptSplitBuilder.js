@@ -1,7 +1,16 @@
 import { generateSplitGroupId, generateTxId } from "../../utils/id.js";
-import { deriveReceiptCategoryKey } from "../../utils/receiptCategorizer.js";
+import {
+  deriveReceiptCategoryKey,
+  inferCategoryKeyFromText,
+  sanitizeCategoryKey,
+} from "../../utils/receiptCategorizer.js";
 import { normalizeReceiptScan } from "./normalizeReceiptScan.js";
-import { receiptLinesFromReceipt, receiptLineToStoredLine, signedReceiptLineSatang } from "./receiptLineModel.js";
+import {
+  isReceiptAdjustmentLine,
+  receiptLinesFromReceipt,
+  receiptLineToStoredLine,
+  signedReceiptLineSatang,
+} from "./receiptLineModel.js";
 import { reconcileReceiptLines } from "./reconcileReceipt.js";
 
 export const RECEIPT_SAVE_MODES = Object.freeze({
@@ -33,6 +42,7 @@ function baseTransactionFields(base = {}, receipt = {}) {
     accountId: clean(base.accountId ?? base.account_id),
     date: clean(base.date ?? receipt.date).slice(0, 10) || toLocalDate(),
     time: clean(base.time),
+    transactionTime: clean(base.transactionTime ?? base.transaction_time ?? base.time),
     note: clean(base.note),
     ref: clean(base.ref ?? base.reference ?? receipt.referenceId) || null,
     source: clean(base.source) || "receipt",
@@ -45,6 +55,16 @@ function baseTransactionFields(base = {}, receipt = {}) {
 }
 
 function buildParentCategory(lines, fallbackCategoryId) {
+  const itemCategoryIds = new Set(
+    lines
+      .filter((line) => line.receiptLineType !== "adjustment")
+      .map((line) => categoryKey(line, fallbackCategoryId))
+      .filter(Boolean),
+  );
+
+  if (itemCategoryIds.size > 1) return "mixed";
+  if (itemCategoryIds.size === 1) return Array.from(itemCategoryIds)[0];
+
   return deriveReceiptCategoryKey(
     "expense",
     lines
@@ -60,42 +80,76 @@ function buildParentCategory(lines, fallbackCategoryId) {
 }
 
 function lineDisplayName(line) {
-  return clean(line.name || line.rawName || line.normalizedName) || "Receipt item";
+  return clean(line.itemName || line.name || line.note || line.rawName || line.normalizedName || line.label) || "Receipt item";
+}
+
+function rawCategoryKey(line) {
+  return clean(
+    line?.categoryId ??
+      line?.category_id ??
+      line?.category ??
+      line?.category_key ??
+      line?.suggestedCategoryId ??
+      line?.suggested_category_id ??
+      line?.key,
+  );
+}
+
+function lineEvidenceText(line) {
+  const childText = Array.isArray(line?.children)
+    ? line.children.map((child) => lineDisplayName(child)).filter(Boolean).join(" ")
+    : "";
+  return [lineDisplayName(line), childText, clean(line?.parentName)].filter(Boolean).join(" ");
+}
+
+function adjustmentCategoryKey(line, fallbackCategoryId = "fees") {
+  const raw = rawCategoryKey(line);
+  const type = clean(line?.adjustmentType ?? line?.adjustment_type ?? line?.type).toLowerCase();
+  const effect = clean(line?.adjustmentEffect ?? line?.adjustment_effect ?? line?.effect).toLowerCase();
+
+  if (raw === "discount" || type === "discount" || effect === "subtract") return "discount";
+  if (raw === "service_charge" || type === "service_charge") return "service_charge";
+
+  return (
+    sanitizeCategoryKey(raw, { allowAdjustmentCategories: true }) ||
+    sanitizeCategoryKey(fallbackCategoryId, { allowAdjustmentCategories: true }) ||
+    "fees"
+  );
+}
+
+function shouldPreferTextCategory(raw, sanitizedRaw) {
+  const normalizedRaw = clean(raw).toLowerCase().replace(/\s+/g, " ");
+  return Boolean(normalizedRaw && sanitizedRaw && normalizedRaw !== sanitizedRaw);
 }
 
 function categoryKey(line, fallbackCategoryId) {
-  return clean(line.categoryId) || clean(fallbackCategoryId) || "uncategorized";
-}
-
-function groupLinesByCategory(lines, fallbackCategoryId) {
-  const grouped = new Map();
-
-  for (const line of lines) {
-    const isAdjustment = line.receiptLineType === "adjustment";
-    const key = isAdjustment
-      ? `adjustment:${line.adjustmentType || "unknown"}:${line.adjustmentEffect || "add"}:${categoryKey(line, "fees")}`
-      : `category:${categoryKey(line, fallbackCategoryId)}`;
-    const existing = grouped.get(key);
-    if (existing) {
-      existing.lines.push(line);
-      existing.amountSatang += Number(line.amountSatang || 0);
-      existing.signedSatang += signedReceiptLineSatang(line);
-      continue;
-    }
-
-    grouped.set(key, {
-      key,
-      categoryId: categoryKey(line, isAdjustment ? "fees" : fallbackCategoryId),
-      receiptLineType: isAdjustment ? "adjustment" : "item",
-      adjustmentType: isAdjustment ? line.adjustmentType || "unknown" : null,
-      adjustmentEffect: isAdjustment ? line.adjustmentEffect || "add" : "add",
-      amountSatang: Number(line.amountSatang || 0),
-      signedSatang: signedReceiptLineSatang(line),
-      lines: [line],
-    });
+  if (line?.receiptLineType === "adjustment" || isReceiptAdjustmentLine(line)) {
+    return adjustmentCategoryKey(line, fallbackCategoryId);
   }
 
-  return Array.from(grouped.values());
+  const raw = rawCategoryKey(line);
+  const sanitizedRaw = sanitizeCategoryKey(raw);
+  const sanitizedFallback = sanitizeCategoryKey(fallbackCategoryId);
+  const inferred = inferCategoryKeyFromText("expense", lineEvidenceText(line), {
+    fallbackCategory: sanitizedRaw || sanitizedFallback || fallbackCategoryId,
+  });
+
+  if (shouldPreferTextCategory(raw, sanitizedRaw)) {
+    return inferred || sanitizedRaw || sanitizedFallback || "other";
+  }
+
+  return sanitizedRaw || inferred || sanitizedFallback || "other";
+}
+
+function normalizeSplitLineCategory(line, fallbackCategoryId, index) {
+  const categoryId = categoryKey(line, line?.receiptLineType === "adjustment" ? "fees" : fallbackCategoryId);
+  return {
+    ...line,
+    categoryId,
+    category: categoryId,
+    key: clean(line?.key) || categoryId,
+    splitIndex: Number(line?.splitIndex || line?.split_index || 0) || index + 1,
+  };
 }
 
 function buildChildFromGroup(group, index, context) {
@@ -150,7 +204,10 @@ export function buildReceiptSplitPlan({
   const rawLines = Array.isArray(lines) && lines.length ? lines : receiptLinesFromReceipt(normalizedReceipt || {});
   const paidTotalSatang = Number(normalizedReceipt?.paidTotalSatang || baseTransaction.amount || baseTransaction.amountSatang || 0);
   const reconciled = reconcileReceiptLines(rawLines, paidTotalSatang, { addRoundingAdjustment });
-  const finalLines = reconciled.lines;
+  const finalLines = reconciled.lines.map((line, index) =>
+    normalizeSplitLineCategory(line, fallbackCategoryId, index),
+  );
+  const reconciliation = { ...reconciled, lines: finalLines };
   const saveMode = normalizeMode(mode);
   const base = baseTransactionFields(baseTransaction, normalizedReceipt || {});
   const parentAmountSatang = reconciled.paidTotalSatang || Math.max(0, reconciled.netSatang);
@@ -179,26 +236,23 @@ export function buildReceiptSplitPlan({
         isSplitChild: false,
         receiptLines: parentReceiptLines,
         receiptPaidTotalSatang: parentAmountSatang,
-        receiptItemsSubtotalSatang: reconciled.itemSubtotalSatang,
-        receiptDiscountSatang: reconciled.discountSatang,
-        receiptSurchargeSatang: reconciled.surchargeSatang,
+        receiptItemsSubtotalSatang: reconciliation.itemSubtotalSatang,
+        receiptDiscountSatang: reconciliation.discountSatang,
+        receiptSurchargeSatang: reconciliation.surchargeSatang,
       },
     };
   }
 
-  const groups =
-    saveMode === RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY
-      ? groupLinesByCategory(finalLines, fallbackCategoryId)
-      : finalLines.map((line) => ({
-          key: line.id,
-          categoryId: categoryKey(line, line.receiptLineType === "adjustment" ? "fees" : fallbackCategoryId),
-          receiptLineType: line.receiptLineType,
-          adjustmentType: line.adjustmentType,
-          adjustmentEffect: line.adjustmentEffect,
-          amountSatang: line.amountSatang,
-          signedSatang: signedReceiptLineSatang(line),
-          lines: [line],
-        }));
+  const groups = finalLines.map((line) => ({
+    key: line.id,
+    categoryId: categoryKey(line, line.receiptLineType === "adjustment" ? "fees" : fallbackCategoryId),
+    receiptLineType: line.receiptLineType,
+    adjustmentType: line.adjustmentType,
+    adjustmentEffect: line.adjustmentEffect,
+    amountSatang: line.amountSatang,
+    signedSatang: signedReceiptLineSatang(line),
+    lines: [line],
+  }));
 
   const splitCount = groups.length;
   const parent = {
@@ -221,9 +275,9 @@ export function buildReceiptSplitPlan({
     splitLabel: resolvedSplitLabel,
     receiptLines: parentReceiptLines,
     receiptPaidTotalSatang: parentAmountSatang,
-    receiptItemsSubtotalSatang: reconciled.itemSubtotalSatang,
-    receiptDiscountSatang: reconciled.discountSatang,
-    receiptSurchargeSatang: reconciled.surchargeSatang,
+    receiptItemsSubtotalSatang: reconciliation.itemSubtotalSatang,
+    receiptDiscountSatang: reconciliation.discountSatang,
+    receiptSurchargeSatang: reconciliation.surchargeSatang,
   };
 
   const children = groups.map((group, index) =>
@@ -239,7 +293,7 @@ export function buildReceiptSplitPlan({
   return {
     mode: saveMode,
     receipt: normalizedReceipt,
-    reconciliation: reconciled,
+    reconciliation,
     parent,
     children,
     transactions: [parent, ...children],

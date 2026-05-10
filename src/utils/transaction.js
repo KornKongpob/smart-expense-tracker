@@ -2,7 +2,8 @@
 // Centralized transaction helpers used across views.
 // Eliminates duplicated isTransferLike / signedExpenseSatang / sumExpense* / compareTx* / daysInMonthKey.
 
-import { combineLocalDateTime, normalizeTimeHHmm, parseDateSafe } from "./format.js";
+import { parseDateSafe } from "./format.js";
+import { combineTransactionDateTimeForSort } from "./scanDateTime.js";
 import {
   isReportableExpenseTransaction,
   isTransferTransaction,
@@ -81,17 +82,20 @@ function getTxDateMs(t) {
 }
 
 function getTxTimeValue(t) {
-  const normalized = normalizeTimeHHmm(
+  return combineTransactionDateTimeForSort(
+    t?.date,
+    t?.transactionTime ||
+      t?.transaction_time ||
+      t?.transactionAt ||
+      t?.transaction_at ||
     t?.time ||
       t?.meta?.time ||
+      t?.meta?.transactionTime ||
       t?.meta?.slip?.time ||
+      t?.scanMeta?.transactionTime ||
       t?.scanMeta?.time ||
       t?.scanMeta?.slip?.time,
   );
-  if (!normalized) return -1;
-
-  const combined = combineLocalDateTime(t?.date, normalized);
-  return combined ? combined.getTime() : -1;
 }
 
 /**
@@ -103,7 +107,8 @@ function getTxCreatedAt(t) {
 
 /**
  * Compare transactions newest-first.
- * Primary: date descending. Secondary: createdAt descending. Tertiary: id descending.
+ * Primary: date descending. Secondary: transactionTime/time descending.
+ * Tertiary: createdAt descending. Quaternary: id descending.
  */
 export function compareTxNewestFirst(a, b) {
   const da = getTxDateMs(a);

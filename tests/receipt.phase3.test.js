@@ -61,11 +61,11 @@ function amountByCategory(transactions) {
   return map;
 }
 
-test("receipt phase 3: split by category creates an excluded parent and reportable category children", () => {
+test("receipt phase 3: split by category creates an excluded parent and one reportable child per receipt line", () => {
   const plan = buildReceiptSplitPlan({
     receipt: lotusReceipt,
     mode: RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY,
-    baseTransaction: baseTransaction(),
+    baseTransaction: baseTransaction({ transactionTime: "13:45", attachmentId: "att-1", fileHash: "hash-1", ref: "REF-1" }),
     fallbackCategoryId: "mixed",
     splitGroupId: "lotus-split-1",
     parentId: "lotus-parent-1",
@@ -81,17 +81,32 @@ test("receipt phase 3: split by category creates an excluded parent and reportab
   const dashboardRows = plan.transactions.filter((tx) => !tx.isSplitChild);
   assert.deepEqual(dashboardRows.map((tx) => tx.id), ["lotus-parent-1"]);
 
-  assert.equal(plan.children.length, 5);
+  assert.equal(plan.children.length, 6);
   assert.ok(plan.children.every((child) => isSplitChildTransaction(child)));
   assert.ok(plan.children.every((child) => isReportableExpenseTransaction(child)));
   assert.ok(plan.children.every((child) => child.splitGroupId === "lotus-split-1"));
+  assert.ok(plan.children.every((child) => child.splitParentId === "lotus-parent-1"));
+  assert.ok(plan.children.every((child) => child.attachmentId === "att-1"));
+  assert.ok(plan.children.every((child) => child.fileHash === "hash-1"));
+  assert.ok(plan.children.every((child) => child.ref === "REF-1"));
+  assert.ok(plan.children.every((child) => child.transactionTime === "13:45"));
+  assert.ok(plan.children.every((child) => child.date === "2026-04-10"));
+  assert.ok(plan.children.every((child) => child.receiptLines.length === 1));
+  assert.deepEqual(
+    plan.children.map((child) => child.splitIndex),
+    [1, 2, 3, 4, 5, 6],
+  );
 
   const totals = amountByCategory(plan.transactions);
-  assert.equal(totals.get("groceries"), 25000);
-  assert.equal(totals.get("household"), 12000);
-  assert.equal(totals.get("personal_care"), 37000);
+  assert.equal(totals.get("packaged_food"), 25000);
+  assert.equal(totals.get("household_cleaning"), 12000);
+  assert.equal(totals.get("oral_care"), 9000);
   assert.equal(totals.get("snacks"), 8000);
+  assert.equal(totals.get("personal_items"), 28000);
   assert.equal(totals.get("discount"), -4000);
+  for (const broadId of ["groceries", "bills", "food", "shopping", "home"]) {
+    assert.equal(totals.has(broadId), false, broadId);
+  }
   assert.deepEqual(calculateIncomeExpenseTotals(plan.transactions), {
     income: 0,
     expense: 78000,
@@ -120,6 +135,30 @@ test("receipt phase 3: split by item creates one child per purchased item", () =
     [
       ["Iced latte", "coffee", 14500],
       ["Croissant", "bakery", 12000],
+    ],
+  );
+});
+
+test("receipt phase 3: legacy split by category mode still saves one child per line", () => {
+  const plan = buildReceiptSplitPlan({
+    receipt: {
+      merchant: "Mini Mart",
+      paidTotalSatang: 3000,
+      items: [
+        { id: "water-a", rawName: "Water 600ml", totalSatang: 1200, suggestedCategoryId: "drinks" },
+        { id: "water-b", rawName: "Water 1.5L", totalSatang: 1800, suggestedCategoryId: "drinks" },
+      ],
+    },
+    mode: RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY,
+    baseTransaction: baseTransaction({ merchant: "Mini Mart", amount: 3000 }),
+  });
+
+  assert.equal(plan.parent.categoryId, "drinks");
+  assert.deepEqual(
+    plan.children.map((child) => [child.itemName, child.categoryId, child.amount]),
+    [
+      ["Water 600ml", "drinks", 1200],
+      ["Water 1.5L", "drinks", 1800],
     ],
   );
 });
@@ -154,8 +193,8 @@ test("receipt phase 3: service charges increase report total and discounts reduc
   });
 
   const totals = amountByCategory(plan.transactions);
-  assert.equal(totals.get("food"), 10000);
-  assert.equal(totals.get("fees"), 1000);
+  assert.equal(totals.get("dining"), 10000);
+  assert.equal(totals.get("service_charge"), 1000);
   assert.equal(totals.get("discount"), -200);
   assert.equal(calculateIncomeExpenseTotals(plan.transactions).expense, 10800);
 });
@@ -198,7 +237,7 @@ test("receipt phase 3: changing a line category changes the category split child
   const original = buildReceiptSplitPlan({
     lines: [
       { name: "Lunch", amountSatang: 10000, categoryId: "food" },
-      { name: "Coffee beans", amountSatang: 12000, categoryId: "groceries" },
+      { name: "Dish soap", amountSatang: 12000, categoryId: "groceries" },
     ],
     mode: RECEIPT_SAVE_MODES.SPLIT_BY_CATEGORY,
     baseTransaction: baseTransaction({ amount: 22000, merchant: "Market" }),
@@ -212,7 +251,7 @@ test("receipt phase 3: changing a line category changes the category split child
     baseTransaction: baseTransaction({ amount: 22000, merchant: "Market" }),
   });
 
-  assert.ok(original.children.some((child) => child.categoryId === "groceries"));
+  assert.ok(original.children.some((child) => child.categoryId === "household_cleaning"));
   assert.equal(edited.children.some((child) => child.categoryId === "groceries"), false);
   assert.equal(edited.children.find((child) => child.categoryId === "coffee")?.amount, 12000);
 });
@@ -225,7 +264,7 @@ test("receipt phase 3: ledger wrapper returns the receipt split transactions", (
     parentId: "lotus-parent-wrapper",
   });
 
-  assert.equal(transactions.length, 6);
+  assert.equal(transactions.length, 7);
   assert.equal(transactions[0].id, "lotus-parent-wrapper");
   assert.equal(transactions[0].isSplitParent, true);
   assert.equal(calculateIncomeExpenseTotals(transactions).expense, 78000);

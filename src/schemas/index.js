@@ -11,6 +11,7 @@ import { normalizeBackupCore } from "../utils/backupPayload.js";
 const satangInt = z.number().int().finite().default(0);
 const isoDateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.string().length(0)).default("");
 const timeHHmmStr = z.string().regex(/^\d{2}:\d{2}$/).or(z.string().length(0)).default("");
+const transactionTimeStr = z.string().regex(/^\d{2}:\d{2}(?::\d{2})?$/).or(z.string().length(0)).default("");
 const optionalStr = z.string().default("");
 const optionalBool = z.boolean().default(false);
 const timestamp = z.number().finite().default(0);
@@ -67,6 +68,7 @@ export const TransactionSchema = z.object({
   amount: satangInt,
   date: isoDateStr,
   time: timeHHmmStr,
+  transactionTime: transactionTimeStr,
   category: optionalStr,
   accountId: optionalStr,
   note: optionalStr,
@@ -166,6 +168,7 @@ export const CategorySchema = z.object({
   icon: z.string().default("🏷️"),
   color: z.string().default("#94A3B8"),
   parentId: optionalStr,
+  assignable: z.boolean().optional(),
 
   // Tombstone
   isDeleted: optionalBool,
@@ -285,6 +288,7 @@ export const InboxItemSchema = z.object({
   amount: satangInt,
   date: isoDateStr,
   time: timeHHmmStr,
+  transactionTime: transactionTimeStr,
   categoryId: optionalStr,
   accountId: optionalStr,
   fromAccountId: optionalStr,

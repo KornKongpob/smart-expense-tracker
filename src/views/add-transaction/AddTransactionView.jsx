@@ -5,6 +5,12 @@ import {
   isCreditAccount,
   matchFromToAccounts,
 } from "../../utils/accountMatch";
+import {
+  hasScannedLineItems,
+  normalizeScannedTxType,
+  resolveScannedDocType,
+  resolveScannedTxTypeFromAccounts,
+} from "../../utils/scanTransactionType.js";
 
 import {
   X,
@@ -39,6 +45,7 @@ import BentoCard from "../../components/bento/BentoCard";
 import { scanReceiptOpenAI } from "../../services/scanOpenAI";
 import { putBlob, getBlobUrl } from "../../services/blobStore";
 import { formatCurrency, normalizeTimeHHmm, toISODate } from "../../utils/format";
+import { normalizeTransactionTime, parseTransactionTimeFromText } from "../../utils/scanDateTime.js";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput, normalizeThaiDigits } from "../../utils/money";
 import { generateId, generateTransferId, generateSplitGroupId } from "../../utils/id";
 import { expandTransactionToInstallments } from "../../utils/installments";
@@ -54,7 +61,12 @@ import {
   getBudget,
   calcAccountBalance,
 } from "../../store/selectors";
-import { deriveReceiptCategoryKey, splitReceiptItemsToLines, sanitizeCategoryKey } from "../../utils/receiptCategorizer";
+import {
+  deriveReceiptCategoryKey,
+  inferCategoryKeyFromText,
+  splitReceiptItemsToLines,
+  sanitizeCategoryKey,
+} from "../../utils/receiptCategorizer";
 import {
   reconcileReceiptGroups,
   signedReceiptGroupSatang,
@@ -122,6 +134,59 @@ function categoryNameFromKey(key) {
   return map[k] || String(key || "").trim() || "อื่นๆ";
 }
 
+function resolveReceiptGroupCategoryKey(group, fallbackCategoryId = "other") {
+  const source = group && typeof group === "object" ? group : {};
+  const raw = String(
+    source.categoryId ||
+      source.category ||
+      source.category_key ||
+      source.key ||
+      source.suggestedCategoryId ||
+      source.suggested_category_id ||
+      "",
+  ).trim();
+  const isAdj =
+    isAdjustmentLike(source) ||
+    String(source.receiptLineType || source.receipt_line_type || "").toLowerCase().trim() === "adjustment";
+
+  if (isAdj) {
+    const rawKey = raw.toLowerCase();
+    const effect = String(source.adjustmentEffect || source.adjustment_effect || source.effect || "").toLowerCase().trim();
+    const type = String(source.adjustmentType || source.adjustment_type || source.type || "").toLowerCase().trim();
+    if (rawKey === "discount" || type === "discount" || effect === "subtract") return "discount";
+    if (rawKey === "service_charge" || type === "service_charge") return "service_charge";
+    return (
+      sanitizeCategoryKey(raw, { allowAdjustmentCategories: true }) ||
+      sanitizeCategoryKey(fallbackCategoryId, { allowAdjustmentCategories: true }) ||
+      "fees"
+    );
+  }
+
+  const sanitizedRaw = sanitizeCategoryKey(raw);
+  const sanitizedFallback = sanitizeCategoryKey(fallbackCategoryId);
+  const text = [
+    source.itemName,
+    source.note,
+    source.name,
+    source.title,
+    source.label,
+    source.rawName,
+    source.normalizedName,
+    source.parentName,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const inferred = inferCategoryKeyFromText("expense", text, {
+    fallbackCategory: sanitizedRaw || sanitizedFallback || fallbackCategoryId,
+  });
+  const normalizedRaw = raw.toLowerCase().replace(/\s+/g, " ");
+  const shouldPreferText = Boolean(normalizedRaw && sanitizedRaw && normalizedRaw !== sanitizedRaw);
+
+  if (shouldPreferText) return inferred || sanitizedRaw || sanitizedFallback || "other";
+  return sanitizedRaw || inferred || sanitizedFallback || "other";
+}
+
 function mapKnownCategoryId(type, key) {
   const k = sanitizeCategoryKey(key);
   if (!k) return type === "income" ? "other_income" : "other";
@@ -159,7 +224,7 @@ function mapKnownCategoryId(type, key) {
   return type === "income" ? incomeMap[k] || "" : expenseMap[k] || "";
 }
 
-function looksLikeCreditPaymentText(text) {
+function LOOKS_LIKE_CREDIT_PAYMENT_TEXT(text) {
   const t = String(text || "").toLowerCase();
   return (
     t.includes("ชำระ") ||
@@ -173,7 +238,7 @@ function looksLikeCreditPaymentText(text) {
   );
 }
 
-function looksLikeTransferText(text) {
+function LOOKS_LIKE_TRANSFER_TEXT(text) {
   const t = String(text || "").toLowerCase();
   return (
     t.includes("โอน") ||
@@ -187,7 +252,7 @@ function looksLikeTransferText(text) {
   );
 }
 
-function looksLikeIncomeText(text) {
+function LOOKS_LIKE_INCOME_TEXT(text) {
   const t = String(text || "").toLowerCase();
   return (
     t.includes("เงินเข้า") ||
@@ -204,7 +269,7 @@ function looksLikeIncomeText(text) {
   );
 }
 
-function looksLikeExpenseText(text) {
+function LOOKS_LIKE_EXPENSE_TEXT(text) {
   const t = String(text || "").toLowerCase();
   return (
     t.includes("โอนออก") ||
@@ -247,18 +312,6 @@ function fixBuddhistYearISO(isoLike) {
   if (y >= 2400) y = y - 543;
   const pad = (n) => String(n).padStart(2, "0");
   return `${y}-${pad(mo)}-${pad(d)}`;
-}
-
-function parseSlipTimeFromText(text) {
-  const t0 = String(text || "").replace(/\u00A0/g, " ").trim();
-  if (!t0) return "";
-  const t = normalizeThaiDigits(t0);
-  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[:.](\d{2})(?:[:.](\d{2}))?/i);
-  if (!m) return "";
-  const hh = String(m[1]).padStart(2, "0");
-  const mm = String(m[2]).padStart(2, "0");
-  const ss = m[3] != null ? String(m[3]).padStart(2, "0") : "";
-  return ss ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
 }
 
 function guessSlipReceiverBankId(text) {
@@ -318,59 +371,6 @@ function guessSlipCategoryKey(merchantText) {
   }
 
   return "";
-}
-
-/**
- * Enhance model-detected tx type using:
- * - Whether from/to accounts are recognized in the user's account list
- * - Credit-account direction (deposit -> credit) to detect credit card payments
- * - Lightweight keyword hints for income vs expense when only one side is recognized
- */
-function enhanceScannedTxType({
-  currentType,
-  aiTxType,
-  matchedFromId,
-  matchedToId,
-  matchedFromAcc,
-  matchedToAcc,
-  contextText,
-}) {
-  if (currentType === "credit_payment") return "credit_payment";
-
-  const internalFrom = !!matchedFromAcc;
-  const internalTo = !!matchedToAcc;
-
-  const fromIsCredit = internalFrom && isCreditAccount(matchedFromAcc);
-  const toIsCredit = internalTo && isCreditAccount(matchedToAcc);
-
-  const twoInternal =
-    internalFrom && internalTo && matchedFromId && matchedToId && matchedFromId !== matchedToId;
-
-  // If we can validate both sides as internal accounts, it's a transfer (or credit payment).
-  if (twoInternal) {
-    if (toIsCredit && !fromIsCredit) return "credit_payment";
-    return "transfer";
-  }
-
-  // If text strongly indicates paying a credit card and destination looks like credit, prefer credit_payment.
-  if (looksLikeCreditPaymentText(contextText) && toIsCredit && !fromIsCredit) return "credit_payment";
-
-  // If model says transfer but we can't validate both sides, infer direction:
-  // - internalFrom only  => likely expense (money leaving your account)
-  // - internalTo only    => likely income (money entering your account)
-  if (currentType === "transfer") {
-    if (internalFrom && !internalTo) return looksLikeIncomeText(contextText) ? "income" : "expense";
-    if (!internalFrom && internalTo) return looksLikeExpenseText(contextText) ? "expense" : "income";
-    return "transfer";
-  }
-
-  // Direction consistency fixes:
-  // - If destination is internal but source isn't, it's likely income.
-  if (currentType === "expense" && !internalFrom && internalTo) return "income";
-  // - If source is internal but destination isn't, it's likely expense.
-  if (currentType === "income" && internalFrom && !internalTo) return "expense";
-
-  return currentType || aiTxType || "expense";
 }
 
 export default function AddTransactionView({ showAlert, showConfirm }) {
@@ -1190,14 +1190,24 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           fallbackCategoryId,
         },
       );
+      const leafCategoryId =
+        resolveReceiptGroupCategoryKey(
+          {
+            ...group,
+            categoryId: categorized.categoryId || categorized.suggestedCategoryId || group?.categoryId || group?.key,
+          },
+          fallbackCategoryId,
+        ) ||
+        sanitizeCategoryKey(fallbackCategoryId) ||
+        "other";
       const categoryId = ensureCategory(
         "expense",
-        categorized.categoryId || categorized.suggestedCategoryId || group?.categoryId || group?.key || fallbackCategoryId,
+        leafCategoryId,
       );
 
       return {
         ...group,
-        key: sanitizeCategoryKey(categoryId) || sanitizeCategoryKey(group?.key) || fallbackCategoryId,
+        key: sanitizeCategoryKey(categoryId) || leafCategoryId,
         categoryId,
         suggestedCategoryId: categorized.suggestedCategoryId || categoryId,
         categoryConfidence: categorized.categoryConfidence,
@@ -1571,6 +1581,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             txType: "expense",
             amount: null,
             date: toISODate(new Date()),
+            time: "",
+            transactionTime: "",
             dateWasDefault: true,
             dateEdited: false,
             note: "",
@@ -1622,8 +1634,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
 
           const fileHash = await fileHashPromise;
 
-          const aiTxType =
-            result?.tx_type === "transfer" ? "transfer" : result?.tx_type === "income" ? "income" : "expense";
+          const aiTxType = normalizeScannedTxType(result?.tx_type);
 
           const amount =
             typeof result?.amount === "number" ? result.amount : result?.amount != null ? Number(result.amount) : null;
@@ -1646,7 +1657,16 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const rrefKey = normalizeRefKey(rref);
 
           // Slip Hunter: enrich transfer slips with time + receiver bank (best-effort)
-          const slipTime = parseSlipTimeFromText(evidenceText || contextText);
+          const transactionTime =
+            normalizeTransactionTime(
+              result?.transactionTime ??
+                result?.transaction_time ??
+                result?.time ??
+                result?.transaction_at ??
+                result?.transactionAt,
+            ) ||
+            parseTransactionTimeFromText(evidenceText || contextText);
+          const legacyTime = normalizeTimeHHmm(transactionTime) || "";
           const receiverBankId = guessSlipReceiverBankId(contextText || evidenceText);
 
           const fromDigits = digitsOnly(result?.from_account);
@@ -1675,82 +1695,24 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           const matchedFromAcc = matchedFromId ? accounts.find((a) => a.id === matchedFromId) : null;
           const matchedToAcc = matchedToId ? accounts.find((a) => a.id === matchedToId) : null;
 
-          const hasTwoSides = !!(matchedFromId && matchedToId && matchedFromId !== matchedToId);
-
           // ===== Robust doc type + tx type resolution (Hybrid Pipeline) =====
-          const rawDocType = String(result?.doc_type ?? result?.docType ?? "").toLowerCase().trim();
+          const hasLineItems = hasScannedLineItems(result);
+          const docType = resolveScannedDocType({
+            docType: result?.doc_type ?? result?.docType,
+            aiTxType,
+            hasLineItems,
+          });
 
-          const hasLineItems =
-            Array.isArray(result?.items) &&
-            result.items.some((it) => {
-              const n = String(it?.name || it?.title || it?.desc || "").trim();
-              const amt =
-                Number(it?.line_total) ||
-                Number(it?.total) ||
-                Number(it?.amount) ||
-                Number(it?.lineTotal) ||
-                0;
-              return !!n && Number.isFinite(amt) && amt > 0;
-            });
-
-          // Prefer model doc_type, but if we clearly see priced line items, treat it as a receipt.
-          const docType = (() => {
-            if (hasLineItems) return "receipt";
-            if (rawDocType) return rawDocType;
-            if (aiTxType === "transfer" || aiTxType === "credit_payment") return "transfer_slip";
-            return "unknown";
-          })();
-
-          // ===== Resolve final tx type (conservative; prevents misclassifying receipts as transfers) =====
-          let finalTxType = aiTxType;
-
-          if (docType === "receipt") {
-            // Receipts are not internal transfers. Default to expense unless model strongly says income.
-            finalTxType = aiTxType === "income" ? "income" : "expense";
-          } else if (docType === "transfer_slip" || docType === "bill_payment") {
-            const looksLikeCreditPay = looksLikeCreditPaymentText(contextText);
-            if (hasTwoSides) {
-              const isCreditPay =
-                (matchedToAcc && isCreditAccount(matchedToAcc) && matchedFromAcc && !isCreditAccount(matchedFromAcc)) ||
-                looksLikeCreditPay;
-
-              finalTxType = isCreditPay ? "credit_payment" : "transfer";
-            } else if (looksLikeCreditPay && matchedToAcc && isCreditAccount(matchedToAcc)) {
-              finalTxType = "credit_payment";
-            } else if (matchedFromId && !matchedToId) {
-              finalTxType = "expense";
-            } else if (!matchedFromId && matchedToId) {
-              finalTxType = "income";
-            } else {
-              finalTxType = aiTxType === "income" ? "income" : "expense";
-            }
-          } else {
-            let tmp = aiTxType;
-
-            if (
-              looksLikeCreditPaymentText(contextText) &&
-              matchedToAcc &&
-              isCreditAccount(matchedToAcc)
-            ) {
-              tmp = "credit_payment";
-            } else if (aiTxType !== "income" && hasTwoSides && looksLikeTransferText(contextText)) {
-              tmp = "transfer";
-            }
-
-            finalTxType = enhanceScannedTxType({
-              currentType: tmp,
-              aiTxType,
-              matchedFromId,
-              matchedToId,
-              matchedFromAcc,
-              matchedToAcc,
-              contextText,
-            });
-
-            if (hasLineItems && (finalTxType === "transfer" || finalTxType === "credit_payment")) {
-              finalTxType = "expense";
-            }
-          }
+          const finalTxType = resolveScannedTxTypeFromAccounts({
+            docType,
+            aiTxType,
+            hasLineItems,
+            matchedFromId,
+            matchedToId,
+            matchedFromAcc,
+            matchedToAcc,
+            contextText,
+          });
 
           // ---- NEW: payment method + account_id returned from OpenAI ----
           const aiPaymentMethodRaw = String(result?.payment_method || result?.paymentMethod || "")
@@ -1892,15 +1854,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             groups = (lines || [])
               .map((ln, idx) => {
                 const isAdj = String(ln?.receiptLineType || "").toLowerCase().trim() === "adjustment";
-                const key =
-                  sanitizeCategoryKey(
-                    ln.key ||
-                      (isAdj
-                        ? String(ln.adjustmentEffect || "").toLowerCase().trim() === "subtract"
-                          ? "discount"
-                          : "fees"
-                        : "other")
-                  ) || "other";
+                const key = resolveReceiptGroupCategoryKey({ ...ln, note: ln?.name }, fallbackKey);
                 const catId = ensureCategory("expense", key);
 
                 const effect = String(ln?.adjustmentEffect || "").toLowerCase().trim();
@@ -1921,9 +1875,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   children: Array.isArray(ln?.children)
                     ? ln.children
                         .map((c) => {
-                          const childKey = sanitizeCategoryKey(
-                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
-                          );
+                          const childKey = resolveReceiptGroupCategoryKey(c, fallbackKey);
                           return {
                             name: String(c?.name || "").trim(),
                             amount: parseMoneyToSatang(c?.amount),
@@ -2070,6 +2022,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             amount: pickedAmount,
             amountEdited: false,
             date: d,
+            time: legacyTime,
+            transactionTime,
             dateWasDefault,
             dateEdited: false,
             note: mergedNote,
@@ -2096,7 +2050,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
               slip:
                 docType === "transfer_slip" || docType === "bill_payment"
                   ? {
-                      time: normalizeTimeHHmm(slipTime) || "",
+                      time: transactionTime || "",
                       receiverBankId: receiverBankId || "",
                       transactionRef: rref || "",
                       receiverName: merchant || "",
@@ -2352,7 +2306,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             groups = (lines || [])
               .filter((ln) => (Number(ln?.amount) || 0) > 0)
               .map((ln, idx) => {
-                const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+                const key = resolveReceiptGroupCategoryKey({ ...ln, note: ln?.name }, fallbackKey);
                 const categoryId = ensureCategory("expense", key);
                 return {
                   key,
@@ -2365,9 +2319,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   children: Array.isArray(ln?.children)
                     ? ln.children
                         .map((c) => {
-                          const childKey = sanitizeCategoryKey(
-                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
-                          );
+                          const childKey = resolveReceiptGroupCategoryKey(c, fallbackKey);
                           return {
                             ...c,
                             key: childKey || null,
@@ -2476,7 +2428,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             groups = (lines || [])
               .filter((ln) => (Number(ln?.amount) || 0) > 0)
               .map((ln, idx) => {
-                const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+                const key = resolveReceiptGroupCategoryKey({ ...ln, note: ln?.name }, fallbackKey);
                 const categoryId = ensureCategory("expense", key);
                 return {
                   key,
@@ -2489,9 +2441,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   children: Array.isArray(ln?.children)
                     ? ln.children
                         .map((c) => {
-                          const childKey = sanitizeCategoryKey(
-                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
-                          );
+                          const childKey = resolveReceiptGroupCategoryKey(c, fallbackKey);
                           return {
                             ...c,
                             key: childKey || null,
@@ -2629,7 +2579,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             groups = (lines || [])
               .filter((ln) => (Number(ln?.amount) || 0) > 0)
               .map((ln, idx) => {
-                const key = sanitizeCategoryKey(ln?.key || "other") || "other";
+                const key = resolveReceiptGroupCategoryKey({ ...ln, note: ln?.name }, fallbackKey);
                 const categoryId = ensureCategory("expense", key);
                 return {
                   key,
@@ -2642,9 +2592,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                   children: Array.isArray(ln?.children)
                     ? ln.children
                         .map((c) => {
-                          const childKey = sanitizeCategoryKey(
-                            c?.key || c?.category_key || c?.categoryId || c?.category || "",
-                          );
+                          const childKey = resolveReceiptGroupCategoryKey(c, fallbackKey);
                           return {
                             ...c,
                             key: childKey || null,
@@ -2764,7 +2712,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       const id = String(catId || "").trim();
       if (!id || id === "transfer") return ensureCategory(txType, "other");
       const set = txType === "income" ? incomeCatIds : expenseCatIds;
-      if (set.has(id)) return id;
+      const normalizedId = txType === "expense" ? sanitizeCategoryKey(id, { allowMixed: true }) || id : id;
+      if (set.has(normalizedId)) return normalizedId;
       return ensureCategory(txType, "other");
     };
 
@@ -2784,8 +2733,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             const amount = Number(gg.amount) || 0;
             if (amount <= 0) return null;
 
-            const rawCat = String(gg.categoryId || gg.category || "").trim();
-            const categoryId = rawCat && expenseCatIds.has(rawCat) ? rawCat : next.categoryId;
+            const key = resolveReceiptGroupCategoryKey(gg, next.categoryId || "other");
+            const categoryId = key && expenseCatIds.has(key) ? key : next.categoryId;
 
             return { ...gg, amount, categoryId };
           })
@@ -2894,7 +2843,8 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       const sm = base.scanMeta && typeof base.scanMeta === "object" ? base.scanMeta : null;
       const reconcile = sm?.reconcile && typeof sm.reconcile === "object" ? sm.reconcile : null;
       const slip = sm?.slip && typeof sm.slip === "object" ? { ...sm.slip } : null;
-      if (slip) slip.time = normalizeTimeHHmm(slip.time) || "";
+      const transactionTime = normalizeTransactionTime(base.transactionTime || base.time || sm?.transactionTime || slip?.time);
+      if (slip) slip.time = transactionTime || "";
       // Keep meta compact and stable
       return {
         ...(reconcile || {}),
@@ -2906,7 +2856,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     const txs = [];
     for (const q of normalizedReady) {
       const d = String(q.date || toISODate(new Date())).slice(0, 10);
-      const txTime = normalizeTimeHHmm(q.time || q.scanMeta?.slip?.time || q.meta?.slip?.time) || "";
+      const transactionTime =
+        normalizeTransactionTime(q.transactionTime || q.time || q.scanMeta?.slip?.time || q.meta?.slip?.time) || "";
+      const txTime = normalizeTimeHHmm(transactionTime) || "";
       const noteText = String(q.note || "").trim();
       const merchant = String(q.merchant || "").trim();
       const baseNoteRaw = noteText || merchant || "Scan";
@@ -2941,6 +2893,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           accountId: q.fromAccountId,
           date: d,
           time: txTime,
+          transactionTime,
           note: baseNote || defaultNote,
           isTransfer: true,
           transferId,
@@ -2972,6 +2925,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           accountId: q.toAccountId,
           date: d,
           time: txTime,
+          transactionTime,
           note: baseNote || defaultNote,
           isTransfer: true,
           transferId,
@@ -3005,7 +2959,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         let groups = (q.groups || [])
           .map((g) => {
             const note = String(g?.note || "").trim();
-            const catId = String(g?.categoryId || "").trim();
+            const catId = ensureCategory("expense", resolveReceiptGroupCategoryKey(g, q.categoryId || "other"));
             const looksLikeDiscount = catId === "discount" || note.includes("ส่วนลด");
             const isAdj = isAdjustmentLike(g) || looksLikeDiscount;
             const adjEffectRaw = String(g?.adjustmentEffect || "").toLowerCase().trim();
@@ -3067,6 +3021,18 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         const surchargeSatang = groups
           .filter((g) => isAdjustmentLike(g) && String(g.adjustmentEffect || "").toLowerCase().trim() === "add")
           .reduce((s, g) => s + (Number(g.amount) || 0), 0);
+        const receiptLinesForSplit = groups.map((g, idx) => ({
+          key: String(g?.key || g?.categoryId || "").trim() || null,
+          categoryId: String(g?.categoryId || "").trim() || null,
+          amount: Math.abs(Number(g?.amount || 0)),
+          note: String(g?.note || g?.name || "").trim() || null,
+          splitIndex: Number(g?.splitIndex || 0) || idx + 1,
+          receiptLineType: String(g?.receiptLineType || "item"),
+          adjustmentEffect: String(g?.adjustmentEffect || "add"),
+          adjustmentType: String(g?.adjustmentType || "").trim() || null,
+          children: Array.isArray(g?.children) ? g.children : null,
+          childrenIncludedInParent: !!g?.childrenIncludedInParent,
+        }));
 
         // ✅ Parent category for split receipts:
         // - If children have multiple categories → parent = "mixed" (UI-only parent)
@@ -3091,6 +3057,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           accountId: q.accountId,
           date: d,
           time: txTime,
+          transactionTime,
           note: baseNote,
           isTransfer: false,
           transferId: null,
@@ -3111,6 +3078,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
           receiptItemsSubtotalSatang: itemsSubtotalSatang,
           receiptDiscountSatang: discountSatang,
           receiptSurchargeSatang: surchargeSatang,
+          receiptLines: receiptLinesForSplit,
 
           splitGroupId,
           splitCount,
@@ -3137,12 +3105,13 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             accountId: q.accountId,
             date: d,
             time: txTime,
+            transactionTime,
             // ✅ Explicit item name for child line (also mirrored into note for compatibility)
             itemName,
             note: itemName,
             isTransfer: false,
             transferId: null,
-            ref: null,
+            ref: q.ref || null,
             source: "scan",
             attachmentId: q.attachmentId || null,
             fileHash: String(q.fileHash || '').trim() || null,
@@ -3157,6 +3126,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             receiptLineType: g.receiptLineType || "item",
             adjustmentType: g.adjustmentType || null,
             adjustmentEffect: g.adjustmentEffect || "add",
+            receiptLines: receiptLinesForSplit[idx] ? [receiptLinesForSplit[idx]] : [],
 
             splitGroupId,
             splitIndex: Number(g?.splitIndex || 0) || idx + 1,
@@ -3191,9 +3161,11 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                 const effect = String(gg.adjustmentEffect || gg.effect || "").toLowerCase().trim();
                 const adjEffect = isAdj ? (effect === "subtract" ? "subtract" : "add") : "add";
 
+                const categoryKey = resolveReceiptGroupCategoryKey(gg, q.categoryId || "other");
+
                 return {
-                  key: String(gg.key || "").trim() || null,
-                  categoryId: String(gg.categoryId || gg.category || "").trim() || null,
+                  key: categoryKey || String(gg.key || "").trim() || null,
+                  categoryId: categoryKey ? ensureCategory("expense", categoryKey) : null,
                   amount: Math.abs(amt),
                   note: String(gg.note || gg.name || "").trim() || null,
                   splitIndex: Number(gg.splitIndex || 0) || idx + 1,
@@ -3207,9 +3179,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
                           const ca = typeof cc.amount === "number" ? cc.amount : Number(cc.amount);
                           const camt = Number.isFinite(ca) ? Math.round(ca) : 0;
                           const nm = String(cc.name || "").trim();
-                          const childKey = sanitizeCategoryKey(
-                            cc.key || cc.category_key || cc.categoryId || cc.category || "",
-                          );
+                          const childKey = resolveReceiptGroupCategoryKey(cc, q.categoryId || "other");
                           if (!nm && !camt && !childKey) return null;
                           return {
                             name: nm || "—",
@@ -3249,6 +3219,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         accountId: q.accountId,
         date: d,
         time: txTime,
+        transactionTime,
         note: baseNote,
         isTransfer: false,
         transferId: null,

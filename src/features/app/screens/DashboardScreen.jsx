@@ -7,6 +7,7 @@ import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import DashboardAnalyticsPanels from "../DashboardAnalyticsPanels.jsx";
 import AssistantPanel from "../../assistant/AssistantPanel.jsx";
 import { generatePersonalMoneyRecommendations } from "../../assistant/recommendationEngine.js";
+import MoneyCoachPanel from "../../../components/MoneyCoachPanel.jsx";
 import TransactionEditSheet, {
   TransactionKindIcon,
   buildTransactionAccountLabel,
@@ -17,6 +18,8 @@ import TransactionEditSheet, {
 import { AmountText, MetricCard, ScreenShell, StatusPill } from "../ui.jsx";
 import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
 import { formatCurrency, toISODate } from "../../../utils/format.js";
+import TransactionDetailModal from "../../../components/TransactionDetailModal.jsx";
+import { generateMoneyCoachInsights } from "../../../utils/moneyCoach.js";
 
 void AccountSheetPicker;
 
@@ -119,6 +122,18 @@ export default function DashboardScreen() {
     () => generatePersonalMoneyRecommendations(assistantState, { today: todayISO, maxItems: 5 }),
     [assistantState, todayISO],
   );
+  const moneyCoachInsights = useMemo(
+    () =>
+      generateMoneyCoachInsights({
+        transactions: recentTransactions,
+        accounts: allAccounts,
+        categories,
+        budgets: budgetRows,
+        recurring: recurringRules,
+        todayISO,
+      }),
+    [recentTransactions, allAccounts, categories, budgetRows, recurringRules, todayISO],
+  );
   const accountMap = useMemo(
     () => new Map(allAccounts.map((account) => [toId(account?.id), account])),
     [allAccounts],
@@ -128,6 +143,7 @@ export default function DashboardScreen() {
   const hasAccounts = snapshotAccounts.length > 0;
   const hasCategories = topCategories.length > 0;
   const rawCashflow = Array.isArray(cashflowSeries) ? cashflowSeries : [];
+  const [detailTransaction, setDetailTransaction] = useState(null);
   const [activeTransaction, setActiveTransaction] = useState(null);
   const hasCashflow = rawCashflow.some(
     (row) => hasValue(row?.income_satang) || hasValue(row?.expense_satang),
@@ -220,6 +236,28 @@ export default function DashboardScreen() {
     }));
     navigateToPath("/transactions");
   };
+  const handleMoneyCoachAction = (target) => {
+    const view = toId(target);
+    if (!view) return;
+    if (view === "transactions") {
+      openFullHistory();
+      return;
+    }
+    if (view === "budgets" || view === "planner") {
+      navigateToView("planner");
+      return;
+    }
+    navigateToView(view);
+  };
+  const editTransactionFromDetail = (id) => {
+    const targetId = toId(id);
+    const target =
+      (Array.isArray(recentTransactions) ? recentTransactions : []).find(
+        (transaction) => toId(transaction?.id) === targetId,
+      ) || detailTransaction;
+    setDetailTransaction(null);
+    setActiveTransaction(target || null);
+  };
 
   const starterCard = (
     <article
@@ -273,6 +311,8 @@ export default function DashboardScreen() {
         onNavigate={(view) => navigateToView(view)}
         actionViewAliases={{ planner: "planner", budgets: "planner" }}
       />
+
+      <MoneyCoachPanel insights={moneyCoachInsights} onAction={handleMoneyCoachAction} />
 
       <article className="ui-card finance-panel finance-month-card">
         <div className="finance-month-card-copy">
@@ -472,7 +512,7 @@ export default function DashboardScreen() {
                   key={transaction.id}
                   type="button"
                   className="finance-list-button finance-history-button"
-                  onClick={() => setActiveTransaction(transaction)}
+                  onClick={() => setDetailTransaction(transaction)}
                   data-testid={`dashboard-transaction-${transaction.id}`}
                 >
                   <div className="finance-row finance-history-row">
@@ -585,6 +625,14 @@ export default function DashboardScreen() {
         saving={saving}
         updateTransaction={updateTransaction}
         deleteTransaction={deleteTransaction}
+      />
+      <TransactionDetailModal
+        transaction={detailTransaction}
+        transactions={recentTransactions}
+        accounts={allAccounts}
+        categories={categories}
+        onClose={() => setDetailTransaction(null)}
+        onEdit={editTransactionFromDetail}
       />
     </ScreenShell>
   );

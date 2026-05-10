@@ -34,7 +34,8 @@ import {
   resolveMerchantCanonical,
   deriveMerchantAutofillPatch,
 } from "../utils/merchantDictionary";
-import { inferCategoryKeyFromText } from "../utils/receiptCategorizer";
+import { inferCategoryKeyFromText, sanitizeCategoryKey } from "../utils/receiptCategorizer";
+import { normalizeTransactionTime } from "../utils/scanDateTime";
 import {
   reconcileReceiptGroups,
   signedReceiptGroupSatang,
@@ -66,6 +67,59 @@ function isPositiveNumber(n) {
 function asSatang(v) {
   if (typeof v === "number" && Number.isFinite(v)) return Math.round(v);
   return parseMoneyToSatang(v);
+}
+
+function resolveReceiptGroupCategoryKey(group, fallbackCategoryId = "other") {
+  const source = group && typeof group === "object" ? group : {};
+  const raw = String(
+    source.categoryId ||
+      source.category ||
+      source.category_key ||
+      source.key ||
+      source.suggestedCategoryId ||
+      source.suggested_category_id ||
+      "",
+  ).trim();
+  const isAdj =
+    isAdjustmentLike(source) ||
+    String(source.receiptLineType || source.receipt_line_type || "").toLowerCase().trim() === "adjustment";
+
+  if (isAdj) {
+    const rawKey = raw.toLowerCase();
+    const effect = String(source.adjustmentEffect || source.adjustment_effect || source.effect || "").toLowerCase().trim();
+    const type = String(source.adjustmentType || source.adjustment_type || source.type || "").toLowerCase().trim();
+    if (rawKey === "discount" || type === "discount" || effect === "subtract") return "discount";
+    if (rawKey === "service_charge" || type === "service_charge") return "service_charge";
+    return (
+      sanitizeCategoryKey(raw, { allowAdjustmentCategories: true }) ||
+      sanitizeCategoryKey(fallbackCategoryId, { allowAdjustmentCategories: true }) ||
+      "fees"
+    );
+  }
+
+  const sanitizedRaw = sanitizeCategoryKey(raw);
+  const sanitizedFallback = sanitizeCategoryKey(fallbackCategoryId);
+  const text = [
+    source.itemName,
+    source.note,
+    source.name,
+    source.title,
+    source.label,
+    source.rawName,
+    source.normalizedName,
+    source.parentName,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const inferred = inferCategoryKeyFromText("expense", text, {
+    fallbackCategory: sanitizedRaw || sanitizedFallback || fallbackCategoryId,
+  });
+  const normalizedRaw = raw.toLowerCase().replace(/\s+/g, " ");
+  const shouldPreferText = Boolean(normalizedRaw && sanitizedRaw && normalizedRaw !== sanitizedRaw);
+
+  if (shouldPreferText) return inferred || sanitizedRaw || sanitizedFallback || "other";
+  return sanitizedRaw || inferred || sanitizedFallback || "other";
 }
 
 function normalizeTxType(t) {
@@ -167,7 +221,15 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
   const accounts = Array.isArray(ctx?.accounts) ? ctx.accounts : [];
   const txType = normalizeTxType(item?.type || item?.txType);
   const date = item?.date ? String(item.date).slice(0, 10) : toISODate(new Date());
-  const time = normalizeTimeHHmm(item?.time || item?.scanMeta?.slip?.time || item?.meta?.slip?.time) || "";
+  const transactionTime =
+    normalizeTransactionTime(
+      item?.transactionTime ||
+        item?.transaction_time ||
+        item?.time ||
+        item?.scanMeta?.slip?.time ||
+        item?.meta?.slip?.time,
+    ) || "";
+  const time = normalizeTimeHHmm(transactionTime || item?.time || item?.scanMeta?.slip?.time || item?.meta?.slip?.time) || "";
   const merchant = item?.merchant || "";
   const note = appendEvidenceToNote(item?.note || "", item?.evidence);
   const ref = item?.referenceId || item?.ref || "";
@@ -201,7 +263,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
       .map((g, idx) => {
         const gg = g && typeof g === "object" ? g : {};
         const amount = asSatang(gg?.amount);
-        const categoryId = String(gg?.categoryId || gg?.category || "").trim();
+        const categoryId = resolveReceiptGroupCategoryKey(gg, item?.categoryId || item?.category || "other");
         const note0 = String(gg?.note || gg?.name || gg?.title || "").trim();
         const receiptLineType = String(gg?.receiptLineType || "").toLowerCase().trim()
           || (isAdjustmentLike(gg) || categoryId === "discount" ? "adjustment" : "item");
@@ -248,7 +310,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
     // (prevents approval from failing on edge cases like 1 item + 1 discount line).
     if (usableGroups.length < 2 || nonAdjCount < 2) {
       const g0 = usableGroups.find((x) => String(x?.receiptLineType || "").toLowerCase().trim() !== "adjustment") || usableGroups[0];
-      const categoryId = String(g0?.categoryId || item?.categoryId || "").trim();
+      const categoryId = resolveReceiptGroupCategoryKey(g0, item?.categoryId || item?.category || "other");
       if (!categoryId) throw new Error("ยังไม่ได้เลือก Category สำหรับรายการนี้");
 
       // Amount must respect adjustment math (discount subtracts from paid total)
@@ -271,6 +333,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
           amount,
           date,
           time,
+          transactionTime,
           merchant,
           note: String(g0?.note || "").trim() || note,
           ref: ref || "",
@@ -327,7 +390,19 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
           .filter(Boolean)
       )
     );
-    const parentCategory = String((nonAdjCats.length > 1 ? "mixed" : nonAdjCats[0]) || item?.categoryId || "mixed").trim();
+    const parentCategory = String((nonAdjCats.length > 1 ? "mixed" : nonAdjCats[0]) || sanitizeCategoryKey(item?.categoryId, { allowMixed: true }) || "mixed").trim();
+    const receiptLinesForSplit = usableGroups.map((g, idx) => ({
+      key: String(g?.key || g?.categoryId || "").trim() || null,
+      categoryId: String(g?.categoryId || "").trim() || null,
+      amount: Math.abs(Number(g?.amount || 0)),
+      note: String(g?.note || g?.name || "").trim() || null,
+      splitIndex: Number(g?.splitIndex || 0) || idx + 1,
+      receiptLineType: String(g?.receiptLineType || "item"),
+      adjustmentEffect: String(g?.adjustmentEffect || "add"),
+      adjustmentType: String(g?.adjustmentType || "").trim() || null,
+      children: Array.isArray(g?.children) ? g.children : null,
+      childrenIncludedInParent: !!g?.childrenIncludedInParent,
+    }));
 
     const txs = [];
 
@@ -338,6 +413,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
       amount: parentAmount,
       date,
       time,
+      transactionTime,
       merchant,
       note,
       ref: ref || "",
@@ -355,6 +431,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
       splitLabel,
       isSplit: true,
       isSplitParent: true,
+      receiptLines: receiptLinesForSplit,
     });
 
     // Children (real transactions)
@@ -375,10 +452,11 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         amount,
         date,
         time,
+        transactionTime,
         merchant,
         itemName,
         note: itemName,
-        ref: "",
+        ref: ref || "",
         category: categoryId,
         accountId,
         paymentMethod,
@@ -399,6 +477,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         receiptLineType: String(g?.receiptLineType || "item"),
         adjustmentType: String(g?.adjustmentType || ""),
         adjustmentEffect: String(g?.adjustmentEffect || "add"),
+        receiptLines: receiptLinesForSplit[i] ? [receiptLinesForSplit[i]] : [],
       });
     }
 
@@ -427,6 +506,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         amount,
         date,
         time,
+        transactionTime,
         note,
         merchant,
         ref,
@@ -445,6 +525,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
         amount,
         date,
         time,
+        transactionTime,
         note,
         merchant,
         ref: "",
@@ -461,14 +542,17 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
   // Normal income/expense
   const accountId = item?.accountId || "";
   const amount = asSatang(item?.amount);
-  const categoryId = item?.categoryId || item?.category || "";
+  const categoryId =
+    txType === "expense"
+      ? resolveReceiptGroupCategoryKey(item, item?.categoryId || item?.category || "other")
+      : item?.categoryId || item?.category || "";
 
   const receiptLines =
     txType === "expense" && Array.isArray(item?.groups) && item.groups.length
       ? item.groups
           .map((g, idx) => {
             const gg = g && typeof g === "object" ? g : {};
-            const categoryId0 = String(gg?.categoryId || gg?.category || "").trim();
+            const categoryId0 = resolveReceiptGroupCategoryKey(gg, categoryId || "other");
             const amount0 = asSatang(gg?.amount);
             const note0 = String(gg?.note || gg?.name || gg?.title || "").trim();
             const rlt = String(gg?.receiptLineType || "").toLowerCase().trim() || (isAdjustmentLike(gg) || categoryId0 === "discount" ? "adjustment" : "item");
@@ -484,8 +568,14 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
                     const cc = c && typeof c === "object" ? c : {};
                     const nm = String(cc?.name || "").trim();
                     const ca = asSatang(cc?.amount);
-                    if (!nm && !ca) return null;
-                    return { name: nm || "—", amount: Math.abs(ca) };
+                    const childKey = resolveReceiptGroupCategoryKey(cc, categoryId0 || categoryId || "other");
+                    if (!nm && !ca && !childKey) return null;
+                    return {
+                      name: nm || "—",
+                      amount: Math.abs(ca),
+                      key: childKey || null,
+                      categoryId: childKey || null,
+                    };
                   })
                   .filter(Boolean)
               : null;
@@ -526,6 +616,7 @@ function buildTransactionsFromInboxItem(item, ctx = {}) {
     amount,
     date,
     time,
+    transactionTime,
     merchant,
     note,
     ref,

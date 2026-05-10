@@ -1,5 +1,6 @@
 import { DEFAULT_CATEGORIES } from "../constants/categories.js";
 import { parseMoneyToSatang } from "./money.js";
+import { getAssignableCategoryFallback } from "./categoryHierarchy.js";
 
 const DEFAULT_EXPENSE_CATEGORY = "other";
 const DEFAULT_INCOME_CATEGORY = "other_income";
@@ -68,6 +69,93 @@ const FEE_KEYWORDS = [
 ];
 
 const EXPENSE_RULES = [
+  {
+    id: "electricity",
+    keywords: ["electricity", "electric bill", "power bill", "pea", "mea", "\u0e04\u0e48\u0e32\u0e44\u0e1f"],
+    merchantKeywords: ["pea", "mea", "electricity"],
+    priority: 99,
+  },
+  {
+    id: "water",
+    keywords: ["water bill", "water utility", "\u0e04\u0e48\u0e32\u0e19\u0e49\u0e33"],
+    priority: 98,
+  },
+  {
+    id: "internet_home",
+    keywords: ["fiber", "fibre", "broadband", "home internet", "internet home", "wifi bill", "3bb", "nt broadband", "\u0e2d\u0e34\u0e19\u0e40\u0e17\u0e2d\u0e23\u0e4c\u0e40\u0e19\u0e47\u0e15\u0e1a\u0e49\u0e32\u0e19"],
+    merchantKeywords: ["3bb", "ais fibre", "true online", "nt broadband"],
+    priority: 97,
+  },
+  {
+    id: "phone_internet",
+    keywords: ["mobile bill", "phone bill", "postpaid", "prepaid", "ais", "true", "dtac", "mobile internet", "\u0e04\u0e48\u0e32\u0e21\u0e37\u0e2d\u0e16\u0e37\u0e2d"],
+    merchantKeywords: ["ais", "true", "dtac"],
+    priority: 96,
+  },
+  {
+    id: "ride_hailing",
+    keywords: ["grab", "bolt", "taxi", "grab ride", "bolt ride", "grabcar", "grab taxi", "ride hailing", "taxi app", "\u0e41\u0e01\u0e23\u0e47\u0e1a", "\u0e42\u0e1a\u0e25\u0e17\u0e4c"],
+    merchantKeywords: ["grab", "bolt"],
+    priority: 95,
+  },
+  {
+    id: "shipping",
+    keywords: ["shipping", "parcel", "postage", "delivery parcel", "courier", "ems", "\u0e04\u0e48\u0e32\u0e2a\u0e48\u0e07\u0e1e\u0e31\u0e2a\u0e14\u0e38"],
+    merchantKeywords: ["kerry", "flash", "j&t", "thailand post", "dhl"],
+    priority: 94,
+  },
+  {
+    id: "household_cleaning",
+    keywords: ["dish soap", "dishwashing", "cleaner", "cleaning", "sponge", "mop", "trash bag", "\u0e19\u0e49\u0e33\u0e22\u0e32\u0e25\u0e49\u0e32\u0e07\u0e08\u0e32\u0e19", "\u0e19\u0e49\u0e33\u0e22\u0e32\u0e17\u0e33\u0e04\u0e27\u0e32\u0e21\u0e2a\u0e30\u0e2d\u0e32\u0e14", "\u0e16\u0e38\u0e07\u0e02\u0e22\u0e30"],
+    priority: 93,
+  },
+  {
+    id: "laundry_supplies",
+    keywords: ["detergent", "laundry detergent", "fabric softener", "laundry", "\u0e1c\u0e07\u0e0b\u0e31\u0e01\u0e1f\u0e2d\u0e01", "\u0e19\u0e49\u0e33\u0e22\u0e32\u0e0b\u0e31\u0e01\u0e1c\u0e49\u0e32", "\u0e19\u0e49\u0e33\u0e22\u0e32\u0e1b\u0e23\u0e31\u0e1a\u0e1c\u0e49\u0e32\u0e19\u0e38\u0e48\u0e21"],
+    priority: 92,
+  },
+  {
+    id: "paper_goods",
+    keywords: ["tissue", "toilet paper", "paper towel", "napkin", "\u0e17\u0e34\u0e0a\u0e0a\u0e39\u0e48", "\u0e01\u0e23\u0e30\u0e14\u0e32\u0e29"],
+    priority: 91,
+  },
+  {
+    id: "oral_care",
+    keywords: ["toothpaste", "toothbrush", "mouthwash", "dental floss", "\u0e22\u0e32\u0e2a\u0e35\u0e1f\u0e31\u0e19", "\u0e41\u0e1b\u0e23\u0e07\u0e2a\u0e35\u0e1f\u0e31\u0e19"],
+    priority: 90,
+  },
+  {
+    id: "skincare",
+    keywords: ["skincare", "serum", "sunscreen", "cleanser", "toner", "\u0e2a\u0e01\u0e34\u0e19\u0e41\u0e04\u0e23\u0e4c", "\u0e40\u0e0b\u0e23\u0e31\u0e48\u0e21", "\u0e01\u0e31\u0e19\u0e41\u0e14\u0e14"],
+    priority: 85,
+  },
+  {
+    id: "dairy",
+    keywords: ["milk", "yogurt", "yoghurt", "cheese", "butter", "\u0e19\u0e21", "\u0e42\u0e22\u0e40\u0e01\u0e34\u0e23\u0e4c\u0e15", "\u0e0a\u0e35\u0e2a"],
+    priority: 85,
+  },
+  {
+    id: "meat_seafood",
+    keywords: ["meat", "pork", "chicken", "beef", "fish", "shrimp", "seafood", "\u0e40\u0e19\u0e37\u0e49\u0e2d", "\u0e2b\u0e21\u0e39", "\u0e44\u0e01\u0e48", "\u0e1b\u0e25\u0e32", "\u0e01\u0e38\u0e49\u0e07"],
+    priority: 88,
+  },
+  {
+    id: "fresh_produce",
+    keywords: ["fresh produce", "vegetable", "vegetables", "fruit", "fruits", "produce", "\u0e1c\u0e31\u0e01", "\u0e1c\u0e25\u0e44\u0e21\u0e49", "\u0e02\u0e2d\u0e07\u0e2a\u0e14"],
+    priority: 88,
+  },
+  {
+    id: "packaged_food",
+    keywords: ["packaged food", "instant", "canned", "frozen food", "rice bag", "rice", "grocery", "groceries", "supermarket", "\u0e02\u0e49\u0e32\u0e27\u0e2a\u0e32\u0e23"],
+    merchantKeywords: ["lotus", "tesco", "big c", "tops", "makro", "gourmet market", "villa market"],
+    priority: 87,
+  },
+  {
+    id: "convenience_food",
+    keywords: ["ready meal", "convenience food", "frozen meal", "bento", "7-eleven meal", "convenience store", "minimart"],
+    merchantKeywords: ["7-eleven", "7 eleven", "seven eleven", "familymart", "lawson", "mini big c", "mini lotus"],
+    priority: 86,
+  },
   {
     id: "groceries",
     keywords: [
@@ -585,19 +673,19 @@ const INCOME_RULES = [
 ];
 
 const ALIAS = {
-  "food & beverage": "food",
-  "food and beverage": "food",
-  "food/beverage": "food",
+  "food & beverage": "dining",
+  "food and beverage": "dining",
+  "food/beverage": "dining",
   "beverage": "drinks",
   "drink": "drinks",
   "coffee/tea": "coffee",
   "bubble tea": "milk_tea",
-  "supermarket": "groceries",
-  "convenience store": "groceries",
-  "household": "home",
-  "household goods": "home",
-  "personal care": "personal_care",
-  "toiletries": "personal_items",
+  "supermarket": "packaged_food",
+  "convenience store": "convenience_food",
+  "household": "household_cleaning",
+  "household goods": "household_cleaning",
+  "personal care": "toiletries",
+  "toiletries": "toiletries",
   "cosmetics": "beauty",
   "medicine": "pharmacy",
   "pharmacy": "pharmacy",
@@ -610,6 +698,9 @@ const ALIAS = {
   "fee": "fees",
   "fees": "fees",
   "tax": "taxes",
+  "utilities": "subscriptions",
+  "utility": "subscriptions",
+  "bill": "subscriptions",
   "service charge": "service_charge",
   "other income": "other_income",
   "mixed category": MIXED_CATEGORY_ID,
@@ -746,7 +837,7 @@ function inferAdjustmentDescriptor({
   amountSatang = null,
 } = {}) {
   const effect = norm(explicitEffect);
-  const category = sanitizeCategoryKey(explicitCategory);
+  const category = sanitizeCategoryKey(explicitCategory, { allowAdjustmentCategories: true });
   const text = uniqueNormalized([name, explicitType, category]).join(" ");
   const normalizedType = normalizeAdjustmentType(explicitType);
 
@@ -810,8 +901,8 @@ function inferExpenseCategoryKey(context) {
     }
   }
 
-  if (bestId) return bestId;
-  if (context.fallbackCategory) return context.fallbackCategory;
+  if (bestId) return sanitizeCategoryKey(bestId) || bestId;
+  if (context.fallbackCategory) return sanitizeCategoryKey(context.fallbackCategory) || context.fallbackCategory;
   return "";
 }
 
@@ -845,9 +936,8 @@ function normalizeChildItem(type, child, { merchantText = "", parentText = "", f
   const source = child && typeof child === "object" ? child : {};
   const name = String(source.name || source.title || source.item || source.label || "").trim();
   const amountSatang = readSatangAmount(source, ["total", "line_total", "lineTotal", "amount", "price"]);
-  const explicitCategory = sanitizeCategoryKey(
-    source.category_key ?? source.categoryKey ?? source.categoryId ?? source.category ?? source.key,
-  );
+  const rawCategory = source.category_key ?? source.categoryKey ?? source.categoryId ?? source.category ?? source.key;
+  const explicitCategory = sanitizeCategoryKey(rawCategory);
   const adjustment = inferAdjustmentDescriptor({
     name,
     explicitType: source.adjustmentType || source.adjustment_type || source.type,
@@ -856,15 +946,15 @@ function normalizeChildItem(type, child, { merchantText = "", parentText = "", f
     amountSatang,
   });
   const category_key =
-    explicitCategory ||
     (adjustment ? adjustment.category_key : "") ||
-    inferCategoryKeyFromText(type, name, {
+    resolveItemCategoryKey(type, {
+      rawCategory,
+      explicitCategory,
+      name,
       merchantText,
       parentText,
       fallbackCategory,
-    }) ||
-    sanitizeCategoryKey(fallbackCategory) ||
-    getDefaultCategory(type);
+    });
 
   if (!name && !Number.isFinite(amountSatang) && !category_key) return null;
 
@@ -895,15 +985,38 @@ function shouldPromoteChildren({ parentTotalSatang = null, children = [] } = {})
   return Math.abs(parentTotalSatang - childTotalSatang) <= toleranceSatang;
 }
 
+function shouldPreferEvidenceCategory(rawCategory, explicitCategory) {
+  const raw = norm(rawCategory);
+  return Boolean(raw && explicitCategory && raw !== explicitCategory);
+}
+
+function resolveItemCategoryKey(
+  type,
+  { rawCategory = "", explicitCategory = "", name = "", merchantText = "", parentText = "", childText = "", fallbackCategory = "" } = {},
+) {
+  const fallbackKey = sanitizeCategoryKey(fallbackCategory);
+  const inferred = inferCategoryKeyFromText(type, name, {
+    merchantText,
+    parentText,
+    childText,
+    fallbackCategory: explicitCategory || fallbackKey || fallbackCategory,
+  });
+
+  if (shouldPreferEvidenceCategory(rawCategory, explicitCategory)) {
+    return inferred || explicitCategory || fallbackKey || getDefaultCategory(type);
+  }
+
+  return explicitCategory || inferred || fallbackKey || getDefaultCategory(type);
+}
+
 function normalizeReceiptLineItem(type, item, { merchantText = "", fallbackCategory = "" } = {}) {
   const source = item && typeof item === "object" ? item : {};
   const name = String(source.name || source.title || source.item || source.product || "").trim();
   if (!name) return null;
 
   const baseTotalSatang = readSatangAmount(source, ["total", "line_total", "lineTotal", "amount", "price"]);
-  const explicitCategory = sanitizeCategoryKey(
-    source.category_key ?? source.categoryKey ?? source.categoryId ?? source.category ?? source.key,
-  );
+  const rawCategory = source.category_key ?? source.categoryKey ?? source.categoryId ?? source.category ?? source.key;
+  const explicitCategory = sanitizeCategoryKey(rawCategory);
   const adjustment = inferAdjustmentDescriptor({
     name,
     explicitType: source.adjustmentType || source.adjustment_type || source.type,
@@ -942,15 +1055,14 @@ function normalizeReceiptLineItem(type, item, { merchantText = "", fallbackCateg
     : [];
 
   const childText = children.map((child) => child?.name || "").join(" ");
-  const category_key =
-    explicitCategory ||
-    inferCategoryKeyFromText(type, name, {
-      merchantText,
-      childText,
-      fallbackCategory,
-    }) ||
-    sanitizeCategoryKey(fallbackCategory) ||
-    getDefaultCategory(type);
+  const category_key = resolveItemCategoryKey(type, {
+    rawCategory,
+    explicitCategory,
+    name,
+    merchantText,
+    childText,
+    fallbackCategory,
+  });
   const positiveChildSumSatang = children
     .filter((child) => child.receiptLineType !== "adjustment" && child.amountSatang > 0)
     .reduce((sum, child) => sum + child.amountSatang, 0);
@@ -1015,15 +1127,30 @@ function isAdjustmentLine(line) {
   );
 }
 
-export function sanitizeCategoryKey(raw) {
+const ADJUSTMENT_CATEGORY_IDS = new Set(["discount", "fees", "taxes", "service_charge"]);
+
+function remapCategoryForAssignment(categoryId, options = {}) {
+  const id = norm(categoryId);
+  if (!id) return "";
+  if (options.allowMixed && id === MIXED_CATEGORY_ID) return id;
+  if (options.allowAdjustmentCategories && ADJUSTMENT_CATEGORY_IDS.has(id)) return id;
+  if (id === "transfer" || id === "adjust_balance" || id === "discount") return id;
+
+  const fallback = getAssignableCategoryFallback(id);
+  if (fallback && KNOWN_CATEGORY_IDS.has(fallback)) return fallback;
+
+  return id;
+}
+
+export function sanitizeCategoryKey(raw, options = {}) {
   const normalized = norm(raw);
   if (!normalized) return "";
-  if (ALIAS[normalized]) return ALIAS[normalized];
-  if (KNOWN_CATEGORY_IDS.has(normalized)) return normalized;
+  if (ALIAS[normalized]) return remapCategoryForAssignment(ALIAS[normalized], options);
+  if (KNOWN_CATEGORY_IDS.has(normalized)) return remapCategoryForAssignment(normalized, options);
 
   for (const knownId of KNOWN_CATEGORY_IDS) {
     if (!knownId) continue;
-    if (normalized.includes(knownId)) return knownId;
+    if (normalized.includes(knownId)) return remapCategoryForAssignment(knownId, options);
   }
   return "";
 }
@@ -1071,7 +1198,7 @@ export function deriveReceiptCategoryKey(type, lines = [], fallbackText = "", fa
 
   if (!(subtotalSatang > 0) || totals.size === 0) {
     return (
-      sanitizeCategoryKey(fallbackCategory) ||
+      sanitizeCategoryKey(fallbackCategory, { allowMixed: true }) ||
       inferCategoryKeyFromText(type, fallbackText, { fallbackCategory }) ||
       getDefaultCategory(type)
     );

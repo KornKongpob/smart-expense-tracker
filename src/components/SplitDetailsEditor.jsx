@@ -6,6 +6,7 @@ import { formatCurrency } from "../utils/format";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput } from "../utils/money";
 import { isAdjustmentLike, signedReceiptGroupSatang } from "../utils/receiptAdjustments";
 import { inferCategoryKeyFromText } from "../utils/receiptCategorizer";
+import { buildCategoryHierarchy, canSelectCategory } from "../utils/categoryHierarchy";
 
 function adjustmentLabel(g) {
   const eff = String(g?.adjustmentEffect || "").toLowerCase().trim();
@@ -66,6 +67,7 @@ export default function SplitDetailsEditor({
   const list = useMemo(() => (Array.isArray(groups) ? groups : []), [groups]);
 
   const { byId: catById, ids: categoryIds } = useMemo(() => buildCategoryIndex(categories), [categories]);
+  const categoryHierarchy = useMemo(() => buildCategoryHierarchy(categories), [categories]);
 
   const sums = useMemo(() => {
     const net = list.reduce((s, g) => s + signedReceiptGroupSatang(g), 0);
@@ -333,7 +335,9 @@ export default function SplitDetailsEditor({
                     </button>
                   ) : null}
 
-                  {parentCategoryId && safeId(parentCategoryId) !== effectiveCategoryId ? (
+                  {parentCategoryId &&
+                  safeId(parentCategoryId) !== effectiveCategoryId &&
+                  canSelectCategory(catById.get(safeId(parentCategoryId)), categoryHierarchy) ? (
                     <button
                       type="button"
                       onClick={() => onChangeGroup?.(idx, { categoryId: safeId(parentCategoryId) })}

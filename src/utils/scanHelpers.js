@@ -2,9 +2,10 @@
 // Pure helper functions extracted from AddTransactionView.jsx
 // for scan/slip detection, category guessing, and type inference.
 
-import { isCreditAccount } from "./accountMatch";
 import { sanitizeCategoryKey } from "./receiptCategorizer";
 import { normalizeThaiDigits } from "./money";
+import { parseTransactionTimeFromText } from "./scanDateTime.js";
+import { resolveScannedTxTypeFromAccounts } from "./scanTransactionType.js";
 
 // ===== Common helpers =====
 
@@ -254,15 +255,7 @@ export function fixBuddhistYearISO(isoLike) {
 }
 
 export function parseSlipTimeFromText(text) {
-  const t0 = String(text || "").replace(/\u00A0/g, " ").trim();
-  if (!t0) return "";
-  const t = normalizeThaiDigits(t0);
-  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[:.](\d{2})(?:[:.](\d{2}))?/i);
-  if (!m) return "";
-  const hh = String(m[1]).padStart(2, "0");
-  const mm = String(m[2]).padStart(2, "0");
-  const ss = m[3] != null ? String(m[3]).padStart(2, "0") : "";
-  return ss ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
+  return parseTransactionTimeFromText(text);
 }
 
 export function guessSlipReceiverBankId(text) {
@@ -318,32 +311,14 @@ export function enhanceScannedTxType({
   matchedToAcc,
   contextText,
 }) {
-  if (currentType === "credit_payment") return "credit_payment";
-
-  const internalFrom = !!matchedFromAcc;
-  const internalTo = !!matchedToAcc;
-
-  const fromIsCredit = internalFrom && isCreditAccount(matchedFromAcc);
-  const toIsCredit = internalTo && isCreditAccount(matchedToAcc);
-
-  const twoInternal =
-    internalFrom && internalTo && matchedFromId && matchedToId && matchedFromId !== matchedToId;
-
-  if (twoInternal) {
-    if (toIsCredit && !fromIsCredit) return "credit_payment";
-    return "transfer";
-  }
-
-  if (looksLikeCreditPaymentText(contextText) && toIsCredit && !fromIsCredit) return "credit_payment";
-
-  if (currentType === "transfer") {
-    if (internalFrom && !internalTo) return looksLikeIncomeText(contextText) ? "income" : "expense";
-    if (!internalFrom && internalTo) return looksLikeExpenseText(contextText) ? "expense" : "income";
-    return "transfer";
-  }
-
-  if (currentType === "expense" && !internalFrom && internalTo) return "income";
-  if (currentType === "income" && internalFrom && !internalTo) return "expense";
-
-  return currentType || aiTxType || "expense";
+  return resolveScannedTxTypeFromAccounts({
+    docType: "unknown",
+    aiTxType: currentType || aiTxType,
+    hasLineItems: false,
+    matchedFromId,
+    matchedToId,
+    matchedFromAcc,
+    matchedToAcc,
+    contextText,
+  });
 }

@@ -56,8 +56,13 @@ function manualOverride(item = {}, context = {}) {
 
 function aiSuggestion(item = {}, context = {}) {
   const categories = categoriesOf(context);
-  const categoryId = clean(item.suggestedCategoryId || item.aiSuggestedCategoryId || context.aiSuggestedCategoryId || item.categoryId);
-  if (!categoryId || !categoryExists(categories, categoryId)) return null;
+  const categoryId = pickExistingCategory(
+    categories,
+    [item.suggestedCategoryId || item.aiSuggestedCategoryId || context.aiSuggestedCategoryId || item.categoryId],
+    "",
+    { requireAssignable: true },
+  );
+  if (!categoryId) return null;
   return {
     categoryId,
     source: "ai_suggestion",
@@ -68,8 +73,13 @@ function aiSuggestion(item = {}, context = {}) {
 
 function parentFallback(context = {}) {
   const categories = categoriesOf(context);
-  const categoryId = clean(context.parentCategoryId || context.fallbackCategoryId || context.defaultCategoryId);
-  if (!categoryId || !categoryExists(categories, categoryId)) return null;
+  const categoryId = pickExistingCategory(
+    categories,
+    [context.parentCategoryId || context.fallbackCategoryId || context.defaultCategoryId],
+    "",
+    { requireAssignable: true },
+  );
+  if (!categoryId) return null;
   return {
     categoryId,
     source: "parent_fallback",

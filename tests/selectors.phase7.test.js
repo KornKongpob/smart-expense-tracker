@@ -18,8 +18,12 @@ const accounts = [
 
 const categories = [
   { id: "food", name: "Food", parentId: "" },
+  { id: "dining", name: "Dining", parentId: "food" },
   { id: "groceries", name: "Groceries", parentId: "food" },
-  { id: "household", name: "Household", parentId: "" },
+  { id: "packaged_food", name: "Packaged food", parentId: "food" },
+  { id: "housing", name: "Housing", parentId: "" },
+  { id: "household", name: "Household", parentId: "housing" },
+  { id: "household_cleaning", name: "Household cleaning", parentId: "housing" },
   { id: "discount", name: "Discount", parentId: "" },
   { id: "mixed", name: "Mixed", parentId: "" },
 ];
@@ -53,8 +57,8 @@ test("dashboard phase 7: split parent appears once in recent transactions and ch
       date: "2026-04-10",
       paidTotalSatang: 78000,
       items: [
-        { rawName: "\u0e02\u0e49\u0e32\u0e27", totalSatang: 40000, suggestedCategoryId: "groceries" },
-        { rawName: "\u0e19\u0e49\u0e33\u0e22\u0e32", totalSatang: 42000, suggestedCategoryId: "household" },
+        { rawName: "\u0e02\u0e49\u0e32\u0e27\u0e2a\u0e32\u0e23", totalSatang: 40000, suggestedCategoryId: "groceries" },
+        { rawName: "\u0e19\u0e49\u0e33\u0e22\u0e32\u0e25\u0e49\u0e32\u0e07\u0e08\u0e32\u0e19", totalSatang: 42000, suggestedCategoryId: "household" },
       ],
       adjustments: [{ type: "discount", label: "Discount", amountSatang: 4000, effect: "subtract" }],
     },
@@ -69,8 +73,8 @@ test("dashboard phase 7: split parent appears once in recent transactions and ch
 
   assert.deepEqual(snapshot.recentTransactions.map((tx) => tx.id), ["parent-1"]);
   assert.equal(snapshot.monthlySummary.expense, 78000);
-  assert.equal(categoryTotals.get("groceries"), 40000);
-  assert.equal(categoryTotals.get("household"), 42000);
+  assert.equal(categoryTotals.get("packaged_food"), 40000);
+  assert.equal(categoryTotals.get("household_cleaning"), 42000);
   assert.equal(categoryTotals.get("discount"), -4000);
 });
 
@@ -130,11 +134,11 @@ test("dashboard phase 7: budget actuals are split aware", () => {
   });
   const budgets = [
     { id: "food-budget", month: "2026-04", categoryId: "food", limit: 100000 },
-    { id: "house-budget", month: "2026-04", categoryId: "household", limit: 50000 },
+    { id: "house-budget", month: "2026-04", categoryId: "housing", limit: 50000 },
   ];
   const summary = selectBudgetSummary(plan.transactions, budgets, categories, "2026-04");
 
   assert.equal(summary.actualSatang, 70000);
   assert.equal(summary.rows.find((row) => row.categoryId === "food").actual, 40000);
-  assert.equal(summary.rows.find((row) => row.categoryId === "household").actual, 30000);
+  assert.equal(summary.rows.find((row) => row.categoryId === "housing").actual, 30000);
 });

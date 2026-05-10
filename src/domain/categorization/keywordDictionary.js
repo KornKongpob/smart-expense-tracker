@@ -1,4 +1,9 @@
 import { calculateCategoryConfidence } from "./confidenceScoring.js";
+import {
+  buildCategoryHierarchy,
+  getAssignableCategoryFallback,
+  isAssignableCategory,
+} from "../../utils/categoryHierarchy.js";
 
 const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g;
 
@@ -19,34 +24,55 @@ function tokensOf(value) {
     .filter(Boolean);
 }
 
-export function categoryExists(categories = [], categoryId) {
-  const id = String(categoryId || "").trim();
-  if (!id) return false;
-  const list = Array.isArray(categories)
+function categoryList(categories = []) {
+  return Array.isArray(categories)
     ? categories
     : [...(Array.isArray(categories?.expense) ? categories.expense : []), ...(Array.isArray(categories?.income) ? categories.income : [])];
-  if (!list.length) return true;
-  return list.some((category) => String(category?.id || "").trim() === id && category?.isDeleted !== true && !category?.deletedAt);
 }
 
-export function pickExistingCategory(categories, candidates = [], fallback = "") {
+export function categoryExists(categories = [], categoryId, options = {}) {
+  const id = String(categoryId || "").trim();
+  if (!id) return false;
+  const list = categoryList(categories);
+  if (!list.length) return true;
+  const hierarchy = options.requireAssignable ? buildCategoryHierarchy(list) : null;
+  return list.some((category) => {
+    if (String(category?.id || "").trim() !== id || category?.isDeleted === true || category?.deletedAt) return false;
+    if (!options.requireAssignable) return true;
+    return isAssignableCategory(hierarchy?.byId?.get?.(id) || category, hierarchy);
+  });
+}
+
+export function pickExistingCategory(categories, candidates = [], fallback = "", options = {}) {
   for (const candidate of candidates) {
     const id = String(candidate || "").trim();
-    if (id && categoryExists(categories, id)) return id;
+    const fallbackId = getAssignableCategoryFallback(id);
+    const ids = options.requireAssignable && fallbackId ? [fallbackId] : fallbackId ? [id, fallbackId] : [id];
+    for (const nextId of ids) {
+      if (nextId && categoryExists(categories, nextId, options)) return nextId;
+    }
   }
-  return categoryExists(categories, fallback) ? String(fallback || "").trim() : "";
+  return categoryExists(categories, fallback, options) ? String(fallback || "").trim() : "";
 }
 
 const KEYWORD_RULES = Object.freeze([
-  { keywords: ["starbucks", "latte", "espresso", "americano", "cappuccino", "coffee", "\u0e01\u0e32\u0e41\u0e1f"], categories: ["coffee", "drinks", "food"] },
-  { keywords: ["milk", "\u0e19\u0e21"], categories: ["groceries", "drinks", "food"] },
-  { keywords: ["rice", "\u0e02\u0e49\u0e32\u0e27", "\u0e02\u0e49\u0e32\u0e27\u0e2a\u0e32\u0e23"], categories: ["groceries", "meal_prep", "food"] },
-  { keywords: ["snack", "chips", "\u0e02\u0e19\u0e21"], categories: ["snacks", "food"] },
-  { keywords: ["toothpaste", "\u0e22\u0e32\u0e2a\u0e35\u0e1f\u0e31\u0e19"], categories: ["personal_care", "personal_items", "health"] },
-  { keywords: ["shampoo", "\u0e41\u0e0a\u0e21\u0e1e\u0e39"], categories: ["personal_care", "personal_items"] },
-  { keywords: ["dish soap", "dishwashing", "detergent", "\u0e19\u0e49\u0e33\u0e22\u0e32\u0e25\u0e49\u0e32\u0e07\u0e08\u0e32\u0e19"], categories: ["cleaning", "home", "household_goods"] },
-  { keywords: ["soap", "cleaner", "\u0e19\u0e49\u0e33\u0e22\u0e32"], categories: ["cleaning", "home", "household_goods"] },
+  { keywords: ["starbucks", "latte", "espresso", "americano", "cappuccino", "coffee", "\u0e01\u0e32\u0e41\u0e1f"], categories: ["coffee", "drinks", "dining"] },
+  { keywords: ["milk", "\u0e19\u0e21"], categories: ["dairy", "drinks", "packaged_food"] },
+  { keywords: ["rice", "\u0e02\u0e49\u0e32\u0e27\u0e2a\u0e32\u0e23"], categories: ["packaged_food", "meal_prep"] },
+  { keywords: ["lunch", "dinner", "meal", "rice plate", "\u0e02\u0e49\u0e32\u0e27", "\u0e2d\u0e32\u0e2b\u0e32\u0e23\u0e08\u0e32\u0e19\u0e40\u0e14\u0e35\u0e22\u0e27"], categories: ["dining", "street_food"] },
+  { keywords: ["snack", "chips", "\u0e02\u0e19\u0e21"], categories: ["snacks", "dessert"] },
+  { keywords: ["toothpaste", "toothbrush", "\u0e22\u0e32\u0e2a\u0e35\u0e1f\u0e31\u0e19", "\u0e41\u0e1b\u0e23\u0e07\u0e2a\u0e35\u0e1f\u0e31\u0e19"], categories: ["oral_care", "toiletries"] },
+  { keywords: ["shampoo", "\u0e41\u0e0a\u0e21\u0e1e\u0e39"], categories: ["toiletries", "personal_items"] },
+  { keywords: ["dish soap", "dishwashing", "\u0e19\u0e49\u0e33\u0e22\u0e32\u0e25\u0e49\u0e32\u0e07\u0e08\u0e32\u0e19"], categories: ["household_cleaning", "cleaning"] },
+  { keywords: ["detergent", "laundry", "\u0e1c\u0e07\u0e0b\u0e31\u0e01\u0e1f\u0e2d\u0e01"], categories: ["laundry_supplies", "household_cleaning"] },
+  { keywords: ["tissue", "toilet paper", "\u0e17\u0e34\u0e0a\u0e0a\u0e39\u0e48", "\u0e01\u0e23\u0e30\u0e14\u0e32\u0e29"], categories: ["paper_goods", "household_cleaning"] },
+  { keywords: ["soap", "cleaner", "\u0e19\u0e49\u0e33\u0e22\u0e32"], categories: ["household_cleaning", "cleaning"] },
   { keywords: ["grab", "bolt", "taxi"], categories: ["ride_hailing", "taxi", "transport"] },
+  { keywords: ["electricity", "pea", "mea", "\u0e04\u0e48\u0e32\u0e44\u0e1f"], categories: ["electricity"] },
+  { keywords: ["water bill", "\u0e04\u0e48\u0e32\u0e19\u0e49\u0e33"], categories: ["water"] },
+  { keywords: ["ais", "true", "dtac", "mobile bill"], categories: ["phone_internet"] },
+  { keywords: ["fiber", "broadband", "home internet"], categories: ["internet_home"] },
+  { keywords: ["parcel", "shipping", "\u0e04\u0e48\u0e32\u0e2a\u0e48\u0e07\u0e1e\u0e31\u0e2a\u0e14\u0e38"], categories: ["shipping"] },
   { keywords: ["netflix", "spotify", "icloud", "subscription"], categories: ["subscriptions", "software_subscription", "bills"] },
 ]);
 
@@ -123,7 +149,7 @@ export function applyKeywordDictionary(item = {}, context = {}, options = {}) {
     );
     if (!matched) continue;
 
-    const categoryId = pickExistingCategory(categories, rule.categories);
+    const categoryId = pickExistingCategory(categories, rule.categories, "", { requireAssignable: true });
     if (!categoryId) continue;
 
     const source = mode === "fuzzy" ? "keyword_fuzzy" : "keyword_exact";

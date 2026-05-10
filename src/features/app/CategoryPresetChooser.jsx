@@ -7,6 +7,7 @@ import {
   normalizeCategorySearchQuery,
   resolveCategoryPresetFocusMainId,
 } from "./categoryPresetState.js";
+import { canSelectCategory, hasCategoryChildren } from "../../utils/categoryHierarchy.js";
 
 function toId(value) {
   return String(value || "").trim();
@@ -34,6 +35,7 @@ export default function CategoryPresetChooser({
     stageMainId,
     stageMain,
     stageChildren,
+    stageMainSelectable,
     showSubcategoryStage,
   } = pickerState;
   const searchResults = useMemo(
@@ -59,16 +61,18 @@ export default function CategoryPresetChooser({
     const children = hierarchy.childrenByParent.get(nextId) || [];
     if (children.length) {
       setFocusedMainId(nextId);
-      if (activeMainId !== nextId) onChange?.(nextId);
       return;
     }
 
+    const category = hierarchy.byId.get(nextId);
+    if (!canSelectCategory(category, hierarchy, { selectedId: value })) return;
     setFocusedMainId("");
     onChange?.(nextId);
   };
 
   const handleUseMainCategory = () => {
     if (!stageMainId) return;
+    if (!stageMainSelectable) return;
     onChange?.(stageMainId);
   };
 
@@ -82,6 +86,11 @@ export default function CategoryPresetChooser({
     const nextId = toId(categoryId);
     if (!nextId) return;
     setQuery("");
+    if (hasCategoryChildren(nextId, hierarchy) && !canSelectCategory(hierarchy.byId.get(nextId), hierarchy, { selectedId: value })) {
+      setFocusedMainId(nextId);
+      return;
+    }
+    if (!canSelectCategory(hierarchy.byId.get(nextId), hierarchy, { selectedId: value })) return;
     setFocusedMainId(resolveCategoryPresetFocusMainId(hierarchy, nextId));
     onChange?.(nextId);
   };
@@ -207,6 +216,7 @@ export default function CategoryPresetChooser({
               </div>
 
               <div className="finance-subcategory-card-grid">
+                {stageMainSelectable ? (
                 <button
                   type="button"
                   className={[
@@ -235,6 +245,7 @@ export default function CategoryPresetChooser({
                     </span>
                   ) : null}
                 </button>
+                ) : null}
 
                 {stageChildren.map((category) => {
                   const categoryId = toId(category?.id);

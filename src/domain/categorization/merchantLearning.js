@@ -5,7 +5,7 @@ import {
   resolveMerchantCanonical,
 } from "../../utils/merchantDictionary.js";
 import { calculateCategoryConfidence } from "./confidenceScoring.js";
-import { categoryExists, normalizeKeywordText } from "./keywordDictionary.js";
+import { normalizeKeywordText, pickExistingCategory } from "./keywordDictionary.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -64,9 +64,10 @@ export function applyMerchantLearning(item = {}, context = {}) {
   const learnedCategoryId =
     mappingCategory(learning?.itemMappings?.[itemMappingKey]) || mappingCategory(learning?.merchantMappings?.[merchantKey]);
 
-  if (learnedCategoryId && categoryExists(categories, learnedCategoryId)) {
+  const learnedAssignableCategoryId = pickExistingCategory(categories, [learnedCategoryId], "", { requireAssignable: true });
+  if (learnedAssignableCategoryId) {
     return {
-      categoryId: learnedCategoryId,
+      categoryId: learnedAssignableCategoryId,
       source: "learned_mapping",
       confidence: calculateCategoryConfidence("learned_mapping"),
       reason: lineKey ? "Learned item correction" : "Learned merchant correction",
@@ -86,8 +87,8 @@ export function applyMerchantLearning(item = {}, context = {}) {
     },
     merchantEntries,
   );
-  const categoryId = clean(patch?.categoryId);
-  if (!categoryId || !categoryExists(categories, categoryId)) return null;
+  const categoryId = pickExistingCategory(categories, [patch?.categoryId], "", { requireAssignable: true });
+  if (!categoryId) return null;
 
   return {
     categoryId,

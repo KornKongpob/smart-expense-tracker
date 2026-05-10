@@ -1,6 +1,6 @@
 import { deriveAutomationPatch } from "../../utils/rulesEngine.js";
 import { calculateCategoryConfidence } from "./confidenceScoring.js";
-import { categoryExists } from "./keywordDictionary.js";
+import { pickExistingCategory } from "./keywordDictionary.js";
 
 function textForRule(item = {}, context = {}) {
   return [
@@ -30,8 +30,13 @@ export function applyRulesEngine(item = {}, context = {}) {
     ref: context.referenceId || "",
   });
 
-  const categoryId = String(patch?.categoryId || "").trim();
-  if (!categoryId || !categoryExists(context.categories || context.expenseCategories || [], categoryId)) return null;
+  const categoryId = pickExistingCategory(
+    context.categories || context.expenseCategories || [],
+    [patch?.categoryId],
+    "",
+    { requireAssignable: true },
+  );
+  if (!categoryId) return null;
 
   return {
     categoryId,

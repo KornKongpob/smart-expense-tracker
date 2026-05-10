@@ -9,6 +9,8 @@ import {
   extractMerchantFromScanText,
   normalizeScanText,
 } from "../utils/scanPostprocess";
+import { normalizeTransactionTime } from "../utils/scanDateTime.js";
+import { sanitizeCategoryKey } from "../utils/receiptCategorizer.js";
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -550,7 +552,10 @@ function normalizeItems(items) {
       const unitPrice = safeParseAmount(it.unit_price ?? it.unitPrice ?? it.price);
       const lineTotal = safeParseAmount(it.line_total ?? it.lineTotal ?? it.total ?? it.amount ?? it.price);
 
-      const category_key = (it.category_key ?? it.category ?? null) != null ? String(it.category_key ?? it.category).trim() : null;
+      const category_key =
+        (it.category_key ?? it.category ?? null) != null
+          ? sanitizeCategoryKey(it.category_key ?? it.category) || String(it.category_key ?? it.category).trim()
+          : null;
 
       // one-level children (for add-ons/modifiers)
       let children = null;
@@ -563,10 +568,11 @@ function normalizeItems(items) {
             const chQty = safeParseAmount(ch.qty);
             const chUnitPrice = safeParseAmount(ch.unit_price ?? ch.unitPrice ?? ch.price);
             const chLineTotal = safeParseAmount(ch.line_total ?? ch.lineTotal ?? ch.total ?? ch.amount ?? ch.price);
-            const chCategoryKey =
+            const chCategoryKeyRaw =
               (ch.category_key ?? ch.categoryKey ?? ch.category ?? null) != null
                 ? String(ch.category_key ?? ch.categoryKey ?? ch.category).trim()
                 : null;
+            const chCategoryKey = chCategoryKeyRaw ? sanitizeCategoryKey(chCategoryKeyRaw) || chCategoryKeyRaw : null;
             return {
               name: chName,
               qty: Number.isFinite(chQty) ? chQty : null,
@@ -705,6 +711,15 @@ function normalizeScanResult({
     itemsAmount;
   const inferredMerchant = base.merchant ?? d?.merchant ?? extractMerchantFromScanText(textContext, { docType: inferredDocType }) ?? null;
   const noteValue = d?.note != null && String(d.note).trim() ? d.note : inferredMerchant;
+  const transactionTime = normalizeTransactionTime(
+    base.transactionTime ??
+      base.time ??
+      d?.transactionTime ??
+      d?.transaction_time ??
+      d?.time ??
+      d?.transaction_at ??
+      d?.transactionAt,
+  );
 
   const normalized = {
     doc_type: inferredDocType,
@@ -712,11 +727,17 @@ function normalizeScanResult({
     tx_type: normalizeTxType(d?.tx_type),
     amount: safeParseAmount(fallbackAmount),
     date: safeISODate(base.date ?? d?.date),
+    time: transactionTime || "",
+    transactionTime,
     merchant: inferredMerchant,
     note: noteValue ?? null,
     ref: (d?.ref ?? d?.referenceId ?? d?.reference_id) ?? null,
-    category: d?.category ?? base.category_key ?? null,
-    category_key: d?.category_key ?? d?.category ?? base.category_key ?? null,
+    category:
+      sanitizeCategoryKey(d?.category ?? base.category_key, { allowMixed: true }) ||
+      (d?.category ?? base.category_key ?? null),
+    category_key:
+      sanitizeCategoryKey(d?.category_key ?? d?.category ?? base.category_key, { allowMixed: true }) ||
+      (d?.category_key ?? d?.category ?? base.category_key ?? null),
     payment_method: d?.payment_method ?? d?.paymentMethod ?? null,
     account_id: d?.account_id ?? d?.accountId ?? null,
     from_account: d?.from_account ?? null,

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
-import { buildCategoryHierarchy, splitSelection, isDeletedCategory, getAncestors } from "../utils/categoryHierarchy";
+import {
+  buildCategoryHierarchy,
+  canSelectCategory,
+  getAncestors,
+  hasCategoryChildren,
+  isDeletedCategory,
+  isPromotedCategory,
+  shouldShowCategoryInPicker,
+  splitSelection,
+} from "../utils/categoryHierarchy";
 
 function normalizeText(s) {
   return String(s || "")
@@ -82,7 +91,8 @@ export default function CategoryPicker({
         const id = String(c?.id || "").trim();
         return id && (byId.has(id) || listAll.some((x) => String(x?.id || "") === id));
       })
-      .filter((c) => !isDeletedCategory(c) || String(c?.id || "") === selectedId);
+      .filter((c) => !isDeletedCategory(c) || String(c?.id || "") === selectedId)
+      .filter((c) => String(c?.id || "").trim() === selectedId || isPromotedCategory(c, hierarchy));
     return normalized.slice(0, 10);
   }, [recent, hierarchy, listAll, selectedId]);
 
@@ -128,6 +138,7 @@ export default function CategoryPicker({
     for (const c of source) {
       const id = String(c?.id || "").trim();
       if (!id) continue;
+      if (!shouldShowCategoryInPicker(c, hierarchy, { selectedId })) continue;
       const name = normalizeText(c?.name);
       if (!name) continue;
       if (!name.includes(q)) continue;
@@ -143,12 +154,18 @@ export default function CategoryPicker({
 
     hit.sort((a, b) => (a.rank - b.rank) || String(a.crumb).localeCompare(String(b.crumb), "th"));
     return hit.slice(0, 24);
-  }, [query, hierarchy, list]);
+  }, [query, hierarchy, list, selectedId]);
 
   const subcats = useMemo(() => {
     const kids = hierarchy?.childrenByParent?.get?.(activeMainId) || [];
-    return Array.isArray(kids) ? kids : [];
-  }, [hierarchy, activeMainId]);
+    if (!Array.isArray(kids)) return [];
+    return kids.filter((cat) => shouldShowCategoryInPicker(cat, hierarchy, { selectedId }));
+  }, [hierarchy, activeMainId, selectedId]);
+
+  const mainCats = useMemo(
+    () => hierarchy.main.filter((cat) => shouldShowCategoryInPicker(cat, hierarchy, { selectedId })),
+    [hierarchy, selectedId],
+  );
 
   const isSelected = (id) => String(id || "") === selectedId;
   const chipBaseClass =
@@ -202,18 +219,29 @@ export default function CategoryPicker({
               {searchResults.map(({ c, crumb }) => {
                 const id = String(c?.id || "").trim();
                 const deleted = isDeletedCategory(c) && id !== selectedId;
+                const hasKids = hasCategoryChildren(id, hierarchy);
+                const selectable = canSelectCategory(c, hierarchy, { selectedId });
                 return (
                   <button
                     key={id}
                     type="button"
                     onClick={() => {
-                      onChange?.(id);
-                      // when choosing via search, reset two-step state
-                      if (twoStep) {
-                        setStage("main");
-                        setManualMainId("");
+                      if (selectable) {
+                        onChange?.(id);
+                        // when choosing via search, reset two-step state
+                        if (twoStep) {
+                          setStage("main");
+                          setManualMainId("");
+                        }
+                        setQuery("");
+                        return;
                       }
-                      setQuery("");
+
+                      if (hasKids) {
+                        setManualMainId(id);
+                        setStage("sub");
+                        setQuery("");
+                      }
                     }}
                     className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 hover:bg-white/10 active:scale-[0.99] min-w-0 ${
                       isSelected(id) ? "bg-gray-900/80 text-white" : "text-gray-900"
@@ -234,7 +262,9 @@ export default function CategoryPicker({
                         <div className={`text-[11px] truncate ${isSelected(id) ? "text-white/75" : "text-gray-900/55"}`}>{crumb}</div>
                       </div>
                     </div>
-                    <ChevronRight size={16} className={isSelected(id) ? "text-white/80" : "text-gray-900/40"} />
+                    {hasKids && !selectable ? (
+                      <ChevronRight size={16} className={isSelected(id) ? "text-white/80" : "text-gray-900/40"} />
+                    ) : null}
                   </button>
                 );
               })}
@@ -278,31 +308,34 @@ export default function CategoryPicker({
             <div className="mt-4">
               <div className="text-[11px] font-semibold text-gray-900/55 uppercase mb-2">หมวดหลัก</div>
               <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 ${maxListHeightClass} overflow-y-auto pr-1 no-scrollbar`}>
-                {hierarchy.main.map((cat) => {
+                {mainCats.map((cat) => {
                   const id = String(cat?.id || "").trim();
                   const on = String(activeMainId) === id;
                   const deleted = isDeletedCategory(cat) && id !== selectedId;
+                  const hasKids = hasCategoryChildren(id, hierarchy);
+                  const selectable = canSelectCategory(cat, hierarchy, { selectedId });
                   return (
                     <button
                       key={`m-${id}`}
                       type="button"
                       onClick={() => {
                         if (!twoStep) {
-                          onChange?.(id);
+                          if (hasKids) {
+                            setManualMainId(id);
+                            return;
+                          }
+                          if (selectable) onChange?.(id);
                           return;
                         }
 
                         // two-step: choose main first, then show subs under it
                         setManualMainId(id);
 
-                        const kids = hierarchy?.childrenByParent?.get?.(id) || [];
-                        const hasKids = Array.isArray(kids) && kids.length > 0;
-
                         if (hasKids) {
                           setStage("sub");
                         } else {
                           // no children → selecting main is final
-                          onChange?.(id);
+                          if (selectable) onChange?.(id);
                           setStage("main");
                         }
                       }}
@@ -312,7 +345,7 @@ export default function CategoryPicker({
                       <span className="inline-flex items-center gap-2 min-w-0 w-full">
                         <span className="shrink-0 text-base">{cat?.icon || "🏷️"}</span>
                         <span className="truncate">{cat?.name}</span>
-                        {twoStep ? <ChevronRight size={15} className={`ml-auto shrink-0 ${on ? "text-white/80" : "text-gray-900/50"}`} /> : null}
+                        {hasKids ? <ChevronRight size={15} className={`ml-auto shrink-0 ${on ? "text-white/80" : "text-gray-900/50"}`} /> : null}
                       </span>
                     </button>
                   );
@@ -331,11 +364,14 @@ export default function CategoryPicker({
                   const id = String(cat?.id || "").trim();
                   const on = isSelected(id);
                   const deleted = isDeletedCategory(cat) && id !== selectedId;
+                  const selectable = canSelectCategory(cat, hierarchy, { selectedId });
                   return (
                     <button
                       key={`s-${id}`}
                       type="button"
-                      onClick={() => onChange?.(id)}
+                      onClick={() => {
+                        if (selectable) onChange?.(id);
+                      }}
                       className={`${chipBaseClass} ${chipStateClass(on, deleted)}`}
                       title={getBreadcrumb(id)}
                     >
@@ -376,7 +412,7 @@ export default function CategoryPicker({
               </div>
 
               {/* option to keep main (no sub) */}
-              {activeMainId ? (
+              {activeMainId && canSelectCategory(activeMainCat, hierarchy, { selectedId }) && !hasCategoryChildren(activeMainId, hierarchy) ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -398,11 +434,13 @@ export default function CategoryPicker({
                   const id = String(cat?.id || "").trim();
                   const on = isSelected(id);
                   const deleted = isDeletedCategory(cat) && id !== selectedId;
+                  const selectable = canSelectCategory(cat, hierarchy, { selectedId });
                   return (
                     <button
                       key={`ts-${id}`}
                       type="button"
                       onClick={() => {
+                        if (!selectable) return;
                         onChange?.(id);
                         setStage("main");
                       }}

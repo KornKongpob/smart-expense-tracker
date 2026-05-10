@@ -2,13 +2,19 @@ import { canonicalizeCategoryId } from "../../utils/categoryIds.js";
 import { buildReceiptSplitPlan, RECEIPT_SAVE_MODES } from "../../domain/receipt/receiptSplitBuilder.js";
 import { generateSplitGroupId } from "../../utils/id.js";
 import { normalizeTimeHHmm, toISODate } from "../../utils/format.js";
+import { normalizeTransactionTime } from "../../utils/scanDateTime.js";
 import { ensureSatangInt, parseMoneyToSatang, satangToBahtNumber } from "../../utils/money.js";
 import {
   chooseReceiptPaidTotalSatang,
   isAdjustmentLike,
   reconcileReceiptGroups,
 } from "../../utils/receiptAdjustments.js";
-import { deriveReceiptCategoryKey, splitReceiptItemsToLines } from "../../utils/receiptCategorizer.js";
+import {
+  deriveReceiptCategoryKey,
+  inferCategoryKeyFromText,
+  sanitizeCategoryKey,
+  splitReceiptItemsToLines,
+} from "../../utils/receiptCategorizer.js";
 
 function cleanText(value, fallback = "") {
   const text = String(value || "").trim();
@@ -18,6 +24,64 @@ function cleanText(value, fallback = "") {
 function cleanNullableText(value) {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function rawCategoryId(source) {
+  return cleanText(
+    source?.categoryId ||
+      source?.category_id ||
+      source?.category ||
+      source?.category_key ||
+      source?.key ||
+      source?.suggestedCategoryId ||
+      source?.suggested_category_id ||
+      "",
+  );
+}
+
+function resolveExpenseLineCategoryId(source, { fallbackName = "Item", fallbackCategoryId = "", adjustmentEffect = "add" } = {}) {
+  const raw = rawCategoryId(source);
+  const isAdjustment = isAdjustmentLike(source);
+
+  if (isAdjustment) {
+    const rawKey = raw.toLowerCase();
+    const type = cleanText(source?.adjustmentType || source?.adjustment_type || source?.type, "").toLowerCase();
+    if (rawKey === "discount" || type === "discount" || adjustmentEffect === "subtract") return "discount";
+    if (rawKey === "service_charge" || type === "service_charge") return "service_charge";
+    return (
+      sanitizeCategoryKey(raw, { allowAdjustmentCategories: true }) ||
+      sanitizeCategoryKey(fallbackCategoryId, { allowAdjustmentCategories: true }) ||
+      "fees"
+    );
+  }
+
+  const sanitizedRaw = sanitizeCategoryKey(raw);
+  const sanitizedFallback = sanitizeCategoryKey(fallbackCategoryId);
+  const text = [
+    source?.itemName,
+    source?.name,
+    source?.note,
+    source?.title,
+    source?.label,
+    source?.rawName,
+    fallbackName,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const inferred = inferCategoryKeyFromText("expense", text, {
+    fallbackCategory: sanitizedRaw || sanitizedFallback || fallbackCategoryId,
+  });
+  const normalizedRaw = raw.toLowerCase().replace(/\s+/g, " ");
+  const shouldPreferText = Boolean(normalizedRaw && sanitizedRaw && normalizedRaw !== sanitizedRaw);
+
+  if (shouldPreferText) return inferred || sanitizedRaw || sanitizedFallback || "other";
+  return sanitizedRaw || inferred || sanitizedFallback || "other";
+}
+
+function resolveDraftCategoryId(kind, source, options = {}) {
+  if (kind === "expense") return resolveExpenseLineCategoryId(source, options);
+  return canonicalizeCategoryId(kind, rawCategoryId(source));
 }
 
 function toInt(value, fallback = 0) {
@@ -103,10 +167,10 @@ function normalizeDraftEntry(item, kind, { amountUnit = "satang", fallbackName =
   ).toLowerCase();
   const adjustmentEffect = adjustmentEffectRaw === "subtract" ? "subtract" : "add";
   const name = cleanText(source.name || source.title || source.label || source.note, "");
-  const categoryId = canonicalizeCategoryId(
-    kind,
-    source.categoryId || source.category || source.category_key || source.key || "",
-  );
+  const categoryId = resolveDraftCategoryId(kind, source, {
+    fallbackName,
+    adjustmentEffect,
+  });
 
   return {
     name: name || (adjustment ? "ส่วนลด/ปรับยอด" : fallbackName),
@@ -266,6 +330,14 @@ export function sanitizeTransactionDraft(input) {
     kind,
     receiptGroups,
   });
+  const transactionTime = normalizeTransactionTime(
+    draft.transactionTime ||
+      draft.transaction_time ||
+      draft.transactionAt ||
+      draft.transaction_at ||
+      draft.time ||
+      draft.slip_time,
+  );
 
   return {
     kind,
@@ -286,7 +358,8 @@ export function sanitizeTransactionDraft(input) {
     reference: cleanText(draft.reference || draft.ref),
     paymentMethod: cleanText(draft.paymentMethod || draft.payment_method),
     date: sanitizeIsoDate(draft.date),
-    time: sanitizeDraftTime(draft.time),
+    time: sanitizeDraftTime(transactionTime || draft.time),
+    transactionTime,
     docType: cleanText(draft.docType || draft.doc_type),
     lineItems,
     receiptGroups,
@@ -307,7 +380,14 @@ export function normalizeLineItems(items, kind = "expense") {
       return {
         line_order: index,
         name: cleanText(source.name || source.title || source.label, source.receiptLineType === "adjustment" ? "Adjustment" : "Item"),
-        category_id: canonicalizeCategoryId(kind, source.categoryId || source.category || "") || null,
+        category_id: resolveDraftCategoryId(kind, source, {
+          fallbackName: source.name || source.title || source.label || "",
+          adjustmentEffect:
+            cleanText(source.adjustmentEffect || source.adjustment_effect || source.effect, "add").toLowerCase() ===
+            "subtract"
+              ? "subtract"
+              : "add",
+        }) || null,
         amount_satang: amountSatang,
         quantity: normalizeQuantity(source.qty ?? source.quantity),
         unit_price_satang:
@@ -357,7 +437,16 @@ function normalizeSplitGroups(draft) {
           ? "subtract"
           : "add",
       adjustmentType: cleanNullableText(group.adjustmentType || group.adjustment_type || group.type),
-      categoryId: canonicalizeCategoryId(draft.kind, group.categoryId || group.category || group.category_key || "") || "",
+      categoryId:
+        resolveDraftCategoryId(draft.kind, group, {
+          fallbackName: group.name || group.note || group.title || group.label || "",
+          fallbackCategoryId: draft.categoryId,
+          adjustmentEffect:
+            cleanText(group.adjustmentEffect || group.adjustment_effect || group.effect, "add").toLowerCase() ===
+            "subtract"
+              ? "subtract"
+              : "add",
+        }) || "",
       name: cleanText(group.name || group.note || group.title || group.label, ""),
       note: cleanText(group.note || group.name || group.title || group.label, ""),
     }))
@@ -378,7 +467,7 @@ function normalizeSplitGroups(draft) {
     })),
     draft.amountSatang,
     {
-      ensureCategoryId: (key) => canonicalizeCategoryId("expense", key),
+      ensureCategoryId: (key) => sanitizeCategoryKey(key, { allowAdjustmentCategories: true }) || key,
       baseLineCountMin: 2,
     },
   );
@@ -447,6 +536,7 @@ function buildBaseTransactionRow({
       source,
       docType: draft.docType || null,
       time: draft.time || null,
+      transactionTime: draft.transactionTime || draft.transaction_time || draft.time || null,
       splitByCategory: draft.splitByCategory === true,
       receiptSaveMode: draft.receiptSaveMode || null,
       lineItems: draft.lineItems,
@@ -536,6 +626,7 @@ export function buildTransactionSavePlan({
       accountId: sanitized.accountId,
       date: sanitized.date,
       time: sanitized.time,
+      transactionTime: sanitized.transactionTime,
       merchant: sanitized.merchant,
       note: sanitized.note,
       paymentMethod: sanitized.paymentMethod,
@@ -689,6 +780,7 @@ export function buildApprovedSuggestion(scan, draft) {
     amount: toBahtAmount(sanitized.amountSatang),
     date: sanitized.date,
     time: sanitized.time || null,
+    transactionTime: sanitized.transactionTime || sanitized.time || "",
     merchant: sanitized.merchant || null,
     note: sanitized.note || null,
     ref: sanitized.reference || null,
@@ -776,6 +868,14 @@ export function scanToDraft(scan) {
     reference: suggestion?.ref || suggestion?.referenceId || "",
     paymentMethod: suggestion?.payment_method || suggestion?.paymentMethod || "",
     date: suggestion?.date || todayDate(),
+    transactionTime:
+      suggestion?.transactionTime ||
+      suggestion?.transaction_time ||
+      suggestion?.transactionAt ||
+      suggestion?.transaction_at ||
+      suggestion?.time ||
+      suggestion?.slip_time ||
+      "",
     time: suggestion?.time || suggestion?.slip_time || "",
     docType: suggestion?.doc_type || suggestion?.docType || "",
     lineItems: receiptGroups,

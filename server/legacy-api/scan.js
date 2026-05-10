@@ -28,8 +28,14 @@ import {
   extractMerchantFromScanText,
   normalizeScanText,
 } from "../../src/utils/scanPostprocess.js";
+import { normalizeTransactionTime } from "../../src/utils/scanDateTime.js";
 import { DEFAULT_CATEGORIES } from "../../src/constants/categories.js";
-import { deriveReceiptCategoryKey } from "../../src/utils/receiptCategorizer.js";
+import {
+  deriveReceiptCategoryKey,
+  inferCategoryKeyFromText,
+  sanitizeCategoryKey as sanitizeReceiptCategoryKey,
+} from "../../src/utils/receiptCategorizer.js";
+import { buildCategoryHierarchy, isAssignableCategory } from "../../src/utils/categoryHierarchy.js";
 import { getSupabaseAdmin, hasSupabaseServerConfig } from "../../lib/supabase/admin.js";
 import { getRequestUser } from "../../lib/supabase/auth.js";
 import { uploadUserDocument } from "../../lib/supabase/documents.js";
@@ -38,24 +44,38 @@ import { normalizeMerchantKey } from "../../src/utils/merchantDictionary.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 
-const categoryIdsForPrompt = (type) =>
-  Array.from(
+const EXPENSE_ITEM_CATEGORY_EXCLUSIONS = new Set(["adjust_balance", "discount", "mixed"]);
+
+const categoryIdsForPrompt = (type) => {
+  const rows = DEFAULT_CATEGORIES[type] || [];
+  const hierarchy = type === "expense" ? buildCategoryHierarchy(rows) : null;
+  return Array.from(
     new Set(
-      (DEFAULT_CATEGORIES[type] || [])
+      rows
+        .filter((category) => {
+          const id = String(category?.id || "").trim();
+          if (!id) return false;
+          if (type !== "expense") return true;
+          if (EXPENSE_ITEM_CATEGORY_EXCLUSIONS.has(id)) return false;
+          return isAssignableCategory(hierarchy?.byId?.get?.(id) || category, hierarchy);
+        })
         .map((category) => String(category?.id || "").trim())
         .filter(Boolean),
     ),
   );
+};
 
 const EXPENSE_SCAN_CATEGORY_KEYS = categoryIdsForPrompt("expense");
 const INCOME_SCAN_CATEGORY_KEYS = categoryIdsForPrompt("income");
 const SCAN_CATEGORY_KEY_SET = new Set([
   ...EXPENSE_SCAN_CATEGORY_KEYS,
   ...INCOME_SCAN_CATEGORY_KEYS,
+  "mixed",
   "transfer",
 ]);
 const SCAN_CATEGORY_PROMPT_TEXT = [
-  `- expense: ${EXPENSE_SCAN_CATEGORY_KEYS.join(", ")}`,
+  `- expense line items: ${EXPENSE_SCAN_CATEGORY_KEYS.join(", ")}`,
+  "- receipt summary may use mixed only when multiple material leaf categories are present",
   `- income: ${INCOME_SCAN_CATEGORY_KEYS.join(", ")}`,
   "- transfer: transfer",
 ].join("\n");
@@ -326,29 +346,31 @@ function clamp01(v) {
   return clamp01Helper(v);
 }
 
-function normalizeCategoryKey(v) {
+function normalizeCategoryKey(v, options = {}) {
   const s = safeString(v).toLowerCase();
   if (!s) return null;
 
-  if (SCAN_CATEGORY_KEY_SET.has(s)) return s;
+  const sanitized = sanitizeReceiptCategoryKey(s, { allowMixed: options.allowMixed === true });
+  if (sanitized && (SCAN_CATEGORY_KEY_SET.has(sanitized) || sanitized === "transfer")) return sanitized;
 
   const alias = {
-    utilities: "bills",
-    utility: "bills",
-    bill: "bills",
+    utilities: "subscriptions",
+    utility: "subscriptions",
+    bill: "subscriptions",
 
     gas: "fuel",
     petrol: "fuel",
     diesel: "fuel",
 
-    supermarket: "groceries",
-    grocery: "groceries",
+    supermarket: "packaged_food",
+    grocery: "packaged_food",
+    groceries: "packaged_food",
 
-    pharmacy: "health",
-    medicine: "health",
+    pharmacy: "pharmacy",
+    medicine: "pharmacy",
 
-    cinema: "entertainment",
-    movie: "entertainment",
+    cinema: "movies",
+    movie: "movies",
 
     internet: "phone_internet",
     phone: "phone_internet",
@@ -359,7 +381,7 @@ function normalizeCategoryKey(v) {
     café: "coffee",
     cafe: "coffee",
   };
-  if (alias[s]) return alias[s];
+  if (alias[s]) return normalizeCategoryKey(alias[s], options);
 
   return null;
 }
@@ -367,6 +389,8 @@ function normalizeCategoryKey(v) {
 function inferCategoryFromText(text) {
   const t = safeString(text).toLowerCase();
   if (!t) return null;
+  const inferred = inferCategoryKeyFromText("expense", t);
+  if (inferred) return normalizeCategoryKey(inferred) || inferred;
 
   const has = (arr) => arr.some((k) => t.includes(k));
 
@@ -401,7 +425,7 @@ function inferCategoryFromText(text) {
       "ที่จอดรถ",
     ])
   )
-    return "transport";
+    return normalizeCategoryKey("transport");
 
   if (
     has([
@@ -432,7 +456,7 @@ function inferCategoryFromText(text) {
       "ของกิน",
     ])
   )
-    return "food";
+    return normalizeCategoryKey("food");
 
   if (
     has([
@@ -457,10 +481,10 @@ function inferCategoryFromText(text) {
       "ชำระบิล",
     ])
   )
-    return "bills";
+    return normalizeCategoryKey("bills");
 
   if (has(["hospital", "clinic", "pharmacy", "drug", "medicine", "vitamin", "health", "โรงพยาบาล", "คลินิก", "ร้านยา", "ยา"]))
-    return "health";
+    return normalizeCategoryKey("health");
 
   if (
     has([
@@ -479,7 +503,7 @@ function inferCategoryFromText(text) {
       "เกม",
     ])
   )
-    return "entertainment";
+    return normalizeCategoryKey("entertainment");
 
   if (
     has([
@@ -507,18 +531,18 @@ function inferCategoryFromText(text) {
       "แม็คโคร",
     ])
   )
-    return "shopping";
+    return normalizeCategoryKey("shopping");
 
   if (has(["rent", "ค่าเช่า", "หอพัก", "คอนโด", "ห้องเช่า"])) return "rent";
-  if (has(["insurance", "ประกัน", "ค่าประกัน", "เบี้ยประกัน", "ประกันภัย", "ประกันชีวิต"])) return "insurance";
+  if (has(["insurance", "ประกัน", "ค่าประกัน", "เบี้ยประกัน", "ประกันภัย", "ประกันชีวิต"])) return normalizeCategoryKey("insurance");
   if (has(["subscription", "สมาชิก", "รายเดือน", "netflix", "spotify", "youtube premium", "icloud", "apple", "google one"])) return "subscriptions";
   if (has(["coffee", "café", "cafe", "starbucks", "amazon cafe", "inthanin", "กาแฟ", "คาเฟ่", "อินทนิล", "อเมซอน"])) return "coffee";
   if (has(["drinks", "beverage", "smoothie", "juice", "เครื่องดื่ม", "น้ำผลไม้", "ชานม", "ชาไข่มุก", "bubble"])) return "drinks";
-  if (has(["grocery", "groceries", "ผัก", "ผลไม้", "เนื้อ", "นม", "ไข่", "วัตถุดิบ", "ของสด", "ซุปเปอร์มาร์เก็ต", "tops", "villa"])) return "groceries";
+  if (has(["grocery", "groceries", "ผัก", "ผลไม้", "เนื้อ", "นม", "ไข่", "วัตถุดิบ", "ของสด", "ซุปเปอร์มาร์เก็ต", "tops", "villa"])) return normalizeCategoryKey("groceries");
   if (has(["beauty", "salon", "haircut", "spa", "nail", "ทำผม", "ร้านเสริมสวย", "สปา", "เล็บ", "เครื่องสำอาง"])) return "beauty";
-  if (has(["education", "school", "tutor", "course", "เรียน", "คอร์ส", "โรงเรียน", "มหาวิทยาลัย", "ค่าเทอม", "กวดวิชา"])) return "education";
-  if (has(["donation", "บริจาค", "ทำบุญ", "กุศล"])) return "donation";
-  if (has(["pet", "สัตว์เลี้ยง", "หมา", "แมว", "อาหารสัตว์", "สัตวแพทย์"])) return "pets";
+  if (has(["education", "school", "tutor", "course", "เรียน", "คอร์ส", "โรงเรียน", "มหาวิทยาลัย", "ค่าเทอม", "กวดวิชา"])) return normalizeCategoryKey("education");
+  if (has(["donation", "บริจาค", "ทำบุญ", "กุศล"])) return normalizeCategoryKey("donation");
+  if (has(["pet", "สัตว์เลี้ยง", "หมา", "แมว", "อาหารสัตว์", "สัตวแพทย์"])) return normalizeCategoryKey("pet_food") || "pet_food";
 
   if (has(["salary", "payroll", "เงินเดือน"])) return "salary";
   if (has(["bonus", "โบนัส"])) return "bonus";
@@ -1022,7 +1046,7 @@ IMPORTANT:
 - If multiple images are provided, they are CROPS/ENHANCEMENTS/TILES of the SAME document.
   Combine information across all images. Prefer the clearest text instance.
   Do NOT double-count or duplicate line items.
-- Thai digits ๐-๙ MUST be converted to Arabic 0-9 in all numeric fields (amount, date, account digits).
+- Thai digits ๐-๙ MUST be converted to Arabic 0-9 in all numeric fields (amount, date, time, account digits).
 - Dates may use Buddhist Era (พ.ศ.) — e.g. 2567 means 2024 AD, 2568 means 2025 AD, 2569 means 2026 AD. Always return Gregorian (AD) dates.
 - Thai months: ม.ค.=Jan, ก.พ.=Feb, มี.ค.=Mar, เม.ย.=Apr, พ.ค.=May, มิ.ย.=Jun, ก.ค.=Jul, ส.ค.=Aug, ก.ย.=Sep, ต.ค.=Oct, พ.ย.=Nov, ธ.ค.=Dec
 
@@ -1078,7 +1102,7 @@ ${SCAN_CATEGORY_PROMPT_TEXT}
 
 Notes:
 - Top-level receipt category_key should be the dominant category by positive item amount when one category clearly dominates. Use "mixed" only when two or more materially significant positive categories are present.
-- Each item in items[] MUST have its own category_key (use "other" if uncertain).
+- Each item in items[] MUST have its own leaf category_key (use "other" if uncertain). Never use broad parent keys such as food, transport, bills, shopping, groceries, home, utilities, or mixed for items.
 - Each child item in children[] should also carry category_key when it can be inferred from the child text. Do not copy the parent category when the child clearly belongs elsewhere.
 
 Schema (ALL keys must exist; use null if unknown):
@@ -1092,6 +1116,7 @@ Schema (ALL keys must exist; use null if unknown):
   "amount": number|null,
   "currency": string|null,
   "date": "YYYY-MM-DD"|null,
+  "time": "HH:mm:ss"|"HH:mm"|null,
   "merchant": string|null,
   "note": string|null,
   "ref": string|null,
@@ -1160,6 +1185,7 @@ ${accountsText}
           "amount",
           "currency",
           "date",
+          "time",
           "merchant",
           "note",
           "ref",
@@ -1182,6 +1208,7 @@ ${accountsText}
           amount: { anyOf: [{ type: "number" }, { type: "null" }] },
           currency: { anyOf: [{ type: "string" }, { type: "null" }] },
           date: { anyOf: [{ type: "string" }, { type: "null" }] },
+          time: { anyOf: [{ type: "string" }, { type: "null" }] },
           merchant: { anyOf: [{ type: "string" }, { type: "null" }] },
           note: { anyOf: [{ type: "string" }, { type: "null" }] },
           ref: { anyOf: [{ type: "string" }, { type: "null" }] },
@@ -1456,6 +1483,9 @@ ${accountsText}
 
   const parsedAmount = typeof parsed.amount === "number" ? parsed.amount : parsed.amount != null ? Number(parsed.amount) : null;
   let amount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : amountFallback;
+  const transactionTime = normalizeTransactionTime(
+    parsed?.time ?? parsed?.transaction_time ?? parsed?.transactionTime ?? parsed?.transaction_at ?? parsed?.transactionAt,
+  );
 
   const merchantRaw = parsed?.merchant != null ? String(parsed.merchant).trim() : "";
   const merchant = merchantRaw || merchantFallback || null;
@@ -1594,8 +1624,9 @@ Accounts list:
 ${accountsText}
 
 Category:
-- For each item, output category_key from this allowed set:
+- For each item, output a precise leaf category_key from this allowed set:
   ${EXPENSE_SCAN_CATEGORY_KEYS.join(", ")}
+- Never use broad parent keys such as food, transport, bills, shopping, groceries, home, utilities, or mixed for items.
 - For each child item, include category_key when available. Do not use child lines to double-count a parent total.
 
 Output JSON schema:
@@ -1718,8 +1749,8 @@ Output JSON schema:
   }
 
   let category =
-    normalizeCategoryKey(parsed?.category_key) ||
-    normalizeCategoryKey(parsed?.category) ||
+    normalizeCategoryKey(parsed?.category_key, { allowMixed: true }) ||
+    normalizeCategoryKey(parsed?.category, { allowMixed: true }) ||
     (refined.tx_type === "transfer" ? "transfer" : null);
 
   if (refined.tx_type !== "transfer") {
@@ -1811,6 +1842,8 @@ Output JSON schema:
     amount: Number.isFinite(amount) ? amount : null,
     currency: parsed?.currency != null && String(parsed.currency).trim() ? String(parsed.currency).trim().toUpperCase() : null,
     date: normalizeScannedDate(parsed.date) || (parsed.date ? String(parsed.date).slice(0, 10) : null),
+    time: transactionTime || null,
+    transactionTime,
     merchant,
     note,
     ref: parsed.ref ? String(parsed.ref).trim() : null,
@@ -1901,6 +1934,8 @@ Output JSON schema:
   normalized.merchant = schemaNormalized.merchant;
   normalized.amount = schemaNormalized.amount;
   normalized.date = schemaNormalized.date;
+  normalized.time = schemaNormalized.time;
+  normalized.transactionTime = schemaNormalized.transactionTime;
   normalized.category_key = normalized.category_key || schemaNormalized.category_key || null;
   normalized.category = normalized.category || normalized.category_key || null;
   normalized.items = Array.isArray(normalized.items) && normalized.items.length ? normalized.items : schemaNormalized.items;

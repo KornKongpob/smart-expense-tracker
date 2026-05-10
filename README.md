@@ -9,6 +9,7 @@ Smart Expense Tracker is a mobile-first Next.js App Router expense app built for
 - Transactions history with month/kind/account/category filters, edit/delete, and CSV export
 - Receipt and transfer-slip scanning with Inbox review before approval
 - Split receipt persistence using one parent transaction plus linked child transactions
+- Deterministic money coach cards on Dashboard, generated locally from budgets, transactions, accounts, categories, and recurring rules
 - Planner flows for budgets, savings goals, debt payoff, and monthly recommendation snapshots
 - Recurring transaction rules for daily, weekly, monthly, and yearly automation
 - Dashboard analytics plus an in-app notification center for budget/debt/recurring/inbox alerts
@@ -47,6 +48,8 @@ Useful scripts:
 - Recurring rule normalization lives in `src/features/app/recurringState.js`.
 - Runtime notification synthesis and dedupe helpers live in `src/features/app/notificationState.js`.
 - The history, recurring, and notification-center screens are all wired through the same provider surface.
+- Transactions keep `date` as `YYYY-MM-DD` for monthly/daily totals. Scanned receipts and slips may also set optional `transactionTime` as `HH:mm` or `HH:mm:ss`; old rows without this field are still valid.
+- Category rows can set `assignable: false` for parent/group/system categories. Historical transactions using old broad category IDs remain displayable, but new transaction and receipt-line assignment should prefer assignable leaf IDs.
 
 ### Scanning
 
@@ -54,14 +57,18 @@ Useful scripts:
 - The default public endpoint is `NEXT_PUBLIC_SCAN_API_URL` and points to `/api/scan`.
 - Server-side request parsing, provider orchestration, and normalization live in `api/scan.js`, `app/api/*`, and `lib/scan/*`.
 - Receipt line validation lives in `lib/scan/receiptValidation.js`.
+- Shared scan date/time parsing lives in `src/utils/scanDateTime.js`.
+- Account-aware scan transaction classification lives in `src/utils/scanTransactionType.js`.
 
 Current scan behavior:
 
 1. Upload one or more receipt/slip files from the Add screen.
 2. Track per-file stages in the runtime UI: queued, preparing, uploading, scanning, validating, done, error.
 3. Save receipt scans into `scan_documents` for Inbox review.
-4. For expense receipts with 2+ purchased items, approve as one split parent transaction plus linked child rows.
-5. Keep transfer-slip approvals on the single-transaction transfer path.
+4. Normalize scan dates and optional transaction times before saving drafts or transactions.
+5. For expense receipts with 2+ purchased items, approve as one split parent transaction plus linked child rows.
+6. Keep transfer-slip approvals on the single-transaction transfer path.
+7. Classify transfer slips on the client with account ownership: own source only becomes an expense, own destination only becomes income, own source plus own destination becomes transfer, and own bank to own credit card becomes `credit_payment`.
 
 ## Split transactions
 
@@ -78,11 +85,28 @@ Runtime split receipt persistence uses nullable linkage fields on `public.transa
 - `adjustment_effect`
 - `adjustment_type`
 
+Split receipt parents are UI grouping rows: they hold the paid total and shared receipt metadata, but are excluded from reports, budgets, and balances. Split child rows are the reportable lines and carry the item/adjustment amount, leaf category, split index/group fields, merchant/reference, attachment id, file hash, date, and optional `transactionTime`.
+
 The migration for this pass is:
 
 - `supabase/migrations/20260403_split_transactions_runtime.sql`
 
 It also updates dashboard/account balance SQL helpers so split parents are excluded from aggregates and receipt adjustments are signed correctly.
+
+## Attachments
+
+- Scanned receipt/slip files are stored through `src/services/blobStore.js` using the existing IndexedDB blob store.
+- Transactions store only attachment identifiers and metadata such as `attachmentId` and `fileHash`.
+- Detail views resolve previews with `src/utils/useBlobInfo.js` / `src/utils/useBlobUrl.js`; do not introduce a second attachment storage path.
+- Parent and child split transactions should share the same `attachmentId` so the original scan remains accessible from the grouped detail view.
+
+## Money coach
+
+- `src/utils/moneyCoach.js` exports `generateMoneyCoachInsights(...)`.
+- The coach is deterministic and offline: it does not call OpenAI, Gemini, or any external service.
+- Inputs are transactions, accounts, categories, budgets, recurring rules, and `todayISO`.
+- Outputs are capped coaching cards with `id`, `severity`, `title`, `message`, `metric`, `actionLabel`, and optional action/category/account targets.
+- Calculations exclude split parents and transfers from spending/income totals, and ignore `transactionTime` for monthly totals.
 
 ## Recurring and Notifications
 

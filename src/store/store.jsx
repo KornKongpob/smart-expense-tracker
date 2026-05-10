@@ -13,6 +13,7 @@ import {
   createInitialState,
   normalizeAccount,
   normalizeCanonicalTransactionTime,
+  normalizeCanonicalTransactionTimeFull,
   normalizeGoal as normalizeGoalModel,
   normalizeGoals,
   normalizeInboxItem,
@@ -841,7 +842,9 @@ export function AppStoreProvider({ children }) {
       const now = Date.now();
       const prev = (state.transactions || []).find((t) => t?.id === id) || null;
       const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
-      const time = normalizeCanonicalTransactionTime({ ...(prev || {}), ...(tx || {}) });
+      const source = { ...(prev || {}), ...(tx || {}) };
+      const transactionTime = normalizeCanonicalTransactionTimeFull(source);
+      const time = normalizeCanonicalTransactionTime({ ...source, transactionTime });
 
       const cleaned = {
         // ✅ preserve fields that the current form doesn't edit (e.g., merchant/evidence/attachment)
@@ -851,6 +854,7 @@ export function AppStoreProvider({ children }) {
         amount,
         date,
         time,
+        transactionTime,
         note: String(tx?.note || ""),
         createdAt,
         updatedAt: now,
@@ -872,7 +876,9 @@ export function AppStoreProvider({ children }) {
           const date = tx?.date ? String(tx.date).slice(0, 10) : toISODate(new Date());
           const prev = prevById.get(String(id)) || null;
           const createdAt = Number(tx?.createdAt || prev?.createdAt || now);
-          const time = normalizeCanonicalTransactionTime({ ...(prev || {}), ...(tx || {}) });
+          const source = { ...(prev || {}), ...(tx || {}) };
+          const transactionTime = normalizeCanonicalTransactionTimeFull(source);
+          const time = normalizeCanonicalTransactionTime({ ...source, transactionTime });
           return {
             // ✅ preserve fields that the current form doesn't edit (e.g., merchant/evidence/attachment)
             ...(prev || {}),
@@ -881,6 +887,7 @@ export function AppStoreProvider({ children }) {
             amount,
             date,
             time,
+            transactionTime,
             note: String(tx?.note || ""),
             createdAt,
             updatedAt: now,

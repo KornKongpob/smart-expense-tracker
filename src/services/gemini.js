@@ -10,6 +10,7 @@
 import { scanReceiptOpenAI } from "./scanOpenAI";
 import { normalizeThaiDigits, parseMoneyToSatang } from "../utils/money";
 import { parseScanRequestPayload, normalizeScanResponse, SCAN_PARSE_ERROR_CODE } from "../../shared/scanSchema";
+import { normalizeTransactionTime, parseTransactionTimeFromText } from "../utils/scanDateTime.js";
 
 export const fileToBase64 = (file) => {
   return new Promise((resolve, reject) => {
@@ -161,17 +162,7 @@ function fixBuddhistYearISO(isoLike) {
 }
 
 function parseTimeFromText(text) {
-  const t0 = safeText(text);
-  if (!t0) return "";
-  const t = normalizeThaiDigits(t0);
-
-  // common: "เวลา 14:22" / "Time 14:22:10" / "14.22"
-  const m = t.match(/(?:เวลา|time)?\s*([01]?\d|2[0-3])[:.](\d{2})(?:[:.](\d{2}))?/i);
-  if (!m) return "";
-  const hh = String(m[1]).padStart(2, "0");
-  const mm = String(m[2]).padStart(2, "0");
-  const ss = m[3] != null ? String(m[3]).padStart(2, "0") : "";
-  return ss ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
+  return parseTransactionTimeFromText(text);
 }
 
 function guessReceiverBankId(text) {
@@ -257,7 +248,7 @@ export async function parseThaiSlip(file, { onStatus, accounts } = {}) {
   const isSlip = String(result?.doc_type || result?.docType || "").toLowerCase().includes("slip") || looksLikeThaiSlip(ctx);
 
   const dateISO = fixBuddhistYearISO(result?.date || "");
-  const time = parseTimeFromText(ctx);
+  const time = normalizeTransactionTime(result?.transactionTime ?? result?.transaction_time ?? result?.time) || parseTimeFromText(ctx);
 
   const amountNumber =
     typeof result?.amount === "number" ? result.amount : result?.amount != null ? Number(result.amount) : NaN;

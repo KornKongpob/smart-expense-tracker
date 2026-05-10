@@ -18,7 +18,7 @@ export const DEFAULT_CATEGORIES = {
     // =====================================================================
 
     // ----- Food & Drink -----
-    { id: "food", name: "อาหาร & เครื่องดื่ม", icon: "🍜", color: "#FF6B6B", parentId: "" },
+    { id: "food", assignable: false, name: "อาหาร & เครื่องดื่ม", icon: "🍜", color: "#FF6B6B", parentId: "" },
     { id: "breakfast", name: "อาหารเช้า", icon: "🍳", color: "#FF6B6B", parentId: "food" },
     { id: "lunch", name: "อาหารกลางวัน", icon: "🍱", color: "#FF6B6B", parentId: "food" },
     { id: "dinner", name: "อาหารเย็น", icon: "🍛", color: "#FF6B6B", parentId: "food" },
@@ -33,12 +33,18 @@ export const DEFAULT_CATEGORIES = {
     { id: "dessert", name: "ของหวาน", icon: "🍰", color: "#F368E0", parentId: "food" },
     { id: "bakery", name: "เบเกอรี", icon: "🍞", color: "#FFE66D", parentId: "food" },
     { id: "alcohol", name: "แอลกอฮอล์", icon: "🍺", color: "#485460", parentId: "food" },
-    { id: "groceries", name: "ของกิน/ของใช้ (ซูเปอร์)", icon: "🛒", color: "#FF9F43", parentId: "food" },
+    { id: "groceries", assignable: false, name: "ของกิน/ของใช้ (ซูเปอร์)", icon: "🛒", color: "#FF9F43", parentId: "food" },
+
+    { id: "fresh_produce", name: "Fresh produce", icon: "*", color: "#22C55E", parentId: "food" },
+    { id: "packaged_food", name: "Packaged food", icon: "*", color: "#F59E0B", parentId: "food" },
+    { id: "dairy", name: "Dairy", icon: "*", color: "#38BDF8", parentId: "food" },
+    { id: "meat_seafood", name: "Meat & seafood", icon: "*", color: "#EF4444", parentId: "food" },
+    { id: "convenience_food", name: "Convenience food", icon: "*", color: "#FB7185", parentId: "food" },
     { id: "meal_prep", name: "วัตถุดิบทำอาหาร", icon: "🥬", color: "#22C55E", parentId: "food" },
     { id: "supplements", name: "วิตามิน/อาหารเสริม", icon: "💊", color: "#38BDF8", parentId: "food" },
 
     // ----- Transport -----
-    { id: "transport", name: "เดินทาง", icon: "🚗", color: "#4ECDC4", parentId: "" },
+    { id: "transport", assignable: false, name: "เดินทาง", icon: "🚗", color: "#4ECDC4", parentId: "" },
     { id: "fuel", name: "น้ำมัน/ชาร์จรถ", icon: "⛽", color: "#48BFE3", parentId: "transport" },
     { id: "public_transit", name: "รถไฟฟ้า/รถเมล์/รถไฟ", icon: "🚇", color: "#54A0FF", parentId: "transport" },
     { id: "taxi", name: "แท็กซี่", icon: "🚕", color: "#FFE66D", parentId: "transport" },
@@ -51,11 +57,16 @@ export const DEFAULT_CATEGORIES = {
     { id: "car_rental", name: "เช่ารถ/รถแทน", icon: "🚘", color: "#60A5FA", parentId: "transport" },
 
     // ----- Housing / Home -----
-    { id: "housing", name: "ที่อยู่อาศัย", icon: "🏠", color: "#60A5FA", parentId: "" },
+    { id: "housing", assignable: false, name: "ที่อยู่อาศัย", icon: "🏠", color: "#60A5FA", parentId: "" },
     { id: "rent", name: "ค่าเช่า/ที่พัก", icon: "🏠", color: "#60A5FA", parentId: "housing" },
     { id: "mortgage", name: "ผ่อนบ้าน/สินเชื่อบ้าน", icon: "🏡", color: "#54A0FF", parentId: "housing" },
     { id: "condo_fee", name: "ค่าส่วนกลาง/นิติ", icon: "🏢", color: "#94A3B8", parentId: "housing" },
-    { id: "home", name: "ของใช้ในบ้าน", icon: "🧹", color: "#94A3B8", parentId: "housing" },
+    { id: "home", assignable: false, name: "ของใช้ในบ้าน", icon: "🧹", color: "#94A3B8", parentId: "housing" },
+
+    { id: "household_cleaning", name: "Household cleaning", icon: "*", color: "#0EA5E9", parentId: "housing" },
+    { id: "paper_goods", name: "Paper goods", icon: "*", color: "#94A3B8", parentId: "housing" },
+    { id: "kitchen_supplies", name: "Kitchen supplies", icon: "*", color: "#F59E0B", parentId: "housing" },
+    { id: "laundry_supplies", name: "Laundry supplies", icon: "*", color: "#A78BFA", parentId: "housing" },
     { id: "furniture", name: "เฟอร์นิเจอร์", icon: "🛋️", color: "#C8D6E5", parentId: "housing" },
     { id: "appliances", name: "เครื่องใช้ไฟฟ้า", icon: "🔌", color: "#6366F1", parentId: "housing" },
     { id: "home_repair", name: "ซ่อมบ้าน/ช่าง", icon: "🔧", color: "#485460", parentId: "housing" },
@@ -63,19 +74,21 @@ export const DEFAULT_CATEGORIES = {
     { id: "laundry", name: "ซักรีด", icon: "🧺", color: "#A78BFA", parentId: "housing" },
 
     // ----- Bills / Utilities -----
-    { id: "bills", name: "บิล/ค่าสาธารณูปโภค", icon: "🧾", color: "#F59E0B", parentId: "" },
+    { id: "bills", assignable: false, name: "บิล/ค่าสาธารณูปโภค", icon: "🧾", color: "#F59E0B", parentId: "" },
     { id: "electricity", name: "ค่าไฟ", icon: "💡", color: "#FFE66D", parentId: "bills" },
     { id: "water", name: "ค่าน้ำ", icon: "💧", color: "#54A0FF", parentId: "bills" },
     { id: "gas", name: "ค่าแก๊ส", icon: "🔥", color: "#F97316", parentId: "bills" },
     { id: "internet_home", name: "อินเทอร์เน็ตบ้าน", icon: "🌐", color: "#0EA5E9", parentId: "bills" },
     { id: "phone_internet", name: "มือถือ/แพ็กเกจ", icon: "📱", color: "#6366F1", parentId: "bills" },
+
+    { id: "mobile_topup", name: "Mobile top-up", icon: "*", color: "#22C55E", parentId: "bills" },
     { id: "cable_tv", name: "ทีวี/เคเบิล", icon: "📺", color: "#485460", parentId: "bills" },
     { id: "subscriptions", name: "สมาชิก/Subscription", icon: "🔁", color: "#8B5CF6", parentId: "bills" },
     { id: "cloud_storage", name: "คลาวด์/พื้นที่เก็บข้อมูล", icon: "☁️", color: "#38BDF8", parentId: "bills" },
     { id: "software_subscription", name: "ค่าซอฟต์แวร์รายเดือน", icon: "💻", color: "#6366F1", parentId: "bills" },
 
     // ----- Shopping -----
-    { id: "shopping", name: "ช้อปปิ้ง", icon: "🛍️", color: "#FBBF24", parentId: "" },
+    { id: "shopping", assignable: false, name: "ช้อปปิ้ง", icon: "🛍️", color: "#FBBF24", parentId: "" },
     { id: "clothing", name: "เสื้อผ้า", icon: "👕", color: "#FF6B6B", parentId: "shopping" },
     { id: "shoes", name: "รองเท้า", icon: "👟", color: "#4ECDC4", parentId: "shopping" },
     { id: "accessories", name: "เครื่องประดับ/นาฬิกา", icon: "⌚", color: "#A78BFA", parentId: "shopping" },
@@ -86,16 +99,20 @@ export const DEFAULT_CATEGORIES = {
     { id: "home_decor", name: "ของตกแต่งบ้าน", icon: "🪴", color: "#22C55E", parentId: "shopping" },
 
     // ----- Personal Care -----
-    { id: "personal_care", name: "ดูแลตัวเอง", icon: "💆", color: "#F368E0", parentId: "" },
+    { id: "personal_care", assignable: false, name: "ดูแลตัวเอง", icon: "💆", color: "#F368E0", parentId: "" },
     { id: "beauty", name: "ความงาม/สกินแคร์", icon: "💅", color: "#F472B6", parentId: "personal_care" },
     { id: "hair", name: "ทำผม/ตัดผม", icon: "💇", color: "#A78BFA", parentId: "personal_care" },
     { id: "spa", name: "สปา/นวด", icon: "🧖", color: "#0EA5E9", parentId: "personal_care" },
     { id: "personal_items", name: "ของใช้ส่วนตัว", icon: "🧴", color: "#C8D6E5", parentId: "personal_care" },
+
+    { id: "toiletries", name: "Toiletries", icon: "*", color: "#C8D6E5", parentId: "personal_care" },
+    { id: "oral_care", name: "Oral care", icon: "*", color: "#4ECDC4", parentId: "personal_care" },
+    { id: "skincare", name: "Skincare", icon: "*", color: "#F472B6", parentId: "personal_care" },
     { id: "cosmetics", name: "เครื่องสำอาง", icon: "💄", color: "#FB7185", parentId: "personal_care" },
     { id: "barber", name: "ร้านตัดผม/บาร์เบอร์", icon: "💈", color: "#64748B", parentId: "personal_care" },
 
     // ----- Health & Fitness -----
-    { id: "health", name: "สุขภาพ", icon: "💊", color: "#54A0FF", parentId: "" },
+    { id: "health", assignable: false, name: "สุขภาพ", icon: "💊", color: "#54A0FF", parentId: "" },
     { id: "pharmacy", name: "ยา/ร้านขายยา", icon: "💊", color: "#54A0FF", parentId: "health" },
     { id: "doctor", name: "พบแพทย์/คลินิก", icon: "🩺", color: "#0EA5E9", parentId: "health" },
     { id: "dental", name: "ทันตกรรม", icon: "🦷", color: "#4ECDC4", parentId: "health" },
@@ -104,14 +121,14 @@ export const DEFAULT_CATEGORIES = {
     { id: "mental_health", name: "สุขภาพจิต/นักจิตวิทยา", icon: "🧠", color: "#A78BFA", parentId: "health" },
     { id: "medical_devices", name: "อุปกรณ์ทางการแพทย์", icon: "🩺", color: "#38BDF8", parentId: "health" },
 
-    { id: "fitness", name: "ออกกำลังกาย", icon: "🏋️", color: "#10B981", parentId: "" },
+    { id: "fitness", assignable: false, name: "ออกกำลังกาย", icon: "🏋️", color: "#10B981", parentId: "" },
     { id: "gym", name: "ยิม/ฟิตเนส", icon: "🏋️", color: "#10B981", parentId: "fitness" },
     { id: "sports", name: "กีฬา/กิจกรรม", icon: "🏃", color: "#4ECDC4", parentId: "fitness" },
     { id: "fitness_class", name: "คลาส/เทรนเนอร์", icon: "🧘", color: "#A78BFA", parentId: "fitness" },
     { id: "sports_gear", name: "อุปกรณ์กีฬา", icon: "🎽", color: "#FF9F43", parentId: "fitness" },
 
     // ----- Entertainment -----
-    { id: "entertainment", name: "บันเทิง", icon: "🎬", color: "#5F27CD", parentId: "" },
+    { id: "entertainment", assignable: false, name: "บันเทิง", icon: "🎬", color: "#5F27CD", parentId: "" },
     { id: "movies", name: "หนัง/โรงภาพยนตร์", icon: "🎬", color: "#5F27CD", parentId: "entertainment" },
     { id: "music", name: "เพลง/สตรีมมิง", icon: "🎵", color: "#6366F1", parentId: "entertainment" },
     { id: "games", name: "เกม", icon: "🎮", color: "#F368E0", parentId: "entertainment" },
@@ -119,7 +136,7 @@ export const DEFAULT_CATEGORIES = {
     { id: "books", name: "หนังสือ/งานอดิเรก", icon: "📚", color: "#0EA5E9", parentId: "entertainment" },
 
     // ----- Education -----
-    { id: "education", name: "การศึกษา", icon: "🎓", color: "#38BDF8", parentId: "" },
+    { id: "education", assignable: false, name: "การศึกษา", icon: "🎓", color: "#38BDF8", parentId: "" },
     { id: "tuition", name: "ค่าเรียน/ค่าเทอม", icon: "🎓", color: "#38BDF8", parentId: "education" },
     { id: "courses", name: "คอร์ส/อบรม", icon: "🧑‍🏫", color: "#0EA5E9", parentId: "education" },
     { id: "study_materials", name: "หนังสือ/อุปกรณ์เรียน", icon: "📚", color: "#6366F1", parentId: "education" },
@@ -128,7 +145,7 @@ export const DEFAULT_CATEGORIES = {
     { id: "school_activity", name: "กิจกรรมโรงเรียน", icon: "🏫", color: "#60A5FA", parentId: "education" },
 
     // ----- Travel -----
-    { id: "travel", name: "ท่องเที่ยว", icon: "✈️", color: "#22C55E", parentId: "" },
+    { id: "travel", assignable: false, name: "ท่องเที่ยว", icon: "✈️", color: "#22C55E", parentId: "" },
     { id: "flights", name: "ตั๋วเครื่องบิน", icon: "✈️", color: "#22C55E", parentId: "travel" },
     { id: "accommodation", name: "ที่พัก", icon: "🏨", color: "#60A5FA", parentId: "travel" },
     { id: "travel_transport", name: "เดินทางระหว่างทริป", icon: "🚌", color: "#4ECDC4", parentId: "travel" },
@@ -139,7 +156,7 @@ export const DEFAULT_CATEGORIES = {
     { id: "airport_transfer", name: "รถรับ-ส่งสนามบิน", icon: "🚐", color: "#0EA5E9", parentId: "travel" },
 
     // ----- Family & Pets -----
-    { id: "family", name: "ครอบครัว", icon: "👨‍👩‍👧‍👦", color: "#FB7185", parentId: "" },
+    { id: "family", assignable: false, name: "ครอบครัว", icon: "👨‍👩‍👧‍👦", color: "#FB7185", parentId: "" },
     { id: "kids", name: "ลูก/เด็ก", icon: "👶", color: "#FB7185", parentId: "family" },
     { id: "childcare", name: "ดูแลเด็ก/พี่เลี้ยง", icon: "🧸", color: "#FFE66D", parentId: "family" },
     { id: "parents_support", name: "ดูแลพ่อแม่/ผู้ใหญ่", icon: "👵", color: "#C8D6E5", parentId: "family" },
@@ -150,12 +167,12 @@ export const DEFAULT_CATEGORIES = {
     { id: "pet_grooming", name: "อาบน้ำ/ตัดขน", icon: "🛁", color: "#A78BFA", parentId: "family" },
 
     // ----- Gifts / Social -----
-    { id: "gift", name: "ของขวัญ/สังคม", icon: "🎁", color: "#E879F9", parentId: "" },
+    { id: "gift", assignable: false, name: "ของขวัญ/สังคม", icon: "🎁", color: "#E879F9", parentId: "" },
     { id: "celebrations", name: "งานเลี้ยง/สังสรรค์", icon: "🎉", color: "#FF6B6B", parentId: "gift" },
     { id: "dating", name: "เดต/ความสัมพันธ์", icon: "💐", color: "#F43F5E", parentId: "gift" },
 
     // ----- Work / Business -----
-    { id: "work", name: "งาน/ธุรกิจ", icon: "💼", color: "#64748B", parentId: "" },
+    { id: "work", assignable: false, name: "งาน/ธุรกิจ", icon: "💼", color: "#64748B", parentId: "" },
     { id: "office_supplies", name: "อุปกรณ์สำนักงาน", icon: "🗂️", color: "#94A3B8", parentId: "work" },
     { id: "software", name: "ซอฟต์แวร์/เครื่องมือ", icon: "🧩", color: "#6366F1", parentId: "work" },
     { id: "business_meals", name: "เลี้ยงรับรอง/พบลูกค้า", icon: "🥂", color: "#F59E0B", parentId: "work" },
@@ -166,9 +183,11 @@ export const DEFAULT_CATEGORIES = {
     { id: "professional_fees", name: "ค่าจ้างวิชาชีพ", icon: "🧾", color: "#64748B", parentId: "work" },
 
     // ----- Finance / Fees -----
-    { id: "fees", name: "ค่าธรรมเนียม/ดอกเบี้ย", icon: "🏦", color: "#EF4444", parentId: "" },
+    { id: "fees", assignable: false, name: "ค่าธรรมเนียม/ดอกเบี้ย", icon: "🏦", color: "#EF4444", parentId: "" },
     { id: "bank_fee", name: "ค่าธรรมเนียมธนาคาร", icon: "🏦", color: "#EF4444", parentId: "fees" },
     { id: "card_fee", name: "ค่าธรรมเนียมบัตร", icon: "💳", color: "#6366F1", parentId: "fees" },
+
+    { id: "transfer_fee", name: "Transfer fee", icon: "*", color: "#EF4444", parentId: "fees" },
     { id: "interest", name: "ดอกเบี้ย", icon: "📉", color: "#EF4444", parentId: "fees" },
     { id: "forex_fee", name: "ค่าธรรมเนียมแลกเงิน", icon: "💱", color: "#485460", parentId: "fees" },
     { id: "atm_fee", name: "ค่าธรรมเนียม ATM", icon: "🏧", color: "#EF4444", parentId: "fees" },
@@ -176,13 +195,13 @@ export const DEFAULT_CATEGORIES = {
     { id: "service_charge", name: "Service charge", icon: "🧾", color: "#F59E0B", parentId: "fees" },
 
     // ----- Debt / Installments -----
-    { id: "debt", name: "หนี้/ผ่อนชำระ", icon: "🧾", color: "#485460", parentId: "" },
+    { id: "debt", assignable: false, name: "หนี้/ผ่อนชำระ", icon: "🧾", color: "#485460", parentId: "" },
     { id: "loan_payment", name: "ชำระสินเชื่อ", icon: "🧾", color: "#485460", parentId: "debt" },
     { id: "credit_card_payment", name: "ชำระบัตรเครดิต", icon: "💳", color: "#6366F1", parentId: "debt" },
     { id: "installment", name: "ผ่อนสินค้า/งวด", icon: "📆", color: "#A78BFA", parentId: "debt" },
 
     // ----- Insurance -----
-    { id: "insurance", name: "ประกัน", icon: "🛡️", color: "#0EA5E9", parentId: "" },
+    { id: "insurance", assignable: false, name: "ประกัน", icon: "🛡️", color: "#0EA5E9", parentId: "" },
     { id: "car_insurance", name: "ประกันรถ", icon: "🚗", color: "#4ECDC4", parentId: "insurance" },
     { id: "health_insurance", name: "ประกันสุขภาพ", icon: "❤️", color: "#F43F5E", parentId: "insurance" },
     { id: "life_insurance", name: "ประกันชีวิต", icon: "🛡️", color: "#0EA5E9", parentId: "insurance" },
@@ -191,7 +210,7 @@ export const DEFAULT_CATEGORIES = {
     { id: "property_insurance", name: "ประกันทรัพย์สิน", icon: "🏠", color: "#60A5FA", parentId: "insurance" },
 
     // ----- Taxes / Fines -----
-    { id: "taxes", name: "ภาษี/ค่าปรับ", icon: "🧾", color: "#FF6B6B", parentId: "" },
+    { id: "taxes", assignable: false, name: "ภาษี/ค่าปรับ", icon: "🧾", color: "#FF6B6B", parentId: "" },
     { id: "income_tax", name: "ภาษีเงินได้", icon: "🧾", color: "#FF6B6B", parentId: "taxes" },
     { id: "vehicle_tax", name: "ภาษีรถ", icon: "🚗", color: "#4ECDC4", parentId: "taxes" },
     { id: "fines", name: "ค่าปรับ/ใบสั่ง", icon: "🚨", color: "#EF4444", parentId: "taxes" },
@@ -200,7 +219,7 @@ export const DEFAULT_CATEGORIES = {
     { id: "customs_duty", name: "ภาษีศุลกากร", icon: "📮", color: "#F97316", parentId: "taxes" },
 
     // ----- Giving -----
-    { id: "donation", name: "บริจาค", icon: "❤️", color: "#F43F5E", parentId: "" },
+    { id: "donation", assignable: false, name: "บริจาค", icon: "❤️", color: "#F43F5E", parentId: "" },
     { id: "charity", name: "มูลนิธิ/การกุศล", icon: "🤝", color: "#F43F5E", parentId: "donation" },
     { id: "temple", name: "ทำบุญ/วัด", icon: "🛕", color: "#FFE66D", parentId: "donation" },
 
@@ -211,7 +230,7 @@ export const DEFAULT_CATEGORIES = {
 
     // ----- Misc -----
     // ✅ Neutral category for "one receipt, many categories" parent transaction (UI-only)
-    { id: "mixed", name: "หลายหมวด", icon: "🧩", color: "#A3A3A3", parentId: "" },
+    { id: "mixed", assignable: false, name: "หลายหมวด", icon: "🧩", color: "#A3A3A3", parentId: "" },
     { id: "other", name: "อื่นๆ", icon: "📦", color: "#C8D6E5", parentId: "" },
   ],
 

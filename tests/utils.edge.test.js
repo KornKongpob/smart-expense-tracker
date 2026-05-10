@@ -17,6 +17,8 @@ import {
 } from '../src/utils/receiptAdjustments.js';
 import {
   deriveReceiptCategoryKey,
+  inferCategoryKeyFromText,
+  sanitizeCategoryKey,
   splitReceiptItemsToLines,
 } from '../src/utils/receiptCategorizer.js';
 import { getNextRecurringDueISO, advanceRecurringDate } from '../src/utils/recurring.js';
@@ -26,6 +28,19 @@ import {
   extractLikelyAmountFromScanText,
   extractMerchantFromScanText,
 } from '../src/utils/scanPostprocess.js';
+import {
+  normalizeTransactionTime,
+  parseTransactionTimeFromText,
+} from '../src/utils/scanDateTime.js';
+import {
+  hasScannedLineItems,
+  normalizeScannedTxType,
+  resolveScannedDocType,
+  resolveScannedTxTypeFromAccounts,
+} from '../src/utils/scanTransactionType.js';
+import { resolveTransactionDetailModel } from '../src/utils/transactionDetail.js';
+import { generateMoneyCoachInsights } from '../src/utils/moneyCoach.js';
+import { compareTxNewestFirst } from '../src/utils/transaction.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
 import { normalizeBackupCore } from '../src/utils/backupPayload.js';
 import { normalizeProviderScanResult } from '../server/legacy-api/scan.js';
@@ -93,6 +108,11 @@ import {
   patchScanUploadEntry,
 } from '../src/features/app/scanUploadState.js';
 import {
+  buildCategoryHierarchy,
+  canSelectCategory,
+  isAssignableCategory,
+} from '../src/utils/categoryHierarchy.js';
+import {
   calculateGoalProgressPercent,
   calculateMonthlyNeeded,
   summarizeGoals,
@@ -118,6 +138,7 @@ import { deriveSplitParentCategoryId } from '../src/views/add-transaction/helper
 import { getSystemCategoryRows } from '../lib/supabase/systemCategories.js';
 import { importLegacySnapshot } from '../lib/import/local.js';
 import { createSeedState, createStorageRecord } from './e2e/fixtures/seed-state.mjs';
+import { DEFAULT_CATEGORIES } from '../src/constants/categories.js';
 
 function installBrowserGlobals(t, { getItem = () => null, setItem = () => {}, removeItem = () => {} } = {}) {
   const prevWindow = globalThis.window;
@@ -487,7 +508,7 @@ test('receiptCategorizer: child lines flatten into counted split lines without d
     lines.map((line) => ({ name: line.name, key: line.key, amount: line.amount })),
     [
       { name: 'Coffee', key: 'coffee', amount: 40 },
-      { name: 'Sandwich', key: 'food', amount: 110 },
+      { name: 'Sandwich', key: 'dining', amount: 110 },
     ],
   );
   assert.equal(lines.reduce((sum, line) => sum + parseMoneyToSatang(line.amount), 0), 15000);
@@ -504,7 +525,7 @@ test('receiptCategorizer: top-level category prefers dominant category and only 
       'Cafe Bloom',
       'food',
     ),
-    'food',
+    'dining',
   );
 
   assert.equal(
@@ -519,6 +540,73 @@ test('receiptCategorizer: top-level category prefers dominant category and only 
     ),
     'mixed',
   );
+});
+
+test('receiptCategorizer: scan item categories resolve to precise assignable leaves', () => {
+  const broadIds = new Set(['food', 'transport', 'bills', 'utilities', 'shopping', 'groceries', 'home', 'mixed']);
+  const samples = [
+    ['น้ำดื่ม', 'drinks'],
+    ['กาแฟ/ชา', 'coffee'],
+    ['ขนม', 'snacks'],
+    ['ข้าว/อาหารจานเดียว', 'dining'],
+    ['ค่าไฟ PEA MEA', 'electricity'],
+    ['ค่าน้ำ', 'water'],
+    ['AIS True dtac mobile bill', 'phone_internet'],
+    ['internet fiber broadband', 'internet_home'],
+    ['น้ำยาล้างจาน', 'household_cleaning'],
+    ['ผงซักฟอก', 'laundry_supplies'],
+    ['ทิชชู่ กระดาษ', 'paper_goods'],
+    ['ยาสีฟัน แปรงสีฟัน', 'oral_care'],
+    ['ยา ร้านขายยา', 'pharmacy'],
+    ['Grab Bolt ride', 'ride_hailing'],
+    ['ค่าส่งพัสดุ', 'shipping'],
+  ];
+
+  for (const [text, expected] of samples) {
+    const categoryId = inferCategoryKeyFromText('expense', text);
+    assert.equal(categoryId, expected, text);
+    assert.equal(broadIds.has(categoryId), false, text);
+  }
+
+  assert.equal(sanitizeCategoryKey('food'), 'dining');
+  assert.equal(sanitizeCategoryKey('groceries'), 'packaged_food');
+  assert.equal(sanitizeCategoryKey('home'), 'household_cleaning');
+  assert.equal(sanitizeCategoryKey('bills'), 'subscriptions');
+  assert.equal(sanitizeCategoryKey('mixed'), 'other');
+});
+
+test('receiptCategorizer: splitReceiptItemsToLines keeps supermarket items as precise line categories', () => {
+  const broadIds = new Set(['groceries', 'utilities', 'bills', 'food', 'shopping', 'home']);
+  const lines = splitReceiptItemsToLines(
+    'expense',
+    {
+      items: [
+        { name: '\u0e19\u0e49\u0e33\u0e14\u0e37\u0e48\u0e21', total: '12.00', category_key: 'groceries' },
+        { name: '\u0e02\u0e19\u0e21', total: '15.00', category_key: 'food' },
+        { name: '\u0e1c\u0e07\u0e0b\u0e31\u0e01\u0e1f\u0e2d\u0e01', total: '38.00', category_key: 'shopping' },
+      ],
+      adjustments: [{ name: 'Member discount', amount: '5.00', effect: 'subtract', type: 'discount' }],
+      targetTotalSatang: 6000,
+    },
+    'Lotus 7-Eleven',
+    'groceries',
+  );
+
+  const categories = new Map(lines.map((line) => [line.name, line.key || line.category_key]));
+  assert.equal(categories.get('\u0e19\u0e49\u0e33\u0e14\u0e37\u0e48\u0e21'), 'drinks');
+  assert.equal(categories.get('\u0e02\u0e19\u0e21'), 'snacks');
+  assert.equal(categories.get('\u0e1c\u0e07\u0e0b\u0e31\u0e01\u0e1f\u0e2d\u0e01'), 'laundry_supplies');
+
+  for (const line of lines) {
+    assert.equal(broadIds.has(line.key || line.category_key), false, line.name);
+  }
+  assert.equal(lines.find((line) => line.receiptLineType === 'adjustment')?.adjustmentEffect, 'subtract');
+
+  const signedTotal = lines.reduce((sum, line) => {
+    const amountSatang = parseMoneyToSatang(line.amount);
+    return sum + (line.adjustmentEffect === 'subtract' ? -amountSatang : amountSatang);
+  }, 0);
+  assert.equal(signedTotal, 6000);
 });
 
 test('receiptCategorizer: positive discount lines stay adjustments instead of purchased items', () => {
@@ -616,6 +704,442 @@ test('duplicate helpers: normalize comparable entries and duplicate reasons cons
   assert.equal(dupState.duplicate, true);
   assert.equal(dupState.duplicateInfo.kind, 'ref');
   assert.equal(dupState.duplicateInfo.matchId, 'tx-1');
+});
+
+test('scan date-time helpers: normalize transaction times and Thai digits', () => {
+  assert.equal(normalizeTransactionTime('14:05'), '14:05');
+  assert.equal(normalizeTransactionTime('14.05'), '14:05');
+  assert.equal(normalizeTransactionTime('20:01:32'), '20:01:32');
+  assert.equal(normalizeTransactionTime('2026-04-04T20:01:32+07:00'), '20:01:32');
+  assert.equal(normalizeTransactionTime('\u0e40\u0e27\u0e25\u0e32 \u0e51\u0e53:\u0e54\u0e55'), '13:45');
+  assert.equal(normalizeTransactionTime('1,234.56'), '');
+});
+
+test('scan date-time helpers: parse time from evidence text without amount false positives', () => {
+  assert.equal(parseTransactionTimeFromText('Total 1,234.56\n\u0e40\u0e27\u0e25\u0e32 13:45'), '13:45');
+  assert.equal(parseTransactionTimeFromText('Time 14:05'), '14:05');
+  assert.equal(parseTransactionTimeFromText('paid 1,234.56 baht'), '');
+});
+
+test('transactions: newest-first sorting uses transactionTime before createdAt on the same date', () => {
+  const sorted = [
+    { id: 'created-only', date: '2026-04-04', createdAt: 9_999 },
+    { id: 'early', date: '2026-04-04', transactionTime: '08:15', createdAt: 1 },
+    { id: 'legacy', date: '2026-04-04', time: '19:59', createdAt: 1 },
+    { id: 'late', date: '2026-04-04', transactionTime: '20:01:32', createdAt: 1 },
+  ].sort(compareTxNewestFirst);
+
+  assert.deepEqual(sorted.map((tx) => tx.id), ['late', 'legacy', 'early', 'created-only']);
+});
+
+test('money coach: flags a category that is over budget', () => {
+  const insights = generateMoneyCoachInsights({
+    todayISO: '2026-05-11',
+    categories: { expense: [{ id: 'dining', name: 'Dining' }] },
+    budgets: [{ month: '2026-05', categoryId: 'dining', limit: 10000 }],
+    transactions: [
+      { id: 'tx-1', type: 'expense', date: '2026-05-05', category: 'dining', amount: 15000 },
+    ],
+  });
+
+  const categoryInsight = insights.find((insight) => insight.id === 'category_budget_dining');
+  assert.equal(categoryInsight?.severity, 'danger');
+  assert.equal(categoryInsight?.relatedCategoryId, 'dining');
+});
+
+test('money coach: warns when month-to-date spending is ahead of budget pace', () => {
+  const insights = generateMoneyCoachInsights({
+    todayISO: '2026-05-11',
+    budgets: [{ month: '2026-05', categoryId: '__TOTAL__', limit: 300000 }],
+    transactions: [
+      { id: 'tx-1', type: 'expense', date: '2026-05-02', category: 'dining', amount: 140000 },
+    ],
+  });
+
+  const paceInsight = insights.find((insight) => insight.id === 'monthly_spend_pace');
+  assert.equal(paceInsight?.severity, 'warning');
+  assert.equal(paceInsight?.actionTarget, 'budgets');
+});
+
+test('money coach: reports a positive savings rate when income stays ahead of expense', () => {
+  const insights = generateMoneyCoachInsights({
+    todayISO: '2026-05-11',
+    transactions: [
+      { id: 'income-1', type: 'income', date: '2026-05-01', category: 'salary', amount: 100000 },
+      { id: 'expense-1', type: 'expense', date: '2026-05-02', category: 'dining', amount: 50000 },
+    ],
+  });
+
+  const savingsInsight = insights.find((insight) => insight.id === 'savings_rate');
+  assert.equal(savingsInsight?.severity, 'positive');
+  assert.equal(savingsInsight?.metric, '50%');
+});
+
+test('money coach: detects likely duplicate transactions by merchant and amount', () => {
+  const insights = generateMoneyCoachInsights({
+    todayISO: '2026-05-11',
+    transactions: [
+      { id: 'tx-1', type: 'expense', date: '2026-05-09', merchant: 'Coffee Bar', amount: 12000 },
+      { id: 'tx-2', type: 'expense', date: '2026-05-10', merchant: 'Coffee Bar', amount: 12000 },
+    ],
+  });
+
+  const duplicateInsight = insights.find((insight) => insight.id === 'duplicate_possible');
+  assert.equal(duplicateInsight?.severity, 'warning');
+});
+
+test('money coach: excludes split parents from budget calculations', () => {
+  const insights = generateMoneyCoachInsights({
+    todayISO: '2026-05-11',
+    categories: { expense: [{ id: 'dining', name: 'Dining' }] },
+    budgets: [{ month: '2026-05', categoryId: 'dining', limit: 50000 }],
+    transactions: [
+      {
+        id: 'parent-1',
+        type: 'expense',
+        date: '2026-05-05',
+        category: 'dining',
+        amount: 900000,
+        isSplitParent: true,
+      },
+      {
+        id: 'child-1',
+        type: 'expense',
+        date: '2026-05-05',
+        category: 'dining',
+        amount: 20000,
+        isSplitChild: true,
+        splitParentId: 'parent-1',
+      },
+    ],
+  });
+
+  assert.equal(insights.some((insight) => insight.id === 'category_budget_dining'), false);
+});
+
+test('scan transaction type helpers: normalize scan type and infer receipt doc type from line items', () => {
+  assert.equal(normalizeScannedTxType('credit_payment'), 'credit_payment');
+  assert.equal(normalizeScannedTxType('unexpected'), 'expense');
+
+  const scanResult = {
+    tx_type: 'transfer',
+    items: [
+      { name: 'Water', total: '12.00' },
+      { name: 'Promo line', total: '0.00' },
+    ],
+  };
+
+  assert.equal(hasScannedLineItems(scanResult), true);
+  assert.equal(
+    resolveScannedDocType({
+      docType: '',
+      aiTxType: scanResult.tx_type,
+      hasLineItems: hasScannedLineItems(scanResult),
+    }),
+    'receipt',
+  );
+  assert.equal(resolveScannedDocType({ aiTxType: 'transfer' }), 'transfer_slip');
+  assert.equal(resolveScannedDocType({ docType: 'bill_payment', aiTxType: 'expense' }), 'bill_payment');
+});
+
+test('scan transaction type: account-aware transfer slip direction wins over AI type', () => {
+  const bank = { id: 'kbank', type: 'bank', name: 'KBank' };
+  const wallet = { id: 'wallet', type: 'wallet', name: 'Wallet' };
+  const credit = { id: 'visa', type: 'credit', name: 'Visa' };
+
+  assert.equal(
+    resolveScannedTxTypeFromAccounts({
+      docType: 'transfer_slip',
+      aiTxType: 'transfer',
+      matchedFromId: 'kbank',
+      matchedFromAcc: bank,
+      contextText: 'transfer to shop',
+    }),
+    'expense',
+  );
+
+  assert.equal(
+    resolveScannedTxTypeFromAccounts({
+      docType: 'transfer_slip',
+      aiTxType: 'transfer',
+      matchedFromAcc: bank,
+      matchedToAcc: { name: 'External merchant account' },
+      contextText: 'transfer to external shop account',
+    }),
+    'expense',
+  );
+
+  assert.equal(
+    resolveScannedTxTypeFromAccounts({
+      docType: 'transfer_slip',
+      aiTxType: 'transfer',
+      matchedToId: 'wallet',
+      matchedToAcc: wallet,
+      contextText: 'incoming transfer',
+    }),
+    'income',
+  );
+
+  assert.equal(
+    resolveScannedTxTypeFromAccounts({
+      docType: 'transfer_slip',
+      aiTxType: 'expense',
+      matchedFromId: 'kbank',
+      matchedToId: 'wallet',
+      matchedFromAcc: bank,
+      matchedToAcc: wallet,
+      contextText: 'transfer between own accounts',
+    }),
+    'transfer',
+  );
+
+  assert.equal(
+    resolveScannedTxTypeFromAccounts({
+      docType: 'bill_payment',
+      aiTxType: 'transfer',
+      matchedFromId: 'kbank',
+      matchedToId: 'visa',
+      matchedFromAcc: bank,
+      matchedToAcc: credit,
+      contextText: 'credit card payment',
+    }),
+    'credit_payment',
+  );
+});
+
+test('scan transaction type: receipts and unknown unmatched scans stay conservative', () => {
+  assert.equal(
+    resolveScannedTxTypeFromAccounts({
+      docType: 'receipt',
+      aiTxType: 'transfer',
+      hasLineItems: true,
+      contextText: '7-Eleven receipt',
+    }),
+    'expense',
+  );
+
+  assert.equal(
+    resolveScannedTxTypeFromAccounts({
+      docType: 'transfer_slip',
+      aiTxType: 'transfer',
+      contextText: 'unknown recipient transfer',
+    }),
+    'expense',
+  );
+});
+
+test('transaction detail resolver: selected split child resolves to parent with ordered receipt lines', () => {
+  const accounts = [{ id: 'cash', name: 'Cash wallet', type: 'cash' }];
+  const categories = {
+    expense: [
+      { id: 'mixed', name: 'Mixed' },
+      { id: 'drinks', name: 'Drinks' },
+      { id: 'snacks', name: 'Snacks' },
+      { id: 'household_cleaning', name: 'Household cleaning' },
+      { id: 'discount', name: 'Discount' },
+    ],
+  };
+  const parent = {
+    id: 'parent-1',
+    type: 'expense',
+    amount: 6000,
+    date: '2026-04-04',
+    transactionTime: '13:45',
+    category: 'mixed',
+    accountId: 'cash',
+    merchant: 'Lotus',
+    isSplitParent: true,
+    splitGroupId: 'sg-1',
+    attachmentId: 'att-1',
+    fileHash: 'hash-1',
+  };
+  const water = {
+    id: 'child-water',
+    type: 'expense',
+    amount: 1200,
+    date: '2026-04-04',
+    category: 'drinks',
+    accountId: 'cash',
+    itemName: 'Water',
+    isSplitChild: true,
+    splitParentId: 'parent-1',
+    splitGroupId: 'sg-1',
+    splitIndex: 1,
+    attachmentId: 'att-1',
+  };
+  const snack = {
+    id: 'child-snack',
+    type: 'expense',
+    amount: 1500,
+    date: '2026-04-04',
+    category: 'snacks',
+    accountId: 'cash',
+    itemName: 'Snack',
+    isSplitChild: true,
+    splitParentId: 'parent-1',
+    splitGroupId: 'sg-1',
+    splitIndex: 2,
+    attachmentId: 'att-1',
+  };
+  const detergent = {
+    id: 'child-detergent',
+    type: 'expense',
+    amount: 3800,
+    date: '2026-04-04',
+    category: 'household_cleaning',
+    accountId: 'cash',
+    itemName: 'Detergent',
+    isSplitChild: true,
+    splitParentId: 'parent-1',
+    splitGroupId: 'sg-1',
+    splitIndex: 3,
+    attachmentId: 'att-1',
+  };
+  const discount = {
+    id: 'child-discount',
+    type: 'expense',
+    amount: 500,
+    date: '2026-04-04',
+    category: 'discount',
+    accountId: 'cash',
+    itemName: 'Member discount',
+    receiptLineType: 'adjustment',
+    adjustmentEffect: 'subtract',
+    adjustmentType: 'discount',
+    isSplitChild: true,
+    splitParentId: 'parent-1',
+    splitGroupId: 'sg-1',
+    splitIndex: 4,
+    attachmentId: 'att-1',
+  };
+
+  const model = resolveTransactionDetailModel({
+    transaction: snack,
+    transactions: [parent, snack, discount, water, detergent],
+    accounts,
+    categories,
+  });
+
+  assert.equal(model.kind, 'split');
+  assert.equal(model.primaryTxId, 'parent-1');
+  assert.equal(model.editTargetId, 'parent-1');
+  assert.equal(model.attachmentId, 'att-1');
+  assert.equal(model.transactionTime, '13:45');
+  assert.deepEqual(
+    model.lines.map((line) => [line.itemName, line.categoryId, line.receiptLineType, line.adjustmentEffect]),
+    [
+      ['Water', 'drinks', 'item', 'add'],
+      ['Snack', 'snacks', 'item', 'add'],
+      ['Detergent', 'household_cleaning', 'item', 'add'],
+      ['Member discount', 'discount', 'adjustment', 'subtract'],
+    ],
+  );
+});
+
+test('transaction detail resolver: transfer pair opens from selected leg and edits outgoing leg', () => {
+  const accounts = [
+    { id: 'bank', name: 'Checking', type: 'bank' },
+    { id: 'visa', name: 'Visa', type: 'credit' },
+  ];
+  const outTx = {
+    id: 'tx-out',
+    type: 'expense',
+    amount: 50000,
+    date: '2026-04-04',
+    transactionTime: '09:30',
+    category: 'transfer',
+    accountId: 'bank',
+    isTransfer: true,
+    transferId: 'tr-1',
+    transferKind: 'credit_payment',
+    ref: 'REF-1',
+    attachmentId: 'att-slip',
+  };
+  const inTx = {
+    id: 'tx-in',
+    type: 'income',
+    amount: 50000,
+    date: '2026-04-04',
+    transactionTime: '09:30',
+    category: 'transfer',
+    accountId: 'visa',
+    isTransfer: true,
+    transferId: 'tr-1',
+    transferKind: 'credit_payment',
+    ref: 'REF-1',
+    attachmentId: 'att-slip',
+  };
+
+  const model = resolveTransactionDetailModel({
+    transaction: inTx,
+    transactions: [inTx, outTx],
+    accounts,
+    categories: { expense: [{ id: 'transfer', name: 'Transfer' }] },
+  });
+
+  assert.equal(model.kind, 'transfer');
+  assert.equal(model.txType, 'credit_payment');
+  assert.equal(model.primaryTxId, 'tx-out');
+  assert.equal(model.editTargetId, 'tx-out');
+  assert.equal(model.transfer.fromAccountName, 'Checking');
+  assert.equal(model.transfer.toAccountName, 'Visa');
+  assert.equal(model.attachmentId, 'att-slip');
+});
+
+test('transaction detail resolver: runtime snake-case rows expose amount and raw receipt lines', () => {
+  const model = resolveTransactionDetailModel({
+    transaction: {
+      id: 42,
+      kind: 'expense',
+      amount_satang: 2222,
+      date: '2026-04-04',
+      category_id: 'drinks',
+      account_id: 'cash',
+      merchant: 'Mini mart',
+      reference: 'R-42',
+      raw: {
+        time: '20:01',
+        source: 'scan',
+        receiptLines: [{ name: 'Water', amountSatang: 2222, categoryId: 'drinks' }],
+      },
+    },
+    transactions: [],
+    accounts: [{ id: 'cash', name: 'Cash wallet' }],
+    categories: { expense: [{ id: 'drinks', name: 'Drinks' }] },
+  });
+
+  assert.equal(model.kind, 'normal');
+  assert.equal(model.amountSatang, 2222);
+  assert.equal(model.accountName, 'Cash wallet');
+  assert.equal(model.categoryName, 'Drinks');
+  assert.equal(model.transactionTime, '20:01');
+  assert.equal(model.ref, 'R-42');
+  assert.deepEqual(model.lines.map((line) => [line.itemName, line.categoryId, line.amountSatang]), [
+    ['Water', 'drinks', 2222],
+  ]);
+});
+
+test('transaction detail resolver: old transactions without time and old broad categories stay displayable', () => {
+  const model = resolveTransactionDetailModel({
+    transaction: {
+      id: 'legacy-1',
+      type: 'expense',
+      amount: 12345,
+      date: '2026-04-04',
+      category: 'food',
+      accountId: 'cash',
+      note: 'Old broad category transaction',
+      attachmentId: 'legacy-attachment',
+    },
+    transactions: [],
+    accounts: [{ id: 'cash', name: 'Cash wallet' }],
+    categories: { expense: [{ id: 'food', name: 'Food', assignable: false }] },
+  });
+
+  assert.equal(model.kind, 'normal');
+  assert.equal(model.transactionTime, '');
+  assert.equal(model.categoryName, 'Food');
+  assert.equal(model.attachmentId, 'legacy-attachment');
 });
 
 test('scan postprocess: detects transfer slip and extracts amount from Thai payment slip text', () => {
@@ -1377,6 +1901,7 @@ test('scan schema: normalized responses keep child categories, adjustments, conf
     merchant: 'Cafe Bloom',
     amount: 150,
     date: '2026-04-04T10:30:00Z',
+    time: '20:01:32',
     category: 'food',
     items: [
       {
@@ -1396,8 +1921,11 @@ test('scan schema: normalized responses keep child categories, adjustments, conf
     flags: { has_line_items: true, needs_human_review: true },
   });
 
-  assert.equal(normalized.category_key, 'food');
+  assert.equal(normalized.category_key, 'dining');
+  assert.equal(normalized.time, '20:01:32');
+  assert.equal(normalized.transactionTime, '20:01:32');
   assert.equal(normalized.items[0].children[0].category_key, 'coffee');
+  assert.equal(normalized.items[0].children[1].category_key, 'dining');
   assert.equal(normalized.adjustments[0].category_key, 'discount');
   assert.equal(normalized.confidence.overall, 0.82);
   assert.equal(normalized.flags.has_line_items, true);
@@ -1587,6 +2115,7 @@ test('runtime transaction drafts: scanToDraft converts baht scans into satang an
       amount: 255,
       merchant: 'Cafe Bloom',
       date: '2026-04-04',
+      time: '20:01:32',
       items: [
         { name: 'Iced latte', total: 145, category_key: 'food' },
         { name: 'Croissant', total: 120, category_key: 'shopping' },
@@ -1601,6 +2130,8 @@ test('runtime transaction drafts: scanToDraft converts baht scans into satang an
   assert.equal(draft.accountId, '12');
   assert.equal(draft.categoryId, 'mixed');
   assert.equal(draft.amountSatang, 25500);
+  assert.equal(draft.time, '20:01');
+  assert.equal(draft.transactionTime, '20:01:32');
   assert.equal(draft.splitByCategory, true);
   assert.equal(draft.receiptGroups.length, 3);
   assert.equal(draft.receiptGroups[0].amountSatang, 14500);
@@ -1629,13 +2160,13 @@ test('runtime transaction drafts: scanToDraft flattens receipt children and keep
   });
 
   assert.equal(draft.amountSatang, 15000);
-  assert.equal(draft.categoryId, 'food');
+  assert.equal(draft.categoryId, 'dining');
   assert.equal(draft.splitByCategory, true);
   assert.deepEqual(
     draft.receiptGroups.map((group) => ({ name: group.name, categoryId: group.categoryId, amountSatang: group.amountSatang })),
     [
       { name: 'Coffee', categoryId: 'coffee', amountSatang: 4000 },
-      { name: 'Sandwich', categoryId: 'food', amountSatang: 11000 },
+      { name: 'Sandwich', categoryId: 'dining', amountSatang: 11000 },
     ],
   );
 });
@@ -1734,7 +2265,7 @@ test('runtime transaction drafts: approved suggestions preserve child categories
     },
   );
 
-  assert.equal(suggestion.category_key, 'food');
+  assert.equal(suggestion.category_key, 'dining');
   assert.equal(suggestion.groups[0].children_included_in_parent, true);
   assert.equal(suggestion.groups[0].children[0].category_key, 'coffee');
 });
@@ -1866,6 +2397,20 @@ test('runtime category preset state: starts on main cards and only opens the cho
   assert.equal(parentOnly.activeMainId, 'salary');
   assert.equal(parentOnly.subCategoryId, '');
   assert.equal(parentOnly.showSubcategoryStage, false);
+});
+
+test('category hierarchy: broad parents are visible groups but not assignable transaction categories', () => {
+  const hierarchy = buildCategoryHierarchy(DEFAULT_CATEGORIES.expense);
+  const broadIds = ['food', 'transport', 'bills', 'shopping', 'groceries', 'home', 'mixed'];
+
+  for (const id of broadIds) {
+    assert.equal(isAssignableCategory(hierarchy.byId.get(id), hierarchy), false, id);
+    assert.equal(canSelectCategory(hierarchy.byId.get(id), hierarchy, { selectedId: id }), true, id);
+  }
+
+  for (const id of ['dining', 'packaged_food', 'electricity', 'household_cleaning', 'oral_care', 'bank_fee']) {
+    assert.equal(isAssignableCategory(hierarchy.byId.get(id), hierarchy), true, id);
+  }
 });
 
 test('runtime category preset state: search finds visible main and subcategories and preserves parent focus after select', () => {

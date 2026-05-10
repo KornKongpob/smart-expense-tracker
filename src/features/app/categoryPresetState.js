@@ -1,4 +1,10 @@
-import { buildCategoryHierarchy, splitSelection } from "../../utils/categoryHierarchy.js";
+import {
+  buildCategoryHierarchy,
+  canSelectCategory,
+  hasCategoryChildren,
+  shouldShowCategoryInPicker,
+  splitSelection,
+} from "../../utils/categoryHierarchy.js";
 
 function toId(value) {
   return String(value || "").trim();
@@ -68,6 +74,8 @@ export function buildCategorySearchResults(categoriesOrHierarchy, query, value =
       const id = toId(category?.id);
       const parentId = toId(hierarchy?.parentById?.get?.(id));
       const parent = parentId ? hierarchy?.byId?.get?.(parentId) || null : null;
+      const hasChildren = hasCategoryChildren(id, hierarchy);
+      const isSelectable = canSelectCategory(category, hierarchy, { selectedId });
       const name = String(category?.name || "").trim();
       const parentName = String(parent?.name || "").trim();
       const searchText = normalizeSearchText(
@@ -81,11 +89,14 @@ export function buildCategorySearchResults(categoriesOrHierarchy, query, value =
         parentName,
         category,
         isActive: id === selectedId,
+        isSelectable,
         isSubcategory: Boolean(parentId),
+        hasChildren,
         searchText,
       };
     })
-    .filter((entry) => entry.id && entry.searchText.includes(normalizedQuery))
+    .filter((entry) => entry.id && shouldShowCategoryInPicker(entry.category, hierarchy, { selectedId }))
+    .filter((entry) => entry.searchText.includes(normalizedQuery))
     .map((entry) => {
       const nextEntry = { ...entry };
       delete nextEntry.searchText;
@@ -97,15 +108,22 @@ export function buildCategoryPresetState(categories, value, focusedMainId = "") 
   const visibleCategories = toVisibleCategoryRows(categories);
   const hierarchy = buildCategoryHierarchy(visibleCategories);
   const selection = splitSelection(value, hierarchy);
+  const selectedId = toId(value);
   const activeMainId = toId(selection.mainId);
   const subCategoryId = toId(selection.subId);
   const stageMainId = toId(focusedMainId);
   const stageMain = stageMainId ? hierarchy.byId.get(stageMainId) || null : null;
-  const stageChildren = stageMainId ? hierarchy.childrenByParent.get(stageMainId) || [] : [];
+  const stageChildren = stageMainId
+    ? (hierarchy.childrenByParent.get(stageMainId) || []).filter((category) =>
+        shouldShowCategoryInPicker(category, hierarchy, { selectedId }),
+      )
+    : [];
 
   return {
     hierarchy,
-    mainCategories: Array.isArray(hierarchy.main) ? hierarchy.main : [],
+    mainCategories: (Array.isArray(hierarchy.main) ? hierarchy.main : []).filter((category) =>
+      shouldShowCategoryInPicker(category, hierarchy, { selectedId }),
+    ),
     activeMainId,
     subCategoryId,
     activeMain: activeMainId ? hierarchy.byId.get(activeMainId) || null : null,
@@ -113,6 +131,7 @@ export function buildCategoryPresetState(categories, value, focusedMainId = "") 
     stageMainId: stageMain ? stageMainId : "",
     stageMain,
     stageChildren,
+    stageMainSelectable: Boolean(stageMain && canSelectCategory(stageMain, hierarchy, { selectedId }) && !hasCategoryChildren(stageMainId, hierarchy)),
     showSubcategoryStage: Boolean(stageMain && stageChildren.length),
   };
 }

@@ -62,7 +62,10 @@ export function buildTransactionAccountLabel(transaction, accountMap) {
 }
 
 export function buildTransactionDateTimeLabel(transaction) {
-  return formatTransactionDateTime(transaction?.date, transaction?.raw?.time || transaction?.time || "");
+  return formatTransactionDateTime(
+    transaction?.date,
+    transaction?.transactionTime || transaction?.transaction_time || transaction?.raw?.transactionTime || transaction?.raw?.time || transaction?.time || "",
+  );
 }
 
 export function canEditTransactionFromHistory(transaction) {

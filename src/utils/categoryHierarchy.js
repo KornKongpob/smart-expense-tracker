@@ -7,6 +7,60 @@
 
 const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
 
+export const NON_ASSIGNABLE_CATEGORY_IDS = new Set([
+  "food",
+  "transport",
+  "housing",
+  "bills",
+  "shopping",
+  "personal_care",
+  "health",
+  "fitness",
+  "entertainment",
+  "education",
+  "travel",
+  "family",
+  "gift",
+  "work",
+  "fees",
+  "debt",
+  "insurance",
+  "taxes",
+  "donation",
+  "mixed",
+  "groceries",
+  "home",
+]);
+
+export const LOW_PRIORITY_ASSIGNABLE_CATEGORY_IDS = new Set(["other", "other_income"]);
+
+export const BROAD_CATEGORY_ASSIGNMENT_FALLBACKS = Object.freeze({
+  food: "dining",
+  groceries: "packaged_food",
+  home: "household_cleaning",
+  transport: "public_transit",
+  housing: "home_repair",
+  bills: "subscriptions",
+  utilities: "subscriptions",
+  utility: "subscriptions",
+  shopping: "online_shopping",
+  personal_care: "toiletries",
+  health: "pharmacy",
+  fitness: "gym",
+  entertainment: "movies",
+  education: "courses",
+  travel: "travel_transport",
+  family: "kids",
+  gift: "celebrations",
+  work: "office_supplies",
+  fees: "service_charge",
+  debt: "loan_payment",
+  insurance: "property_insurance",
+  taxes: "income_tax",
+  donation: "charity",
+  mixed: "other",
+});
+
 export function isDeletedCategory(c) {
   return !!(c?.isDeleted || c?.deletedAt);
 }
@@ -57,7 +111,75 @@ export function buildCategoryHierarchy(categories) {
     childrenByParent.set(pid, arr);
   }
 
+  for (const [id, c] of byId.entries()) {
+    const hasChildren = (childrenByParent.get(id) || []).length > 0;
+    if (c?.assignable == null && (hasChildren || NON_ASSIGNABLE_CATEGORY_IDS.has(id))) {
+      byId.set(id, { ...c, assignable: false });
+    }
+  }
+
+  for (let i = 0; i < main.length; i += 1) {
+    const id = String(main[i]?.id || "").trim();
+    main[i] = byId.get(id) || main[i];
+  }
+  for (const [pid, arr] of childrenByParent.entries()) {
+    childrenByParent.set(
+      pid,
+      arr.map((child) => byId.get(String(child?.id || "").trim()) || child),
+    );
+  }
+
   return { byId, parentById, childrenByParent, main };
+}
+
+export function hasCategoryChildren(categoryOrId, hierarchy) {
+  const id = String(typeof categoryOrId === "object" ? categoryOrId?.id : categoryOrId || "").trim();
+  if (!id) return false;
+  return (hierarchy?.childrenByParent?.get?.(id) || []).length > 0;
+}
+
+export function isAssignableCategory(category, hierarchy = null) {
+  if (!category) return false;
+  if (isDeletedCategory(category)) return false;
+
+  const id = String(category?.id || "").trim();
+  if (!id) return false;
+
+  if (category.assignable === false) return false;
+  if (category.assignable === true) return true;
+  if (NON_ASSIGNABLE_CATEGORY_IDS.has(id)) return false;
+  if (hierarchy && hasCategoryChildren(id, hierarchy)) return false;
+
+  return true;
+}
+
+export function canSelectCategory(category, hierarchy = null, { selectedId = "", allowCurrent = true } = {}) {
+  const id = String(category?.id || "").trim();
+  const currentId = String(selectedId || "").trim();
+  if (allowCurrent && id && currentId && id === currentId) return true;
+  return isAssignableCategory(category, hierarchy);
+}
+
+export function shouldShowCategoryInPicker(category, hierarchy = null, { selectedId = "" } = {}) {
+  const id = String(category?.id || "").trim();
+  if (!id) return false;
+  if (String(selectedId || "").trim() === id) return true;
+  if (isDeletedCategory(category)) return false;
+  if (category.hideFromPicker === true || category.hiddenFromPicker === true) return false;
+  if (hasCategoryChildren(id, hierarchy)) return true;
+  return isAssignableCategory(category, hierarchy);
+}
+
+export function isPromotedCategory(category, hierarchy = null) {
+  const id = String(category?.id || "").trim();
+  if (!id || LOW_PRIORITY_ASSIGNABLE_CATEGORY_IDS.has(id)) return false;
+  return isAssignableCategory(category, hierarchy);
+}
+
+export function getAssignableCategoryFallback(categoryId) {
+  const id = String(categoryId || "").trim();
+  if (!id) return "";
+  return BROAD_CATEGORY_ASSIGNMENT_FALLBACKS[id] || "";
 }
 
 export function getAncestors(id, parentById, { maxDepth = 8 } = {}) {

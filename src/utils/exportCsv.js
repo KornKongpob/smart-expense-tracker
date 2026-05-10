@@ -1,4 +1,5 @@
 import { satangToBahtNumber } from "./money";
+import { normalizeTransactionTime } from "./scanDateTime.js";
 
 function escCsv(val) {
   const s = String(val ?? "").replace(/"/g, '""');
@@ -11,6 +12,17 @@ function toId(value) {
 
 function formatDate(d) {
   return String(d || "").slice(0, 10);
+}
+
+function formatTime(transaction) {
+  return normalizeTransactionTime(
+    transaction?.transactionTime ??
+      transaction?.transaction_time ??
+      transaction?.raw?.transactionTime ??
+      transaction?.raw?.transaction_time ??
+      transaction?.raw?.time ??
+      transaction?.time,
+  );
 }
 
 function pickFirstString(...values) {
@@ -120,6 +132,7 @@ export function transactionsToCsv(transactions, { categories, accounts } = {}) {
 
   const headers = [
     "Date",
+    "Time",
     "Type",
     "Amount (THB)",
     "Category",
@@ -140,6 +153,7 @@ export function transactionsToCsv(transactions, { categories, accounts } = {}) {
 
       return [
         formatDate(t?.date || t?.created_at),
+        formatTime(t),
         getKindLabel(kind),
         amount.toFixed(2),
         getCategoryLabel(t, catMap, kind),

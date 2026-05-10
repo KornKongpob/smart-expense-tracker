@@ -11,7 +11,7 @@ import AccountPill from "./AccountPill";
 
 function safeDateLabel(d) {
   try {
-    return formatTransactionDateTime(d?.date || d, d?.time);
+    return formatTransactionDateTime(d?.date || d, d?.transactionTime || d?.transaction_time || d?.time);
   } catch {
     return String(d?.date || d || "");
   }
@@ -209,6 +209,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
       fromAcc,
       toAcc,
       date: outTx?.date || tx?.date,
+      transactionTime: outTx?.transactionTime || outTx?.transaction_time || outTx?.time || tx?.transactionTime || tx?.time,
     };
 
     // transfer/payments should be neutral in UI (ไม่ใช่รายจ่ายจริง)
@@ -254,7 +255,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
         <span className="text-gray-900/35 font-semibold">→</span>
         <AccountPill account={transferMeta.toAcc} size="sm" showHint={true} className="max-w-full" />
         <span className="text-gray-900/25 font-semibold">•</span>
-        <span className="font-semibold">{safeDateLabel({ date: transferMeta.date, time: tx?.time })}</span>
+        <span className="font-semibold">{safeDateLabel({ date: transferMeta.date, transactionTime: transferMeta.transactionTime })}</span>
       </div>
     );
   } else {
@@ -329,16 +330,12 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
           )}
           {/* ✅ Split breakdown (show all + scroll inside card) */}
           {!isTransfer && isSplitGroup && Array.isArray(splitLines) && splitLines.length ? (
-            <div
-              className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-56 overflow-y-auto overflow-x-hidden no-scrollbar"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
+            <div className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 overflow-hidden">
               <div className="text-[10px] font-semibold text-gray-900/55 uppercase tracking-wide mb-2">
                 รายละเอียด ({splitLines.length})
               </div>
               <div className="space-y-2 pr-1">
-                {splitLines.map((l) => {
+                {splitLines.slice(0, 3).map((l) => {
                   const cat = categoriesById.get(String(l?.category || "")) || null;
                   const isIncomeLine = String(l?.type || "").toLowerCase() === "income";
                   const prefix = isIncomeLine ? "+" : "-";
@@ -364,22 +361,23 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                     </div>
                   );
                 })}
+                {splitLines.length > 3 ? (
+                  <div className="text-[11px] font-semibold text-gray-900/50">
+                    +{splitLines.length - 3} more in details
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}
 
           {/* ✅ Receipt breakdown (single transaction; receipt-style) */}
           {!isTransfer && !isSplitGroup && Array.isArray(receiptLines) && receiptLines.length ? (
-            <div
-              className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 max-h-56 overflow-y-auto overflow-x-hidden no-scrollbar"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
+            <div className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 overflow-hidden">
               <div className="text-[10px] font-semibold text-gray-900/55 uppercase tracking-wide mb-2">
                 ใบเสร็จ ({receiptLines.length})
               </div>
               <div className="space-y-2 pr-1">
-                {receiptLines.map((l, idx) => {
+                {receiptLines.slice(0, 2).map((l, idx) => {
                   const cat = categoriesById.get(String(l?.categoryId || "")) || null;
                   const isAdj = String(l?.receiptLineType || "").toLowerCase().trim() === "adjustment";
                   const eff = String(l?.adjustmentEffect || "").toLowerCase().trim();
@@ -419,6 +417,11 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
                     </div>
                   );
                 })}
+                {receiptLines.length > 2 ? (
+                  <div className="text-[11px] font-semibold text-gray-900/50">
+                    +{receiptLines.length - 2} more in details
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}

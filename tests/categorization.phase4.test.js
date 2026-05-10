@@ -7,13 +7,19 @@ import {
 } from "../src/domain/categorization/index.js";
 
 const categories = [
-  { id: "food", name: "Food" },
+  { id: "food", name: "Food", assignable: false },
+  { id: "dining", name: "Dining", parentId: "food" },
   { id: "coffee", name: "Coffee" },
-  { id: "groceries", name: "Groceries" },
+  { id: "packaged_food", name: "Packaged food", parentId: "food" },
+  { id: "dairy", name: "Dairy", parentId: "food" },
+  { id: "groceries", name: "Groceries", assignable: false },
   { id: "snacks", name: "Snacks" },
-  { id: "personal_care", name: "Personal Care" },
+  { id: "personal_care", name: "Personal Care", assignable: false },
+  { id: "toiletries", name: "Toiletries", parentId: "personal_care" },
+  { id: "oral_care", name: "Oral care", parentId: "personal_care" },
   { id: "cleaning", name: "Cleaning" },
-  { id: "home", name: "Home" },
+  { id: "household_cleaning", name: "Household cleaning" },
+  { id: "home", name: "Home", assignable: false },
   { id: "other", name: "Other" },
   { id: "fees", name: "Fees" },
   { id: "discount", name: "Discount" },
@@ -77,7 +83,7 @@ test("categorization phase 4: rule beats generic keyword match", () => {
     },
   );
 
-  assert.equal(result.categoryId, "food");
+  assert.equal(result.categoryId, "dining");
   assert.equal(result.categorySource, "rules_engine");
 });
 
@@ -102,7 +108,7 @@ test("categorization phase 4: AI suggestion is used only when stronger rules are
     { categories },
   );
 
-  assert.equal(aiOnly.categoryId, "food");
+  assert.equal(aiOnly.categoryId, "dining");
   assert.equal(aiOnly.categorySource, "ai_suggestion");
   assert.equal(stronger.categoryId, "coffee");
   assert.equal(stronger.categorySource, "keyword_exact");
@@ -114,7 +120,7 @@ test("categorization phase 4: low confidence item is marked needsReview", () => 
     { categories, parentCategoryId: "food" },
   );
 
-  assert.equal(result.categoryId, "food");
+  assert.equal(result.categoryId, "dining");
   assert.equal(result.categorySource, "parent_fallback");
   assert.equal(result.needsReview, true);
 });
@@ -148,10 +154,10 @@ test("categorization phase 4: Thai receipt keywords map to sensible categories",
     { categories },
   );
 
-  assert.equal(rice.categoryId, "groceries");
-  assert.equal(milk.categoryId, "groceries");
-  assert.equal(toothpaste.categoryId, "personal_care");
-  assert.equal(dishSoap.categoryId, "cleaning");
+  assert.equal(rice.categoryId, "dining");
+  assert.equal(milk.categoryId, "dairy");
+  assert.equal(toothpaste.categoryId, "oral_care");
+  assert.equal(dishSoap.categoryId, "household_cleaning");
 });
 
 test("categorization phase 4: unknown item safely becomes uncategorized fallback", () => {

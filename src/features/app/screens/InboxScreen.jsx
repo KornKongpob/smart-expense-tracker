@@ -235,7 +235,10 @@ export default function InboxScreen() {
                           {suggestion?.merchant || scan.file_name || "รายการสแกน"}
                         </div>
                         <div className="finance-row-meta">
-                          {formatTransactionDateTime(suggestion?.date || scan.created_at, suggestion?.time)}
+                          {formatTransactionDateTime(
+                            suggestion?.date || scan.created_at,
+                            suggestion?.transactionTime || suggestion?.transaction_time || suggestion?.time,
+                          )}
                         </div>
                       </div>
                     </div>

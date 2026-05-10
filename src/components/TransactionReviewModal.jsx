@@ -26,6 +26,7 @@ import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput } fr
 import { isAdjustmentLike } from "../utils/receiptAdjustments";
 import { deriveMerchantAutofillPatch } from "../utils/merchantDictionary";
 import { reconcileReceiptLines, RECEIPT_SAVE_MODES } from "../domain/receipt/index.js";
+import { isPromotedCategory } from "../utils/categoryHierarchy";
 
 const isTombstoneCategory = (c) => !!(c?.deletedAt || c?.isDeleted);
 
@@ -585,7 +586,7 @@ export default function TransactionReviewModal({
                 );
                 const mdCatId = String(md?.categoryId || "").trim();
                 const mdCat = mdCatId ? byId.get(mdCatId) : null;
-                if (mdCat && mdCatId) {
+                if (mdCat && mdCatId && isPromotedCategory(mdCat)) {
                   const pid = String(mdCat?.parentId || "").trim();
                   const parent = pid ? byId.get(pid) : null;
                   items.push({
@@ -603,7 +604,7 @@ export default function TransactionReviewModal({
               const histId = String(q?.suggestedCategoryId || "").trim();
               if (histId && !items.some((x) => String(x?.id || "") === histId)) {
                 const c = byId.get(histId);
-                if (c && !isTombstoneCategory(c)) {
+                if (c && !isTombstoneCategory(c) && isPromotedCategory(c)) {
                   const pid = String(c?.parentId || "").trim();
                   const parent = pid ? byId.get(pid) : null;
                   items.push({
@@ -622,6 +623,7 @@ export default function TransactionReviewModal({
                 if (!id) continue;
                 if (items.some((x) => String(x?.id || "") === id)) continue;
                 if (isTombstoneCategory(c)) continue;
+                if (!isPromotedCategory(c)) continue;
 
                 const pid = String(c?.parentId || "").trim();
                 const parent = pid ? byId.get(pid) : null;

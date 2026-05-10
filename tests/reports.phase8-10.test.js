@@ -26,12 +26,17 @@ const accounts = [
 
 const categories = [
   { id: "food", name: "Food", parentId: "" },
-  { id: "groceries", name: "Groceries", parentId: "food" },
-  { id: "household", name: "Household", parentId: "" },
-  { id: "personal_care", name: "Personal Care", parentId: "" },
+  { id: "packaged_food", name: "Packaged food", parentId: "food" },
   { id: "snacks", name: "Snacks", parentId: "food" },
+  { id: "housing", name: "Housing", parentId: "" },
+  { id: "household_cleaning", name: "Household cleaning", parentId: "housing" },
+  { id: "personal_care", name: "Personal Care", parentId: "" },
+  { id: "oral_care", name: "Oral care", parentId: "personal_care" },
+  { id: "personal_items", name: "Personal items", parentId: "personal_care" },
+  { id: "dining", name: "Dining", parentId: "food" },
   { id: "discount", name: "Discount", parentId: "" },
   { id: "fees", name: "Fees", parentId: "" },
+  { id: "service_charge", name: "Service charge", parentId: "fees" },
   { id: "mixed", name: "Mixed categories", parentId: "" },
 ];
 
@@ -99,12 +104,15 @@ test("phase 8 reports: split parent is excluded and child categories drive chart
 
   assert.equal(selectIncomeVsExpense(plan.transactions, { monthKey: "2026-04" }).expense, 78000);
   assert.equal(categoryTotals.get("mixed"), undefined);
-  assert.equal(categoryTotals.get("groceries"), 25000);
-  assert.equal(categoryTotals.get("household"), 12000);
-  assert.equal(categoryTotals.get("personal_care"), 37000);
+  assert.equal(categoryTotals.get("packaged_food"), 25000);
+  assert.equal(categoryTotals.get("household_cleaning"), 12000);
+  assert.equal(categoryTotals.get("oral_care"), 9000);
+  assert.equal(categoryTotals.get("personal_items"), 28000);
   assert.equal(categoryTotals.get("snacks"), 8000);
   assert.equal(categoryTotals.get("discount"), -4000);
   assert.equal(parentTotals.get("food"), 33000);
+  assert.equal(parentTotals.get("housing"), 12000);
+  assert.equal(parentTotals.get("personal_care"), 37000);
   assert.deepEqual(merchantRows.map((row) => [row.merchant, row.amount, row.count]), [["Lotus", 78000, 1]]);
   assert.equal(receiptSummary.parentCount, 1);
   assert.equal(receiptSummary.childTotal, 78000);
@@ -117,7 +125,7 @@ test("phase 10 budgets: actuals are split aware and subcategories roll up to par
     { id: "total", month: "2026-04", categoryId: "__TOTAL__", limit: 100000 },
     { id: "food", month: "2026-04", categoryId: "food", limit: 50000 },
     { id: "personal", month: "2026-04", categoryId: "personal_care", limit: 30000 },
-    { id: "house", month: "2026-04", categoryId: "household", limit: 50000 },
+    { id: "house", month: "2026-04", categoryId: "housing", limit: 50000 },
   ];
 
   const rows = selectBudgetVsActual(plan.transactions, budgets, categories, "2026-04");
@@ -127,6 +135,7 @@ test("phase 10 budgets: actuals are split aware and subcategories roll up to par
   assert.equal(rows.find((row) => row.categoryId === "food").actual, 33000);
   assert.equal(rows.find((row) => row.categoryId === "personal_care").actual, 37000);
   assert.equal(rows.find((row) => row.categoryId === "personal_care").over, true);
+  assert.equal(rows.find((row) => row.categoryId === "housing").actual, 12000);
   assert.equal(summary.actualSatang, 78000);
   assert.equal(summary.remainingSatang, 22000);
 });
@@ -150,8 +159,8 @@ test("phase 10 budgets: discount reduces actual and service charge increases act
   const paymentMethods = selectPaymentMethodBreakdown(plan.transactions, { monthKey: "2026-04" });
 
   assert.equal(selectIncomeVsExpense(plan.transactions, { monthKey: "2026-04" }).expense, 10800);
-  assert.equal(breakdown.get("food"), 10000);
-  assert.equal(breakdown.get("fees"), 1000);
+  assert.equal(breakdown.get("dining"), 10000);
+  assert.equal(breakdown.get("service_charge"), 1000);
   assert.equal(breakdown.get("discount"), -200);
   assert.equal(paymentMethods.reduce((sum, row) => sum + row.amount, 0), 10800);
 });

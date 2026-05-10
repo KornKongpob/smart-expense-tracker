@@ -4,6 +4,7 @@ import { generateId } from "../utils/id.js";
 import { parseDigitsList as parseDigitsListUtil, choosePrimaryDigits, digitsOnly } from "../utils/accountMatch.js";
 import { parseDateSafe } from "./selectors.js";
 import { normalizeTimeHHmm, toISODate } from "../utils/format.js";
+import { normalizeTransactionTime } from "../utils/scanDateTime.js";
 import { parseMoneyToSatang, ensureSatangInt } from "../utils/money.js";
 import { normalizeMerchants } from "../utils/merchantDictionary.js";
 import { readMoneyUnit } from "../utils/moneyUnit.js";
@@ -672,19 +673,37 @@ const readNestedTimeCandidates = (raw) => {
   const slip = source.slip && typeof source.slip === "object" ? source.slip : {};
 
   return [
-    source.time,
     source.transactionTime,
+    source.transaction_time,
+    source.transactionAt,
+    source.transaction_at,
+    source.time,
     source.txTime,
     source.localTime,
     source.timeText,
-    meta.time,
     meta.transactionTime,
+    meta.transaction_time,
+    meta.transactionAt,
+    meta.transaction_at,
+    meta.time,
     meta?.slip?.time,
+    scanMeta.transactionTime,
+    scanMeta.transaction_time,
+    scanMeta.transactionAt,
+    scanMeta.transaction_at,
     scanMeta.time,
     scanMeta?.slip?.time,
     slip.time,
   ];
 };
+
+function normalizeCanonicalTransactionTimeFull(raw) {
+  for (const candidate of readNestedTimeCandidates(raw)) {
+    const normalized = normalizeTransactionTime(candidate);
+    if (normalized) return normalized;
+  }
+  return "";
+}
 
 function normalizeCanonicalTime(raw) {
   for (const candidate of readNestedTimeCandidates(raw)) {
@@ -698,6 +717,8 @@ export function normalizeCanonicalTransactionTime(raw) {
   return normalizeCanonicalTime(raw);
 }
 
+export { normalizeCanonicalTransactionTimeFull };
+
 export function normalizeCanonicalInboxTime(raw) {
   return normalizeCanonicalTime(raw);
 }
@@ -707,7 +728,8 @@ function normalizeTransaction(raw) {
   const id = String(t.id || generateId());
   const amount = safeSatang(t.amount ?? t.amountSatang ?? t.amount_satang, 0);
   const date = t?.date ? String(t.date).slice(0, 10) : toISODate(new Date());
-  const time = normalizeCanonicalTransactionTime(t);
+  const transactionTime = normalizeCanonicalTransactionTimeFull(t);
+  const time = normalizeTimeHHmm(transactionTime) || normalizeCanonicalTransactionTime(t);
   const dateMs = date ? parseDateSafe(date).getTime() : 0;
   const createdAt = Number(t.createdAt || t.addedAt || t.updatedAt || dateMs || Date.now());
   const updatedAt = Number(t.updatedAt || createdAt);
@@ -731,6 +753,7 @@ function normalizeTransaction(raw) {
     amount,
     date,
     time,
+    transactionTime,
     categoryId,
     category: categoryId,
     note: String(t.note || ""),
@@ -768,7 +791,8 @@ export function normalizeInboxItem(raw) {
   const type = String(it.type || it.txType || "expense");
   const amount = safeSatang(it.amount, 0);
   const date = it.date ? String(it.date).slice(0, 10) : toISODate(new Date());
-  const time = normalizeCanonicalInboxTime(it);
+  const transactionTime = normalizeCanonicalTransactionTimeFull(it);
+  const time = normalizeTimeHHmm(transactionTime) || normalizeCanonicalInboxTime(it);
   const categoryId = String(it.categoryId || it.category || "").trim();
   const referenceId = String(it.referenceId || it.ref || "");
 
@@ -782,6 +806,7 @@ export function normalizeInboxItem(raw) {
     amount,
     date,
     time,
+    transactionTime,
     categoryId,
     category: categoryId,
     accountId: String(it.accountId || ""),
