@@ -1,4 +1,4 @@
-import legacyHandler from "../../../api/financial-plan.js";
+import legacyHandler from "../../../server/legacy-api/financial-plan.js";
 import { createLegacyRouteHandler } from "../../../lib/next/legacyRoute.js";
 
 export const runtime = "nodejs";

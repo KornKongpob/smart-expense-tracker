@@ -1,8 +1,8 @@
-import { enforceAccess, setSecurityHeaders } from "../lib/scan/access.js";
-import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from "../lib/scan/openaiModel.js";
-import { parseJsonBody } from "../lib/scan/requestParse.js";
-import { createRateLimiter } from "../lib/scan/rateLimit.js";
-import { extractResponsesOutputText, findFirstParsedObject } from "../lib/scan/resultHelpers.js";
+import { enforceAccess, setSecurityHeaders } from "../../lib/scan/access.js";
+import { normalizeOpenAIModel, OPENAI_SCAN_DEFAULT_MODEL } from "../../lib/scan/openaiModel.js";
+import { parseJsonBody } from "../../lib/scan/requestParse.js";
+import { createRateLimiter } from "../../lib/scan/rateLimit.js";
+import { extractResponsesOutputText, findFirstParsedObject } from "../../lib/scan/resultHelpers.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const DISCLAIMER = "เป็นคำแนะนำทั่วไป ไม่ใช่คำแนะนำการเงินส่วนบุคคลจากผู้เชี่ยวชาญ";
