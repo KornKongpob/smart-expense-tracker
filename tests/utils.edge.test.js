@@ -40,6 +40,7 @@ import {
 } from '../src/utils/scanTransactionType.js';
 import { resolveTransactionDetailModel } from '../src/utils/transactionDetail.js';
 import { generateMoneyCoachInsights } from '../src/utils/moneyCoach.js';
+import { buildCreditDebtSnapshot, planCreditCardPayments } from '../src/utils/debtPlan.js';
 import { compareTxNewestFirst } from '../src/utils/transaction.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
 import { normalizeBackupCore } from '../src/utils/backupPayload.js';
@@ -62,7 +63,7 @@ import {
 } from '../src/views/add-transaction/helpers/queueTypeHelpers.js';
 import { canonicalizeCategoryId } from '../src/utils/categoryIds.js';
 import { buildCustomCategoryId } from '../src/utils/categoryCustomId.js';
-import { applyGoalContribution, createInitialState, normalizeGoal } from '../src/store/boot.js';
+import { applyGoalContribution, createInitialState, normalizeCreditStatement, normalizeGoal } from '../src/store/boot.js';
 import {
   applyCategoryPresentationToSnapshot,
   mergeCategoryState,
@@ -1254,6 +1255,245 @@ test('backup normalization: wrapped payloads preserve merchants and normalize am
   assert.deepEqual(normalized.goals, []);
   assert.ok(Array.isArray(normalized.inbox));
   assert.ok(Array.isArray(normalized.scanInbox));
+});
+
+test('credit statements: normalize model and default missing backups to empty list', () => {
+  const empty = createInitialState({ transactions: [], accounts: [], categories: { expense: [], income: [] } });
+  assert.deepEqual(empty.creditStatements, []);
+
+  const normalized = normalizeCreditStatement({
+    account_id: 'card-1',
+    month: '2026-05',
+    statement_date: '2026-05-10',
+    due_date: '2026-05-25',
+    statement_balance_satang: 123_450,
+    minimum_due_satang: 12_000,
+    apr: '20.5',
+    status: 'unknown',
+    note: 'May statement',
+    created_at: 100,
+    updated_at: 200,
+  });
+
+  assert.equal(normalized.id, 'credit_statement_card-1_2026-05');
+  assert.equal(normalized.accountId, 'card-1');
+  assert.equal(normalized.month, '2026-05');
+  assert.equal(normalized.statementDate, '2026-05-10');
+  assert.equal(normalized.dueDate, '2026-05-25');
+  assert.equal(normalized.statementBalance, 123_450);
+  assert.equal(normalized.minimumDue, 12_000);
+  assert.equal(normalized.apr, 20.5);
+  assert.equal(normalized.status, 'open');
+
+  const state = createInitialState({
+    moneyUnit: 'baht',
+    transactions: [],
+    accounts: [],
+    categories: { expense: [], income: [] },
+    creditStatements: [
+      {
+        id: 'stmt-1',
+        accountId: 'card-2',
+        month: '2026-06',
+        statementDate: '2026-06-12',
+        dueDate: '2026-07-02',
+        statementBalance: '1234.50',
+        minimumDue: '125.25',
+        status: 'paid',
+      },
+    ],
+  });
+
+  assert.equal(state.creditStatements.length, 1);
+  assert.equal(state.creditStatements[0].statementBalance, 123_450);
+  assert.equal(state.creditStatements[0].minimumDue, 12_525);
+  assert.equal(state.creditStatements[0].status, 'paid');
+});
+
+test('credit statements: persist through storage and backup validation', (t) => {
+  let raw = '';
+  installBrowserGlobals(t, {
+    getItem: () => raw,
+    setItem: (_key, value) => {
+      raw = value;
+    },
+  });
+
+  const statement = {
+    id: 'stmt-card-1-2026-05',
+    accountId: 'card-1',
+    month: '2026-05',
+    statementDate: '2026-05-10',
+    dueDate: '2026-05-25',
+    statementBalance: 500_000,
+    minimumDue: 50_000,
+    apr: 18,
+    note: 'real minimum from bank',
+    status: 'open',
+    createdAt: 1,
+    updatedAt: 2,
+  };
+
+  saveAll({
+    transactions: [],
+    accounts: [],
+    categories: { expense: [], income: [] },
+    creditStatements: [statement],
+  });
+
+  const saved = JSON.parse(raw);
+  assert.equal(saved.data.creditStatements.length, 1);
+  assert.equal(saved.data.creditStatements[0].minimumDue, 50_000);
+
+  const loaded = loadAll();
+  assert.equal(loaded.creditStatements.length, 1);
+  assert.equal(loaded.creditStatements[0].accountId, 'card-1');
+  assert.equal(loaded.creditStatements[0].minimumDue, 50_000);
+
+  const validation = validateBackupImport({ data: { moneyUnit: 'satang', creditStatements: [statement] } });
+  assert.equal(validation.success, true);
+  assert.equal(validation.data.creditStatements.length, 1);
+  assert.equal(validation.data.creditStatements[0].statementBalance, 500_000);
+});
+
+test('debt payment plan: uses real statement minimums and avalanche extra', () => {
+  const accounts = [
+    { id: 'card-a', name: 'Card A', type: 'credit', openingBalance: 0, apr: 18 },
+    { id: 'card-b', name: 'Card B', type: 'credit', openingBalance: 0, apr: 28 },
+  ];
+  const transactions = [
+    { id: 'spend-a', accountId: 'card-a', type: 'expense', amount: 100_000, date: '2026-05-01' },
+    { id: 'spend-b', accountId: 'card-b', type: 'expense', amount: 200_000, date: '2026-05-02' },
+  ];
+  const creditStatements = [
+    {
+      id: 'stmt-a',
+      accountId: 'card-a',
+      month: '2026-05',
+      statementBalance: 100_000,
+      minimumDue: 20_000,
+      dueDate: '2026-05-20',
+      apr: 18,
+    },
+    {
+      id: 'stmt-b',
+      accountId: 'card-b',
+      month: '2026-05',
+      statementBalance: 200_000,
+      minimumDue: 30_000,
+      dueDate: '2026-05-15',
+      apr: 28,
+    },
+  ];
+
+  const plan = planCreditCardPayments({
+    accounts,
+    transactions,
+    creditStatements,
+    month: '2026-05',
+    availableCashToPay: 80_000,
+    minimumCashBuffer: 10_000,
+    strategy: 'avalanche',
+  });
+  const cardA = plan.cards.find((card) => card.accountId === 'card-a');
+  const cardB = plan.cards.find((card) => card.accountId === 'card-b');
+
+  assert.equal(cardA.minimumDue, 20_000);
+  assert.equal(cardA.recommendedPayment, 20_000);
+  assert.equal(cardB.minimumDue, 30_000);
+  assert.equal(cardB.recommendedPayment, 50_000);
+  assert.equal(cardB.extraPayment, 20_000);
+  assert.equal(plan.totals.totalMinimum, 50_000);
+  assert.equal(plan.totals.totalRecommended, 70_000);
+  assert.equal(plan.totals.cashAfterPayments, 10_000);
+});
+
+test('debt payment plan: cash shortfall allocates partial minimums without exceeding cash', () => {
+  const accounts = [
+    { id: 'card-a', name: 'Card A', type: 'credit', openingBalance: 0 },
+    { id: 'card-b', name: 'Card B', type: 'credit', openingBalance: 0 },
+  ];
+  const transactions = [
+    { id: 'spend-a', accountId: 'card-a', type: 'expense', amount: 100_000, date: '2026-05-01' },
+    { id: 'spend-b', accountId: 'card-b', type: 'expense', amount: 200_000, date: '2026-05-02' },
+  ];
+  const creditStatements = [
+    { id: 'stmt-a', accountId: 'card-a', month: '2026-05', statementBalance: 100_000, minimumDue: 20_000 },
+    { id: 'stmt-b', accountId: 'card-b', month: '2026-05', statementBalance: 200_000, minimumDue: 30_000 },
+  ];
+
+  const plan = planCreditCardPayments({
+    accounts,
+    transactions,
+    creditStatements,
+    month: '2026-05',
+    availableCashToPay: 40_000,
+    minimumCashBuffer: 10_000,
+    strategy: 'due_date',
+  });
+  const cardA = plan.cards.find((card) => card.accountId === 'card-a');
+  const cardB = plan.cards.find((card) => card.accountId === 'card-b');
+
+  assert.equal(cardA.recommendedPayment, 12_000);
+  assert.equal(cardB.recommendedPayment, 18_000);
+  assert.equal(plan.totals.totalRecommended, 30_000);
+  assert.equal(plan.totals.cashAfterPayments, 10_000);
+  assert.ok(plan.warnings.includes('cash_shortfall_minimum_due'));
+  assert.ok(cardA.warnings.includes('minimum_due_not_fully_funded'));
+  assert.ok(cardB.warnings.includes('minimum_due_not_fully_funded'));
+});
+
+test('debt payment plan: snowball extra pays the smallest balance first', () => {
+  const accounts = [
+    { id: 'small', name: 'Small card', type: 'credit', openingBalance: 0, apr: 12 },
+    { id: 'large', name: 'Large card', type: 'credit', openingBalance: 0, apr: 29 },
+  ];
+  const transactions = [
+    { id: 'spend-small', accountId: 'small', type: 'expense', amount: 40_000, date: '2026-05-01' },
+    { id: 'spend-large', accountId: 'large', type: 'expense', amount: 100_000, date: '2026-05-01' },
+  ];
+  const creditStatements = [
+    { id: 'stmt-small', accountId: 'small', month: '2026-05', statementBalance: 40_000, minimumDue: 5_000 },
+    { id: 'stmt-large', accountId: 'large', month: '2026-05', statementBalance: 100_000, minimumDue: 5_000 },
+  ];
+
+  const plan = planCreditCardPayments({
+    accounts,
+    transactions,
+    creditStatements,
+    month: '2026-05',
+    availableCashToPay: 60_000,
+    minimumCashBuffer: 0,
+    strategy: 'snowball',
+  });
+  const small = plan.cards.find((card) => card.accountId === 'small');
+  const large = plan.cards.find((card) => card.accountId === 'large');
+
+  assert.equal(small.recommendedPayment, 40_000);
+  assert.equal(small.extraPayment, 35_000);
+  assert.equal(large.recommendedPayment, 20_000);
+  assert.equal(large.extraPayment, 15_000);
+  assert.equal(plan.totals.totalRecommended, 60_000);
+});
+
+test('debt payment snapshot: missing minimum falls back to zero with warning', () => {
+  const accounts = [{ id: 'card-missing', name: 'Missing minimum card', type: 'credit', openingBalance: 0 }];
+  const transactions = [
+    { id: 'spend-missing', accountId: 'card-missing', type: 'expense', amount: 80_000, date: '2026-05-01' },
+  ];
+
+  const snapshot = buildCreditDebtSnapshot({
+    accounts,
+    transactions,
+    creditStatements: [],
+    month: '2026-05',
+  });
+  const card = snapshot.cards.find((item) => item.accountId === 'card-missing');
+
+  assert.equal(card.balance, 80_000);
+  assert.equal(card.minimumDue, 0);
+  assert.ok(card.warnings.includes('missing_minimum_due'));
+  assert.ok(snapshot.warnings.includes('missing_minimum_due'));
 });
 
 test('goals: boot normalization keeps satang integers and legacy backups default to empty goals', () => {

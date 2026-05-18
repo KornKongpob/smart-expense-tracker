@@ -36,6 +36,7 @@ import { useAppStore } from "../../store/store";
 import AmountField from "../../components/AmountField";
 import AccountPicker from "../../components/AccountPicker";
 import AccountChipsPicker from "../../components/AccountChipsPicker";
+import AttachmentPreview from "../../components/AttachmentPreview";
 import CategorySelect from "../../components/CategorySelect";
 import CategoryPicker from "../../components/CategoryPicker";
 import TagsInput from "../../components/TagsInput";
@@ -43,7 +44,7 @@ import AppHeader from "../../components/AppHeader";
 import BentoGrid from "../../components/bento/BentoGrid";
 import BentoCard from "../../components/bento/BentoCard";
 import { scanReceiptOpenAI } from "../../services/scanOpenAI";
-import { putBlob, getBlobUrl } from "../../services/blobStore";
+import { putBlob, getBlobUrl, hasBlob } from "../../services/blobStore";
 import { formatCurrency, normalizeTimeHHmm, toISODate } from "../../utils/format";
 import { normalizeTransactionTime, parseTransactionTimeFromText } from "../../utils/scanDateTime.js";
 import { parseMoneyToSatang, formatMoneyInputFromSatang, sanitizeMoneyInput, normalizeThaiDigits } from "../../utils/money";
@@ -96,8 +97,68 @@ import { digitsOnly, normalizeRefKey, normalizeMerchantKey, extractMerchantFromN
 import ReceiptSection from "./sections/ReceiptSection";
 import ScanQueueList from "./scan/ScanQueueList";
 
+const ATTACHMENT_PERSISTENCE_WARNING = "ไฟล์แนบอาจดูได้เฉพาะรอบนี้ เพราะบันทึกลงเครื่องไม่สำเร็จ";
+
 // Tombstone category helper (module-scope => safe for hooks deps)
 const isTombstoneCategory = (c) => !!(c?.deletedAt || c?.isDeleted);
+
+function hasAttachmentPersistenceFailure(items) {
+  return (Array.isArray(items) ? items : []).some(
+    (item) => !!item?.attachmentPersistenceWarning || (!!item?.previewUrl && item?.attachmentPersisted === false)
+  );
+}
+
+function withAttachmentPersistenceWarning(message, items) {
+  return hasAttachmentPersistenceFailure(items) ? `${ATTACHMENT_PERSISTENCE_WARNING}\n${message}` : message;
+}
+
+const REVIEW_TYPE_LABELS = {
+  expense: "รายจ่าย",
+  income: "รายรับ",
+  transfer: "โอนเงิน",
+  credit_payment: "ชำระบัตร",
+};
+
+function isReviewSplitLinePopulated(line) {
+  if (!line) return false;
+  return (
+    parseMoneyToSatang(line.amountDigits || "") > 0 ||
+    String(line.categoryId || "").trim().length > 0 ||
+    String(line.lineNote || "").trim().length > 0 ||
+    String(line.txId || "").trim().length > 0
+  );
+}
+
+function ReviewSummaryItem({ label, value }) {
+  return (
+    <div className="min-w-0 rounded-2xl bg-white/55 border border-white/30 px-3 py-2">
+      <div className="text-[10px] font-bold uppercase tracking-wide text-gray-900/45">{label}</div>
+      <div className="mt-0.5 text-[12px] font-semibold text-gray-900 truncate">{value || "-"}</div>
+    </div>
+  );
+}
+
+function SaveReviewSummary({ title = "ตรวจสอบก่อนบันทึก", subtitle, items = [] }) {
+  const visibleItems = (Array.isArray(items) ? items : []).filter(Boolean);
+
+  return (
+    <div className="mb-2 rounded-3xl bg-white/80 border border-white/45 p-3 shadow-[0_16px_42px_rgba(15,23,42,0.08)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[12px] font-bold text-gray-900">{title}</div>
+          {subtitle ? <div className="mt-0.5 text-[11px] font-semibold text-gray-900/55 truncate">{subtitle}</div> : null}
+        </div>
+      </div>
+      {visibleItems.length ? (
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {visibleItems.map((item) => (
+            <ReviewSummaryItem key={item.label} label={item.label} value={item.value} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // (Account dropdown UI is now shared: src/components/AccountPicker.jsx)
 
@@ -1349,11 +1410,93 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
   }, [creditAccounts, accounts, state.transactions]);
 
   const selectedToAcc = useMemo(() => accounts.find((a) => a.id === toAccountId) || null, [accounts, toAccountId]);
+  const selectedFromAcc = useMemo(() => accounts.find((a) => a.id === fromAccountId) || null, [accounts, fromAccountId]);
   const creditDebt = useMemo(() => {
     if (!selectedToAcc) return 0;
     if (!isCreditAccount(selectedToAcc)) return 0;
     return creditDebtById.get(selectedToAcc.id) || 0;
   }, [selectedToAcc, creditDebtById]);
+
+  const reviewCategory = useMemo(() => {
+    const id = String(categoryId || "").trim();
+    if (!id || type === "transfer" || type === "credit_payment") return null;
+    return catHierarchy.byId.get(id) || null;
+  }, [catHierarchy, categoryId, type]);
+
+  const reviewSplitCount = useMemo(
+    () => (Array.isArray(splitLines) ? splitLines.filter(isReviewSplitLinePopulated).length : 0),
+    [splitLines]
+  );
+
+  const manualReviewItems = useMemo(() => {
+    const typeLabel = REVIEW_TYPE_LABELS[type] || REVIEW_TYPE_LABELS.expense;
+    const amountLabel = formatCurrency(isSplitMode ? splitTotalNumber : amountNumber || 0);
+    const accountLabel =
+      type === "transfer" || type === "credit_payment"
+        ? `${selectedFromAcc?.name || "ต้นทาง"} → ${selectedToAcc?.name || "ปลายทาง"}`
+        : selectedManualAccount?.name || "ยังไม่ได้เลือกบัญชี";
+    const categoryLabel =
+      type === "transfer"
+        ? "ไม่กระทบหมวด"
+        : type === "credit_payment"
+          ? "ลดหนี้บัตร"
+          : isSplitMode
+            ? `${Math.max(reviewSplitCount, 0)} รายการย่อย`
+            : reviewCategory?.name || "ยังไม่ได้เลือกหมวด";
+    const attachmentLabel = initialAttachmentId ? "มีไฟล์แนบ" : "ไม่มีไฟล์แนบ";
+
+    return [
+      { label: "ประเภท", value: typeLabel },
+      { label: "ยอดเงิน", value: amountLabel },
+      { label: type === "transfer" || type === "credit_payment" ? "บัญชีต้นทาง → ปลายทาง" : "บัญชี", value: accountLabel },
+      { label: isSplitMode ? "Split" : "หมวด", value: categoryLabel },
+      { label: "วันที่", value: date || "-" },
+      { label: "ไฟล์แนบ", value: attachmentLabel },
+    ];
+  }, [
+    type,
+    isSplitMode,
+    splitTotalNumber,
+    amountNumber,
+    selectedFromAcc,
+    selectedToAcc,
+    selectedManualAccount,
+    reviewSplitCount,
+    reviewCategory,
+    initialAttachmentId,
+    date,
+  ]);
+
+  const scanReview = useMemo(() => {
+    const items = Array.isArray(queue) ? queue : [];
+    const ready = items.filter((item) => item?.status === "ready").length;
+    const failed = items.filter((item) => item?.status === "error").length;
+    const scanning = items.filter((item) => item?.status === "scanning").length;
+    const blockedDuplicates = items.filter((item) => item?.status === "ready" && !!item?.duplicate && !item?.includeDuplicate).length;
+    const savableNow = Math.max(0, ready - blockedDuplicates);
+    const splitReady = items.filter((item) => item?.status === "ready" && item?.splitByCategory).length;
+    const attachmentCount = items.filter((item) => item?.attachmentId || item?.previewUrl).length;
+    const actionText = ready
+      ? blockedDuplicates
+        ? `บันทึกได้ ${savableNow} รายการทันที • ${blockedDuplicates} รายการซ้ำจะถามก่อน`
+        : `บันทึกทันทีจะสร้างรายการจาก ${ready} ไฟล์พร้อมบันทึก`
+      : failed
+        ? "ตรวจไฟล์ที่สแกนไม่สำเร็จก่อนบันทึก"
+        : "แนบไฟล์และรอให้สแกนเสร็จก่อนบันทึก";
+
+    return {
+      subtitle: actionText,
+      items: [
+        { label: "ไฟล์ทั้งหมด", value: String(items.length) },
+        { label: "สแกนแล้ว", value: String(ready + failed) },
+        { label: "พร้อม", value: String(ready) },
+        { label: "กำลังสแกน", value: String(scanning) },
+        { label: "ไม่สำเร็จ", value: String(failed) },
+        { label: "Split", value: splitReady ? `${splitReady} รายการ` : "ไม่มี" },
+        { label: "ไฟล์แนบ", value: attachmentCount ? `${attachmentCount} ไฟล์` : "ไม่มี" },
+      ],
+    };
+  }, [queue]);
 
   // auto-fix accounts when choose credit_payment
   useEffect(() => {
@@ -1545,21 +1688,34 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         const tmpUrl = URL.createObjectURL(file);
         let previewUrl = tmpUrl;
         let previewUrlSource = "temp"; // temp = in-memory object URL, idb = persisted (blobStore)
+        let attachmentPersisted = false;
+        let attachmentPersistenceWarning = "";
 
         try {
           await putBlob(attachmentId, file);
-          const persistedUrl = await getBlobUrl(attachmentId);
-          if (persistedUrl) {
-            previewUrl = persistedUrl;
-            previewUrlSource = "idb";
+          attachmentPersisted = await hasBlob(attachmentId);
+          if (attachmentPersisted) {
             try {
-              URL.revokeObjectURL(tmpUrl);
+              const persistedUrl = await getBlobUrl(attachmentId);
+              if (persistedUrl) {
+                previewUrl = persistedUrl;
+                previewUrlSource = "idb";
+                try {
+                  URL.revokeObjectURL(tmpUrl);
+                } catch {
+                  // ignore
+                }
+              }
             } catch {
-              // ignore
+              // Keep the temp preview; the blob itself was persisted.
             }
           }
         } catch {
           // If IndexedDB fails (private mode / quota), keep in-memory preview.
+        }
+        if (!attachmentPersisted) {
+          attachmentPersistenceWarning = ATTACHMENT_PERSISTENCE_WARNING;
+          showAlert?.(ATTACHMENT_PERSISTENCE_WARNING);
         }
 
         const initialStage = getScanStageMeta("", file.name);
@@ -1574,7 +1730,9 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
             fileMimeType: file.type || "",
             previewUrl,
             previewUrlSource,
-            attachmentId,
+            attachmentId: attachmentPersisted ? attachmentId : null,
+            attachmentPersisted,
+            attachmentPersistenceWarning,
             fileHash: "",
             status: "scanning",
             error: "",
@@ -2367,7 +2525,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     clearQueue();
     setDupDecisionOpen(false);
     navigate("inbox");
-    showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
+    showAlert?.(withAttachmentPersistenceWarning(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`, ready));
     return true;
   };
 
@@ -2489,7 +2647,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     removeQueueItems(ready.map((q) => q.id));
     setDupDecisionOpen(false);
     navigate("inbox");
-    showAlert?.(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`);
+    showAlert?.(withAttachmentPersistenceWarning(`ส่งเข้า Inbox ${serializable.length} รายการแล้ว`, ready));
     return true;
     },
     [queue, showAlert, ensureCategory, categorizeReceiptGroups, addScanInboxItems, removeQueueItems, setDupDecisionOpen, navigate]
@@ -2640,7 +2798,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     removeQueueItems(dups.map((q) => q.id));
     setDupDecisionOpen(false);
     navigate("inbox");
-    showAlert?.(`ส่งรายการซ้ำเข้า Inbox ${serializable.length} รายการแล้ว`);
+    showAlert?.(withAttachmentPersistenceWarning(`ส่งรายการซ้ำเข้า Inbox ${serializable.length} รายการแล้ว`, dups));
     return true;
   };
 
@@ -3301,7 +3459,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
     // ✅ remove only the queue items we actually saved (so duplicates can remain blocked/pending)
     removeQueueItems(normalizedReady.map((q) => q.id));
 
-    showAlert?.(`บันทึก ${txs.length} รายการแล้ว`);
+    showAlert?.(withAttachmentPersistenceWarning(`บันทึก ${txs.length} รายการแล้ว`, normalizedReady));
     return true;
   };
 
@@ -4020,7 +4178,7 @@ const handleClose = () => {
                 {[
                   { id: "expense", label: "รายจ่าย" },
                   { id: "income", label: "รายรับ" },
-                  { id: "transfer", label: "Transfer" },
+                  { id: "transfer", label: "โอนเงิน" },
                   { id: "credit_payment", label: "ชำระบัตร" },
                 ].map((t) => (
                   <button
@@ -4046,8 +4204,8 @@ const handleClose = () => {
                     setAmountDigits(v);
                   }}
                   variant={type === "credit_payment" ? "transfer" : type}
-                  label={isSplitMode ? "ยอดรวม (Split)" : "จำนวนเงิน"}
-                  helper={isSplitMode ? "Split: ยอดรวมจะคำนวณจากรายการย่อยด้านล่าง" : budgetHint}
+                  label={isSplitMode ? "ยอดรวมแบบ Split" : "จำนวนเงิน"}
+                  helper={isSplitMode ? "โหมด Split: ยอดรวมจะคำนวณจากรายการย่อยด้านล่าง" : budgetHint}
                   disabled={isSplitMode}
                 />
               </div>
@@ -4121,8 +4279,8 @@ const handleClose = () => {
                         {isRequestingLocation
                           ? "กำลังอ่านตำแหน่ง..."
                           : currentLocation
-                            ? "Refresh nearby location"
-                            : "Use nearby location to help detect merchant"}
+                            ? "อัปเดตตำแหน่งใกล้เคียง"
+                            : "ใช้ตำแหน่งใกล้เคียงช่วยเดาร้าน"}
                       </button>
                     </div>
                   ) : null}
@@ -4132,7 +4290,7 @@ const handleClose = () => {
 
             {/* Accounts */}
             <BentoCard
-              title={type === "transfer" ? "Transfer accounts" : type === "credit_payment" ? "ชำระบัตรเครดิต" : "บัญชีที่ใช้"}
+              title={type === "transfer" ? "บัญชีโอนเงิน" : type === "credit_payment" ? "ชำระบัตรเครดิต" : "บัญชีที่ใช้"}
               subtitle={
                 type === "transfer"
                   ? "เงินย้ายระหว่างบัญชี (ไม่กระทบรายรับ/รายจ่าย)"
@@ -4265,7 +4423,7 @@ const handleClose = () => {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="text-[12px] text-gray-900/60">
-                      Split จะบันทึกเป็นหลาย transactions (เพื่อให้งบ/สถิติ/Export ถูกต้อง) แต่หน้า Recent แสดงเป็น 1 การ์ด
+                      การแยกหมวดจะบันทึกเป็นหลายรายการ เพื่อให้งบ/สถิติ/Export ถูกต้อง แต่หน้า Recent แสดงเป็น 1 การ์ด
                     </div>
                   </div>
 
@@ -4279,19 +4437,19 @@ const handleClose = () => {
                         : "bg-white/70 text-gray-900 border-slate-900/10 hover:bg-white"
                     }`}
                   >
-                    {isSplitMode ? "SPLIT ON" : "SPLIT OFF"}
+                    {isSplitMode ? "Split เปิดอยู่" : "เปิด Split"}
                   </button>
                 </div>
 
                 {isSplitMode ? (
                   <div className="mt-4 space-y-3">
                     <div className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
-                      <div className="ui-label mb-1">Split label (optional)</div>
+                      <div className="ui-label mb-1">ชื่อกลุ่ม Split (ถ้ามี)</div>
                       <input
                         value={splitLabel}
                         onChange={(e) => setSplitLabel(e.target.value)}
                         className="ui-input"
-                        placeholder='เช่น "Lotus receipt"'
+                        placeholder='เช่น "ใบเสร็จ Lotus"'
                       />
                     </div>
 
@@ -4300,7 +4458,7 @@ const handleClose = () => {
                         <div key={`${l.txId || "new"}-${idx}`} className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
                           <div className="flex items-center justify-between gap-3">
                             <div className="text-[11px] text-gray-900/65 font-semibold">
-                              Line {idx + 1} <span className="font-bold">/{splitLines.length}</span>
+                              รายการย่อย {idx + 1} <span className="font-bold">/{splitLines.length}</span>
                             </div>
                             <button
                               type="button"
@@ -4338,7 +4496,7 @@ const handleClose = () => {
                           </div>
 
                           <div className="mt-2">
-                            <div className="ui-label mb-1">Note (optional)</div>
+                            <div className="ui-label mb-1">รายละเอียด (ถ้ามี)</div>
                             <input
                               value={l.lineNote || ""}
                               onChange={(e) => updateSplitLine(idx, { lineNote: e.target.value })}
@@ -4394,7 +4552,7 @@ const handleClose = () => {
                       <Sparkles size={18} className="text-gray-900" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-gray-900">Advanced options</div>
+                      <div className="text-sm font-semibold text-gray-900">ตัวเลือกเพิ่มเติม</div>
                       <div className="mt-0.5 text-[12px] font-bold text-gray-800/60">อ้างอิง • แท็ก • ไฟล์แนบ • ผ่อนชำระ</div>
                     </div>
                   </div>
@@ -4411,27 +4569,10 @@ const handleClose = () => {
                   {initialAttachmentId ? (
                     <div className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
                       <div className="ui-label mb-2">ไฟล์แนบ</div>
-                      {attachmentUrl ? (
-                        <a
-                          href={attachmentUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="block rounded-2xl overflow-hidden border border-slate-900/10 bg-white/50"
-                        >
-                          {String(attachmentMimeType || "").toLowerCase() === "application/pdf" ? (
-                            <div className="w-full max-h-72 min-h-[180px] flex items-center justify-center">
-                              <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900/80">
-                                <FileText size={18} /> เปิดไฟล์ PDF
-                              </div>
-                            </div>
-                          ) : (
-                            <img src={attachmentUrl} alt="attachment" className="w-full max-h-72 object-cover" />
-                          )}
-                        </a>
-                      ) : (
-                        <div className="text-sm text-gray-900/60">กำลังโหลดไฟล์…</div>
-                      )}
-                      <div className="mt-2 text-[11px] text-gray-900/50">ไฟล์แนบถูกเก็บแบบถาวรในเครื่อง (IndexedDB)</div>
+                      <AttachmentPreview attachmentId={initialAttachmentId} variant="inline" />
+                      <div className="mt-2 text-[11px] text-gray-900/50">
+                        ไฟล์แนบเก็บในเครื่องนี้เท่านั้น และ JSON Backup ยังไม่รวมรูปใบเสร็จ/สลิป
+                      </div>
                     </div>
                   ) : null}
 
@@ -4513,6 +4654,10 @@ const handleClose = () => {
           {/* Sticky action bar */}
           <div ref={bottomDockRef} className="page-fixed-action-bar fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-[42]">
             <div className="ui-card-strong p-2 rounded-3xl shadow-[0_28px_70px_-50px_rgba(0,0,0,0.65)]">
+              <SaveReviewSummary
+                subtitle={isSplitMode ? "จะบันทึกเป็นรายการหลักพร้อมรายการย่อย" : "จะบันทึกตามข้อมูลที่เลือกไว้ตอนนี้"}
+                items={manualReviewItems}
+              />
               <button
                 onClick={handleSaveManual}
                 disabled={isSaving}
@@ -4532,6 +4677,11 @@ const handleClose = () => {
       {!isEditMode && entryMode === "scan" && queue.length ? (
         <div ref={bottomDockRef} className="page-fixed-action-bar fixed left-4 right-4 bottom-[calc(1rem+env(safe-area-inset-bottom)+var(--keyboard-inset,0px))] z-[42]">
           <div className="ui-card-strong p-2 rounded-3xl shadow-[0_28px_70px_-50px_rgba(0,0,0,0.65)]">
+            <SaveReviewSummary
+              title="ตรวจสอบคิวสแกนก่อนบันทึก"
+              subtitle={scanReview.subtitle}
+              items={scanReview.items}
+            />
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={sendQueueToInbox}

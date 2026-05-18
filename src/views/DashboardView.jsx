@@ -3,14 +3,18 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowRightLeft,
-  Camera,
   CalendarDays,
+  CreditCard,
   List,
+  PiggyBank,
   Plus,
+  ReceiptText,
   TrendingUp,
+  Wallet,
 } from "lucide-react";
 
 import AppHeader from "../components/AppHeader";
+import FinancialPlanPanel from "../components/FinancialPlanPanel.jsx";
 import MoneyCoachPanel from "../components/MoneyCoachPanel.jsx";
 import TransactionDetailModal from "../components/TransactionDetailModal.jsx";
 import { useAppStore } from "../store/store.jsx";
@@ -22,7 +26,6 @@ import {
   selectVisibleTransactions,
 } from "../store/selectors/index.js";
 import {
-  calculateMoneyHealthScore,
   calculateMonthlyPlan,
   forecastCashFlow,
 } from "../features/money-plan/moneyPlan.js";
@@ -44,27 +47,34 @@ function clampPercent(value) {
   return Math.max(0, Math.min(100, number));
 }
 
-const HEALTH_GRADE_LABELS = {
-  poor: "ต้องระวัง",
-  fair: "พอใช้",
-  good: "ดี",
-  great: "ดีมาก",
-};
-
-function MoneyAssistantMetric({ label, value, hint, tone = "slate" }) {
+function OverviewMetric({ icon, label, value, hint, tone = "slate", onClick }) {
   const toneClass =
     tone === "emerald"
       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
       : tone === "indigo"
         ? "border-indigo-200 bg-indigo-50 text-indigo-950"
+        : tone === "rose"
+          ? "border-rose-200 bg-rose-50 text-rose-900"
+          : tone === "amber"
+            ? "border-amber-200 bg-amber-50 text-amber-900"
         : "border-slate-200 bg-slate-50 text-slate-900";
+  const Component = onClick ? "button" : "div";
 
   return (
-    <div className={`min-w-0 rounded-2xl border p-3 ${toneClass}`}>
-      <div className="text-[11px] font-bold uppercase text-current/60">{label}</div>
-      <div className="mt-1 truncate text-lg font-bold tabular-nums">{value}</div>
+    <Component
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={`min-w-0 rounded-2xl border p-3 text-left shadow-sm ${onClick ? "cursor-pointer transition hover:shadow-md active:scale-[0.98]" : ""} ${toneClass}`}
+    >
+      <div className="flex items-center gap-2">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/70 text-current">
+          {icon}
+        </span>
+        <div className="min-w-0 text-[11px] font-bold uppercase text-current/60">{label}</div>
+      </div>
+      <div className="mt-3 truncate text-xl font-bold tabular-nums">{value}</div>
       {hint ? <div className="mt-1 truncate text-[11px] font-semibold text-current/60">{hint}</div> : null}
-    </div>
+    </Component>
   );
 }
 
@@ -73,7 +83,7 @@ function QuickAction({ icon, label, onClick, primary = false }) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-20 flex-col items-start justify-between rounded-2xl border p-3 text-left shadow-sm transition active:scale-[0.98] ${
+      className={`flex min-h-20 cursor-pointer flex-col items-start justify-between rounded-2xl border p-3 text-left shadow-sm transition hover:shadow-md active:scale-[0.98] ${
         primary ? "border-indigo-500 bg-indigo-600 text-white" : "border-slate-200 bg-white text-slate-900"
       }`}
     >
@@ -149,11 +159,6 @@ export default function DashboardView() {
     [moneyPlanState, todayISO],
   );
 
-  const moneyHealth = useMemo(
-    () => calculateMoneyHealthScore(moneyPlanState, { today: todayISO }),
-    [moneyPlanState, todayISO],
-  );
-
   const assistantRecommendations = useMemo(
     () => generatePersonalMoneyRecommendations(assistantState, { today: todayISO, maxItems: 5 }),
     [assistantState, todayISO],
@@ -185,12 +190,23 @@ export default function DashboardView() {
     [transactions, detailTransactionId],
   );
   const budgetPercent = clampPercent(snapshot.budgetSummary?.percent || 0);
+  const hasMonthlyBudget = Number(snapshot.budgetSummary?.totalLimitSatang || 0) > 0;
+  const budgetRemainingSatang = Number(snapshot.budgetSummary?.remainingSatang || 0);
+  const isOverMonthlyBudget = hasMonthlyBudget && budgetRemainingSatang < 0;
+  const budgetOverviewLabel = isOverMonthlyBudget ? "เกินงบเดือนนี้" : "เหลืองบเดือนนี้";
+  const budgetOverviewValue = hasMonthlyBudget
+    ? formatCurrency(Math.abs(budgetRemainingSatang))
+    : "ยังไม่ได้ตั้งงบ";
+  const budgetOverviewHint = hasMonthlyBudget
+    ? `ใช้ไป ${budgetPercent}% ของงบ`
+    : `แผนเงินคงเหลือ ${formatCurrency(moneyPlan.availableThisMonth || 0)}`;
   const topOverCategory = snapshot.budgetSummary?.topOverBudget
     ? categoryById.get(String(snapshot.budgetSummary.topOverBudget.categoryId || ""))
     : null;
 
   const openManual = (txType) => store.startNewTransaction({ entryMode: "manual", txType });
   const openScan = () => store.startNewTransaction({ entryMode: "scan", scanUploadKind: "receipt" });
+  const openDebtPlan = () => navigate("debts");
   const openTransactionDetail = (tx) => {
     const id = String(tx?.id || "").trim();
     if (id) setDetailTransactionId(id);
@@ -225,37 +241,57 @@ export default function DashboardView() {
       />
 
       <main className="ui-page pt-4 pb-nav view-flow">
-        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-900">ผู้ช่วยวางแผนเงิน</div>
-              <div className="mt-1 text-xs font-medium text-slate-500">
-                สรุปจากเงินสด งบ และรายการประจำ
-              </div>
+              <div className="text-xs font-bold uppercase text-indigo-700">Today / This month</div>
+              <h1 className="mt-1 text-xl font-bold text-slate-950">ศูนย์บัญชาการการเงิน</h1>
+              <p className="mt-1 text-xs font-medium text-slate-500">ภาพรวมเงินพร้อมใช้ งบเดือนนี้ และหนี้บัตรเครดิต</p>
             </div>
             <button type="button" onClick={() => navigate("budgets")} className="text-xs font-bold text-indigo-700">
-              วางแผน
+              ปรับงบ
             </button>
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <MoneyAssistantMetric
-              label="เงินเหลือใช้เดือนนี้"
-              value={formatCurrency(moneyPlan.availableThisMonth)}
-              hint={`${moneyPlan.daysRemaining} วัน`}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <OverviewMetric
+              icon={<Wallet size={17} aria-hidden="true" />}
+              label="เงินสด/บัญชีพร้อมใช้"
+              value={formatCurrency(snapshot.accountSummary.totalAssetsSatang || 0)}
+              hint="ไม่รวมวงเงินบัตรเครดิต"
               tone="emerald"
+              onClick={() => navigate("accounts")}
             />
-            <MoneyAssistantMetric
-              label="ใช้ได้ต่อวัน"
-              value={formatCurrency(moneyPlan.safeToSpendPerDay)}
-              hint={`วันนี้ ${formatCurrency(moneyPlan.safeToSpendToday)}`}
+            <OverviewMetric
+              icon={<TrendingUp size={17} aria-hidden="true" />}
+              label="ใช้ไปเดือนนี้"
+              value={formatCurrency(snapshot.monthlySummary?.expense || 0)}
+              hint={`รายรับ ${formatCurrency(snapshot.monthlySummary?.income || 0)}`}
               tone="indigo"
             />
-            <MoneyAssistantMetric
-              label="สุขภาพการเงิน"
-              value={`${moneyHealth.score}/100`}
-              hint={HEALTH_GRADE_LABELS[moneyHealth.grade] || moneyHealth.grade}
+            <OverviewMetric
+              icon={<PiggyBank size={17} aria-hidden="true" />}
+              label={budgetOverviewLabel}
+              value={budgetOverviewValue}
+              hint={budgetOverviewHint}
+              tone={isOverMonthlyBudget ? "rose" : hasMonthlyBudget ? "emerald" : "amber"}
+              onClick={() => navigate("budgets")}
             />
+            <OverviewMetric
+              icon={<CreditCard size={17} aria-hidden="true" />}
+              label="หนี้บัตรเครดิตรวม"
+              value={formatCurrency(snapshot.accountSummary.creditCardOutstandingSatang || 0)}
+              hint="ดูแผนชำระและวันครบกำหนด"
+              tone={snapshot.accountSummary.creditCardOutstandingSatang ? "rose" : "slate"}
+              onClick={openDebtPlan}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <QuickAction icon={<Plus size={17} />} label="เพิ่มรายจ่าย" primary onClick={() => openManual("expense")} />
+            <QuickAction icon={<ReceiptText size={17} />} label="สแกนใบเสร็จ" onClick={openScan} />
+            <QuickAction icon={<CreditCard size={17} />} label="ชำระบัตร" onClick={() => openManual("credit_payment")} />
+            <QuickAction icon={<ArrowRightLeft size={17} />} label="ดูแผนหนี้" onClick={openDebtPlan} />
           </div>
 
           <div
@@ -276,6 +312,8 @@ export default function DashboardView() {
           recommendations={assistantRecommendations}
           onNavigate={(view) => navigate(view)}
         />
+
+        <FinancialPlanPanel state={state} month={monthKey} />
 
         <MoneyCoachPanel insights={moneyCoachInsights} onAction={handleMoneyCoachAction} />
 
@@ -305,13 +343,6 @@ export default function DashboardView() {
               budgetSummary={snapshot.budgetSummary}
             />
           </div>
-        </section>
-
-        <section className="grid grid-cols-4 gap-2">
-          <QuickAction icon={<Plus size={17} />} label="Expense" primary onClick={() => openManual("expense")} />
-          <QuickAction icon={<TrendingUp size={17} />} label="Income" onClick={() => openManual("income")} />
-          <QuickAction icon={<ArrowRightLeft size={17} />} label="Transfer" onClick={() => openManual("transfer")} />
-          <QuickAction icon={<Camera size={17} />} label="Scan" onClick={openScan} />
         </section>
 
         <PendingReceiptCard count={snapshot.pendingReceiptCount} onOpen={() => navigate("inbox")} />

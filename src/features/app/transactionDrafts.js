@@ -26,6 +26,10 @@ function cleanNullableText(value) {
   return text || null;
 }
 
+function cleanObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 function rawCategoryId(source) {
   return cleanText(
     source?.categoryId ||
@@ -369,6 +373,9 @@ export function sanitizeTransactionDraft(input) {
     splitCount: Math.max(0, toInt(draft.splitCount ?? draft.split_count, 0)),
     splitLabel: cleanText(draft.splitLabel || draft.split_label),
     amountUnit: "satang",
+    transferKind: cleanText(draft.transferKind || draft.transfer_kind || draft.raw?.transferKind || draft.raw?.transfer_kind),
+    meta: cleanObject(draft.meta || draft.metadata),
+    raw: cleanObject(draft.raw),
   };
 }
 
@@ -572,6 +579,11 @@ export function buildTransactionSavePlan({
         accountId: null,
         fromAccountId: sanitized.fromAccountId,
         toAccountId: sanitized.toAccountId,
+        raw: {
+          ...sanitized.raw,
+          ...(sanitized.transferKind ? { transferKind: sanitized.transferKind, transfer_kind: sanitized.transferKind } : {}),
+          ...(Object.keys(sanitized.meta || {}).length ? { meta: sanitized.meta } : {}),
+        },
       }),
       lineItems: [],
     };

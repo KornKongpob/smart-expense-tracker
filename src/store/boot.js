@@ -205,10 +205,28 @@ export const clampInt = (v, min, max, fallback) => {
 
 const GOAL_TYPES = new Set(["emergency_fund", "travel", "purchase", "debt_buffer", "custom"]);
 const GOAL_STATUSES = new Set(["active", "paused", "completed"]);
+const CREDIT_STATEMENT_STATUSES = new Set(["open", "paid"]);
 
 const normalizeISODateString = (value) => {
   const s = String(value || "").trim().slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+};
+
+const normalizeMonthKey = (value) => {
+  const s = String(value || "").trim().slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(s) ? s : "";
+};
+
+const normalizeOptionalApr = (value) => {
+  if (value == null || String(value).trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, n);
+};
+
+const normalizeTimestamp = (value, fallback = Date.now()) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 };
 
 const uniqueStringList = (list) => {
@@ -328,6 +346,58 @@ export function normalizeAccount(a) {
   };
 }
 
+export function normalizeCreditStatement(raw) {
+  const s = raw && typeof raw === "object" ? raw : {};
+  const accountId = String(s.accountId ?? s.account_id ?? "").trim();
+  const statementDate = normalizeISODateString(s.statementDate ?? s.statement_date);
+  const dueDate = normalizeISODateString(s.dueDate ?? s.due_date);
+  const month =
+    normalizeMonthKey(s.month ?? s.monthKey ?? s.month_key ?? s.statementMonth ?? s.statement_month) ||
+    normalizeMonthKey(statementDate) ||
+    normalizeMonthKey(dueDate);
+  const id = String(s.id || (accountId && month ? `credit_statement_${accountId}_${month}` : "")).trim() || generateId();
+  const createdAt = normalizeTimestamp(s.createdAt ?? s.created_at, Date.now());
+  const updatedAt = normalizeTimestamp(s.updatedAt ?? s.updated_at, createdAt);
+  const statusRaw = String(s.status || "open").toLowerCase().trim();
+
+  return {
+    ...s,
+    id,
+    accountId,
+    month,
+    statementDate,
+    dueDate,
+    statementBalance: Math.max(
+      0,
+      safeSatang(s.statementBalance ?? s.statementBalanceSatang ?? s.statement_balance_satang ?? s.balanceSatang ?? s.balance, 0)
+    ),
+    minimumDue: Math.max(
+      0,
+      safeSatang(s.minimumDue ?? s.minimumDueSatang ?? s.minimum_due_satang ?? s.minimumPayment ?? s.minimumPaymentSatang, 0)
+    ),
+    apr: normalizeOptionalApr(s.apr ?? s.aprPercent ?? s.apr_percent),
+    note: String(s.note || "").trim(),
+    status: CREDIT_STATEMENT_STATUSES.has(statusRaw) ? statusRaw : "open",
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function normalizeCreditStatements(list) {
+  const out = [];
+  const seen = new Set();
+
+  for (const raw of toArray(list)) {
+    const item = normalizeCreditStatement(raw);
+    const key = String(item.id || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+
+  return out;
+}
+
 const normalizeNestedAmountEntries = (value, convertAmount) => {
   if (!Array.isArray(value)) return value;
 
@@ -400,6 +470,32 @@ export function normalizeBootPayload(boot) {
     amount: convertAmount(r?.amount),
   }));
 
+  const readStatementAmount = (statement, valueKeys, satangKeys = []) => {
+    const source = statement && typeof statement === "object" ? statement : {};
+    for (const key of satangKeys) {
+      if (source[key] != null && String(source[key]).trim() !== "") return safeSatang(source[key], 0);
+    }
+    for (const key of valueKeys) {
+      if (source[key] != null && String(source[key]).trim() !== "") return convertAmount(source[key]);
+    }
+    return 0;
+  };
+
+  const creditStatements = toArray(root?.creditStatements).map((statementRaw) => {
+    const statement = statementRaw && typeof statementRaw === "object" ? { ...statementRaw } : {};
+    statement.statementBalance = readStatementAmount(
+      statement,
+      ["statementBalance", "statement_balance", "balance"],
+      ["statementBalanceSatang", "statement_balance_satang", "balanceSatang", "balance_satang"]
+    );
+    statement.minimumDue = readStatementAmount(
+      statement,
+      ["minimumDue", "minimum_due", "minimumPayment", "minimum_payment"],
+      ["minimumDueSatang", "minimum_due_satang", "minimumPaymentSatang", "minimum_payment_satang"]
+    );
+    return statement;
+  });
+
   const convertInboxItem = (it) => {
     const o = it && typeof it === "object" ? { ...it } : {};
     o.amount = convertAmount(o.amount);
@@ -459,6 +555,7 @@ export function normalizeBootPayload(boot) {
     categories,
     budgets,
     recurring,
+    creditStatements,
     goals,
     merchants,
     inbox,
@@ -849,6 +946,7 @@ export function createInitialState(boot = {}) {
     categories: cats,
     budgets: toArray(normalized?.budgets),
     recurring: toArray(normalized?.recurring),
+    creditStatements: normalizeCreditStatements(normalized?.creditStatements),
     goals: normalizeGoals(normalized?.goals),
     merchants: normalizeMerchants(normalized?.merchants),
     inbox,

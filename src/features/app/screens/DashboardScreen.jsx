@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowUpRight, CalendarClock, CreditCard, PlusCircle, Repeat2, Target } from "lucide-react";
+import { ArrowUpRight, CalendarClock, CreditCard, PlusCircle, ReceiptText, Repeat2, Target, Wallet } from "lucide-react";
 
 import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
@@ -7,6 +7,7 @@ import AccountSheetPicker from "../AccountSheetPicker.jsx";
 import DashboardAnalyticsPanels from "../DashboardAnalyticsPanels.jsx";
 import AssistantPanel from "../../assistant/AssistantPanel.jsx";
 import { generatePersonalMoneyRecommendations } from "../../assistant/recommendationEngine.js";
+import FinancialPlanPanel from "../../../components/FinancialPlanPanel.jsx";
 import MoneyCoachPanel from "../../../components/MoneyCoachPanel.jsx";
 import TransactionEditSheet, {
   TransactionKindIcon,
@@ -56,11 +57,14 @@ export default function DashboardScreen() {
     plannerSummary,
     plannerDecisionSummary,
     budgetPlanSnapshot,
+    planningConfig,
     selectedMonth,
     setSelectedMonth,
     accounts,
     categories,
     budgetRows,
+    creditStatements,
+    accountBalanceSnapshot,
     financialGoals,
     recentTransactions,
     recurringRules,
@@ -72,7 +76,7 @@ export default function DashboardScreen() {
     runRecurringNow,
   } = useExpenseApp();
 
-  const snapshot = dashboardSnapshot || {};
+  const snapshot = useMemo(() => dashboardSnapshot || {}, [dashboardSnapshot]);
   const todayISO = useMemo(() => toISODate(new Date()), []);
   const usingSuggestedPlan = !budgetPlanSnapshot?.hasAppliedBudget && !budgetPlanSnapshot?.usesLegacyMonthlyTarget;
   const displayExpenseBudgetSatang = usingSuggestedPlan
@@ -134,6 +138,30 @@ export default function DashboardScreen() {
       }),
     [recentTransactions, allAccounts, categories, budgetRows, recurringRules, todayISO],
   );
+  const financialPlanState = useMemo(
+    () => ({
+      accounts: allAccounts,
+      recentTransactions,
+      categories,
+      budgetRows,
+      creditStatements,
+      dashboardSnapshot: snapshot,
+      accountBalanceSnapshot,
+      selectedMonth,
+      planningConfig,
+    }),
+    [
+      accountBalanceSnapshot,
+      allAccounts,
+      budgetRows,
+      categories,
+      creditStatements,
+      planningConfig,
+      recentTransactions,
+      selectedMonth,
+      snapshot,
+    ],
+  );
   const accountMap = useMemo(
     () => new Map(allAccounts.map((account) => [toId(account?.id), account])),
     [allAccounts],
@@ -165,10 +193,12 @@ export default function DashboardScreen() {
     unmatchedCount > 0;
   const showStarterCardFirst = !hasAccounts || !hasActivity;
   const hideSummaryMetrics = !hasAccounts && !hasActivity;
-  const totalAccountBalanceSatang = snapshotAccounts.reduce(
-    (sum, account) => sum + Number(account?.balance_satang || 0),
-    0,
-  );
+  const readyAccountBalanceSatang = snapshotAccounts
+    .filter((account) => !["credit", "loan"].includes(String(account?.type || "").toLowerCase().trim()))
+    .reduce((sum, account) => sum + Math.max(0, Number(account?.balance_satang || 0)), 0);
+  const creditCardDebtSatang = snapshotAccounts
+    .filter((account) => String(account?.type || "").toLowerCase().trim() === "credit")
+    .reduce((sum, account) => sum + Math.abs(Number(account?.balance_satang || 0)), 0);
   const budgetRemainingSatang = Number(displayExpenseBudgetSatang || 0) - Number(snapshot.expense_satang || 0);
   const hasExpenseBudget = Number(displayExpenseBudgetSatang || 0) > 0;
   const budgetOverviewTone = !hasExpenseBudget
@@ -178,15 +208,15 @@ export default function DashboardScreen() {
       : progress >= 85
         ? "warning"
         : "success";
-  const attentionCount = pendingReviewCount + unmatchedCount + recurringDueCount + plannerAttentionCount;
   const dashboardOverviewCards = [
     {
       id: "accounts",
-      icon: CreditCard,
-      label: "ยอดบัญชีสุทธิ",
-      value: hasAccounts ? formatCurrency(totalAccountBalanceSatang) : "-",
-      detail: hasAccounts ? `${snapshotAccounts.length} บัญชีที่ติดตามอยู่` : "เพิ่มบัญชีเพื่อเริ่มสรุปยอด",
-      tone: totalAccountBalanceSatang < 0 ? "danger" : "default",
+      icon: Wallet,
+      legacyLabel: "ยอดบัญชีสุทธิ",
+      label: "เงินสด/บัญชีพร้อมใช้",
+      value: hasAccounts ? formatCurrency(readyAccountBalanceSatang) : "-",
+      detail: hasAccounts ? "ไม่รวมวงเงินบัตรเครดิต" : "เพิ่มบัญชีเพื่อเริ่มสรุปยอด",
+      tone: readyAccountBalanceSatang < 0 ? "danger" : "success",
     },
     {
       id: "expense",
@@ -201,18 +231,18 @@ export default function DashboardScreen() {
     {
       id: "budget",
       icon: Target,
-      label: hasExpenseBudget && budgetRemainingSatang < 0 ? "เกินงบ" : "เหลืองบ",
+      label: hasExpenseBudget && budgetRemainingSatang < 0 ? "เกินงบเดือนนี้" : "เหลืองบเดือนนี้",
       value: hasExpenseBudget ? formatCurrency(Math.abs(budgetRemainingSatang)) : formatCurrency(displayExpenseBudgetSatang || 0),
       detail: hasExpenseBudget ? `ใช้ไป ${progress}% ของงบเดือนนี้` : "ตั้งงบเพื่อดู pace การใช้จ่าย",
       tone: budgetOverviewTone,
     },
     {
-      id: "attention",
-      icon: CalendarClock,
-      label: "ต้องดูแล",
-      value: `${attentionCount}`,
-      detail: attentionCount ? "รายการรอตรวจ กฎถึงรอบ หรือหมวดที่ควรปรับ" : "ไม่มีงานค้างสำคัญตอนนี้",
-      tone: attentionCount ? "warning" : "success",
+      id: "credit-debt",
+      icon: CreditCard,
+      label: "หนี้บัตรเครดิตรวม",
+      value: formatCurrency(creditCardDebtSatang),
+      detail: creditCardDebtSatang ? "ดูแผนหนี้และวันครบกำหนด" : "ยังไม่มียอดหนี้บัตร",
+      tone: creditCardDebtSatang ? "danger" : "default",
     },
   ];
 
@@ -236,6 +266,8 @@ export default function DashboardScreen() {
     }));
     navigateToPath("/transactions");
   };
+  const openAdd = () => navigateToView("add");
+  const openDebtPlan = () => navigateToView("debts");
   const handleMoneyCoachAction = (target) => {
     const view = toId(target);
     if (!view) return;
@@ -306,11 +338,69 @@ export default function DashboardScreen() {
     <ScreenShell title="ภาพรวม">
       {showStarterCardFirst ? starterCard : null}
 
+      <section className="finance-panel" data-testid="dashboard-command-center">
+        <div className="finance-panel-head">
+          <div>
+            <div className="text-xs font-bold uppercase text-indigo-700">Today / This month</div>
+            <div className="finance-panel-title">ศูนย์บัญชาการการเงิน</div>
+            <div className="finance-panel-copy">ดูเงินพร้อมใช้ งบเดือนนี้ และหนี้บัตรก่อนตัดสินใจต่อ</div>
+          </div>
+          <button type="button" className="ui-btn ui-btn-secondary" onClick={() => navigateToView("planner")}>
+            ปรับงบ
+          </button>
+        </div>
+
+        <section className="finance-dashboard-overview-grid" data-testid="dashboard-money-overview">
+          {dashboardOverviewCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article
+                key={card.id}
+                className={[
+                  "finance-dashboard-overview-card",
+                  `finance-dashboard-overview-card-${card.tone}`,
+                ].join(" ")}
+              >
+                <div className="finance-dashboard-overview-icon" aria-hidden="true">
+                  <Icon size={18} />
+                </div>
+                <div className="finance-dashboard-overview-copy">
+                  <span className="finance-dashboard-overview-label">{card.label}</span>
+                  <strong className="finance-dashboard-overview-value">{card.value}</strong>
+                  <span className="finance-dashboard-overview-detail">{card.detail}</span>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+
+        <div className="finance-dashboard-actions">
+          <button type="button" className="ui-btn ui-btn-primary" onClick={openAdd}>
+            <PlusCircle size={16} />
+            เพิ่มรายจ่าย
+          </button>
+          <button type="button" className="ui-btn ui-btn-secondary" onClick={openAdd}>
+            <ReceiptText size={16} />
+            สแกนใบเสร็จ
+          </button>
+          <button type="button" className="ui-btn ui-btn-secondary" onClick={openDebtPlan}>
+            <CreditCard size={16} />
+            ชำระบัตร
+          </button>
+          <button type="button" className="ui-btn ui-btn-secondary" onClick={openDebtPlan}>
+            <Target size={16} />
+            ดูแผนหนี้
+          </button>
+        </div>
+      </section>
+
       <AssistantPanel
         recommendations={assistantRecommendations}
         onNavigate={(view) => navigateToView(view)}
         actionViewAliases={{ planner: "planner", budgets: "planner" }}
       />
+
+      <FinancialPlanPanel state={financialPlanState} month={selectedMonth} />
 
       <MoneyCoachPanel insights={moneyCoachInsights} onAction={handleMoneyCoachAction} />
 
@@ -333,30 +423,6 @@ export default function DashboardScreen() {
 
       {!hideSummaryMetrics ? (
         <>
-          <section className="finance-dashboard-overview-grid" data-testid="dashboard-money-overview">
-            {dashboardOverviewCards.map((card) => {
-              const Icon = card.icon;
-              return (
-                <article
-                  key={card.id}
-                  className={[
-                    "finance-dashboard-overview-card",
-                    `finance-dashboard-overview-card-${card.tone}`,
-                  ].join(" ")}
-                >
-                  <div className="finance-dashboard-overview-icon" aria-hidden="true">
-                    <Icon size={18} />
-                  </div>
-                  <div className="finance-dashboard-overview-copy">
-                    <span className="finance-dashboard-overview-label">{card.label}</span>
-                    <strong className="finance-dashboard-overview-value">{card.value}</strong>
-                    <span className="finance-dashboard-overview-detail">{card.detail}</span>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
-
           <article className="ui-card finance-panel finance-dashboard-hero">
         <div className="finance-dashboard-hero-head">
           <div>

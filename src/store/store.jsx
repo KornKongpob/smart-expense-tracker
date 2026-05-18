@@ -14,6 +14,8 @@ import {
   normalizeAccount,
   normalizeCanonicalTransactionTime,
   normalizeCanonicalTransactionTimeFull,
+  normalizeCreditStatement,
+  normalizeCreditStatements,
   normalizeGoal as normalizeGoalModel,
   normalizeGoals,
   normalizeInboxItem,
@@ -556,6 +558,38 @@ export function reducer(state, action) {
       return { ...state, transactions, recurring: nextRecurring };
     }
 
+    // ----- credit card statements -----
+    case ACTIONS.UPSERT_CREDIT_STATEMENT: {
+      const incoming = action.payload || {};
+      const draft = normalizeCreditStatement(incoming);
+      const existing = (state.creditStatements || []).find((statement) => {
+        if (String(statement?.id || "") === String(draft.id || "")) return true;
+        return (
+          draft.accountId &&
+          draft.month &&
+          String(statement?.accountId || "") === String(draft.accountId) &&
+          String(statement?.month || "") === String(draft.month)
+        );
+      });
+      const now = Date.now();
+      const nextStatement = normalizeCreditStatement({
+        ...(existing || {}),
+        ...(incoming || {}),
+        id: incoming?.id || existing?.id || draft.id,
+        createdAt: incoming?.createdAt ?? existing?.createdAt ?? draft.createdAt ?? now,
+        updatedAt: now,
+      });
+      const creditStatements = upsertById(state.creditStatements || [], nextStatement);
+      return { ...state, creditStatements };
+    }
+
+    case ACTIONS.DELETE_CREDIT_STATEMENT: {
+      const id = String(action.payload || "").trim();
+      if (!id) return state;
+      const creditStatements = (state.creditStatements || []).filter((statement) => String(statement?.id || "") !== id);
+      return { ...state, creditStatements };
+    }
+
     // ----- savings goals -----
     case ACTIONS.GOAL_UPSERT: {
       const incoming = action.payload || {};
@@ -770,6 +804,7 @@ export function AppStoreProvider({ children }) {
       defaultCategories: DEFAULT_CATEGORIES,
       defaultBudgets: [],
       defaultRecurring: [],
+      defaultCreditStatements: [],
       defaultGoals: [],
       defaultMerchants: [],
       defaultRules: [],
@@ -790,6 +825,7 @@ export function AppStoreProvider({ children }) {
       categories: state.categories,
       budgets: state.budgets,
       recurring: state.recurring,
+      creditStatements: state.creditStatements,
       goals: state.goals,
       merchants: state.merchants,
       rules: state.rules,
@@ -804,6 +840,7 @@ export function AppStoreProvider({ children }) {
     state.categories,
     state.budgets,
     state.recurring,
+    state.creditStatements,
     state.goals,
     state.merchants,
     state.rules,
@@ -1066,6 +1103,11 @@ export function AppStoreProvider({ children }) {
     const upsertRecurring = (r) => dispatch({ type: ACTIONS.UPSERT_RECURRING, payload: r });
     const deleteRecurring = (id) => dispatch({ type: ACTIONS.DELETE_RECURRING, payload: id });
 
+    // credit card statements
+    const upsertCreditStatement = (statement) =>
+      dispatch({ type: ACTIONS.UPSERT_CREDIT_STATEMENT, payload: statement });
+    const deleteCreditStatement = (id) => dispatch({ type: ACTIONS.DELETE_CREDIT_STATEMENT, payload: id });
+
     const runRecurringNow = () => {
       const todayISO = toISODate(new Date());
 
@@ -1128,6 +1170,7 @@ export function AppStoreProvider({ children }) {
           categories: DEFAULT_CATEGORIES,
           budgets: [],
           recurring: [],
+          creditStatements: [],
           goals: [],
           merchants: [],
           rules: [],
@@ -1143,16 +1186,17 @@ export function AppStoreProvider({ children }) {
       }
     };
 
-    const importBackup = (payload) => {
+    const importBackup = async (payload, options = {}) => {
       const normalizedPayload = normalizeBackupCore(payload);
 
       // ✅ Backup does not include binary attachments; clear old blobs to avoid orphans.
       try {
-        void clearAllBlobs();
+        if (options?.preserveBlobs !== true) await clearAllBlobs();
       } catch {
         // ignore
       }
       dispatch({ type: ACTIONS.IMPORT_BACKUP, payload: normalizedPayload });
+      return true;
     };
     // inbox
     const addInboxItems = (items) => dispatch({ type: ACTIONS.INBOX_UPSERT_MANY, payload: items });
@@ -1211,6 +1255,7 @@ export function AppStoreProvider({ children }) {
     categories: state.categories ?? { expense: [], income: [] },
     budgets: state.budgets ?? [],
     recurring: state.recurring ?? [],
+    creditStatements: normalizeCreditStatements(state.creditStatements ?? []),
     goals: normalizeGoals(state.goals ?? []),
     merchants: normalizeMerchants(state.merchants ?? []),
     rules: state.rules ?? [],
@@ -1250,6 +1295,9 @@ export function AppStoreProvider({ children }) {
       upsertRecurring,
       deleteRecurring,
       runRecurringNow,
+
+      upsertCreditStatement,
+      deleteCreditStatement,
 
       upsertGoal,
       deleteGoal,

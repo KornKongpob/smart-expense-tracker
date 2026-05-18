@@ -6,6 +6,7 @@ import { useAppStore } from "../store/store.jsx";
 import { formatCurrency, formatTransactionDateTime } from "../utils/format";
 import { signedReceiptTxSatang } from "../utils/receiptAdjustments";
 import AccountPill from "./AccountPill";
+import AttachmentPreview from "./AttachmentPreview";
 
 // ---------- small helpers ----------
 
@@ -328,6 +329,11 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
               ))}
             </div>
           )}
+          {!isTransfer && !isSplitGroup && tx?.attachmentId ? (
+            <div className="mt-2">
+              <AttachmentPreview attachmentId={tx.attachmentId} variant="link" />
+            </div>
+          ) : null}
           {/* ✅ Split breakdown (show all + scroll inside card) */}
           {!isTransfer && isSplitGroup && Array.isArray(splitLines) && splitLines.length ? (
             <div className="mt-3 rounded-2xl bg-white/20 border border-white/15 p-3 overflow-hidden">

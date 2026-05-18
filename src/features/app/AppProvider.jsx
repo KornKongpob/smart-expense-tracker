@@ -84,6 +84,21 @@ import { validateBackupImport } from "../../schemas/index.js";
 import { extractBackupSupplementalData } from "../../utils/backupPayload.js";
 import { STORAGE_SAVE_ERROR_EVENT, loadAll, saveAll } from "../../services/storage.js";
 import {
+  clearAllBlobs,
+  exportBlobsAsDataUrls,
+  importBlobsFromDataUrls,
+  listExistingBlobs,
+} from "../../services/blobStore.js";
+import {
+  LARGE_ATTACHMENT_BACKUP_BYTES,
+  collectAttachmentIds,
+  formatAttachmentBytes,
+  getBackupData,
+  normalizeAttachmentBackupMap,
+  sumAttachmentBackupSize,
+} from "../../utils/attachmentBackup.js";
+import { normalizeCreditStatement, normalizeCreditStatements } from "../../store/boot.js";
+import {
   checkBudgetAndNotify,
   getNotificationPermissionState,
   requestNotificationPermission,
@@ -115,8 +130,72 @@ function readJson(res) {
   });
 }
 
+function downloadJsonFile(payload, filename) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function todayMonth() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function readLocalCreditStatements() {
+  try {
+    const localSnapshot = loadAll({ defaultCreditStatements: [] });
+    return normalizeCreditStatements(localSnapshot?.creditStatements || []);
+  } catch {
+    return [];
+  }
+}
+
+function persistLocalCreditStatements(nextCreditStatements) {
+  const normalized = normalizeCreditStatements(nextCreditStatements || []);
+  const localSnapshot = loadAll({ defaultCreditStatements: [] });
+  saveAll({
+    ...localSnapshot,
+    creditStatements: normalized,
+  });
+  return normalized;
+}
+
+function mergeCreditStatements(current, payloads) {
+  let next = normalizeCreditStatements(current || []);
+  const now = Date.now();
+
+  for (const incoming of Array.isArray(payloads) ? payloads : []) {
+    const draft = normalizeCreditStatement(incoming || {});
+    if (!draft.accountId || !draft.month) continue;
+
+    const index = next.findIndex((statement) => {
+      if (String(statement?.id || "") === String(draft.id || "")) return true;
+      return (
+        String(statement?.accountId || "") === String(draft.accountId || "") &&
+        String(statement?.month || "") === String(draft.month || "")
+      );
+    });
+    const existing = index >= 0 ? next[index] : null;
+    const merged = normalizeCreditStatement({
+      ...(existing || {}),
+      ...(incoming || {}),
+      id: incoming?.id || existing?.id || draft.id,
+      createdAt: incoming?.createdAt ?? existing?.createdAt ?? draft.createdAt ?? now,
+      updatedAt: now,
+    });
+
+    if (index >= 0) next[index] = merged;
+    else next = [...next, merged];
+  }
+
+  return normalizeCreditStatements(next);
 }
 
 function buildScanAccountContext(accounts) {
@@ -377,6 +456,7 @@ export function AppProvider({ children }) {
   const [categoryPreferenceRows, setCategoryPreferenceRows] = useState([]);
   const [financialGoals, setFinancialGoals] = useState([]);
   const [debtPlans, setDebtPlans] = useState([]);
+  const [creditStatements, setCreditStatements] = useState(readLocalCreditStatements);
   const [budgetRows, setBudgetRows] = useState([]);
   const [planningTransactions, setPlanningTransactions] = useState([]);
   const [recurringRules, setRecurringRules] = useState([]);
@@ -475,6 +555,7 @@ export function AppProvider({ children }) {
   useEffect(() => {
     setQueue(readOfflineQueue());
     setLegacyAvailable(hasLegacySnapshot());
+    setCreditStatements(readLocalCreditStatements());
   }, [session]);
 
   useEffect(() => {
@@ -2071,6 +2152,34 @@ export function AppProvider({ children }) {
     }
   }
 
+  function saveCreditStatements(payloads) {
+    const incoming = Array.isArray(payloads) ? payloads : [payloads].filter(Boolean);
+    const validIncoming = incoming.filter((item) => {
+      const draft = normalizeCreditStatement(item || {});
+      return !!draft.accountId && !!draft.month;
+    });
+    if (!validIncoming.length) {
+      pushToast("warning", "ไม่มีข้อมูลรอบบัตรให้บันทึก");
+      return false;
+    }
+    const nextCreditStatements = mergeCreditStatements(creditStatements, validIncoming);
+
+    try {
+      const persisted = persistLocalCreditStatements(nextCreditStatements);
+      setCreditStatements(persisted);
+      setLegacyAvailable(hasLegacySnapshot());
+      pushToast("success", "บันทึกข้อมูลรอบบัตรแล้ว");
+      return true;
+    } catch (error) {
+      pushToast("error", String(error?.message || error || "save_credit_statement_failed"));
+      return false;
+    }
+  }
+
+  function saveCreditStatement(payload) {
+    return saveCreditStatements([payload]);
+  }
+
   async function saveDebtPlan(payload) {
     if (!supabase || !session || savingRef.current) return false;
 
@@ -2438,7 +2547,7 @@ export function AppProvider({ children }) {
 
     setSaving(true);
     try {
-      await saveTransactionDraft(draft, { source: "manual" });
+      await saveTransactionDraft(draft, { source: options.source || "manual" });
       await refreshAll();
       pushToast("success", "บันทึกรายการแล้ว");
     } finally {
@@ -3075,77 +3184,114 @@ export function AppProvider({ children }) {
     setQueue(nextQueue);
   }
 
+  async function buildBackupPayload() {
+    const [{ data: transactionRows, error: transactionError }, { data: mappingRows, error: mappingError }] =
+      await Promise.all([
+        supabase
+          .from("transactions")
+          .select("*, transaction_line_items(*)")
+          .order("date", { ascending: false })
+          .limit(500),
+        supabase.from("merchant_mappings").select("*"),
+      ]);
+
+    if (transactionError) throw transactionError;
+    if (mappingError) throw mappingError;
+
+    const exportedBudgetRows = normalizeBudgetRows(budgetRows).map((row) => ({
+      id: row.id != null ? `budget_${row.id}` : `${row.month_key}_${row.category_id}`,
+      month: row.month_key,
+      categoryId: row.category_id,
+      limit: row.limit_satang,
+      alertPct: row.alert_pct,
+      source: row.source,
+      manualOverride: row.manual_override === true,
+    }));
+    const compatBudgetRows = buildBudgetCompatRows({
+      monthKey: selectedMonth,
+      budgetPlanSnapshot,
+      budgetRows: [],
+    });
+    let localGoals = [];
+    let localCreditStatements = [];
+    try {
+      const localSnapshot = loadAll({ defaultGoals: [] });
+      localGoals = Array.isArray(localSnapshot?.goals) ? localSnapshot.goals : [];
+      localCreditStatements = Array.isArray(localSnapshot?.creditStatements) ? localSnapshot.creditStatements : [];
+    } catch {
+      localGoals = [];
+      localCreditStatements = [];
+    }
+
+    return {
+      v: 3,
+      exportedAt: new Date().toISOString(),
+      profile,
+      data: {
+        moneyUnit: "satang",
+        profile,
+        categoryPreferences: categoryPreferenceRows,
+        accounts,
+        categories,
+        goals: localGoals,
+        financialGoals,
+        creditStatements: localCreditStatements,
+        debtPlans,
+        inbox: scanDocuments,
+        merchants: mappingRows || [],
+        budgets: [...exportedBudgetRows, ...compatBudgetRows],
+        transactions: transactionRows || [],
+      },
+    };
+  }
+
   async function exportBackup() {
     if (!supabase || !session) return;
     setSaving(true);
     try {
-      const [{ data: transactionRows, error: transactionError }, { data: mappingRows, error: mappingError }] =
-        await Promise.all([
-          supabase
-            .from("transactions")
-            .select("*, transaction_line_items(*)")
-            .order("date", { ascending: false })
-            .limit(500),
-          supabase.from("merchant_mappings").select("*"),
-        ]);
+      const payload = await buildBackupPayload();
+      downloadJsonFile(payload, `smart-expense-backup-${selectedMonth}.json`);
+      pushToast("success", "ส่งออกข้อมูลแล้ว");
+    } finally {
+      setSaving(false);
+    }
+  }
 
-      if (transactionError) throw transactionError;
-      if (mappingError) throw mappingError;
+  async function exportBackupWithAttachments() {
+    if (!supabase || !session) return;
+    setSaving(true);
+    try {
+      const currentBackup = await buildBackupPayload();
+      const data = getBackupData(currentBackup);
+      const requestedIds = Array.from(collectAttachmentIds(data));
+      const existingBlobs = await listExistingBlobs(requestedIds);
+      const totalSize = existingBlobs.reduce((sum, item) => sum + Math.max(0, Number(item?.size || 0)), 0);
 
-      const exportedBudgetRows = normalizeBudgetRows(budgetRows).map((row) => ({
-        id: row.id != null ? `budget_${row.id}` : `${row.month_key}_${row.category_id}`,
-        month: row.month_key,
-        categoryId: row.category_id,
-        limit: row.limit_satang,
-        alertPct: row.alert_pct,
-        source: row.source,
-        manualOverride: row.manual_override === true,
-      }));
-      const compatBudgetRows = buildBudgetCompatRows({
-        monthKey: selectedMonth,
-        budgetPlanSnapshot,
-        budgetRows: [],
-      });
-      let localGoals = [];
-      try {
-        const localSnapshot = loadAll({ defaultGoals: [] });
-        localGoals = Array.isArray(localSnapshot?.goals) ? localSnapshot.goals : [];
-      } catch {
-        localGoals = [];
+      if (totalSize >= LARGE_ATTACHMENT_BACKUP_BYTES) {
+        const message = `รูปใบเสร็จ/สลิปมีขนาดรวมประมาณ ${formatAttachmentBytes(totalSize)} ไฟล์ Backup จะใหญ่ขึ้นและอาจใช้เวลาส่งออก ต้องการดำเนินการต่อหรือไม่?`;
+        if (typeof window !== "undefined" && !window.confirm(message)) return;
       }
 
-      const payload = {
-        v: 3,
-        exportedAt: new Date().toISOString(),
-        profile,
-        data: {
-          moneyUnit: "satang",
-          profile,
-          categoryPreferences: categoryPreferenceRows,
-          accounts,
-          categories,
-          goals: localGoals,
-          financialGoals,
-          debtPlans,
-          inbox: scanDocuments,
-          merchants: mappingRows || [],
-          budgets: [...exportedBudgetRows, ...compatBudgetRows],
-          transactions: transactionRows || [],
+      const attachments = await exportBlobsAsDataUrls(existingBlobs.map((item) => item.id));
+      downloadJsonFile(
+        {
+          v: 2,
+          exportedAt: new Date().toISOString(),
+          data,
+          attachments,
         },
-      };
+        `smart-expense-backup-with-receipts-${selectedMonth}.json`
+      );
 
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: "application/json;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `smart-expense-backup-${selectedMonth}.json`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      pushToast("success", "ส่งออกข้อมูลแล้ว");
+      const missingCount = Math.max(0, requestedIds.length - existingBlobs.length);
+      pushToast(
+        "success",
+        `ส่งออก Backup พร้อมรูปใบเสร็จแล้ว (${Object.keys(attachments).length} ไฟล์${
+          missingCount ? `, ไม่พบไฟล์เดิม ${missingCount} ไฟล์` : ""
+        })`
+      );
+    } catch (error) {
+      pushToast("error", `ส่งออก Backup พร้อมรูปไม่สำเร็จ: ${String(error?.message || error)}`);
     } finally {
       setSaving(false);
     }
@@ -3163,6 +3309,23 @@ export function AppProvider({ children }) {
       }
 
       const extras = extractBackupSupplementalData(parsed);
+      const attachmentMap = normalizeAttachmentBackupMap(parsed?.attachments);
+      const attachmentCount = Object.keys(attachmentMap).length;
+      const attachmentSize = sumAttachmentBackupSize(attachmentMap);
+      const serverAttachmentCount = Array.isArray(parsed?.attachments) ? parsed.attachments.length : 0;
+      const attachmentWarnText = attachmentCount
+        ? `\n\nBackup นี้มีรูปใบเสร็จ/สลิป ${attachmentCount} ไฟล์ (${formatAttachmentBytes(attachmentSize)}) และจะกู้คืนลงเครื่องนี้หลังนำเข้า`
+        : serverAttachmentCount
+          ? `\n\nBackup นี้มีไฟล์แนบ ${serverAttachmentCount} ไฟล์สำหรับนำเข้า`
+          : "\n\nไฟล์ Backup นี้ไม่มีรูปใบเสร็จ/สลิปแนบมาด้วย เมื่อนำเข้าแล้วรูปเดิมในเครื่องนี้จะถูกล้างและไม่สามารถกู้คืนจากไฟล์นี้ได้";
+
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(`การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${attachmentWarnText}`)
+      ) {
+        return false;
+      }
+
       const snapshot = {
         ...(validation.data && typeof validation.data === "object" ? validation.data : {}),
         profile: extras.profile,
@@ -3177,15 +3340,29 @@ export function AppProvider({ children }) {
       });
       try {
         const localSnapshot = loadAll({ defaultGoals: [] });
+        const nextCreditStatements = normalizeCreditStatements(validation.data?.creditStatements || []);
         saveAll({
           ...localSnapshot,
           goals: Array.isArray(validation.data?.goals) ? validation.data.goals : [],
+          creditStatements: nextCreditStatements,
         });
+        setCreditStatements(nextCreditStatements);
       } catch {
         // Local goals are best-effort during cloud import.
       }
+      let restoredAttachments = 0;
+      if (attachmentCount) {
+        await clearAllBlobs();
+        const result = await importBlobsFromDataUrls(attachmentMap);
+        restoredAttachments = result.imported;
+      } else if (!serverAttachmentCount) {
+        await clearAllBlobs();
+      }
       await refreshAll();
-      pushToast("success", "นำเข้าข้อมูลแล้ว");
+      pushToast(
+        "success",
+        attachmentCount ? `นำเข้าข้อมูลแล้ว และกู้คืนรูป ${restoredAttachments} ไฟล์` : "นำเข้าข้อมูลแล้ว"
+      );
       return true;
     } catch (error) {
       pushToast("error", String(error?.message || error || "import_backup_failed"));
@@ -3447,6 +3624,7 @@ export function AppProvider({ children }) {
     categories,
     financialGoals,
     debtPlans,
+    creditStatements,
     budgetRows,
     recurringRules,
     recurringDueToday,
@@ -3491,6 +3669,8 @@ export function AppProvider({ children }) {
     adjustAccountBalance,
     saveFinancialGoal,
     deleteFinancialGoal,
+    saveCreditStatement,
+    saveCreditStatements,
     saveDebtPlan,
     deleteDebtPlan,
     saveCategory,
@@ -3525,6 +3705,7 @@ export function AppProvider({ children }) {
     rejectScanDocument,
     runLegacyMigration,
     exportBackup,
+    exportBackupWithAttachments,
     importBackupFile,
     scanToDraft,
   };

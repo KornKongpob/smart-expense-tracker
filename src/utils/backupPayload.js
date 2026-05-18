@@ -62,6 +62,10 @@ export function normalizeBackupCore(raw, defaults = {}) {
     ),
     budgets: ensureArray(normalized.budgets, ensureArray(defaults.defaultBudgets, [])),
     recurring: ensureArray(normalized.recurring, ensureArray(defaults.defaultRecurring, [])),
+    creditStatements: ensureArray(
+      normalized.creditStatements,
+      ensureArray(defaults.defaultCreditStatements, []),
+    ),
     goals: ensureArray(normalized.goals, ensureArray(defaults.defaultGoals, [])),
     rules: ensureArray(normalized.rules, ensureArray(defaults.defaultRules, [])),
     merchants: ensureArray(normalized.merchants, ensureArray(defaults.defaultMerchants, [])),

@@ -15,7 +15,6 @@ import {
   X,
   Edit2,
   Layers,
-  FileText,
   Sparkles
 } from "lucide-react";
 
@@ -24,10 +23,10 @@ import { findFuzzyDuplicate } from "../store/selectors.js";
 import { generateId, generateTransferId, generateSplitGroupId } from "../utils/id";
 import { formatCurrency, formatTransactionDateTime, normalizeTimeHHmm, toISODate } from "../utils/format";
 import AppHeader from "../components/AppHeader";
+import AttachmentPreview from "../components/AttachmentPreview";
 import InboxItemReviewModal from "./inbox/InboxItemReviewModal";
 import { parseMoneyToSatang } from "../utils/money";
 import { expandTransactionToInstallments } from "../utils/installments";
-import { useBlobInfo } from "../utils/useBlobInfo";
 import { isCreditAccount } from "../utils/accountMatch";
 import { duplicateStateFromMatch, toDuplicateComparable } from "../utils/duplicateDetection";
 import {
@@ -692,38 +691,6 @@ function PillTab({ active, onClick, label, count }) {
         </span>
       ) : null}
     </button>
-  );
-}
-
-function AttachmentThumb({ attachmentId }) {
-  const { url, mimeType } = useBlobInfo(attachmentId);
-  const id = String(attachmentId || "").trim();
-  if (!id) return null;
-
-  return (
-    <div className="mt-2 w-full max-w-[220px]">
-      {url ? (
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="block rounded-2xl overflow-hidden border border-white/20 bg-white/10"
-        >
-          {String(mimeType || "").toLowerCase() === "application/pdf" ? (
-            <div className="w-full h-28 flex items-center justify-center bg-white/10">
-              <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900/80">
-                <FileText size={18} />
-                PDF
-              </div>
-            </div>
-          ) : (
-            <img src={url} alt="attachment" className="w-full h-28 object-cover" />
-          )}
-        </a>
-      ) : (
-        <div className="text-xs text-gray-900/55">กำลังโหลดไฟล์แนบ…</div>
-      )}
-    </div>
   );
 }
 
@@ -1429,7 +1396,11 @@ export default function InboxView({ showAlert, showConfirm }) {
                       {it?.merchant ? ` • ${it.merchant}` : ""}
                     </div>
 
-                    <AttachmentThumb attachmentId={it?.attachmentId} />
+                    <AttachmentPreview
+                      attachmentId={it?.attachmentId}
+                      variant="thumb"
+                      className="mt-2"
+                    />
 
                     <div className="mt-2 text-xs text-gray-900/60 space-y-1 min-w-0">
                       {txType === "transfer" || txType === "credit_payment" ? (

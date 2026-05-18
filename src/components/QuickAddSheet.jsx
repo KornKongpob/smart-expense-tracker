@@ -1,15 +1,73 @@
 // src/components/QuickAddSheet.jsx
 // Redesigned bottom-sheet for quick expense/income entry.
-// Amount + Main Category → Subcategory → Account → Save.
+// Amount → Account → Category → Save.
 // Includes Quick Scan shortcut and "รายละเอียดเพิ่ม" to open full form.
 
-import { useState, useMemo, useEffect, useRef } from "react";
-import { X, Check, ChevronRight, ChevronDown, Camera, FileText, Search, ArrowRightLeft } from "lucide-react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { X, Check, ChevronRight, Camera, FileText, Search, ArrowRightLeft } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../utils/money";
-import { getCurrentLocalTimeHHmm, toISODate } from "../utils/format";
+import { formatCurrency, getCurrentLocalTimeHHmm, toISODate } from "../utils/format";
 import { generateId } from "../utils/id";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
+
+const EMPTY_CATEGORY_SELECTION = { mainCatId: "", subCatId: "" };
+
+function visibleCategories(list = []) {
+  return list.filter((c) => !(c?.deletedAt || c?.isDeleted));
+}
+
+function categorySelectionFrom(cat) {
+  if (!cat?.id) return EMPTY_CATEGORY_SELECTION;
+  const parent = String(cat.parentId || "").trim();
+  return parent
+    ? { mainCatId: parent, subCatId: cat.id }
+    : { mainCatId: cat.id, subCatId: "" };
+}
+
+function recentCategoriesForType(transactions = [], categories = [], txType = "expense", limit = 6) {
+  const out = [];
+  const seen = new Set();
+  const catMap = new Map(categories.map((c) => [c.id, c]));
+
+  for (let i = transactions.length - 1; i >= 0; i--) {
+    const t = transactions[i];
+    if (!t || t.isTransfer) continue;
+    if (String(t.type || "").toLowerCase() !== txType) continue;
+    const cid = String(t.categoryId || t.category || "").trim();
+    if (!cid || seen.has(cid)) continue;
+    const cat = catMap.get(cid);
+    if (!cat) continue;
+    seen.add(cid);
+    out.push(cat);
+    if (out.length >= limit) break;
+  }
+
+  return out;
+}
+
+function recentAccountForType(transactions = [], accounts = [], txType = "expense") {
+  const accountIds = new Set(accounts.map((a) => String(a?.id || "")));
+
+  for (let i = transactions.length - 1; i >= 0; i--) {
+    const t = transactions[i];
+    if (!t || t.isTransfer) continue;
+    if (String(t.type || "").toLowerCase() !== txType) continue;
+    const candidate = String(t.accountId || "").trim();
+    if (candidate && accountIds.has(candidate)) return candidate;
+  }
+
+  return "";
+}
+
+function StepLabel({ number, children }) {
+  return (
+    <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+      <span className="grid h-5 w-5 place-items-center rounded-full bg-indigo-50 text-[10px] text-indigo-700">{number}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
 
 export default function QuickAddSheet({ isOpen, onClose }) {
   const store = useAppStore();
@@ -26,14 +84,28 @@ export default function QuickAddSheet({ isOpen, onClose }) {
   const [searchQuery, setSearchQuery] = useState("");
 
   const amountRef = useRef(null);
+  const wasOpenRef = useRef(false);
 
   const accounts = useMemo(() => state.accounts || [], [state.accounts]);
+  const accountById = useMemo(() => new Map(accounts.map((a) => [String(a?.id || ""), a])), [accounts]);
+  const categoriesByType = useMemo(() => ({
+    income: visibleCategories(state.categories?.income || []),
+    expense: visibleCategories(state.categories?.expense || []),
+  }), [state.categories]);
+
   const allCats = useMemo(() => {
-    const list = type === "income"
-      ? (state.categories?.income || [])
-      : (state.categories?.expense || []);
-    return list.filter((c) => !(c?.deletedAt || c?.isDeleted));
-  }, [state.categories, type]);
+    return type === "income" ? categoriesByType.income : categoriesByType.expense;
+  }, [categoriesByType, type]);
+
+  const defaultAccountByType = useMemo(() => ({
+    expense: recentAccountForType(state.transactions || [], accounts, "expense") || accounts?.[0]?.id || "",
+    income: recentAccountForType(state.transactions || [], accounts, "income") || accounts?.[0]?.id || "",
+  }), [accounts, state.transactions]);
+
+  const defaultCategoryByType = useMemo(() => ({
+    expense: categorySelectionFrom(recentCategoriesForType(state.transactions || [], categoriesByType.expense, "expense", 1)[0]),
+    income: categorySelectionFrom(recentCategoriesForType(state.transactions || [], categoriesByType.income, "income", 1)[0]),
+  }), [categoriesByType, state.transactions]);
 
   // Main categories (no parent)
   const mainCats = useMemo(() => allCats.filter((c) => !String(c.parentId || "").trim()), [allCats]);
@@ -46,27 +118,25 @@ export default function QuickAddSheet({ isOpen, onClose }) {
 
   // Recent categories from transaction history
   const recentCats = useMemo(() => {
-    const txs = state.transactions || [];
-    const out = [];
-    const seen = new Set();
-    const catMap = new Map(allCats.map((c) => [c.id, c]));
-    for (let i = txs.length - 1; i >= 0; i--) {
-      const t = txs[i];
-      if (!t || t.isTransfer) continue;
-      if (String(t.type || "").toLowerCase() !== type) continue;
-      const cid = String(t.category || "").trim();
-      if (!cid || seen.has(cid)) continue;
-      const cat = catMap.get(cid);
-      if (!cat) continue;
-      seen.add(cid);
-      out.push(cat);
-      if (out.length >= 6) break;
-    }
-    return out;
+    return recentCategoriesForType(state.transactions || [], allCats, type, 6);
   }, [state.transactions, allCats, type]);
 
   // Effective category ID for saving
   const effectiveCatId = subCatId || mainCatId;
+  const parsedAmount = parseMoneyToSatang(amount);
+  const selectedAccount = accountById.get(String(accountId || "")) || null;
+  const selectedCategory = allCats.find((c) => String(c?.id || "") === String(effectiveCatId || "")) || null;
+  const typeLabel = type === "income" ? "รายรับ" : "รายจ่าย";
+  const summaryAmount = parsedAmount > 0 ? formatCurrency(parsedAmount) : "฿0.00";
+  const summaryText = `${typeLabel} ${summaryAmount} • หมวด ${selectedCategory?.name || "ยังไม่เลือก"} • บัญชี ${selectedAccount?.name || "ยังไม่เลือก"}`;
+  const saveDisabledReason = !parsedAmount || parsedAmount <= 0
+    ? "กรอกยอดเงินก่อนบันทึก"
+    : !accountId
+      ? "เลือกบัญชีก่อนบันทึก"
+      : !effectiveCatId
+        ? "เลือกหมวดหมู่ก่อนบันทึก"
+        : "";
+  const canSave = !saveDisabledReason;
 
   // Search results
   const searchResults = useMemo(() => {
@@ -75,10 +145,17 @@ export default function QuickAddSheet({ isOpen, onClose }) {
     return allCats.filter((c) => (c.name || "").toLowerCase().includes(q));
   }, [allCats, searchQuery]);
 
-  // Default to first account
+  const applyDefaultsForType = useCallback((txType) => {
+    const selection = defaultCategoryByType[txType] || EMPTY_CATEGORY_SELECTION;
+    setAccountId(defaultAccountByType[txType] || "");
+    setMainCatId(selection.mainCatId);
+    setSubCatId(selection.subCatId);
+  }, [defaultAccountByType, defaultCategoryByType]);
+
+  // Default to the most recently used account for this transaction type.
   useEffect(() => {
-    if (!accountId && accounts.length) setAccountId(accounts[0].id);
-  }, [accounts, accountId]);
+    if (!accountId && defaultAccountByType[type]) setAccountId(defaultAccountByType[type]);
+  }, [accountId, defaultAccountByType, type]);
 
   // Auto-focus amount on open
   useEffect(() => {
@@ -87,25 +164,25 @@ export default function QuickAddSheet({ isOpen, onClose }) {
 
   // Reset form when opening
   useEffect(() => {
-    if (isOpen) {
-      setType("expense");
-      setAmount("");
-      setMainCatId("");
-      setSubCatId("");
-      setNote("");
-      setSearchQuery("");
-      setAccountId(accounts?.[0]?.id || "");
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
     }
-  }, [isOpen, accounts]);
 
-  // When main cat changes, reset sub
-  useEffect(() => { setSubCatId(""); }, [mainCatId]);
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+    setType("expense");
+    setAmount("");
+    setNote("");
+    setSearchQuery("");
+    applyDefaultsForType("expense");
+  }, [isOpen, applyDefaultsForType]);
 
   const handleSave = () => {
-    const satang = parseMoneyToSatang(amount);
-    if (!satang || satang <= 0) return;
-    const cat = effectiveCatId || (type === "income" ? "other_income" : "other");
-    const acc = accountId || accounts?.[0]?.id || "";
+    if (!canSave) return;
+    const satang = parsedAmount;
+    const cat = effectiveCatId;
+    const acc = accountId;
     const now = Date.now();
     store.upsertTransaction({
       id: generateId(),
@@ -192,7 +269,11 @@ export default function QuickAddSheet({ isOpen, onClose }) {
               <button
                 key={t.key}
                 type="button"
-                onClick={() => { setType(t.key); setMainCatId(""); setSubCatId(""); setSearchQuery(""); }}
+                onClick={() => {
+                  setType(t.key);
+                  setSearchQuery("");
+                  applyDefaultsForType(t.key);
+                }}
                 className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.97] ${
                   type === t.key ? t.color : "text-gray-500"
                 }`}
@@ -204,6 +285,7 @@ export default function QuickAddSheet({ isOpen, onClose }) {
 
           {/* Amount — large display */}
           <div className="mb-4">
+            <StepLabel number="1">ยอดเงิน</StepLabel>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-semibold text-gray-400">฿</span>
               <input
@@ -219,8 +301,9 @@ export default function QuickAddSheet({ isOpen, onClose }) {
           </div>
 
           {/* Account */}
-          {accounts.length > 1 && (
-            <div className="mb-4">
+          <div className="mb-4">
+            <StepLabel number="2">บัญชี</StepLabel>
+            {accounts.length ? (
               <div className="flex gap-2 overflow-x-auto no-scrollbar touch-pan-x-scroll">
                 {accounts.map((a) => (
                   <button
@@ -237,8 +320,12 @@ export default function QuickAddSheet({ isOpen, onClose }) {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                เพิ่มบัญชีก่อนบันทึกรายการ
+              </div>
+            )}
+          </div>
 
           {/* Note */}
           <div className="mb-5">
@@ -255,10 +342,12 @@ export default function QuickAddSheet({ isOpen, onClose }) {
             </div>
           </div>
 
+          <StepLabel number="3">หมวดหมู่</StepLabel>
+
           {/* Recent categories */}
           {recentCats.length > 0 && !mainCatId && !searchQuery && (
             <div className="mb-4">
-              <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">ล่าสุด</div>
+              <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">ใช้บ่อย/ล่าสุด</div>
               <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 touch-pan-x-scroll">
                 {recentCats.map((cat) => {
                   const isActive = effectiveCatId === cat.id;
@@ -362,7 +451,10 @@ export default function QuickAddSheet({ isOpen, onClose }) {
                   <button
                     key={cat.id}
                     type="button"
-                    onClick={() => setMainCatId(cat.id)}
+                    onClick={() => {
+                      setMainCatId(cat.id);
+                      setSubCatId("");
+                    }}
                     className="flex flex-col items-center gap-1 p-2.5 rounded-2xl border border-gray-200 bg-white hover:bg-gray-50 active:scale-95 transition-all"
                   >
                     <span className="text-2xl">{cat.icon || "📦"}</span>
@@ -418,26 +510,35 @@ export default function QuickAddSheet({ isOpen, onClose }) {
         </div>
 
         {/* Actions */}
-        <div className="flex gap-3 shrink-0 pt-3 border-t border-gray-200/50 mt-1">
-          <button
-            type="button"
-            onClick={handleOpenFull}
-            className="flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl border border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-[0.98] transition-all"
-          >
-            รายละเอียดเพิ่ม <ChevronRight size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!parseMoneyToSatang(amount)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98] ${
-              parseMoneyToSatang(amount)
-                ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed"
-            }`}
-          >
-            <Check size={16} /> บันทึก
-          </button>
+        <div className="shrink-0 pt-3 border-t border-gray-200/50 mt-1">
+          <StepLabel number="4">บันทึก</StepLabel>
+          <div className="mb-2 rounded-2xl bg-gray-50 border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700">
+            {summaryText}
+          </div>
+          {saveDisabledReason ? (
+            <div className="mb-2 text-xs font-semibold text-amber-700">{saveDisabledReason}</div>
+          ) : null}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleOpenFull}
+              className="flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl border border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-[0.98] transition-all"
+            >
+              รายละเอียดเพิ่ม <ChevronRight size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!canSave}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-3.5 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98] ${
+                canSave
+                  ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25"
+                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
+              }`}
+            >
+              <Check size={16} /> บันทึก
+            </button>
+          </div>
         </div>
       </div>
     </div>

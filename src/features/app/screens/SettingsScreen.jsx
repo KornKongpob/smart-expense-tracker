@@ -39,6 +39,7 @@ export default function SettingsScreen() {
     saving,
     saveProfile,
     exportBackup,
+    exportBackupWithAttachments,
     importBackupFile,
     requestBudgetNotificationPermission,
     runLegacyMigration,
@@ -438,6 +439,16 @@ export default function SettingsScreen() {
             <button type="button" className="ui-btn ui-btn-secondary" onClick={() => exportBackup()} disabled={saving}>
               <Download size={16} />
               ส่งออก
+            </button>
+
+            <button
+              type="button"
+              className="ui-btn ui-btn-secondary"
+              onClick={() => exportBackupWithAttachments()}
+              disabled={saving}
+            >
+              <ReceiptText size={16} />
+              ส่งออก Backup พร้อมรูปใบเสร็จ
             </button>
 
             <button

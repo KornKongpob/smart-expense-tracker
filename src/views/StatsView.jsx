@@ -8,7 +8,7 @@ import {
   PieChart as PieIcon,
   BarChart3,
   CalendarDays,
-  X,
+  Plus,
   ReceiptText,
   Info,
 } from "lucide-react";
@@ -113,7 +113,7 @@ function getTxOrderKey(tx) {
   return Number.isFinite(t) ? t : 0;
 }
 
-function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
+function GlassKpiCard({ icon, title, value, sub, notes = [], tone = "neutral" }) {
   const toneCls =
     tone === "income"
       ? "bg-emerald-600/15 border-emerald-600/20 text-emerald-800"
@@ -151,6 +151,15 @@ function GlassKpiCard({ icon, title, value, sub, tone = "neutral" }) {
           {value}
         </div>
         {sub ? <div className="mt-1 text-[11px] font-bold text-gray-800/60 leading-snug">{sub}</div> : null}
+        {notes.length ? (
+          <div className="mt-2 space-y-1">
+            {notes.map((note) => (
+              <div key={note} className="text-[11px] font-semibold leading-snug text-gray-700/60">
+                {note}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -175,44 +184,33 @@ function TonePill({ tone, children }) {
   );
 }
 
-function SummaryMetaCard({ rangeText, countText, discountSaved }) {
+function SummaryNote({ children }) {
   return (
-    <div className="ui-card-strong p-4 mb-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <TonePill tone="net">
-              <CalendarDays size={14} />
-              {rangeText}
-            </TonePill>
-            <TonePill tone="neutral">{countText}</TonePill>
-          </div>
-          <div className="mt-2 text-[12px] font-bold text-gray-800/65 leading-snug">
-            {discountSaved ? (
-              <>
-                ส่วนลดที่พบในบิล (ไม่นับเป็นค่าใช้จ่ายตามหมวด):
-                <span className="ml-1 tabular-nums">{formatCurrency(discountSaved)}</span>
-              </>
-            ) : (
-              "ข้อมูลสรุปตามรายการที่บันทึกไว้ (ไม่นับ Transfer / Split parent)"
-            )}
-          </div>
-        </div>
-
-        <div className="shrink-0 w-10 h-10 rounded-2xl bg-indigo-600/10 border border-indigo-600/15 flex items-center justify-center">
-          <Info size={18} className="text-indigo-700" />
-        </div>
-      </div>
+    <div className="flex items-start gap-2 rounded-2xl border border-white/20 bg-white/45 px-3 py-2 text-[11px] font-semibold leading-snug text-gray-700/70">
+      <Info size={14} className="mt-0.5 shrink-0 text-indigo-700" />
+      <span>{children}</span>
     </div>
   );
 }
 
-function StatsEmptyState() {
+function StatsEmptyState({ onAdd, onScan, title, description, compact = false }) {
   return (
-    <div className="ui-card text-center py-12">
-      <Activity size={48} className="mx-auto mb-3 opacity-25 text-gray-600" />
-      <p className="font-semibold text-gray-800">ไม่มีข้อมูลในช่วงเวลานี้</p>
-      <p className="text-sm text-gray-800/60 mt-1">ลองเปลี่ยนช่วงเวลา หรือเพิ่มรายการก่อน</p>
+    <div className={`${compact ? "glass-panel border border-white/20" : "ui-card"} text-center ${compact ? "px-4 py-8" : "py-12"}`}>
+      <Activity size={compact ? 38 : 48} className="mx-auto mb-3 opacity-25 text-gray-600" />
+      <p className="font-semibold text-gray-800">{title || "ไม่มีข้อมูลในช่วงเวลานี้"}</p>
+      <p className="mx-auto mt-1 max-w-md text-sm text-gray-800/60">
+        {description || "ลองเปลี่ยนช่วงเวลา หรือเพิ่มรายการก่อน"}
+      </p>
+      <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
+        <button type="button" className="ui-btn ui-btn-primary" onClick={onAdd}>
+          <Plus size={16} />
+          เพิ่มรายการ
+        </button>
+        <button type="button" className="ui-btn ui-btn-secondary" onClick={onScan}>
+          <ReceiptText size={16} />
+          สแกนใบเสร็จ
+        </button>
+      </div>
     </div>
   );
 }
@@ -274,7 +272,8 @@ const TxRow = memo(function TxRow({ tx, cat, account }) {
 });
 
 export default function StatsView() {
-  const { state } = useAppStore();
+  const store = useAppStore();
+  const { state } = store;
   const [period, setPeriod] = useState("month"); // today | week | month | year
   const [isPending, startTransition] = useTransition();
   const isSm = useIsSmallScreen();
@@ -316,17 +315,6 @@ export default function StatsView() {
       return { ...t, _d: d, _time: time, _iso: iso, _amt: amt };
     });
   }, [state.transactions]);
-
-  // ✅ Today's expense (global KPI)
-  const todayExpense = useMemo(() => {
-    let sum = 0;
-    for (const t of normalizedTxs) {
-      if (!isReportableExpenseTransaction(t)) continue;
-      if (t?._iso !== todayIso) continue;
-      sum += signedExpenseAmount(t);
-    }
-    return Math.max(0, sum);
-  }, [normalizedTxs, todayIso]);
 
   // Filter by selected period (still excludes Transfer)
   const filtered = useMemo(() => {
@@ -506,6 +494,22 @@ export default function StatsView() {
     setOpenCat(true);
   };
 
+  const openManualEntry = () => {
+    if (typeof store.startNewTransaction === "function") {
+      store.startNewTransaction({ entryMode: "manual", txType: "expense" });
+      return;
+    }
+    store.navigate?.("add");
+  };
+
+  const openReceiptScan = () => {
+    if (typeof store.startNewTransaction === "function") {
+      store.startNewTransaction({ entryMode: "scan", scanUploadKind: "receipt" });
+      return;
+    }
+    store.navigate?.("add");
+  };
+
   return (
     <div className="min-h-dvh">
       <AppHeader
@@ -541,46 +545,79 @@ export default function StatsView() {
         ))}
       </div>
 
-      <SummaryMetaCard rangeText={rangeText} countText={countText} discountSaved={totals.discountSaved} />
+      <section className="mb-6" aria-labelledby="stats-period-summary-title">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <div id="stats-period-summary-title" className="text-lg font-semibold text-gray-950">
+              สรุปช่วงเวลานี้
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <TonePill tone="net">
+                <CalendarDays size={14} />
+                {rangeText}
+              </TonePill>
+              <TonePill tone="neutral">{countText}</TonePill>
+            </div>
+          </div>
+          {totals.discountSaved ? (
+            <div className="text-[12px] font-bold text-gray-700/65 sm:text-right">
+              ส่วนลดในใบเสร็จ: <span className="tabular-nums">{formatCurrency(totals.discountSaved)}</span>
+            </div>
+          ) : null}
+        </div>
 
-      {/* KPI cards (mobile-first: full-width so long numbers don't get cut) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <GlassKpiCard
-          tone="income"
-          title="รายรับรวม"
-          value={formatCurrency(totals.income)}
-          sub={hasAny ? `ในช่วง ${periodLabel}` : ""}
-          icon={<TrendingUp size={18} />}
-        />
-        <GlassKpiCard
-          tone="expense"
-          title="รายจ่ายรวม"
-          value={formatCurrency(totals.expense)}
-          sub={
-            hasAny
-              ? `เฉลี่ย/วัน ≈ ${formatCurrency(totals.avgSpendPerDay)}${totals.discountSaved ? ` • ส่วนลด ${formatCurrency(totals.discountSaved)}` : ""}`
-              : ""
-          }
-          icon={<TrendingDown size={18} />}
-        />
-        <GlassKpiCard
-          tone="net"
-          title="ยอดสุทธิ"
-          value={formatCurrency(totals.net)}
-          sub={hasAny ? (totals.net >= 0 ? "กำไรสุทธิ" : "ขาดดุลสุทธิ") : ""}
-          icon={<Sparkles size={18} />}
-        />
-        <GlassKpiCard
-          tone="today"
-          title="ค่าใช้จ่ายวันนี้"
-          value={formatCurrency(todayExpense)}
-          sub="Expense สุทธิ (หักส่วนลด) • ไม่นับ Transfer / Split parent"
-          icon={<CalendarDays size={18} />}
-        />
-      </div>
+        {/* KPI cards (mobile-first: full-width so long numbers don't get cut) */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <GlassKpiCard
+            tone="income"
+            title="รายรับ"
+            value={formatCurrency(totals.income)}
+            sub={hasAny ? `ในช่วง ${periodLabel}` : "ยังไม่มีรายรับในช่วงนี้"}
+            notes={["ไม่รวม Transfer / Split parent"]}
+            icon={<TrendingUp size={18} />}
+          />
+          <GlassKpiCard
+            tone="expense"
+            title="รายจ่าย"
+            value={formatCurrency(totals.expense)}
+            sub={totals.discountSaved ? `หักส่วนลดแล้ว ${formatCurrency(totals.discountSaved)}` : "ยอดรายจ่ายสุทธิ"}
+            notes={["ไม่รวม Transfer / Split parent", "ส่วนลดในใบเสร็จไม่นับเป็นรายจ่าย"]}
+            icon={<TrendingDown size={18} />}
+          />
+          <GlassKpiCard
+            tone="net"
+            title="คงเหลือสุทธิ"
+            value={formatCurrency(totals.net)}
+            sub={hasAny ? (totals.net >= 0 ? "รายรับมากกว่ารายจ่าย" : "รายจ่ายมากกว่ารายรับ") : "รายรับ - รายจ่าย"}
+            notes={["ไม่รวม Transfer / Split parent"]}
+            icon={<Sparkles size={18} />}
+          />
+          <GlassKpiCard
+            tone="neutral"
+            title="จำนวนรายการ"
+            value={filtered.length.toLocaleString("th-TH")}
+            sub="รายการที่ใช้ในรายงานนี้"
+            notes={["ไม่รวม Transfer / Split parent"]}
+            icon={<Activity size={18} />}
+          />
+          <GlassKpiCard
+            tone="today"
+            title="เฉลี่ยรายจ่ายต่อวัน"
+            value={formatCurrency(totals.avgSpendPerDay)}
+            sub={`คำนวณจาก ${totals.days.toLocaleString("th-TH")} วัน`}
+            notes={["ส่วนลดในใบเสร็จไม่นับเป็นรายจ่าย"]}
+            icon={<CalendarDays size={18} />}
+          />
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <SummaryNote>ไม่รวม Transfer / Split parent เพื่อไม่ให้ยอดเงินย้ายบัญชีถูกนับเป็นรายรับหรือรายจ่าย</SummaryNote>
+          <SummaryNote>ส่วนลดในใบเสร็จไม่นับเป็นรายจ่าย จึงช่วยให้ยอดรายจ่ายสุทธิอ่านง่ายขึ้น</SummaryNote>
+        </div>
+      </section>
 
       {!hasAny ? (
-        <StatsEmptyState />
+        <StatsEmptyState onAdd={openManualEntry} onScan={openReceiptScan} />
       ) : (
         <>
           {/* Expenses Breakdown */}
@@ -609,83 +646,93 @@ export default function StatsView() {
               ) : null}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-              <div className={isSm ? "h-60 w-full" : "h-64 w-full"}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={isSm ? 56 : 62}
-                      outerRadius={isSm ? 88 : 92}
-                      paddingAngle={6}
-                      dataKey="value"
-                      nameKey="name"
-                      isAnimationActive={false} // ✅ smoother on mobile
-                    >
-                      {pieData.map((entry, i) => (
-                        <Cell key={entry.id || i} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => formatCurrency(v)} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+            {pieData.length ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                <div className={isSm ? "h-60 w-full" : "h-64 w-full"}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={isSm ? 56 : 62}
+                        outerRadius={isSm ? 88 : 92}
+                        paddingAngle={6}
+                        dataKey="value"
+                        nameKey="name"
+                        isAnimationActive={false} // ✅ smoother on mobile
+                      >
+                        {pieData.map((entry, i) => (
+                          <Cell key={entry.id || i} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v) => formatCurrency(v)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
 
-              {/* Top list with progress bars (clickable) */}
-              <div className="space-y-3">
-                {pieData.map((it) => {
-                  const pct = totalExpense ? Math.round((it.value / totalExpense) * 100) : 0;
-                  const clickable = it.id && it.id !== "other_agg";
+                {/* Top list with progress bars (clickable) */}
+                <div className="space-y-3">
+                  {pieData.map((it) => {
+                    const pct = totalExpense ? Math.round((it.value / totalExpense) * 100) : 0;
+                    const clickable = it.id && it.id !== "other_agg";
 
-                  return (
-                    <button
-                      key={it.id}
-                      type="button"
-                      onClick={() => (clickable ? openCategory(it.id) : null)}
-                      className={`w-full text-left glass-panel border border-white/20 rounded-2xl p-3 transition-all active:scale-[0.99] ${
-                        clickable ? "hover:bg-white/10" : "opacity-95"
-                      }`}
-                      aria-label={`category ${it.name}`}
-                      title={clickable ? "แตะเพื่อดูรายการในหมวดนี้" : it.name}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <CatIcon icon={it.icon} color={it.color} title={it.name} />
-                          <div className="min-w-0">
-                            <div className="font-semibold text-gray-900 truncate">{it.name}</div>
-                            <div className="text-[12px] text-gray-800/60 mt-0.5">
-                              {formatCurrency(it.value)} • {pct}%
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        onClick={() => (clickable ? openCategory(it.id) : null)}
+                        className={`w-full text-left glass-panel border border-white/20 rounded-2xl p-3 transition-all active:scale-[0.99] ${
+                          clickable ? "hover:bg-white/10" : "opacity-95"
+                        }`}
+                        aria-label={`category ${it.name}`}
+                        title={clickable ? "แตะเพื่อดูรายการในหมวดนี้" : it.name}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <CatIcon icon={it.icon} color={it.color} title={it.name} />
+                            <div className="min-w-0">
+                              <div className="font-semibold text-gray-900 truncate">{it.name}</div>
+                              <div className="text-[12px] text-gray-800/60 mt-0.5">
+                                {formatCurrency(it.value)} • {pct}%
+                              </div>
                             </div>
                           </div>
+
+                          <div
+                            className="w-10 h-10 rounded-2xl border border-white/20 shrink-0"
+                            style={{ backgroundColor: `${it.color}22` }}
+                            title={it.name}
+                          />
                         </div>
 
-                        <div
-                          className="w-10 h-10 rounded-2xl border border-white/20 shrink-0"
-                          style={{ backgroundColor: `${it.color}22` }}
-                          title={it.name}
-                        />
-                      </div>
+                        <div className="mt-2 h-2 rounded-full bg-white/30 overflow-hidden">
+                          <div
+                            className="h-full"
+                            style={{
+                              width: `${clamp(pct, 0, 100)}%`,
+                              backgroundColor: it.color,
+                            }}
+                          />
+                        </div>
 
-                      <div className="mt-2 h-2 rounded-full bg-white/30 overflow-hidden">
-                        <div
-                          className="h-full"
-                          style={{
-                            width: `${clamp(pct, 0, 100)}%`,
-                            backgroundColor: it.color,
-                          }}
-                        />
-                      </div>
-
-                      {clickable ? (
-                        <div className="mt-2 text-[11px] text-indigo-700 font-semibold">แตะเพื่อดูรายการในหมวดนี้</div>
-                      ) : null}
-                    </button>
-                  );
-                })}
+                        {clickable ? (
+                          <div className="mt-2 text-[11px] text-indigo-700 font-semibold">แตะเพื่อดูรายการในหมวดนี้</div>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              <StatsEmptyState
+                compact
+                title="ยังไม่มีรายจ่ายสำหรับกราฟนี้"
+                description="ช่วงเวลานี้อาจมีเฉพาะรายรับ หรือยังไม่มีรายการรายจ่ายที่ใช้ทำรายงาน"
+                onAdd={openManualEntry}
+                onScan={openReceiptScan}
+              />
+            )}
           </div>
 
           {/* Trend */}

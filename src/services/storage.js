@@ -85,7 +85,7 @@ function normalizeBoot(data, defaults = {}) {
 
 /**
  * ✅ Primary API used by src/store/store.jsx
- * loadAll({ defaultAccounts, defaultCategories, defaultBudgets, defaultRecurring, defaultUI })
+ * loadAll({ defaultAccounts, defaultCategories, defaultBudgets, defaultRecurring, defaultCreditStatements, defaultUI })
  */
 export function loadAll(defaults = {}) {
   if (!hasWindow()) {
@@ -105,7 +105,7 @@ export function loadAll(defaults = {}) {
 
 /**
  * ✅ Primary API used by src/store/store.jsx
- * saveAll({ transactions, accounts, categories, budgets, recurring, goals, ui })
+ * saveAll({ transactions, accounts, categories, budgets, recurring, creditStatements, goals, ui })
  */
 export function saveAll(payload) {
   if (!hasWindow()) return;
@@ -124,6 +124,7 @@ export function saveAll(payload) {
       categories: ensureCategoriesShape(data.categories),
       budgets: ensureArray(data.budgets, []),
       recurring: ensureArray(data.recurring, []),
+      creditStatements: ensureArray(data.creditStatements, []),
       goals: ensureArray(data.goals, []),
       rules: ensureArray(data.rules, []),
       merchants: ensureArray(data.merchants, []),

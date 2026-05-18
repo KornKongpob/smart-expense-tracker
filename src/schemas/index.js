@@ -10,6 +10,7 @@ import { normalizeBackupCore } from "../utils/backupPayload.js";
 
 const satangInt = z.number().int().finite().default(0);
 const isoDateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.string().length(0)).default("");
+const monthStr = z.string().regex(/^\d{4}-\d{2}$/).or(z.string().length(0)).default("");
 const timeHHmmStr = z.string().regex(/^\d{2}:\d{2}$/).or(z.string().length(0)).default("");
 const transactionTimeStr = z.string().regex(/^\d{2}:\d{2}(?::\d{2})?$/).or(z.string().length(0)).default("");
 const optionalStr = z.string().default("");
@@ -158,6 +159,23 @@ export const AccountSchema = z.object({
   creditLimit: satangInt,
   statementDay: z.number().int().min(1).max(31).default(1),
   dueDay: z.number().int().min(1).max(31).default(25),
+}).passthrough();
+
+// ===== Credit Statement =====
+
+export const CreditStatementSchema = z.object({
+  id: z.string().min(1),
+  accountId: optionalStr,
+  month: monthStr,
+  statementDate: isoDateStr,
+  dueDate: isoDateStr,
+  statementBalance: satangInt,
+  minimumDue: satangInt,
+  apr: z.number().finite().nonnegative().nullable().default(null),
+  note: optionalStr,
+  status: z.enum(["open", "paid"]).default("open"),
+  createdAt: timestamp,
+  updatedAt: timestamp,
 }).passthrough();
 
 // ===== Category =====
@@ -312,6 +330,7 @@ export const AppStateSchema = z.object({
   categories: CategoriesSchema.default({ expense: [], income: [] }),
   budgets: z.array(BudgetSchema).default([]),
   recurring: z.array(RecurringSchema).default([]),
+  creditStatements: z.array(CreditStatementSchema).default([]),
   goals: z.array(GoalSchema).default([]),
   rules: z.array(RuleSchema).default([]),
   merchants: z.array(MerchantSchema).default([]),

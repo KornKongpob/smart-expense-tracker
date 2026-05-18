@@ -24,18 +24,39 @@ import {
 import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
 import { downloadBackupJSON } from "../services/storage";
+import {
+  clearAllBlobs,
+  exportBlobsAsDataUrls,
+  importBlobsFromDataUrls,
+  listExistingBlobs,
+} from "../services/blobStore";
 import { toISODate } from "../utils/format";
 import { getRecurringDueCount } from "../utils/recurring";
 import { hasExplicitMoneyUnit } from "../utils/moneyUnit";
 import { validateBackupImport } from "../schemas/index.js";
 import { transactionsToCsv, downloadCsv } from "../utils/exportCsv";
+import {
+  LARGE_ATTACHMENT_BACKUP_BYTES,
+  collectAttachmentIds,
+  formatAttachmentBytes,
+  getBackupData,
+  normalizeAttachmentBackupMap,
+  sumAttachmentBackupSize,
+} from "../utils/attachmentBackup.js";
 
-function MoreRow({ icon, title, subtitle, badge, onClick, danger, testId }) {
+const BACKUP_ATTACHMENT_NOTE = "JSON Backup ปัจจุบันยังไม่รวมรูปใบเสร็จ/สลิป";
+
+function MoreRow({ icon, title, subtitle, badge, onClick, danger, disabled = false, testId }) {
   return (
     <button
       onClick={onClick}
       data-testid={testId}
-      className={["ui-row group", danger ? "text-red-700" : "text-[color:var(--text)]"].join(" ")}
+      disabled={disabled}
+      className={[
+        "ui-row group",
+        danger ? "text-red-700" : "text-[color:var(--text)]",
+        disabled ? "cursor-not-allowed opacity-60" : "",
+      ].join(" ")}
       type="button"
     >
       <div className="flex min-w-0 items-center gap-3">
@@ -180,6 +201,7 @@ export default function MoreView({ showAlert, showConfirm }) {
   const [pinValue, setPinValue] = useStateLocal("");
   const [pinConfirm, setPinConfirm] = useStateLocal("");
   const [pinError, setPinError] = useStateLocal("");
+  const [attachmentBackupBusy, setAttachmentBackupBusy] = useStateLocal(false);
   const [hasPin, setHasPin] = useStateLocal(() => {
     try {
       return !!localStorage.getItem(PIN_KEY);
@@ -300,7 +322,62 @@ export default function MoreView({ showAlert, showConfirm }) {
   const onExport = () => {
     const data = exportBackup();
     downloadBackupJSON(data, "smart-expense-backup.json");
-    showAlert?.("ส่งออกไฟล์ Backup แล้ว");
+    showAlert?.(`ส่งออกไฟล์ Backup แล้ว (${BACKUP_ATTACHMENT_NOTE})`);
+  };
+
+  const finishExportWithAttachments = async ({ skipLargeConfirm = false } = {}) => {
+    if (attachmentBackupBusy) return;
+    setAttachmentBackupBusy(true);
+    try {
+      const currentBackup = exportBackup();
+      const data = getBackupData(currentBackup);
+      const requestedIds = Array.from(collectAttachmentIds(data));
+      const existingBlobs = await listExistingBlobs(requestedIds);
+      const totalSize = existingBlobs.reduce((sum, item) => sum + Math.max(0, Number(item?.size || 0)), 0);
+
+      if (!skipLargeConfirm && totalSize >= LARGE_ATTACHMENT_BACKUP_BYTES) {
+        const message = `รูปใบเสร็จ/สลิปมีขนาดรวมประมาณ ${formatAttachmentBytes(totalSize)} ไฟล์ Backup จะใหญ่ขึ้นและอาจใช้เวลาส่งออก ต้องการดำเนินการต่อหรือไม่?`;
+        if (typeof showConfirm === "function") {
+          showConfirm(
+            "ส่งออก Backup พร้อมรูปใบเสร็จ",
+            message,
+            () => {
+              void finishExportWithAttachments({ skipLargeConfirm: true });
+            },
+            false,
+            { confirmText: "ส่งออก" }
+          );
+          return;
+        }
+        if (typeof window !== "undefined" && !window.confirm(message)) return;
+      }
+
+      const attachments = await exportBlobsAsDataUrls(existingBlobs.map((item) => item.id));
+      downloadBackupJSON(
+        {
+          v: 2,
+          exportedAt: new Date().toISOString(),
+          data,
+          attachments,
+        },
+        "smart-expense-backup-with-receipts.json"
+      );
+
+      const missingCount = Math.max(0, requestedIds.length - existingBlobs.length);
+      showAlert?.(
+        `ส่งออก Backup พร้อมรูปใบเสร็จแล้ว (${Object.keys(attachments).length} ไฟล์${
+          missingCount ? `, ไม่พบไฟล์เดิม ${missingCount} ไฟล์` : ""
+        })`
+      );
+    } catch (error) {
+      showAlert?.(`ส่งออก Backup พร้อมรูปไม่สำเร็จ: ${String(error?.message || error)}`);
+    } finally {
+      setAttachmentBackupBusy(false);
+    }
+  };
+
+  const onExportWithAttachments = () => {
+    void finishExportWithAttachments();
   };
 
   const onPickImport = () => {
@@ -323,18 +400,37 @@ export default function MoreView({ showAlert, showConfirm }) {
         showAlert?.(`ไฟล์สำรองไม่ถูกต้อง: ${String(validation.error || "").slice(0, 200)}`);
         return;
       }
+      const attachmentMap = normalizeAttachmentBackupMap(json?.attachments);
+      const attachmentCount = Object.keys(attachmentMap).length;
+      const attachmentSize = sumAttachmentBackupSize(attachmentMap);
 
       const warnText = assumedSatang
         ? "\n\nไฟล์นี้ไม่มี moneyUnit ระบบจึงตีความเป็น satang เพื่อป้องกันยอดเพี้ยน x100"
         : "";
+      const attachmentWarnText = attachmentCount
+        ? `\n\nBackup นี้มีรูปใบเสร็จ/สลิป ${attachmentCount} ไฟล์ (${formatAttachmentBytes(attachmentSize)}) และจะกู้คืนลงเครื่องนี้หลังนำเข้า`
+        : `\n\nไฟล์ Backup นี้ไม่มีรูปใบเสร็จ/สลิปแนบมาด้วย เมื่อนำเข้าแล้วรูปเดิมในเครื่องนี้จะถูกล้างและไม่สามารถกู้คืนจากไฟล์นี้ได้`;
 
       showConfirm?.(
         "นำเข้าข้อมูล (Import)",
-        `การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${warnText}`,
+        `การนำเข้าจะทับข้อมูลเดิมทั้งหมดในเครื่องนี้ ต้องการดำเนินการต่อหรือไม่?${warnText}${attachmentWarnText}`,
         () => {
-          importBackup(validation.data);
-          showAlert?.("นำเข้าข้อมูลสำเร็จ");
-          navigate("dashboard");
+          void (async () => {
+            try {
+              if (attachmentCount) {
+                await clearAllBlobs();
+                const result = await importBlobsFromDataUrls(attachmentMap);
+                await importBackup(validation.data, { preserveBlobs: true });
+                showAlert?.(`นำเข้าข้อมูลสำเร็จ และกู้คืนรูป ${result.imported} ไฟล์`);
+              } else {
+                await importBackup(validation.data);
+                showAlert?.("นำเข้าข้อมูลสำเร็จ (ไฟล์นี้ไม่มีรูปใบเสร็จ/สลิป)");
+              }
+              navigate("dashboard");
+            } catch (error) {
+              showAlert?.(`นำเข้าไม่สำเร็จ: ${String(error?.message || error)}`);
+            }
+          })();
         },
         true
       );
@@ -472,8 +568,16 @@ export default function MoreView({ showAlert, showConfirm }) {
             onClick={openPinModal}
             testId="hub-security"
           />
-          <MoreRow icon={<Upload size={20} />} title="Export Backup" subtitle="สำรองข้อมูล JSON" onClick={onExport} testId="hub-export-backup" />
-          <MoreRow icon={<Upload size={20} />} title="Import Backup" subtitle="นำเข้าจากไฟล์ JSON" onClick={onPickImport} testId="hub-import-backup" />
+          <MoreRow icon={<Upload size={20} />} title="Export Backup" subtitle="JSON ไม่รวมรูปใบเสร็จ/สลิป" onClick={onExport} testId="hub-export-backup" />
+          <MoreRow
+            icon={<ReceiptText size={20} />}
+            title="ส่งออก Backup พร้อมรูปใบเสร็จ"
+            subtitle={attachmentBackupBusy ? "กำลังเตรียมไฟล์ Backup..." : "รวมรูป/สลิปใน IndexedDB ไว้ในไฟล์เดียว"}
+            onClick={onExportWithAttachments}
+            disabled={attachmentBackupBusy}
+            testId="hub-export-backup-attachments"
+          />
+          <MoreRow icon={<Upload size={20} />} title="Import Backup" subtitle="JSON เดิมอาจไม่มีรูปใบเสร็จ" onClick={onPickImport} testId="hub-import-backup" />
           <input ref={fileRef} type="file" accept="application/json,.json" data-testid="hub-import-file" className="hidden" onChange={onImportFile} />
           <MoreRow
             icon={<Upload size={20} />}
