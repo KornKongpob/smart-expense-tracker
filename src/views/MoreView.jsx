@@ -44,7 +44,7 @@ import {
   sumAttachmentBackupSize,
 } from "../utils/attachmentBackup.js";
 
-const BACKUP_ATTACHMENT_NOTE = "JSON Backup ปัจจุบันยังไม่รวมรูปใบเสร็จ/สลิป";
+const BACKUP_ATTACHMENT_NOTE = "Backup JSON มาตรฐานไม่รวมรูปใบเสร็จ/สลิป";
 
 function MoreRow({ icon, title, subtitle, badge, onClick, danger, disabled = false, testId }) {
   return (
@@ -409,7 +409,7 @@ export default function MoreView({ showAlert, showConfirm }) {
         : "";
       const attachmentWarnText = attachmentCount
         ? `\n\nBackup นี้มีรูปใบเสร็จ/สลิป ${attachmentCount} ไฟล์ (${formatAttachmentBytes(attachmentSize)}) และจะกู้คืนลงเครื่องนี้หลังนำเข้า`
-        : `\n\nไฟล์ Backup นี้ไม่มีรูปใบเสร็จ/สลิปแนบมาด้วย เมื่อนำเข้าแล้วรูปเดิมในเครื่องนี้จะถูกล้างและไม่สามารถกู้คืนจากไฟล์นี้ได้`;
+        : `\n\nไฟล์ Backup JSON มาตรฐานนี้ไม่มีรูปใบเสร็จ/สลิปแนบมาด้วย เมื่อนำเข้าแล้วรูปเดิมในเครื่องนี้จะถูกล้างและไม่สามารถกู้คืนจากไฟล์นี้ได้`;
 
       showConfirm?.(
         "นำเข้าข้อมูล (Import)",
@@ -568,7 +568,7 @@ export default function MoreView({ showAlert, showConfirm }) {
             onClick={openPinModal}
             testId="hub-security"
           />
-          <MoreRow icon={<Upload size={20} />} title="Export Backup" subtitle="JSON ไม่รวมรูปใบเสร็จ/สลิป" onClick={onExport} testId="hub-export-backup" />
+          <MoreRow icon={<Upload size={20} />} title="Export Backup" subtitle="Backup JSON มาตรฐานไม่รวมรูปใบเสร็จ/สลิป" onClick={onExport} testId="hub-export-backup" />
           <MoreRow
             icon={<ReceiptText size={20} />}
             title="ส่งออก Backup พร้อมรูปใบเสร็จ"
@@ -577,7 +577,7 @@ export default function MoreView({ showAlert, showConfirm }) {
             disabled={attachmentBackupBusy}
             testId="hub-export-backup-attachments"
           />
-          <MoreRow icon={<Upload size={20} />} title="Import Backup" subtitle="JSON เดิมอาจไม่มีรูปใบเสร็จ" onClick={onPickImport} testId="hub-import-backup" />
+          <MoreRow icon={<Upload size={20} />} title="Import Backup" subtitle="นำเข้า Backup JSON มาตรฐานอาจไม่มีรูปใบเสร็จ" onClick={onPickImport} testId="hub-import-backup" />
           <input ref={fileRef} type="file" accept="application/json,.json" data-testid="hub-import-file" className="hidden" onChange={onImportFile} />
           <MoreRow
             icon={<Upload size={20} />}

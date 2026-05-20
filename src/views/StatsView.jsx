@@ -837,13 +837,13 @@ export default function StatsView() {
               })}
             </div>
           ) : (
-            <div className="glass-card rounded-3xl border border-dashed glass-divider text-center py-12">
-              <div className="w-16 h-16 glass-chip rounded-full flex items-center justify-center mx-auto mb-3 text-gray-500">
-                <ReceiptText size={32} />
-              </div>
-              <p className="text-gray-700 font-semibold">ไม่มีรายการในหมวดนี้</p>
-              <p className="text-xs text-gray-700/70 mt-1">ลองเปลี่ยนช่วงเวลา แล้วแตะหมวดอีกครั้ง</p>
-            </div>
+            <StatsEmptyState
+              compact
+              title="ไม่มีรายการในหมวดนี้"
+              description="ลองเปลี่ยนช่วงเวลา หรือเพิ่มรายการใหม่เพื่อให้มีข้อมูลในรายงาน"
+              onAdd={openManualEntry}
+              onScan={openReceiptScan}
+            />
           )}
         </ModalShell>
       ) : null}

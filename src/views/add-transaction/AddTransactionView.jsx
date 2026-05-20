@@ -1449,7 +1449,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
       { label: "ประเภท", value: typeLabel },
       { label: "ยอดเงิน", value: amountLabel },
       { label: type === "transfer" || type === "credit_payment" ? "บัญชีต้นทาง → ปลายทาง" : "บัญชี", value: accountLabel },
-      { label: isSplitMode ? "Split" : "หมวด", value: categoryLabel },
+      { label: isSplitMode ? "แยกหมวด (Split)" : "หมวด", value: categoryLabel },
       { label: "วันที่", value: date || "-" },
       { label: "ไฟล์แนบ", value: attachmentLabel },
     ];
@@ -1492,7 +1492,7 @@ export default function AddTransactionView({ showAlert, showConfirm }) {
         { label: "พร้อม", value: String(ready) },
         { label: "กำลังสแกน", value: String(scanning) },
         { label: "ไม่สำเร็จ", value: String(failed) },
-        { label: "Split", value: splitReady ? `${splitReady} รายการ` : "ไม่มี" },
+        { label: "แยกหลายหมวด", value: splitReady ? `${splitReady} รายการ` : "ไม่มี" },
         { label: "ไฟล์แนบ", value: attachmentCount ? `${attachmentCount} ไฟล์` : "ไม่มี" },
       ],
     };
@@ -4204,8 +4204,8 @@ const handleClose = () => {
                     setAmountDigits(v);
                   }}
                   variant={type === "credit_payment" ? "transfer" : type}
-                  label={isSplitMode ? "ยอดรวมแบบ Split" : "จำนวนเงิน"}
-                  helper={isSplitMode ? "โหมด Split: ยอดรวมจะคำนวณจากรายการย่อยด้านล่าง" : budgetHint}
+                  label={isSplitMode ? "ยอดรวมรายการย่อย (Split)" : "จำนวนเงิน"}
+                  helper={isSplitMode ? "โหมดแยกรายการ: ยอดรวมจะคำนวณจากรายการย่อยด้านล่าง" : budgetHint}
                   disabled={isSplitMode}
                 />
               </div>
@@ -4256,7 +4256,7 @@ const handleClose = () => {
                         type === "credit_payment"
                           ? "ธนาคาร/บัตร/รายละเอียด"
                           : isSplitMode
-                            ? "โน้ตสำหรับทั้งกลุ่ม Split"
+                            ? "โน้ตสำหรับทั้งกลุ่มรายการย่อย"
                             : "ชื่อร้าน หรือรายละเอียด"
                       }
                       className="ui-input flex-1"
@@ -4416,7 +4416,7 @@ const handleClose = () => {
             {type !== "transfer" && type !== "credit_payment" ? (
               <BentoCard
                 title="หมวดหมู่"
-                subtitle="เลือกหมวด หรือเปิด Split เพื่อแยกหลายหมวด"
+                subtitle="เลือกหมวด หรือเปิดแยกรายการ (Split) เพื่อแยกหลายหมวด"
                 icon={<Layers size={18} className="text-gray-900" />}
                 className="md:col-span-12"
               >
@@ -4437,14 +4437,14 @@ const handleClose = () => {
                         : "bg-white/70 text-gray-900 border-slate-900/10 hover:bg-white"
                     }`}
                   >
-                    {isSplitMode ? "Split เปิดอยู่" : "เปิด Split"}
+                    {isSplitMode ? "เปิดแยกรายการแล้ว" : "เปิดแยกรายการ (Split)"}
                   </button>
                 </div>
 
                 {isSplitMode ? (
                   <div className="mt-4 space-y-3">
                     <div className="rounded-2xl bg-white/60 border border-slate-900/10 p-3">
-                      <div className="ui-label mb-1">ชื่อกลุ่ม Split (ถ้ามี)</div>
+                      <div className="ui-label mb-1">ชื่อกลุ่มรายการย่อย (Split)</div>
                       <input
                         value={splitLabel}
                         onChange={(e) => setSplitLabel(e.target.value)}

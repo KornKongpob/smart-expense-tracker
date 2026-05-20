@@ -43,7 +43,15 @@ import { generateMoneyCoachInsights } from '../src/utils/moneyCoach.js';
 import { buildCreditDebtSnapshot, planCreditCardPayments } from '../src/utils/debtPlan.js';
 import { compareTxNewestFirst } from '../src/utils/transaction.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
+import { importBlobsFromDataUrls } from '../src/services/blobStore.js';
 import { normalizeBackupCore } from '../src/utils/backupPayload.js';
+import { resolveAttachmentPreviewState } from '../src/utils/attachmentPreviewState.js';
+import {
+  collectAttachmentIds,
+  getBackupData,
+  normalizeAttachmentBackupMap,
+  sumAttachmentBackupSize,
+} from '../src/utils/attachmentBackup.js';
 import { normalizeProviderScanResult } from '../server/legacy-api/scan.js';
 import { scanWithProvider, normalizeProviderName } from '../lib/scan/providers/index.js';
 import { parseScanRequest, assertAllowedInputMime, assertBase64UnderLimit } from '../lib/scan/requestParse.js';
@@ -1141,6 +1149,169 @@ test('transaction detail resolver: old transactions without time and old broad c
   assert.equal(model.transactionTime, '');
   assert.equal(model.categoryName, 'Food');
   assert.equal(model.attachmentId, 'legacy-attachment');
+});
+
+test('attachment preview state: missing local blob resolves to Thai missing copy', () => {
+  const state = resolveAttachmentPreviewState('att-missing', {
+    url: null,
+    mimeType: '',
+    loading: false,
+    resolved: true,
+    missing: true,
+  });
+
+  assert.equal(state.hasAttachment, true);
+  assert.equal(state.isMissing, true);
+  assert.equal(state.isLoading, false);
+  assert.equal(state.canOpen, false);
+  assert.equal(state.label, 'ไฟล์แนบไม่พบในเครื่องนี้');
+});
+
+test('attachment preview state: loading only applies before resolution', () => {
+  assert.equal(
+    resolveAttachmentPreviewState('att-loading', {
+      url: null,
+      mimeType: '',
+      loading: true,
+      resolved: false,
+      missing: false,
+    }).isLoading,
+    true,
+  );
+
+  assert.equal(
+    resolveAttachmentPreviewState('att-resolved-empty', {
+      url: null,
+      mimeType: '',
+      loading: false,
+      resolved: true,
+      missing: false,
+    }).isMissing,
+    true,
+  );
+});
+
+test('attachment persistence source: hasBlob is based on stored blob size', () => {
+  const source = readFileSync(new URL('../src/services/blobStore.js', import.meta.url), 'utf8');
+
+  assert.match(
+    source,
+    /export async function hasBlob\(id\)\s*{\s*const info = await getBlobInfo\(id\);\s*return Number\(info\?\.size \|\| 0\) > 0;\s*}/,
+  );
+});
+
+test('backup UI source: standard JSON backup copy says receipt images are excluded', () => {
+  const source = readFileSync(new URL('../src/views/MoreView.jsx', import.meta.url), 'utf8');
+
+  assert.match(source, /Backup JSON มาตรฐานไม่รวมรูปใบเสร็จ\/สลิป/);
+  assert.match(source, /นำเข้า Backup JSON มาตรฐานอาจไม่มีรูปใบเสร็จ/);
+});
+
+test('attachment backup helpers: collect and normalize v2 attachment payloads', () => {
+  const payload = {
+    v: 2,
+    exportedAt: '2026-05-20T00:00:00.000Z',
+    data: {
+      transactions: [
+        { id: 'tx-1', attachmentId: 'att-1' },
+        { id: 'tx-2', raw: { attachment_id: 'att-2' } },
+        { id: 'tx-3', attachmentId: 'att-1' },
+      ],
+    },
+    attachments: {
+      'att-1': { dataUrl: 'data:image/png;base64,AAAA', mimeType: 'image/png', size: 12 },
+      'att-2': { data_url: 'data:application/pdf;base64,BBBB', mime_type: 'application/pdf', size: '34' },
+      empty: { dataUrl: '' },
+    },
+  };
+
+  assert.deepEqual(Array.from(collectAttachmentIds(getBackupData(payload))).sort(), ['att-1', 'att-2']);
+  assert.deepEqual(normalizeAttachmentBackupMap(payload.attachments), {
+    'att-1': { dataUrl: 'data:image/png;base64,AAAA', mimeType: 'image/png', size: 12 },
+    'att-2': { dataUrl: 'data:application/pdf;base64,BBBB', mimeType: 'application/pdf', size: 34 },
+  });
+  assert.equal(sumAttachmentBackupSize(normalizeAttachmentBackupMap(payload.attachments)), 46);
+});
+
+test('attachment import: unavailable IndexedDB does not count blobs as restored', async () => {
+  const result = await importBlobsFromDataUrls({
+    'att-node': { dataUrl: 'data:text/plain;base64,aGk=', mimeType: 'text/plain' },
+  });
+
+  assert.equal(result.imported, 0);
+  assert.deepEqual(result.skipped, ['att-node']);
+});
+
+test('attachment backup UI source: exports v2 envelope and preserves restored blobs on import', () => {
+  const source = readFileSync(new URL('../src/views/MoreView.jsx', import.meta.url), 'utf8');
+
+  assert.match(source, /v:\s*2/);
+  assert.match(source, /attachments,/);
+  assert.match(source, /smart-expense-backup-with-receipts\.json/);
+  assert.match(source, /importBackup\(validation\.data, \{ preserveBlobs: true \}\)/);
+  assert.match(source, /totalSize >= LARGE_ATTACHMENT_BACKUP_BYTES/);
+});
+
+test('quick add source: daily entry stays guided and does not expose transfer shortcuts', () => {
+  const source = readFileSync(new URL('../src/components/QuickAddSheet.jsx', import.meta.url), 'utf8');
+
+  assert.match(source, /function StepLabel/);
+  assert.match(source, /<StepLabel number="1">ยอดเงิน<\/StepLabel>/);
+  assert.match(source, /<StepLabel number="2">บัญชี<\/StepLabel>/);
+  assert.match(source, /<StepLabel number="3">หมวดหมู่<\/StepLabel>/);
+  assert.match(source, /<StepLabel number="4">บันทึก<\/StepLabel>/);
+  assert.match(source, /recentAccountForType\(state\.transactions \|\| \[\], accounts, "expense"\)/);
+  assert.match(source, /recentCategoriesForType\(state\.transactions \|\| \[\], categoriesByType\.expense, "expense", 1\)/);
+  assert.match(source, /const summaryText = `\$\{typeLabel\} \$\{summaryAmount\}/);
+  assert.match(source, /หมวด \$\{selectedCategory\?\.name \|\| "ยังไม่เลือก"\}/);
+  assert.match(source, /บัญชี \$\{selectedAccount\?\.name \|\| "ยังไม่เลือก"\}/);
+  assert.match(source, /const saveDisabledReason = !parsedAmount/);
+  assert.doesNotMatch(source, /ArrowRightLeft/);
+  assert.doesNotMatch(source, /handleQuickTransfer/);
+  assert.doesNotMatch(source, /txType: "transfer"/);
+});
+
+test('add transaction source: sticky review summary uses Thai-first save labels', () => {
+  const source = readFileSync(new URL('../src/views/add-transaction/AddTransactionView.jsx', import.meta.url), 'utf8');
+
+  assert.match(source, /function SaveReviewSummary/);
+  assert.match(source, /<SaveReviewSummary[\s\S]*items=\{manualReviewItems\}/);
+  assert.match(source, /title="ตรวจสอบคิวสแกนก่อนบันทึก"/);
+  assert.match(source, /\{ label: "ประเภท", value: typeLabel \}/);
+  assert.match(source, /\{ label: "ยอดเงิน", value: amountLabel \}/);
+  assert.match(source, /\{ label: "วันที่", value: date \|\| "-" \}/);
+  assert.match(source, /\{ label: "ไฟล์ทั้งหมด", value: String\(items\.length\) \}/);
+  assert.match(source, /\{ label: "สแกนแล้ว", value: String\(ready \+ failed\) \}/);
+  assert.match(source, /\{ label: "พร้อม", value: String\(ready\) \}/);
+  assert.match(source, /\{ label: "ไม่สำเร็จ", value: String\(failed\) \}/);
+  assert.match(source, /แยกหมวด \(Split\)/);
+  assert.match(source, /ชื่อกลุ่มรายการย่อย \(Split\)/);
+  assert.doesNotMatch(source, /\{ label: isSplitMode \? "Split" : "หมวด"/);
+  assert.doesNotMatch(source, /\{ label: "Split", value: splitReady/);
+  assert.doesNotMatch(source, /Advanced options/);
+  assert.doesNotMatch(source, /Split label/);
+});
+
+test('stats source: period summary keeps reporting math and empty states actionable', () => {
+  const source = readFileSync(new URL('../src/views/StatsView.jsx', import.meta.url), 'utf8');
+
+  assert.match(source, /สรุปช่วงเวลานี้/);
+  assert.match(source, /title="รายรับ"/);
+  assert.match(source, /title="รายจ่าย"/);
+  assert.match(source, /title="คงเหลือสุทธิ"/);
+  assert.match(source, /title="จำนวนรายการ"/);
+  assert.match(source, /title="เฉลี่ยรายจ่ายต่อวัน"/);
+  assert.match(source, /ไม่รวม Transfer \/ Split parent/);
+  assert.match(source, /ส่วนลดในใบเสร็จไม่นับเป็นรายจ่าย/);
+  assert.match(source, /isReportableExpenseTransaction/);
+  assert.match(source, /isReportableIncomeTransaction/);
+  assert.match(source, /signedExpenseAmount\(t\)/);
+  assert.match(source, /function StatsEmptyState/);
+  assert.match(source, /store\.startNewTransaction\(\{ entryMode: "manual", txType: "expense" \}\)/);
+  assert.match(source, /store\.startNewTransaction\(\{ entryMode: "scan", scanUploadKind: "receipt" \}\)/);
+  assert.match(source, /title="ไม่มีรายการในหมวดนี้"/);
+  assert.match(source, /onAdd=\{openManualEntry\}/);
+  assert.match(source, /onScan=\{openReceiptScan\}/);
 });
 
 test('scan postprocess: detects transfer slip and extracts amount from Thai payment slip text', () => {

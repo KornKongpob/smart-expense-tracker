@@ -193,7 +193,7 @@ export async function getBlobInfo(id) {
 
 export async function hasBlob(id) {
   const info = await getBlobInfo(id);
-  return !!info?.url && Number(info?.size || 0) > 0;
+  return Number(info?.size || 0) > 0;
 }
 
 export async function getStoredBlob(id) {
@@ -246,7 +246,11 @@ export async function importBlobsFromDataUrls(blobMap) {
         continue;
       }
       await putBlob(item.id, blob);
-      imported += 1;
+      if (await hasBlob(item.id)) {
+        imported += 1;
+      } else {
+        skipped.push(item.id);
+      }
     } catch (error) {
       const message = String(error?.name || error?.message || error || "");
       if (/quota|storage|exceed/i.test(message)) {
