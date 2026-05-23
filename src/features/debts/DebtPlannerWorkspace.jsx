@@ -757,14 +757,14 @@ export default function DebtPlannerWorkspace({
               <CheckCircle2 size={14} /> บันทึกแล้ว
             </StatusPill>
           ) : (
-            <StatusPill tone="default">local statement data</StatusPill>
+            <StatusPill tone="default">ข้อมูล statement ในเครื่อง</StatusPill>
           )}
         </div>
 
         <div className="finance-form">
           <div className="finance-grid finance-grid-3">
             <label className="finance-field">
-              <span className="ui-label">Month</span>
+              <span className="ui-label">เดือน</span>
               <input
                 className="ui-input"
                 type="month"
@@ -797,7 +797,7 @@ export default function DebtPlannerWorkspace({
             </label>
           </div>
 
-          <div className="finance-type-grid finance-type-grid-accounts" role="radiogroup" aria-label="Debt strategy">
+          <div className="finance-type-grid finance-type-grid-accounts" role="radiogroup" aria-label="กลยุทธ์จัดลำดับหนี้">
             {STRATEGY_OPTIONS.map((option) => {
               const active = strategy === option.id;
               return (
@@ -828,7 +828,7 @@ export default function DebtPlannerWorkspace({
           <div>
             <div className="finance-panel-title">สร้างรายการชำระตามแผน</div>
             <div className="finance-panel-copy">
-              สร้าง transfer สำหรับบัตรที่มียอดแนะนำ โดยผูก meta กันสร้างซ้ำในเดือนเดียวกัน
+              สร้างรายการโอนเงิน (transfer) สำหรับบัตรที่มียอดแนะนำ โดยผูก meta กันสร้างซ้ำในเดือนเดียวกัน
             </div>
           </div>
           <StatusPill tone={plannedPayments.length ? "success" : "default"}>
@@ -867,7 +867,7 @@ export default function DebtPlannerWorkspace({
                   ? `${plannedPayments.length} ใบ รวม ${formatCurrency(
                       plannedPayments.reduce((sum, payment) => sum + payment.amountSatang, 0),
                     )}`
-                  : "ยังไม่มี recommended payment"}
+                  : "ยังไม่มียอดแนะนำให้ชำระ"}
               </div>
             </div>
           </div>

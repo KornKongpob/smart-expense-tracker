@@ -12,7 +12,7 @@ export default function DebtPlannerScreen() {
     creditStatements,
     debtPlans,
     createManualTransaction,
-    recentTransactions,
+    planningTransactions,
     saveCreditStatements,
     saving,
     selectedMonth,
@@ -25,9 +25,9 @@ export default function DebtPlannerScreen() {
         accounts,
         accountBalanceSnapshot,
         debtPlans,
-        transactions: recentTransactions,
+        transactions: planningTransactions,
       }),
-    [accountBalanceSnapshot, accounts, debtPlans, recentTransactions],
+    [accountBalanceSnapshot, accounts, debtPlans, planningTransactions],
   );
 
   const createPlannedPayments = async ({ sourceAccountId, payments }) => {

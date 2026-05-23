@@ -991,7 +991,7 @@ export function AppProvider({ children }) {
       ),
       supabase
         .from("transactions")
-        .select("id, kind, category_id, amount_satang, date, is_split_parent, is_split_child")
+        .select("id, kind, category_id, amount_satang, date, is_split_parent, is_split_child, raw, from_account_id, to_account_id")
         .eq("user_id", session.user.id)
         .eq("status", "posted")
         .gte("date", planningRangeStart)

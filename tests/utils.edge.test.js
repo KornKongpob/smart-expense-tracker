@@ -41,6 +41,11 @@ import {
 import { resolveTransactionDetailModel } from '../src/utils/transactionDetail.js';
 import { generateMoneyCoachInsights } from '../src/utils/moneyCoach.js';
 import { buildCreditDebtSnapshot, planCreditCardPayments } from '../src/utils/debtPlan.js';
+import {
+  buildFinancialSnapshot,
+  FINANCIAL_PLAN_DISCLAIMER,
+  requestFinancialPlan,
+} from '../src/services/financialPlan.js';
 import { compareTxNewestFirst } from '../src/utils/transaction.js';
 import { loadAll, saveAll, STORAGE_SAVE_ERROR_EVENT } from '../src/services/storage.js';
 import { importBlobsFromDataUrls } from '../src/services/blobStore.js';
@@ -72,6 +77,10 @@ import {
 import { canonicalizeCategoryId } from '../src/utils/categoryIds.js';
 import { buildCustomCategoryId } from '../src/utils/categoryCustomId.js';
 import { applyGoalContribution, createInitialState, normalizeCreditStatement, normalizeGoal } from '../src/store/boot.js';
+import {
+  buildFallbackPlan as buildServerFinancialPlanFallback,
+  sanitizeFinancialSnapshot as sanitizeServerFinancialSnapshot,
+} from '../server/legacy-api/financial-plan.js';
 import {
   applyCategoryPresentationToSnapshot,
   mergeCategoryState,
@@ -1527,6 +1536,178 @@ test('credit statements: persist through storage and backup validation', (t) => 
   assert.equal(validation.data.creditStatements[0].statementBalance, 500_000);
 });
 
+test('financial plan API source: keeps OpenAI usage server-side with strict JSON output', () => {
+  const routeSource = readFileSync(new URL('../app/api/financial-plan/route.js', import.meta.url), 'utf8');
+  const handlerSource = readFileSync(new URL('../server/legacy-api/financial-plan.js', import.meta.url), 'utf8');
+
+  assert.match(routeSource, /server\/legacy-api\/financial-plan\.js/);
+  assert.match(handlerSource, /process\.env\.OPENAI_API_KEY/);
+  assert.doesNotMatch(handlerSource, /NEXT_PUBLIC_OPENAI/i);
+  assert.match(handlerSource, /https:\/\/api\.openai\.com\/v1\/responses/);
+  assert.match(handlerSource, /type:\s*"json_schema"/);
+  assert.match(handlerSource, /strict:\s*true/);
+  assert.match(handlerSource, /raw_transactions_not_allowed/);
+  assert.match(handlerSource, /setSecurityHeaders/);
+  assert.match(handlerSource, /enforceAccess/);
+});
+
+test('financial plan server: sanitizes snapshots and rejects raw transactions', () => {
+  assert.throws(
+    () => sanitizeServerFinancialSnapshot({ transactions: [{ id: 'raw-tx' }] }),
+    /raw_transactions_not_allowed/,
+  );
+
+  const snapshot = sanitizeServerFinancialSnapshot({
+    month: '2026-05',
+    incomeTotal: 120_000,
+    expenseTotal: 70_000,
+    categorySpendTop: [{ categoryId: 'food', name: 'Food', amount: 20_000 }],
+    cashAvailable: 500_000,
+    accountsSummary: [{ id: 'cash', name: 'Cash', type: 'cash', balance: 500_000 }],
+    creditCards: [{ accountId: 'card', name: 'Card', balance: 200_000, minimumDue: 20_000 }],
+    creditStatements: [{ accountId: 'card', month: '2026-05', statementBalance: 200_000, minimumDue: 20_000 }],
+    budgets: [{ categoryId: 'food', name: 'Food', limit: 40_000, spent: 20_000 }],
+    deterministicDebtPlan: {
+      strategy: 'avalanche',
+      totals: { totalMinimum: 20_000, totalRecommended: 50_000, cashAfterPayments: 450_000 },
+      cards: [{ accountId: 'card', name: 'Card', balance: 200_000, minimumDue: 20_000, recommendedPayment: 50_000 }],
+      warnings: [],
+    },
+  });
+
+  assert.deepEqual(Object.keys(snapshot), [
+    'month',
+    'incomeTotal',
+    'expenseTotal',
+    'categorySpendTop',
+    'cashAvailable',
+    'accountsSummary',
+    'creditCards',
+    'creditStatements',
+    'budgets',
+    'deterministicDebtPlan',
+  ]);
+  assert.equal(snapshot.month, '2026-05');
+  assert.equal(snapshot.creditStatements[0].minimumDue, 20_000);
+
+  const fallback = buildServerFinancialPlanFallback(snapshot, 'missing_openai_api_key');
+  assert.ok(fallback.summary.includes(FINANCIAL_PLAN_DISCLAIMER));
+  assert.equal(fallback.cashflowPlan.monthlyNet, 50_000);
+  assert.equal(fallback.debtPlan.totalRecommendedPayment, 50_000);
+  assert.ok(fallback.warnings.includes('missing_openai_api_key'));
+});
+
+test('financial plan service: posts sanitized snapshot without browser secrets', async (t) => {
+  const originalFetch = globalThis.fetch;
+  let captured = null;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const responsePlan = {
+    summary: `${FINANCIAL_PLAN_DISCLAIMER} Monthly plan ready.`,
+    cashflowPlan: {
+      status: 'stable',
+      monthlyNet: 90_000,
+      cashAvailable: 480_000,
+      recommendedExpenseLimit: 100_000,
+      notes: ['Use snapshot totals only.'],
+    },
+    savingsPlan: {
+      emergencyFundAction: 'Keep a cash buffer.',
+      recommendedSavings: 20_000,
+      notes: ['Prioritize liquidity.'],
+    },
+    debtPlan: {
+      strategy: 'avalanche',
+      totalRecommendedPayment: 50_000,
+      cards: [{ accountId: 'card', name: 'Card', recommendedPayment: 50_000, reason: 'Highest APR first.' }],
+      notes: ['Pay at least the statement minimum.'],
+    },
+    warnings: [],
+    nextActions: ['Review statement due dates.'],
+  };
+
+  globalThis.fetch = async (url, options) => {
+    captured = { url, options };
+    return new Response(JSON.stringify({ ok: true, plan: responsePlan }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  const snapshot = buildFinancialSnapshot(
+    {
+      accounts: [
+        { id: 'cash', name: 'Cash', type: 'cash', openingBalance: 500_000 },
+        { id: 'card', name: 'Card', type: 'credit', openingBalance: 200_000, apr: 29 },
+      ],
+      categories: {
+        expense: [{ id: 'food', name: 'Food' }],
+        income: [{ id: 'salary', name: 'Salary' }],
+      },
+      transactions: [
+        { id: 'income-raw-id', accountId: 'cash', type: 'income', amount: 120_000, category: 'salary', date: '2026-05-01' },
+        { id: 'expense-raw-id', accountId: 'cash', type: 'expense', amount: 30_000, category: 'food', date: '2026-05-02' },
+      ],
+      creditStatements: [
+        {
+          id: 'stmt-card-2026-05',
+          accountId: 'card',
+          month: '2026-05',
+          statementBalance: 200_000,
+          minimumDue: 20_000,
+          dueDate: '2026-05-25',
+          apr: 29,
+        },
+      ],
+      budgets: [{ categoryId: 'food', limit: 50_000, spent: 30_000 }],
+    },
+    { month: '2026-05', availableCashToPay: 70_000, minimumCashBuffer: 20_000, strategy: 'avalanche' },
+  );
+
+  assert.equal(snapshot.month, '2026-05');
+  assert.equal(Object.hasOwn(snapshot, 'transactions'), false);
+  assert.equal(snapshot.incomeTotal, 120_000);
+  assert.equal(snapshot.expenseTotal, 30_000);
+  assert.equal(snapshot.creditStatements[0].minimumDue, 20_000);
+
+  const plan = await requestFinancialPlan(snapshot, { endpoint: '/api/financial-plan', timeoutMs: 1_000 });
+
+  assert.equal(captured.url, '/api/financial-plan');
+  assert.equal(captured.options.method, 'POST');
+  assert.equal(captured.options.headers.Authorization, undefined);
+  assert.doesNotMatch(JSON.stringify(captured.options), /OPENAI_API_KEY|sk-/);
+
+  const body = JSON.parse(captured.options.body);
+  assert.deepEqual(Object.keys(body), ['snapshot']);
+  assert.equal(Object.hasOwn(body.snapshot, 'transactions'), false);
+  assert.doesNotMatch(JSON.stringify(body), /income-raw-id|expense-raw-id/);
+  assert.ok(plan.summary.includes(FINANCIAL_PLAN_DISCLAIMER));
+  assert.equal(plan.debtPlan.totalRecommendedPayment, 50_000);
+});
+
+test('financial plan UI source: dashboard exposes AI plan workflow with privacy and fallback copy', () => {
+  const panelSource = readFileSync(new URL('../src/components/FinancialPlanPanel.jsx', import.meta.url), 'utf8');
+  const dashboardSource = readFileSync(new URL('../src/features/app/screens/DashboardScreen.jsx', import.meta.url), 'utf8');
+  const legacyDashboardSource = readFileSync(new URL('../src/views/DashboardView.jsx', import.meta.url), 'utf8');
+
+  assert.match(panelSource, /แผนการเงินจาก AI/);
+  assert.match(panelSource, /ให้ AI ช่วยวางแผนการเงิน/);
+  assert.match(panelSource, /ข้อมูลที่จะส่งให้ AI/);
+  assert.match(panelSource, /ระบบส่งเฉพาะข้อมูลสรุป ไม่ส่งรูปใบเสร็จ/);
+  assert.match(panelSource, /สรุปสถานะ/);
+  assert.match(panelSource, /แผนออมเงิน/);
+  assert.match(panelSource, /แผนจ่ายหนี้/);
+  assert.match(panelSource, /สิ่งที่ควรทำเดือนนี้/);
+  assert.match(panelSource, /คำเตือน\/ความเสี่ยง/);
+  assert.match(panelSource, /requestFinancialPlan\(snapshot,\s*\{\s*returnMeta:\s*true\s*\}\)/);
+  assert.match(panelSource, /buildFinancialPlanFallback\(snapshot/);
+  assert.doesNotMatch(panelSource, /process\.env|OPENAI_API_KEY|NEXT_PUBLIC_OPENAI|sk-[A-Za-z0-9]/);
+  assert.match(dashboardSource, /<FinancialPlanPanel state=\{financialPlanState\} month=\{selectedMonth\} \/>/);
+  assert.match(legacyDashboardSource, /<FinancialPlanPanel state=\{state\} month=\{monthKey\} \/>/);
+});
+
 test('debt payment plan: uses real statement minimums and avalanche extra', () => {
   const accounts = [
     { id: 'card-a', name: 'Card A', type: 'credit', openingBalance: 0, apr: 18 },
@@ -1645,6 +1826,42 @@ test('debt payment plan: snowball extra pays the smallest balance first', () => 
   assert.equal(large.recommendedPayment, 20_000);
   assert.equal(large.extraPayment, 15_000);
   assert.equal(plan.totals.totalRecommended, 60_000);
+});
+
+test('debt payment plan: caps minimums and recommendations to statement/current balance', () => {
+  const accounts = [{ id: 'card-cap', name: 'Capped card', type: 'credit', openingBalance: 0, apr: 30 }];
+  const transactions = [
+    { id: 'spend-cap', accountId: 'card-cap', type: 'expense', amount: 25_000, date: '2026-05-01' },
+  ];
+  const creditStatements = [
+    {
+      id: 'stmt-cap',
+      accountId: 'card-cap',
+      month: '2026-05',
+      statementBalance: 100_000,
+      minimumDue: 80_000,
+      dueDate: '2026-05-20',
+      apr: 30,
+    },
+  ];
+
+  const plan = planCreditCardPayments({
+    accounts,
+    transactions,
+    creditStatements,
+    month: '2026-05',
+    availableCashToPay: 200_000,
+    minimumCashBuffer: 0,
+    strategy: 'avalanche',
+  });
+  const card = plan.cards.find((item) => item.accountId === 'card-cap');
+
+  assert.equal(card.balance, 25_000);
+  assert.equal(card.minimumDue, 25_000);
+  assert.equal(card.recommendedPayment, 25_000);
+  assert.equal(card.extraPayment, 0);
+  assert.ok(card.warnings.includes('minimum_due_capped_to_balance'));
+  assert.equal(plan.totals.totalRecommended, 25_000);
 });
 
 test('debt payment snapshot: missing minimum falls back to zero with warning', () => {
@@ -3014,6 +3231,49 @@ test('runtime source: shared account picker is wired through add, inbox, dashboa
   assert.match(accountPickerSource, /Date\.now\(\) < suppressOpenUntilRef\.current/);
   assert.match(accountPickerSource, /requestAnimationFrame/);
   assert.match(accountPickerSource, /event\?\.preventDefault/);
+});
+
+test('phase 14 polish source: mobile amounts and debt planner labels stay Thai-first', () => {
+  const transactionCardSource = readFileSync(new URL('../src/components/TransactionCard.jsx', import.meta.url), 'utf8');
+  const transactionDetailSource = readFileSync(new URL('../src/components/TransactionDetailModal.jsx', import.meta.url), 'utf8');
+  const attachmentPreviewSource = readFileSync(new URL('../src/components/AttachmentPreview.jsx', import.meta.url), 'utf8');
+  const debtWorkspaceSource = readFileSync(new URL('../src/features/debts/DebtPlannerWorkspace.jsx', import.meta.url), 'utf8');
+
+  assert.match(transactionCardSource, /max-w-\[9rem\][\s\S]*truncate[\s\S]*text-right/);
+  assert.match(transactionDetailSource, /if \(key === "credit_payment"\) return "ชำระบัตรเครดิต";/);
+  assert.match(transactionDetailSource, /<SectionTitle icon=\{ArrowRightLeft\}>รายละเอียดการโอน<\/SectionTitle>/);
+  assert.match(transactionDetailSource, /<DetailRow label="บัญชี" value=\{model\.accountName\} \/>/);
+  assert.match(transactionDetailSource, /break-all[\s\S]*tabular-nums/);
+  assert.doesNotMatch(transactionDetailSource, /Credit payment|Transfer details|<DetailRow label="Account"|<DetailRow label="Category"/);
+  assert.match(attachmentPreviewSource, /tabIndex:\s*preview\.canOpen\s*\?\s*0\s*:\s*undefined/);
+  assert.match(attachmentPreviewSource, /event\.key !== "Enter" && event\.key !== " "/);
+  assert.match(attachmentPreviewSource, /onPointerDown:\s*stopAttachmentEvent/);
+  assert.match(debtWorkspaceSource, /aria-label="กลยุทธ์จัดลำดับหนี้"/);
+  assert.match(debtWorkspaceSource, />เดือน</);
+  assert.match(debtWorkspaceSource, /ข้อมูล statement ในเครื่อง/);
+  assert.match(debtWorkspaceSource, /ยอดแนะนำให้ชำระ/);
+  assert.doesNotMatch(debtWorkspaceSource, />Month</);
+  assert.doesNotMatch(debtWorkspaceSource, /local statement data/);
+  assert.doesNotMatch(debtWorkspaceSource, /recommended payment/);
+});
+
+test('runtime source: debt planner duplicate checks use planner transaction metadata history', () => {
+  const screenSource = readFileSync(
+    new URL('../src/features/app/screens/DebtPlannerScreen.jsx', import.meta.url),
+    'utf8',
+  );
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(screenSource, /planningTransactions,/);
+  assert.match(screenSource, /transactions:\s*planningTransactions/);
+  assert.doesNotMatch(screenSource, /transactions:\s*recentTransactions/);
+  assert.match(
+    providerSource,
+    /\.select\(\s*"id, kind, category_id, amount_satang, date, is_split_parent, is_split_child, raw, from_account_id, to_account_id"\s*\)/,
+  );
 });
 
 test('runtime styles: mobile shell keeps app chrome in flow and preserves dock/account picker cards', () => {

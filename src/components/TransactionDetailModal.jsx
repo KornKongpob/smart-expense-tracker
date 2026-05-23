@@ -1,12 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowRightLeft,
   CreditCard,
   Edit3,
-  ExternalLink,
-  FileText,
-  Image as ImageIcon,
   Layers,
   ReceiptText,
   X,
@@ -14,35 +11,27 @@ import {
 
 import { formatCurrency, formatTransactionDateTime } from "../utils/format";
 import { resolveTransactionDetailModel } from "../utils/transactionDetail.js";
-import { useBlobInfo } from "../utils/useBlobInfo";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
+import AttachmentPreview from "./AttachmentPreview.jsx";
 
 function clean(value) {
   return String(value ?? "").trim();
-}
-
-function formatBytes(size) {
-  const bytes = Number(size || 0);
-  if (!Number.isFinite(bytes) || bytes <= 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
-  return `${Math.round(bytes / 1024 / 102.4) / 10} MB`;
 }
 
 function safeDateLabel(date, time) {
   try {
     return formatTransactionDateTime(date, time);
   } catch {
-    return clean(date) || "No date";
+    return clean(date) || "ไม่มีวันที่";
   }
 }
 
 function typeLabel(type) {
   const key = clean(type).toLowerCase();
-  if (key === "credit_payment") return "Credit payment";
-  if (key === "transfer") return "Transfer";
-  if (key === "income") return "Income";
-  return "Expense";
+  if (key === "credit_payment") return "ชำระบัตรเครดิต";
+  if (key === "transfer") return "โอนเงิน";
+  if (key === "income") return "รายรับ";
+  return "รายจ่าย";
 }
 
 function amountPrefix(type) {
@@ -61,11 +50,11 @@ function amountTone(type) {
 
 function lineMarker(line) {
   if (line?.receiptLineType !== "adjustment") return "";
-  if (line?.adjustmentEffect === "subtract") return "Discount";
+  if (line?.adjustmentEffect === "subtract") return "ส่วนลด";
   const type = clean(line?.adjustmentType).toLowerCase();
-  if (type === "tax") return "Tax";
-  if (type === "rounding") return "Rounding";
-  return "Fee";
+  if (type === "tax") return "ภาษี";
+  if (type === "rounding") return "ปัดเศษ";
+  return "ค่าธรรมเนียม";
 }
 
 function lineAmount(line) {
@@ -104,7 +93,7 @@ function ReceiptLines({ lines = [] }) {
 
   return (
     <section className="space-y-3">
-      <SectionTitle icon={ReceiptText}>Receipt lines</SectionTitle>
+      <SectionTitle icon={ReceiptText}>รายการในใบเสร็จ</SectionTitle>
       <div className="space-y-2">
         {lines.map((line, index) => {
           const marker = lineMarker(line);
@@ -117,7 +106,7 @@ function ReceiptLines({ lines = [] }) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="break-words text-sm font-semibold text-slate-900">
-                      {line.itemName || line.note || "Line item"}
+                      {line.itemName || line.note || "รายการ"}
                     </div>
                     {marker ? (
                       <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">
@@ -126,7 +115,7 @@ function ReceiptLines({ lines = [] }) {
                     ) : null}
                   </div>
                   <div className="mt-1 text-xs font-medium text-slate-500">
-                    {line.categoryName || line.categoryId || "Uncategorized"}
+                    {line.categoryName || line.categoryId || "ไม่ระบุหมวด"}
                   </div>
                 </div>
                 <div className="shrink-0 text-sm font-bold tabular-nums text-slate-900">{lineAmount(line)}</div>
@@ -139,7 +128,7 @@ function ReceiptLines({ lines = [] }) {
                       key={`${line.id || index}-${childIndex}`}
                       className="flex items-center justify-between gap-3 text-xs font-medium text-slate-500"
                     >
-                      <span className="min-w-0 truncate">{child.name || "Item"}</span>
+                      <span className="min-w-0 truncate">{child.name || "รายการ"}</span>
                       {child.amountSatang ? <span>{formatCurrency(child.amountSatang)}</span> : null}
                     </div>
                   ))}
@@ -149,102 +138,6 @@ function ReceiptLines({ lines = [] }) {
           );
         })}
       </div>
-    </section>
-  );
-}
-
-function AttachmentPreview({ attachmentId }) {
-  const info = useBlobInfo(attachmentId);
-  const [imageOpen, setImageOpen] = useState(false);
-  const url = info?.url || "";
-  const mimeType = clean(info?.mimeType).toLowerCase();
-  const isImage = !!url && mimeType.startsWith("image/");
-  const isPdf = !!url && mimeType === "application/pdf";
-  const sizeLabel = formatBytes(info?.size);
-
-  useEffect(() => {
-    setImageOpen(false);
-  }, [attachmentId]);
-
-  if (!attachmentId) return null;
-
-  const largePreview =
-    imageOpen && isImage ? (
-      <div className="fixed inset-0 z-[130] flex items-center justify-center p-4" role="dialog" aria-modal="true">
-        <button
-          type="button"
-          className="absolute inset-0 bg-black/80"
-          aria-label="Close image preview"
-          onClick={() => setImageOpen(false)}
-        />
-        <div className="relative max-h-full max-w-5xl">
-          <button
-            type="button"
-            onClick={() => setImageOpen(false)}
-            className="absolute right-2 top-2 grid h-10 w-10 place-items-center rounded-full bg-white text-slate-900 shadow-lg"
-            aria-label="Close image preview"
-          >
-            <X size={18} />
-          </button>
-          <img
-            src={url}
-            alt="Attached scan large preview"
-            className="max-h-[88dvh] max-w-full rounded-2xl object-contain shadow-2xl"
-          />
-        </div>
-      </div>
-    ) : null;
-
-  return (
-    <section className="space-y-3">
-      <SectionTitle icon={FileText}>Attachment</SectionTitle>
-      <div className="rounded-2xl border border-slate-200 bg-white p-3">
-        {isImage ? (
-          <button
-            type="button"
-            onClick={() => setImageOpen(true)}
-            className="block w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-left"
-          >
-            <img src={url} alt="Attached scan preview" className="max-h-72 w-full object-contain" />
-          </button>
-        ) : isPdf ? (
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-900"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <FileText size={18} className="shrink-0 text-rose-600" />
-              <span className="truncate">Open scanned PDF</span>
-            </span>
-            <ExternalLink size={16} className="shrink-0 text-slate-400" />
-          </a>
-        ) : url ? (
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-900"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <ImageIcon size={18} className="shrink-0 text-slate-500" />
-              <span className="truncate">Open attached file</span>
-            </span>
-            <ExternalLink size={16} className="shrink-0 text-slate-400" />
-          </a>
-        ) : (
-          <div className="rounded-xl bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-500">
-            Attachment is saved; preview is loading.
-          </div>
-        )}
-
-        <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-slate-500">
-          <span className="rounded-full bg-slate-100 px-2 py-1">{mimeType || "stored file"}</span>
-          {sizeLabel ? <span className="rounded-full bg-slate-100 px-2 py-1">{sizeLabel}</span> : null}
-        </div>
-      </div>
-      {typeof document !== "undefined" && largePreview ? createPortal(largePreview, document.body) : largePreview}
     </section>
   );
 }
@@ -302,7 +195,7 @@ export default function TransactionDetailModal({
       <button
         type="button"
         className="absolute inset-0 bg-black/45 backdrop-blur-sm"
-        aria-label="Close transaction details"
+        aria-label="ปิดรายละเอียดรายการ"
         onClick={onClose}
       />
 
@@ -315,7 +208,7 @@ export default function TransactionDetailModal({
                 <span>{typeLabel(model.txType)}</span>
               </div>
               <h3 id={titleId} className="mt-1 break-words text-xl font-bold text-slate-950">
-                {model.title || "Transaction"}
+                {model.title || "รายการ"}
               </h3>
               {model.merchant && model.merchant !== model.title ? (
                 <div className="mt-1 break-words text-sm font-semibold text-slate-500">{model.merchant}</div>
@@ -326,8 +219,8 @@ export default function TransactionDetailModal({
               type="button"
               onClick={onClose}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200"
-              aria-label="Close transaction details"
-              title="Close"
+              aria-label="ปิดรายละเอียดรายการ"
+              title="ปิด"
             >
               <X size={18} />
             </button>
@@ -337,36 +230,36 @@ export default function TransactionDetailModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           <div className="space-y-4">
             <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Amount</div>
-              <div className={`mt-1 text-3xl font-black tabular-nums ${amountTone(model.txType)}`}>{amountText}</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-slate-500">จำนวนเงิน</div>
+              <div className={`mt-1 break-all text-3xl font-black tabular-nums ${amountTone(model.txType)}`}>{amountText}</div>
               <div className="mt-2 text-sm font-semibold text-slate-600">{dateLabel}</div>
             </section>
 
             {model.transfer ? (
               <section className="space-y-3">
-                <SectionTitle icon={ArrowRightLeft}>Transfer details</SectionTitle>
+                <SectionTitle icon={ArrowRightLeft}>รายละเอียดการโอน</SectionTitle>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <DetailRow label="From" value={model.transfer.fromAccountName} />
-                  <DetailRow label="To" value={model.transfer.toAccountName} />
+                  <DetailRow label="จากบัญชี" value={model.transfer.fromAccountName} />
+                  <DetailRow label="ไปบัญชี" value={model.transfer.toAccountName} />
                 </div>
               </section>
             ) : null}
 
             <section className="space-y-2">
-              <SectionTitle icon={ReceiptText}>Details</SectionTitle>
-              <DetailRow label="Account" value={model.accountName} />
-              <DetailRow label="Category" value={model.categoryName} />
-              <DetailRow label="Reference" value={model.ref} />
-              <DetailRow label="Source" value={model.source} />
+              <SectionTitle icon={ReceiptText}>รายละเอียด</SectionTitle>
+              <DetailRow label="บัญชี" value={model.accountName} />
+              <DetailRow label="หมวดหมู่" value={model.categoryName} />
+              <DetailRow label="อ้างอิง" value={model.ref} />
+              <DetailRow label="ที่มา" value={model.source} />
               {model.note ? (
                 <div className="rounded-xl bg-slate-50 px-3 py-2">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Note</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">โน้ต</div>
                   <div className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold text-slate-900">{model.note}</div>
                 </div>
               ) : null}
               {sourceEvidence ? (
                 <div className="rounded-xl bg-slate-50 px-3 py-2">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Evidence</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">หลักฐาน</div>
                   <div className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold text-slate-900">
                     {sourceEvidence}
                   </div>
@@ -375,7 +268,12 @@ export default function TransactionDetailModal({
             </section>
 
             <ReceiptLines lines={model.lines} />
-            <AttachmentPreview attachmentId={model.attachmentId} />
+            {model.attachmentId ? (
+              <section className="space-y-3">
+                <SectionTitle icon={ReceiptText}>ไฟล์แนบ</SectionTitle>
+                <AttachmentPreview attachmentId={model.attachmentId} variant="inline" />
+              </section>
+            ) : null}
           </div>
         </div>
 

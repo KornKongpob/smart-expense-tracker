@@ -306,7 +306,7 @@ export default function TransactionCard({ tx, category, accountName, onClick }) 
             </div>
 
             <div className="shrink-0 flex items-center gap-2">
-              <div className={`text-sm font-semibold tabular-nums ${amountClass}`}>
+              <div className={`max-w-[9rem] truncate text-right text-sm font-semibold tabular-nums sm:max-w-none ${amountClass}`}>
                 {amountPrefix}
                 {amountText}
               </div>

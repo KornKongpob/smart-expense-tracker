@@ -284,7 +284,7 @@ export default function FinancialPlanPanel({
               <BrainCircuit size={18} aria-hidden="true" />
             </span>
             <div>
-              <div className="finance-panel-title text-sm font-bold text-slate-950">AI Financial Plan</div>
+              <div className="finance-panel-title text-sm font-bold text-slate-950">แผนการเงินจาก AI</div>
               <div className="finance-panel-copy mt-1 text-xs font-medium text-slate-500">
                 ให้ AI ช่วยเรียบเรียงแผนออมเงิน กระแสเงินสด และการจ่ายหนี้จากข้อมูลสรุปเดือนนี้
               </div>
