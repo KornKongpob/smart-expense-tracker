@@ -40,13 +40,14 @@ const SCREEN_LOADERS = {
   planner: () => import("../features/app/screens/PlannerScreen.jsx"),
   goals: () => import("../features/app/screens/GoalsScreen.jsx"),
   debts: () => import("../features/app/screens/DebtPlannerScreen.jsx"),
+  "credit-statements": () => import("../features/app/screens/CreditStatementsScreen.jsx"),
   bills: () => import("../features/app/screens/BillsScreen.jsx"),
   recurring: () => import("../features/app/screens/RecurringScreen.jsx"),
   settings: () => import("../features/app/screens/SettingsScreen.jsx"),
 };
 
 const PRELOADED_VIEWS = new Set();
-const IDLE_PRELOAD_VIEWS = ["plan", "assistant", "inbox", "add", "transactions", "accounts", "settings", "planner", "goals", "debts", "bills", "categories", "recurring"];
+const IDLE_PRELOAD_VIEWS = ["plan", "assistant", "inbox", "add", "transactions", "accounts", "settings", "planner", "goals", "debts", "credit-statements", "bills", "categories", "recurring"];
 
 function preloadView(view) {
   const key = String(view || "").trim();
@@ -70,6 +71,7 @@ const CategoriesScreen = lazy(SCREEN_LOADERS.categories);
 const PlannerScreen = lazy(SCREEN_LOADERS.planner);
 const GoalsScreen = lazy(SCREEN_LOADERS.goals);
 const DebtPlannerScreen = lazy(SCREEN_LOADERS.debts);
+const CreditStatementsScreen = lazy(SCREEN_LOADERS["credit-statements"]);
 const BillsScreen = lazy(SCREEN_LOADERS.bills);
 const RecurringScreen = lazy(SCREEN_LOADERS.recurring);
 const SettingsScreen = lazy(SCREEN_LOADERS.settings);
@@ -86,6 +88,7 @@ const SCREEN_COMPONENTS = {
   planner: PlannerScreen,
   goals: GoalsScreen,
   debts: DebtPlannerScreen,
+  "credit-statements": CreditStatementsScreen,
   bills: BillsScreen,
   recurring: RecurringScreen,
   settings: SettingsScreen,
@@ -103,12 +106,14 @@ const SCREEN_TITLES = {
   planner: "Planner | Smart Expense",
   goals: "Savings Goals | Smart Expense",
   debts: "Debt Planner | Smart Expense",
+  "credit-statements": "Credit Statements | Smart Expense",
   bills: "Bills | Smart Expense",
   recurring: "Recurring | Smart Expense",
   settings: "Settings | Smart Expense",
 };
 
 const SCREEN_HEADER_LABELS = {
+  "credit-statements": "รอบบิลบัตรเครดิต",
   debts: "แผนจัดการหนี้",
   goals: "เป้าหมายการออม",
   bills: "บิล & Subscription",

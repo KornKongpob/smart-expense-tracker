@@ -12,8 +12,8 @@ export default function CalendarMonthView({ monthKey, days = [], selectedDate = 
   const blanks = Array.from({ length: leadingBlanks(monthKey) }, (_, index) => `blank-${index}`);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-slate-400">
+    <div className="ui-card p-3">
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-[color:var(--muted)]">
         {WEEKDAYS.map((day, index) => (
           <div key={`${day}-${index}`} className="py-1">
             {day}
@@ -33,10 +33,10 @@ export default function CalendarMonthView({ monthKey, days = [], selectedDate = 
               type="button"
               onClick={() => onSelectDate?.(day.date)}
               className={`aspect-square rounded-xl border p-1 text-left transition active:scale-95 ${
-                active ? "border-indigo-500 bg-indigo-50" : "border-slate-100 bg-slate-50"
+                active ? "border-blue-300 bg-blue-50" : "border-slate-100 bg-white/70"
               }`}
             >
-              <div className="text-[11px] font-semibold text-slate-700">{Number(day.date.slice(-2))}</div>
+              <div className="text-[11px] font-semibold text-[color:var(--text)]">{Number(day.date.slice(-2))}</div>
               {hasActivity ? (
                 <div className="mt-1 space-y-0.5">
                   {day.expenseSatang ? (

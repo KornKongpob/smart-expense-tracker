@@ -22,6 +22,18 @@ import {
   splitReceiptItemsToLines,
 } from '../src/utils/receiptCategorizer.js';
 import { getNextRecurringDueISO, advanceRecurringDate } from '../src/utils/recurring.js';
+import {
+  clampBillingDay,
+  getNextDueDate,
+  getNextStatementDate,
+} from '../src/utils/creditDates.js';
+import {
+  calculateCreditPaymentPlan,
+  getBillingCycleForCard,
+  getStatementsNeedingInput,
+  makeCreditStatementCycleKey,
+  normalizeCreditStatement as normalizePlannerCreditStatement,
+} from '../src/utils/creditPlanner.js';
 import { duplicateStateFromMatch, toDuplicateComparable } from '../src/utils/duplicateDetection.js';
 import {
   detectScanTextDocType,
@@ -76,7 +88,13 @@ import {
 } from '../src/views/add-transaction/helpers/queueTypeHelpers.js';
 import { canonicalizeCategoryId } from '../src/utils/categoryIds.js';
 import { buildCustomCategoryId } from '../src/utils/categoryCustomId.js';
-import { applyGoalContribution, createInitialState, normalizeCreditStatement, normalizeGoal } from '../src/store/boot.js';
+import {
+  applyGoalContribution,
+  createInitialState,
+  normalizeCreditStatement,
+  normalizeGoal,
+  normalizeSalaryPlan,
+} from '../src/store/boot.js';
 import {
   buildFallbackPlan as buildServerFinancialPlanFallback,
   sanitizeFinancialSnapshot as sanitizeServerFinancialSnapshot,
@@ -138,9 +156,11 @@ import {
 import {
   getCanonicalPathForPathname,
   getInitialHomePath,
+  getPathForView,
   getPathForLegacyHash,
   getViewForPathname,
 } from '../src/features/app/routes.js';
+import { buildHash, parseHash } from '../src/utils/hashRouter.js';
 import { validateBackupImport } from '../src/schemas/index.js';
 import {
   createNextPublicSupabaseEnv,
@@ -699,6 +719,206 @@ test('recurring: yearly frequency preserves anchor day when possible', () => {
   );
 
   assert.equal(nextDue, '2025-02-28');
+});
+
+test('credit dates: billing days clamp to the valid statement range', () => {
+  assert.equal(clampBillingDay(0), 1);
+  assert.equal(clampBillingDay('32'), 31);
+  assert.equal(clampBillingDay('12.9'), 12);
+  assert.equal(clampBillingDay('bad'), 1);
+});
+
+test('credit dates: next statement date clamps month ends safely', () => {
+  assert.equal(getNextStatementDate(31, '2026-02-01'), '2026-02-28');
+  assert.equal(getNextStatementDate(31, '2026-02-28'), '2026-02-28');
+  assert.equal(getNextStatementDate(31, '2026-03-01'), '2026-03-31');
+});
+
+test('credit dates: next due date follows the nearest open billing cycle', () => {
+  assert.equal(getNextDueDate(20, 5, '2026-02-01'), '2026-02-05');
+  assert.equal(getNextDueDate(20, 5, '2026-02-06'), '2026-03-05');
+  assert.equal(getNextDueDate(20, 5, '2026-02-25'), '2026-03-05');
+  assert.equal(getNextDueDate(20, 25, '2026-02-01'), '2026-02-25');
+  assert.equal(getNextDueDate(31, 31, '2026-02-01'), '2026-02-28');
+  assert.equal(getNextDueDate(31, 5, '2026-03-01'), '2026-03-05');
+});
+
+test('credit planner: billing cycle keys clamp month-end statement and due dates', () => {
+  const account = { id: 'card-1', type: 'credit', statementDay: 31, dueDay: 5 };
+  const cycle = getBillingCycleForCard(account, '2026-03-01');
+
+  assert.equal(cycle.statementDate, '2026-02-28');
+  assert.equal(cycle.dueDate, '2026-03-05');
+  assert.equal(cycle.cycleKey, 'card-1:2026-02-28');
+  assert.equal(makeCreditStatementCycleKey('card-1', '2026-02-28'), cycle.cycleKey);
+});
+
+test('credit planner: statements needing input include missing credit cycles only', () => {
+  const accounts = [
+    { id: 'card-a', name: 'Card A', type: 'credit', statementDay: 20, dueDay: 5 },
+    { id: 'card-b', name: 'Card B', type: 'credit', statementDay: 15, dueDay: 25 },
+    { id: 'cash', name: 'Cash', type: 'cash', statementDay: 1, dueDay: 1 },
+  ];
+  const existing = [
+    normalizePlannerCreditStatement({
+      accountId: 'card-a',
+      statementDate: '2026-06-20',
+      dueDate: '2026-07-05',
+      fullDue: 100_000,
+      minimumDue: 10_000,
+    }),
+  ];
+
+  const missing = getStatementsNeedingInput(accounts, existing, '2026-06-21');
+
+  assert.deepEqual(missing.map((item) => item.accountId), ['card-b']);
+  assert.equal(missing[0].cycleKey, 'card-b:2026-06-15');
+  assert.equal(missing[0].dueDate, '2026-06-25');
+});
+
+test('credit planner: normalizes legacy and new statement fields as positive satang', () => {
+  const normalized = normalizePlannerCreditStatement({
+    account_id: 'card-1',
+    statement_date: '2026-06-20',
+    due_date: '2026-07-05',
+    statement_balance_satang: 120_000,
+    minimum_due_satang: 12_000,
+    paid_amount_satang: 2_000,
+    planned_pay_amount_satang: 10_000,
+    status: 'planned',
+    note: 'June cycle',
+    created_at: 100,
+    updated_at: 200,
+  });
+
+  assert.equal(normalized.id, 'credit_statement_card-1_2026-06-20');
+  assert.equal(normalized.cycleKey, 'card-1:2026-06-20');
+  assert.equal(normalized.fullDue, 120_000);
+  assert.equal(normalized.statementBalance, 120_000);
+  assert.equal(normalized.minimumDue, 12_000);
+  assert.equal(normalized.paidAmount, 2_000);
+  assert.equal(normalized.plannedPayAmount, 10_000);
+  assert.equal(normalized.status, 'planned');
+});
+
+test('credit planner: pays minimums by due date before allocating due-date extra', () => {
+  const accounts = [
+    { id: 'card-a', name: 'Earlier', type: 'credit' },
+    { id: 'card-b', name: 'Later', type: 'credit' },
+    { id: 'cash', name: 'Cash', type: 'cash' },
+  ];
+  const creditStatements = [
+    { id: 'stmt-b', accountId: 'card-b', statementDate: '2026-06-20', dueDate: '2026-07-10', fullDue: 100_000, minimumDue: 10_000, status: 'open' },
+    { id: 'stmt-a', accountId: 'card-a', statementDate: '2026-06-15', dueDate: '2026-07-05', fullDue: 50_000, minimumDue: 20_000, status: 'open' },
+  ];
+
+  const plan = calculateCreditPaymentPlan({
+    accounts,
+    creditStatements,
+    salaryAmount: 40_000,
+    reserveAmount: 0,
+    debtBudget: 0,
+    strategy: 'due_date',
+    todayDate: '2026-06-21',
+  });
+
+  assert.deepEqual(plan.payments.map((payment) => payment.accountId), ['card-a', 'card-b']);
+  assert.equal(plan.totalMinimumRequired, 30_000);
+  assert.equal(plan.totalFullDue, 150_000);
+  assert.equal(plan.availableDebtBudget, 40_000);
+  assert.equal(plan.payments[0].recommendedPayment, 30_000);
+  assert.equal(plan.payments[0].extraPayment, 10_000);
+  assert.equal(plan.payments[1].recommendedPayment, 10_000);
+  assert.equal(plan.shortfall, 0);
+});
+
+test('credit planner: insufficient budget funds nearest minimums first and warns', () => {
+  const accounts = [
+    { id: 'card-a', type: 'credit' },
+    { id: 'card-b', type: 'credit' },
+  ];
+  const creditStatements = [
+    { id: 'stmt-a', accountId: 'card-a', statementDate: '2026-06-15', dueDate: '2026-07-05', fullDue: 50_000, minimumDue: 20_000, status: 'open' },
+    { id: 'stmt-b', accountId: 'card-b', statementDate: '2026-06-20', dueDate: '2026-07-10', fullDue: 100_000, minimumDue: 10_000, status: 'planned' },
+  ];
+
+  const plan = calculateCreditPaymentPlan({
+    accounts,
+    creditStatements,
+    salaryAmount: 15_000,
+    reserveAmount: 0,
+    debtBudget: 0,
+    strategy: 'due_date',
+  });
+
+  assert.equal(plan.totalMinimumRequired, 30_000);
+  assert.equal(plan.availableDebtBudget, 15_000);
+  assert.equal(plan.shortfall, 15_000);
+  assert.ok(plan.warnings.includes('minimum_due_shortfall'));
+  assert.equal(plan.payments[0].recommendedPayment, 15_000);
+  assert.equal(plan.payments[1].recommendedPayment, 0);
+  assert.ok(plan.payments[0].warnings.includes('minimum_due_not_fully_funded'));
+  assert.ok(plan.payments[1].warnings.includes('minimum_due_not_fully_funded'));
+});
+
+test('credit planner: full payoff never recommends more than remaining full due', () => {
+  const accounts = [
+    { id: 'card-a', type: 'credit' },
+    { id: 'card-b', type: 'credit' },
+  ];
+  const creditStatements = [
+    { id: 'stmt-a', accountId: 'card-a', statementDate: '2026-06-15', dueDate: '2026-07-05', fullDue: 100_000, paidAmount: 40_000, minimumDue: 20_000, status: 'open' },
+    { id: 'stmt-b', accountId: 'card-b', statementDate: '2026-06-20', dueDate: '2026-07-10', fullDue: 90_000, paidAmount: 0, minimumDue: 30_000, status: 'planned' },
+  ];
+
+  const plan = calculateCreditPaymentPlan({
+    accounts,
+    creditStatements,
+    salaryAmount: 220_000,
+    reserveAmount: 20_000,
+    debtBudget: 0,
+    strategy: 'highest_balance',
+  });
+
+  assert.equal(plan.availableDebtBudget, 200_000);
+  assert.equal(plan.totalFullDue, 150_000);
+  assert.equal(plan.totalRecommended, 150_000);
+  assert.equal(plan.surplus, 50_000);
+  assert.equal(plan.payments.find((payment) => payment.accountId === 'card-a').recommendedPayment, 60_000);
+  assert.equal(plan.payments.find((payment) => payment.accountId === 'card-b').recommendedPayment, 90_000);
+});
+
+test('credit planner: extra payment strategies differ after minimums', () => {
+  const accounts = [
+    { id: 'large', type: 'credit' },
+    { id: 'small', type: 'credit' },
+  ];
+  const creditStatements = [
+    { id: 'stmt-large', accountId: 'large', statementDate: '2026-06-15', dueDate: '2026-07-08', fullDue: 100_000, minimumDue: 10_000, status: 'open' },
+    { id: 'stmt-small', accountId: 'small', statementDate: '2026-06-15', dueDate: '2026-07-09', fullDue: 25_000, minimumDue: 10_000, status: 'open' },
+  ];
+
+  const highest = calculateCreditPaymentPlan({
+    accounts,
+    creditStatements,
+    salaryAmount: 45_000,
+    reserveAmount: 0,
+    debtBudget: 0,
+    strategy: 'highest_balance',
+  });
+  const snowball = calculateCreditPaymentPlan({
+    accounts,
+    creditStatements,
+    salaryAmount: 45_000,
+    reserveAmount: 0,
+    debtBudget: 0,
+    strategy: 'snowball',
+  });
+
+  assert.equal(highest.payments.find((payment) => payment.accountId === 'large').recommendedPayment, 35_000);
+  assert.equal(highest.payments.find((payment) => payment.accountId === 'small').recommendedPayment, 10_000);
+  assert.equal(snowball.payments.find((payment) => payment.accountId === 'small').recommendedPayment, 25_000);
+  assert.equal(snowball.payments.find((payment) => payment.accountId === 'large').recommendedPayment, 20_000);
 });
 
 test('duplicate helpers: normalize comparable entries and duplicate reasons consistently', () => {
@@ -1440,6 +1660,7 @@ test('backup normalization: wrapped payloads preserve merchants and normalize am
 test('credit statements: normalize model and default missing backups to empty list', () => {
   const empty = createInitialState({ transactions: [], accounts: [], categories: { expense: [], income: [] } });
   assert.deepEqual(empty.creditStatements, []);
+  assert.deepEqual(empty.salaryPlans, []);
 
   const normalized = normalizeCreditStatement({
     account_id: 'card-1',
@@ -1457,13 +1678,34 @@ test('credit statements: normalize model and default missing backups to empty li
 
   assert.equal(normalized.id, 'credit_statement_card-1_2026-05');
   assert.equal(normalized.accountId, 'card-1');
+  assert.equal(normalized.cycleKey, 'card-1:2026-05-10');
   assert.equal(normalized.month, '2026-05');
   assert.equal(normalized.statementDate, '2026-05-10');
   assert.equal(normalized.dueDate, '2026-05-25');
   assert.equal(normalized.statementBalance, 123_450);
+  assert.equal(normalized.fullDue, 123_450);
   assert.equal(normalized.minimumDue, 12_000);
+  assert.equal(normalized.paidAmount, 0);
+  assert.equal(normalized.plannedPayAmount, 0);
   assert.equal(normalized.apr, 20.5);
   assert.equal(normalized.status, 'open');
+
+  const salaryPlan = normalizeSalaryPlan({
+    month: '2026-06',
+    salaryAmountSatang: 120_000,
+    reserve_amount_satang: 40_000,
+    debt_budget_satang: 70_000,
+    strategy: 'snowball',
+    created_at: 100,
+    updated_at: 200,
+  });
+
+  assert.equal(salaryPlan.id, 'salary_plan_2026-06');
+  assert.equal(salaryPlan.month, '2026-06');
+  assert.equal(salaryPlan.salaryAmount, 120_000);
+  assert.equal(salaryPlan.reserveAmount, 40_000);
+  assert.equal(salaryPlan.debtBudget, 70_000);
+  assert.equal(salaryPlan.strategy, 'snowball');
 
   const state = createInitialState({
     moneyUnit: 'baht',
@@ -1488,9 +1730,10 @@ test('credit statements: normalize model and default missing backups to empty li
   assert.equal(state.creditStatements[0].statementBalance, 123_450);
   assert.equal(state.creditStatements[0].minimumDue, 12_525);
   assert.equal(state.creditStatements[0].status, 'paid');
+  assert.deepEqual(state.salaryPlans, []);
 });
 
-test('credit statements: persist through storage and backup validation', (t) => {
+test('credit statements and salary plans: persist through storage and backup validation', (t) => {
   let raw = '';
   installBrowserGlobals(t, {
     getItem: () => raw,
@@ -1513,27 +1756,50 @@ test('credit statements: persist through storage and backup validation', (t) => 
     createdAt: 1,
     updatedAt: 2,
   };
+  const salaryPlan = {
+    id: 'salary-plan-2026-05',
+    month: '2026-05',
+    salaryAmount: 150_000,
+    reserveAmount: 60_000,
+    debtBudget: 80_000,
+    strategy: 'due_date',
+    createdAt: 3,
+    updatedAt: 4,
+  };
 
   saveAll({
     transactions: [],
     accounts: [],
     categories: { expense: [], income: [] },
     creditStatements: [statement],
+    salaryPlans: [salaryPlan],
   });
 
   const saved = JSON.parse(raw);
   assert.equal(saved.data.creditStatements.length, 1);
   assert.equal(saved.data.creditStatements[0].minimumDue, 50_000);
+  assert.equal(saved.data.salaryPlans.length, 1);
+  assert.equal(saved.data.salaryPlans[0].salaryAmount, 150_000);
 
   const loaded = loadAll();
   assert.equal(loaded.creditStatements.length, 1);
   assert.equal(loaded.creditStatements[0].accountId, 'card-1');
   assert.equal(loaded.creditStatements[0].minimumDue, 50_000);
+  assert.equal(loaded.salaryPlans.length, 1);
+  assert.equal(loaded.salaryPlans[0].debtBudget, 80_000);
 
-  const validation = validateBackupImport({ data: { moneyUnit: 'satang', creditStatements: [statement] } });
+  const validation = validateBackupImport({ data: { moneyUnit: 'satang', creditStatements: [statement], salaryPlans: [salaryPlan] } });
   assert.equal(validation.success, true);
   assert.equal(validation.data.creditStatements.length, 1);
   assert.equal(validation.data.creditStatements[0].statementBalance, 500_000);
+  assert.equal(validation.data.creditStatements[0].fullDue, 500_000);
+  assert.equal(validation.data.salaryPlans.length, 1);
+  assert.equal(validation.data.salaryPlans[0].reserveAmount, 60_000);
+
+  const legacyValidation = validateBackupImport({ data: { moneyUnit: 'satang', transactions: [] } });
+  assert.equal(legacyValidation.success, true);
+  assert.deepEqual(legacyValidation.data.creditStatements, []);
+  assert.deepEqual(legacyValidation.data.salaryPlans, []);
 });
 
 test('financial plan API source: keeps OpenAI usage server-side with strict JSON output', () => {
@@ -3381,6 +3647,29 @@ test('route helpers: canonical routes, aliases, and legacy hashes resolve to Nex
   assert.equal(getInitialHomePath({ pathname: '/', hash: '#/assistant' }), '/assistant');
   assert.equal(getInitialHomePath({ pathname: '/accounts', hash: '#/stats' }), '/accounts');
   assert.equal(getInitialHomePath({ pathname: '/', hash: '' }), '/dashboard');
+});
+
+test('credit statements route: runtime, hash router, and settings entry are wired', () => {
+  const appRootSource = readFileSync(new URL('../src/core/AppRoot.jsx', import.meta.url), 'utf8');
+  const settingsSource = readFileSync(new URL('../src/features/app/screens/SettingsScreen.jsx', import.meta.url), 'utf8');
+  const moreSource = readFileSync(new URL('../src/views/MoreView.jsx', import.meta.url), 'utf8');
+  const screenSource = readFileSync(new URL('../src/views/CreditStatementsView.jsx', import.meta.url), 'utf8');
+  const runtimePageSource = readFileSync(new URL('../app/(runtime)/credit-statements/page.js', import.meta.url), 'utf8');
+
+  assert.equal(getPathForView('credit-statements'), '/credit-statements');
+  assert.equal(getViewForPathname('/credit-statements'), 'credit-statements');
+  assert.equal(getPathForLegacyHash('#/credit-statements'), '/credit-statements');
+  assert.equal(parseHash('#/credit-statements').view, 'credit-statements');
+  assert.equal(buildHash('credit-statements'), '#/credit-statements');
+  assert.match(appRootSource, /credit-statements/);
+  assert.match(appRootSource, /CreditStatementsScreen/);
+  assert.match(settingsSource, /รอบบิลบัตรเครดิต/);
+  assert.match(settingsSource, /navigateToView\("credit-statements"\)/);
+  assert.match(moreSource, /รอบบิลบัตรเครดิต/);
+  assert.match(moreSource, /navigate\("credit-statements"\)/);
+  assert.match(screenSource, /ยอดขั้นต่ำ/);
+  assert.match(screenSource, /ยอดเต็มที่ต้องจ่าย/);
+  assert.match(runtimePageSource, /return null/);
 });
 
 test('entry intent helpers: explicit one-shot intents are normalized deterministically', () => {

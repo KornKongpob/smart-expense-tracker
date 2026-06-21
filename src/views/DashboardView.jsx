@@ -16,6 +16,9 @@ import {
 import AppHeader from "../components/AppHeader";
 import FinancialPlanPanel from "../components/FinancialPlanPanel.jsx";
 import MoneyCoachPanel from "../components/MoneyCoachPanel.jsx";
+import ProgressBar from "../components/ProgressBar.jsx";
+import SectionHeader from "../components/SectionHeader.jsx";
+import StatCard from "../components/StatCard.jsx";
 import TransactionDetailModal from "../components/TransactionDetailModal.jsx";
 import { useAppStore } from "../store/store.jsx";
 import { formatCurrency, formatDateShort, toISODate } from "../utils/format";
@@ -47,47 +50,16 @@ function clampPercent(value) {
   return Math.max(0, Math.min(100, number));
 }
 
-function OverviewMetric({ icon, label, value, hint, tone = "slate", onClick }) {
-  const toneClass =
-    tone === "emerald"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-      : tone === "indigo"
-        ? "border-indigo-200 bg-indigo-50 text-indigo-950"
-        : tone === "rose"
-          ? "border-rose-200 bg-rose-50 text-rose-900"
-          : tone === "amber"
-            ? "border-amber-200 bg-amber-50 text-amber-900"
-        : "border-slate-200 bg-slate-50 text-slate-900";
-  const Component = onClick ? "button" : "div";
-
-  return (
-    <Component
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
-      className={`min-w-0 rounded-2xl border p-3 text-left shadow-sm ${onClick ? "cursor-pointer transition hover:shadow-md active:scale-[0.98]" : ""} ${toneClass}`}
-    >
-      <div className="flex items-center gap-2">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/70 text-current">
-          {icon}
-        </span>
-        <div className="min-w-0 text-[11px] font-bold uppercase text-current/60">{label}</div>
-      </div>
-      <div className="mt-3 truncate text-xl font-bold tabular-nums">{value}</div>
-      {hint ? <div className="mt-1 truncate text-[11px] font-semibold text-current/60">{hint}</div> : null}
-    </Component>
-  );
-}
-
 function QuickAction({ icon, label, onClick, primary = false }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-20 cursor-pointer flex-col items-start justify-between rounded-2xl border p-3 text-left shadow-sm transition hover:shadow-md active:scale-[0.98] ${
-        primary ? "border-indigo-500 bg-indigo-600 text-white" : "border-slate-200 bg-white text-slate-900"
+      className={`ui-card flex min-h-20 cursor-pointer flex-col items-start justify-between p-3 text-left ${
+        primary ? "border-blue-500/40 bg-blue-600 text-white shadow-[0_18px_34px_-24px_rgba(0,122,255,0.7)]" : "text-[color:var(--text)]"
       }`}
     >
-      <span className={`grid h-9 w-9 place-items-center rounded-full ${primary ? "bg-white/20" : "bg-slate-100"}`}>
+      <span className={`grid h-9 w-9 place-items-center rounded-2xl ${primary ? "bg-white/20" : "bg-blue-50 text-blue-700"}`}>
         {icon}
       </span>
       <span className="text-sm font-semibold">{label}</span>
@@ -241,53 +213,54 @@ export default function DashboardView() {
       />
 
       <main className="ui-page pt-4 pb-nav view-flow">
-        <section className="space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-xs font-bold uppercase text-indigo-700">Today / This month</div>
-              <h1 className="mt-1 text-xl font-bold text-slate-950">ศูนย์บัญชาการการเงิน</h1>
-              <p className="mt-1 text-xs font-medium text-slate-500">ภาพรวมเงินพร้อมใช้ งบเดือนนี้ และหนี้บัตรเครดิต</p>
-            </div>
-            <button type="button" onClick={() => navigate("budgets")} className="text-xs font-bold text-indigo-700">
-              ปรับงบ
-            </button>
-          </div>
+        <section className="ui-card-strong finance-dashboard-hero space-y-4 p-4">
+          <SectionHeader
+            eyebrow="Today / This month"
+            title="ศูนย์บัญชาการการเงิน"
+            subtitle="ภาพรวมเงินพร้อมใช้ งบเดือนนี้ และหนี้บัตรเครดิต"
+            titleClassName="text-xl"
+            action={
+              <button type="button" onClick={() => navigate("budgets")} className="ui-btn ui-btn-secondary ui-btn-compact">
+                ปรับงบ
+              </button>
+            }
+          />
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <OverviewMetric
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
               icon={<Wallet size={17} aria-hidden="true" />}
               label="เงินสด/บัญชีพร้อมใช้"
               value={formatCurrency(snapshot.accountSummary.totalAssetsSatang || 0)}
               hint="ไม่รวมวงเงินบัตรเครดิต"
-              tone="emerald"
+              tone="success"
               onClick={() => navigate("accounts")}
             />
-            <OverviewMetric
+            <StatCard
               icon={<TrendingUp size={17} aria-hidden="true" />}
               label="ใช้ไปเดือนนี้"
               value={formatCurrency(snapshot.monthlySummary?.expense || 0)}
               hint={`รายรับ ${formatCurrency(snapshot.monthlySummary?.income || 0)}`}
-              tone="indigo"
+              tone="info"
             />
-            <OverviewMetric
+            <StatCard
               icon={<PiggyBank size={17} aria-hidden="true" />}
               label={budgetOverviewLabel}
               value={budgetOverviewValue}
               hint={budgetOverviewHint}
-              tone={isOverMonthlyBudget ? "rose" : hasMonthlyBudget ? "emerald" : "amber"}
+              tone={isOverMonthlyBudget ? "danger" : hasMonthlyBudget ? "success" : "warning"}
               onClick={() => navigate("budgets")}
             />
-            <OverviewMetric
+            <StatCard
               icon={<CreditCard size={17} aria-hidden="true" />}
               label="หนี้บัตรเครดิตรวม"
               value={formatCurrency(snapshot.accountSummary.creditCardOutstandingSatang || 0)}
               hint="ดูแผนชำระและวันครบกำหนด"
-              tone={snapshot.accountSummary.creditCardOutstandingSatang ? "rose" : "slate"}
+              tone={snapshot.accountSummary.creditCardOutstandingSatang ? "danger" : "neutral"}
               onClick={openDebtPlan}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <QuickAction icon={<Plus size={17} />} label="เพิ่มรายจ่าย" primary onClick={() => openManual("expense")} />
             <QuickAction icon={<ReceiptText size={17} />} label="สแกนใบเสร็จ" onClick={openScan} />
             <QuickAction icon={<CreditCard size={17} />} label="ชำระบัตร" onClick={() => openManual("credit_payment")} />
@@ -295,7 +268,7 @@ export default function DashboardView() {
           </div>
 
           <div
-            className={`mt-3 rounded-2xl border px-3 py-2 text-xs font-semibold ${
+            className={`ui-toast text-xs font-semibold ${
               cashFlowForecast.lowestBalance < 0
                 ? "border-amber-200 bg-amber-50 text-amber-800"
                 : "border-emerald-200 bg-emerald-50 text-emerald-800"
@@ -317,7 +290,7 @@ export default function DashboardView() {
 
         <MoneyCoachPanel insights={moneyCoachInsights} onAction={handleMoneyCoachAction} />
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="ui-card-strong p-4">
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => changeMonth(-1)} className="ui-icon-btn" aria-label="Previous month">
               <ArrowLeft size={16} />
@@ -347,27 +320,27 @@ export default function DashboardView() {
 
         <PendingReceiptCard count={snapshot.pendingReceiptCount} onOpen={() => navigate("inbox")} />
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Monthly Budget</div>
-              <div className="mt-1 text-xs font-medium text-slate-500">
-                {snapshot.budgetSummary.totalLimitSatang
-                  ? `${formatCurrency(snapshot.budgetSummary.actualSatang)} used of ${formatCurrency(snapshot.budgetSummary.totalLimitSatang)}`
-                  : "Set a monthly or category budget to track remaining spend."}
-              </div>
-            </div>
-            <button type="button" onClick={() => navigate("budgets")} className="text-xs font-bold text-indigo-700">
-              Budgets
-            </button>
-          </div>
+        <section className="ui-card-strong p-4">
+          <SectionHeader
+            title="Monthly Budget"
+            subtitle={
+              snapshot.budgetSummary.totalLimitSatang
+                ? `${formatCurrency(snapshot.budgetSummary.actualSatang)} used of ${formatCurrency(snapshot.budgetSummary.totalLimitSatang)}`
+                : "Set a monthly or category budget to track remaining spend."
+            }
+            action={
+              <button type="button" onClick={() => navigate("budgets")} className="ui-btn ui-btn-secondary ui-btn-compact">
+                Budgets
+              </button>
+            }
+          />
           {snapshot.budgetSummary.totalLimitSatang ? (
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className={`h-full rounded-full ${snapshot.budgetSummary.overBudget ? "bg-rose-500" : "bg-emerald-500"}`}
-                style={{ width: `${budgetPercent}%` }}
-              />
-            </div>
+            <ProgressBar
+              className="mt-3"
+              value={budgetPercent}
+              tone={snapshot.budgetSummary.overBudget ? "danger" : "success"}
+              label="Monthly budget usage"
+            />
           ) : null}
           {topOverCategory ? (
             <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
@@ -377,32 +350,30 @@ export default function DashboardView() {
         </section>
 
         <section className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-slate-900">Transactions</h2>
-              <p className="text-xs font-medium text-slate-500">
-                {viewMode === "calendar" && selectedDate ? selectedDate : "Recent ledger activity"}
-              </p>
-            </div>
-            <div className="flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-              <button
-                type="button"
-                onClick={() => setViewMode("list")}
-                className={`grid h-9 w-9 place-items-center rounded-full ${viewMode === "list" ? "bg-slate-900 text-white" : "text-slate-500"}`}
-                aria-label="List view"
-              >
-                <List size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("calendar")}
-                className={`grid h-9 w-9 place-items-center rounded-full ${viewMode === "calendar" ? "bg-slate-900 text-white" : "text-slate-500"}`}
-                aria-label="Calendar view"
-              >
-                <CalendarDays size={16} />
-              </button>
-            </div>
-          </div>
+          <SectionHeader
+            title="Transactions"
+            subtitle={viewMode === "calendar" && selectedDate ? selectedDate : "Recent ledger activity"}
+            action={
+              <div className="view-segmented min-w-24">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={`view-segmented-btn grid h-9 w-9 place-items-center ${viewMode === "list" ? "is-active" : ""}`}
+                  aria-label="List view"
+                >
+                  <List size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("calendar")}
+                  className={`view-segmented-btn grid h-9 w-9 place-items-center ${viewMode === "calendar" ? "is-active" : ""}`}
+                  aria-label="Calendar view"
+                >
+                  <CalendarDays size={16} />
+                </button>
+              </div>
+            }
+          />
 
           {viewMode === "calendar" ? (
             <CalendarMonthView
@@ -421,33 +392,35 @@ export default function DashboardView() {
           />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-900">Accounts</div>
-            <button type="button" onClick={() => navigate("accounts")} className="text-xs font-bold text-indigo-700">
-              Manage
-            </button>
-          </div>
-          <div className="space-y-2">
+        <section className="ui-card-strong p-4">
+          <SectionHeader
+            title="Accounts"
+            action={
+              <button type="button" onClick={() => navigate("accounts")} className="ui-btn ui-btn-secondary ui-btn-compact">
+                Manage
+              </button>
+            }
+          />
+          <div className="finance-list mt-3">
             {snapshot.accountSummary.accounts.slice(0, 4).map((account) => (
               <button
                 key={account.id}
                 type="button"
                 onClick={() => navigate("accounts")}
-                className="flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-left"
+                className="ui-row text-left"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-900">{account.name || "Account"}</div>
-                  <div className="text-xs font-medium text-slate-500">
+                  <div className="truncate text-sm font-semibold text-[color:var(--text)]">{account.name || "Account"}</div>
+                  <div className="text-xs font-medium text-[color:var(--muted)]">
                     {account.isCreditCard ? "Credit card" : account.type || "Account"}
                   </div>
                 </div>
                 <div className="ml-3 text-right">
-                  <div className="text-sm font-semibold tabular-nums text-slate-900">
+                  <div className="text-sm font-semibold tabular-nums text-[color:var(--text)]">
                     {formatCurrency(account.isCreditCard ? account.outstandingSatang : account.balanceSatang)}
                   </div>
                   {account.isCreditCard ? (
-                    <div className="text-[11px] font-medium text-slate-500">
+                    <div className="text-[11px] font-medium text-[color:var(--muted)]">
                       Available {formatCurrency(account.availableCreditSatang || 0)}
                     </div>
                   ) : null}
@@ -455,7 +428,7 @@ export default function DashboardView() {
               </button>
             ))}
             {!snapshot.accountSummary.accounts.length ? (
-              <div className="rounded-xl bg-slate-50 p-3 text-sm font-medium text-slate-500">
+              <div className="view-empty py-6 text-sm font-medium text-[color:var(--muted)]">
                 Add cash, bank, wallet, or credit card accounts to see balances here.
               </div>
             ) : null}

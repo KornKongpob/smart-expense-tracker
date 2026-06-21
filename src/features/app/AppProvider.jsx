@@ -167,21 +167,37 @@ function persistLocalCreditStatements(nextCreditStatements) {
   return normalized;
 }
 
+function hasCreditStatementIdentity(statement) {
+  return !!(
+    statement?.accountId &&
+    (statement?.cycleKey || statement?.statementDate || statement?.month)
+  );
+}
+
+function isSameCreditStatement(a, b) {
+  const left = normalizeCreditStatement(a || {});
+  const right = normalizeCreditStatement(b || {});
+  const leftAccountId = String(left.accountId || "");
+  const rightAccountId = String(right.accountId || "");
+  if (!leftAccountId || leftAccountId !== rightAccountId) return false;
+
+  if (left.id && right.id && String(left.id) === String(right.id)) return true;
+  if (left.cycleKey && right.cycleKey && String(left.cycleKey) === String(right.cycleKey)) return true;
+  if (left.statementDate && right.statementDate && String(left.statementDate) === String(right.statementDate)) return true;
+  if (!left.statementDate && !right.statementDate && left.month && right.month && String(left.month) === String(right.month)) return true;
+
+  return false;
+}
+
 function mergeCreditStatements(current, payloads) {
   let next = normalizeCreditStatements(current || []);
   const now = Date.now();
 
   for (const incoming of Array.isArray(payloads) ? payloads : []) {
     const draft = normalizeCreditStatement(incoming || {});
-    if (!draft.accountId || !draft.month) continue;
+    if (!hasCreditStatementIdentity(draft)) continue;
 
-    const index = next.findIndex((statement) => {
-      if (String(statement?.id || "") === String(draft.id || "")) return true;
-      return (
-        String(statement?.accountId || "") === String(draft.accountId || "") &&
-        String(statement?.month || "") === String(draft.month || "")
-      );
-    });
+    const index = next.findIndex((statement) => isSameCreditStatement(statement, draft));
     const existing = index >= 0 ? next[index] : null;
     const merged = normalizeCreditStatement({
       ...(existing || {}),
@@ -2156,7 +2172,7 @@ export function AppProvider({ children }) {
     const incoming = Array.isArray(payloads) ? payloads : [payloads].filter(Boolean);
     const validIncoming = incoming.filter((item) => {
       const draft = normalizeCreditStatement(item || {});
-      return !!draft.accountId && !!draft.month;
+      return hasCreditStatementIdentity(draft);
     });
     if (!validIncoming.length) {
       pushToast("warning", "ไม่มีข้อมูลรอบบัตรให้บันทึก");

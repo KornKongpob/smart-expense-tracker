@@ -15,7 +15,7 @@ export default function RecentTransactionList({ transactions = [], categoryById,
 
   if (!groups.length) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm font-medium text-slate-500">
+      <div className="view-empty py-6 text-sm font-medium text-[color:var(--muted)]">
         No transactions for this view yet.
       </div>
     );

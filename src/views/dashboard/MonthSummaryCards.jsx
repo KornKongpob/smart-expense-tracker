@@ -1,25 +1,17 @@
 import { CreditCard, Landmark, PiggyBank, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import StatCard from "../../components/StatCard.jsx";
 import { formatCurrency } from "../../utils/format";
 
 function SummaryCard({ icon, label, value, tone = "neutral", hint }) {
-  const toneClass =
-    tone === "income"
-      ? "text-emerald-700 bg-emerald-50 border-emerald-100"
-      : tone === "expense"
-        ? "text-rose-700 bg-rose-50 border-rose-100"
-        : tone === "liability"
-          ? "text-amber-700 bg-amber-50 border-amber-100"
-          : "text-slate-700 bg-white border-slate-200";
+  const toneMap = {
+    income: "success",
+    expense: "danger",
+    liability: "warning",
+    neutral: "neutral",
+  };
 
   return (
-    <div className={`rounded-2xl border p-3 ${toneClass}`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] font-bold uppercase text-current/70">{label}</div>
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-white/70">{icon}</span>
-      </div>
-      <div className="mt-2 text-lg font-semibold tabular-nums text-current">{value}</div>
-      {hint ? <div className="mt-1 text-[11px] font-medium text-current/65">{hint}</div> : null}
-    </div>
+    <StatCard icon={icon} label={label} value={value} hint={hint} tone={toneMap[tone] || "neutral"} />
   );
 }
 
@@ -28,7 +20,7 @@ export default function MonthSummaryCards({ accountSummary, monthlySummary, budg
   const remaining = Number(budgetSummary?.remainingSatang || 0);
 
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <SummaryCard
         icon={<Wallet size={16} />}
         label="Assets"

@@ -21,6 +21,8 @@ import {
   normalizeInboxItem,
   normalizeRule,
   normalizeRules,
+  normalizeSalaryPlan,
+  normalizeSalaryPlans,
   safeSatang,
   sanitizeHierarchyOneLevel,
 } from "./boot.js";
@@ -564,6 +566,20 @@ export function reducer(state, action) {
       const draft = normalizeCreditStatement(incoming);
       const existing = (state.creditStatements || []).find((statement) => {
         if (String(statement?.id || "") === String(draft.id || "")) return true;
+        if (
+          draft.cycleKey &&
+          String(statement?.cycleKey || "") === String(draft.cycleKey)
+        ) {
+          return true;
+        }
+        if (
+          draft.accountId &&
+          draft.statementDate &&
+          String(statement?.accountId || "") === String(draft.accountId) &&
+          String(statement?.statementDate || "") === String(draft.statementDate)
+        ) {
+          return true;
+        }
         return (
           draft.accountId &&
           draft.month &&
@@ -588,6 +604,32 @@ export function reducer(state, action) {
       if (!id) return state;
       const creditStatements = (state.creditStatements || []).filter((statement) => String(statement?.id || "") !== id);
       return { ...state, creditStatements };
+    }
+
+    case ACTIONS.UPSERT_SALARY_PLAN: {
+      const incoming = action.payload || {};
+      const draft = normalizeSalaryPlan(incoming);
+      const existing = (state.salaryPlans || []).find((plan) => {
+        if (String(plan?.id || "") === String(draft.id || "")) return true;
+        return draft.month && String(plan?.month || "") === String(draft.month);
+      });
+      const now = Date.now();
+      const nextPlan = normalizeSalaryPlan({
+        ...(existing || {}),
+        ...(incoming || {}),
+        id: incoming?.id || existing?.id || draft.id,
+        createdAt: incoming?.createdAt ?? existing?.createdAt ?? draft.createdAt ?? now,
+        updatedAt: now,
+      });
+      const salaryPlans = upsertById(state.salaryPlans || [], nextPlan);
+      return { ...state, salaryPlans };
+    }
+
+    case ACTIONS.DELETE_SALARY_PLAN: {
+      const id = String(action.payload || "").trim();
+      if (!id) return state;
+      const salaryPlans = (state.salaryPlans || []).filter((plan) => String(plan?.id || "") !== id);
+      return { ...state, salaryPlans };
     }
 
     // ----- savings goals -----
@@ -805,6 +847,7 @@ export function AppStoreProvider({ children }) {
       defaultBudgets: [],
       defaultRecurring: [],
       defaultCreditStatements: [],
+      defaultSalaryPlans: [],
       defaultGoals: [],
       defaultMerchants: [],
       defaultRules: [],
@@ -826,6 +869,7 @@ export function AppStoreProvider({ children }) {
       budgets: state.budgets,
       recurring: state.recurring,
       creditStatements: state.creditStatements,
+      salaryPlans: state.salaryPlans,
       goals: state.goals,
       merchants: state.merchants,
       rules: state.rules,
@@ -841,6 +885,7 @@ export function AppStoreProvider({ children }) {
     state.budgets,
     state.recurring,
     state.creditStatements,
+    state.salaryPlans,
     state.goals,
     state.merchants,
     state.rules,
@@ -1107,6 +1152,8 @@ export function AppStoreProvider({ children }) {
     const upsertCreditStatement = (statement) =>
       dispatch({ type: ACTIONS.UPSERT_CREDIT_STATEMENT, payload: statement });
     const deleteCreditStatement = (id) => dispatch({ type: ACTIONS.DELETE_CREDIT_STATEMENT, payload: id });
+    const upsertSalaryPlan = (plan) => dispatch({ type: ACTIONS.UPSERT_SALARY_PLAN, payload: plan });
+    const deleteSalaryPlan = (id) => dispatch({ type: ACTIONS.DELETE_SALARY_PLAN, payload: id });
 
     const runRecurringNow = () => {
       const todayISO = toISODate(new Date());
@@ -1171,6 +1218,7 @@ export function AppStoreProvider({ children }) {
           budgets: [],
           recurring: [],
           creditStatements: [],
+          salaryPlans: [],
           goals: [],
           merchants: [],
           rules: [],
@@ -1256,6 +1304,7 @@ export function AppStoreProvider({ children }) {
     budgets: state.budgets ?? [],
     recurring: state.recurring ?? [],
     creditStatements: normalizeCreditStatements(state.creditStatements ?? []),
+    salaryPlans: normalizeSalaryPlans(state.salaryPlans ?? []),
     goals: normalizeGoals(state.goals ?? []),
     merchants: normalizeMerchants(state.merchants ?? []),
     rules: state.rules ?? [],
@@ -1298,6 +1347,8 @@ export function AppStoreProvider({ children }) {
 
       upsertCreditStatement,
       deleteCreditStatement,
+      upsertSalaryPlan,
+      deleteSalaryPlan,
 
       upsertGoal,
       deleteGoal,

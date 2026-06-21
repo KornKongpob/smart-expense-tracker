@@ -45,6 +45,7 @@ export function normalizeBackupCore(raw, defaults = {}) {
     inbox: pickInboxList(source.inbox, source.scanInbox, ensureArray(defaults.defaultInbox, [])),
     scanInbox: pickInboxList(source.scanInbox, source.inbox, ensureArray(defaults.defaultScanInbox, [])),
     goals: ensureArray(source.goals, ensureArray(defaults.defaultGoals, [])),
+    salaryPlans: ensureArray(source.salaryPlans, ensureArray(defaults.defaultSalaryPlans, [])),
     merchants: ensureArray(source.merchants, ensureArray(defaults.defaultMerchants, [])),
   };
 
@@ -66,6 +67,7 @@ export function normalizeBackupCore(raw, defaults = {}) {
       normalized.creditStatements,
       ensureArray(defaults.defaultCreditStatements, []),
     ),
+    salaryPlans: ensureArray(normalized.salaryPlans, ensureArray(defaults.defaultSalaryPlans, [])),
     goals: ensureArray(normalized.goals, ensureArray(defaults.defaultGoals, [])),
     rules: ensureArray(normalized.rules, ensureArray(defaults.defaultRules, [])),
     merchants: ensureArray(normalized.merchants, ensureArray(defaults.defaultMerchants, [])),

@@ -35,6 +35,13 @@ import AppHeader from "../components/AppHeader";
 import AccountAvatar from "../components/AccountAvatar.jsx";
 import InstitutionLogo from "../components/InstitutionLogo.jsx";
 import ModalShell from "../components/ModalShell.jsx";
+import ProgressBar from "../components/ProgressBar.jsx";
+import SectionHeader from "../components/SectionHeader.jsx";
+import {
+  clampBillingDay,
+  getNextDueDate,
+  getNextStatementDate,
+} from "../utils/creditDates.js";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 // ===== Visual helpers =====
@@ -607,6 +614,150 @@ const formatMoney = (n, currency = "THB") => {
   }
 };
 
+const formatCreditDay = (day) => `วันที่ ${clampBillingDay(day)}`;
+
+const readCreditLimitSatang = (account) => {
+  const raw = account?._storedCreditLimit ?? account?.creditLimit ?? account?.creditLimitSatang ?? 0;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
+
+const hasBillingDay = (value) => value !== undefined && value !== null && String(value).trim() !== "";
+
+const buildCreditSummary = (account) => {
+  const currentBalanceSatang = Number(account?.balance || 0);
+  const debtSatang = currentBalanceSatang < 0 ? Math.abs(currentBalanceSatang) : 0;
+  const creditLimitSatang = readCreditLimitSatang(account);
+  const hasCreditLimit = creditLimitSatang > 0;
+  const hasStatementDay = hasBillingDay(account?._storedStatementDay);
+  const hasDueDay = hasBillingDay(account?._storedDueDay);
+  const statementDay = clampBillingDay(account?._storedStatementDay ?? account?.statementDay ?? 1);
+  const dueDay = clampBillingDay(account?._storedDueDay ?? account?.dueDay ?? 1);
+  const utilizationPercent = hasCreditLimit ? Math.round((debtSatang / creditLimitSatang) * 100) : 0;
+  const nextStatementDate = hasStatementDay ? getNextStatementDate(statementDay) : "";
+  const nextDueDate = hasStatementDay && hasDueDay ? getNextDueDate(statementDay, dueDay) : "";
+  const nextEvents = [
+    nextDueDate ? { label: "ครบกำหนด", date: nextDueDate } : null,
+    nextStatementDate ? { label: "ตัดรอบ", date: nextStatementDate } : null,
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label));
+  const warnings = [];
+
+  if (!hasCreditLimit) warnings.push("ยังไม่ได้ตั้งวงเงิน");
+  if (!hasStatementDay) warnings.push("ยังไม่ได้ตั้งวันตัดรอบ");
+  if (!hasDueDay) warnings.push("ยังไม่ได้ตั้งวันครบกำหนดชำระ");
+
+  return {
+    currentBalanceSatang,
+    debtSatang,
+    creditLimitSatang,
+    availableCreditSatang: hasCreditLimit ? Math.max(0, creditLimitSatang - debtSatang) : 0,
+    hasCreditLimit,
+    hasStatementDay,
+    hasDueDay,
+    statementDay,
+    dueDay,
+    utilizationPercent,
+    nextStatementDate,
+    nextDueDate,
+    nextEvents,
+    warnings,
+  };
+};
+
+function BillingDayInput({ label, value, onChange, helper, testId }) {
+  return (
+    <div>
+      <label className="ui-label">{label}</label>
+      <input
+        type="number"
+        min="1"
+        max="31"
+        step="1"
+        value={value}
+        onChange={(event) => {
+          const next = event.target.value;
+          onChange(next === "" ? "" : clampBillingDay(next));
+        }}
+        onBlur={(event) => onChange(clampBillingDay(event.target.value || 1))}
+        data-testid={testId}
+        className="ui-input"
+        placeholder="20"
+        inputMode="numeric"
+      />
+      {helper ? <div className="ui-help mt-1">{helper}</div> : null}
+    </div>
+  );
+}
+
+function CreditCardSummary({ account }) {
+  const summary = buildCreditSummary(account);
+  const currency = account?.currency || "THB";
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200/70 bg-white/70 p-3">
+          <div className="text-[11px] font-semibold uppercase text-[color:var(--muted)]">ยอดบัญชีปัจจุบัน</div>
+          <div className="mt-1 text-sm font-semibold tabular-nums text-[color:var(--text)]">
+            {formatMoney(summary.currentBalanceSatang, currency)}
+          </div>
+          <div className="ui-help mt-1">ค่าติดลบคือหนี้บัตรเครดิต</div>
+        </div>
+        <div className="rounded-2xl border border-rose-200/70 bg-rose-50/80 p-3">
+          <div className="text-[11px] font-semibold uppercase text-rose-700/70">หนี้ปัจจุบัน</div>
+          <div className="mt-1 text-sm font-semibold tabular-nums text-rose-800">
+            {formatMoney(summary.debtSatang, currency)}
+          </div>
+          <div className="ui-help mt-1 text-rose-700/70">แสดงเป็นยอดบวกเพื่อให้อ่านง่าย</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <span className="ui-chip">วงเงิน {summary.hasCreditLimit ? formatMoney(summary.creditLimitSatang, currency) : "ยังไม่ได้ตั้ง"}</span>
+        {summary.hasCreditLimit ? (
+          <span className="ui-chip">คงเหลือ {formatMoney(summary.availableCreditSatang, currency)}</span>
+        ) : null}
+        <span className="ui-chip">วันตัดรอบ {summary.hasStatementDay ? formatCreditDay(summary.statementDay) : "ยังไม่ได้ตั้ง"}</span>
+        <span className="ui-chip">วันครบกำหนดชำระ {summary.hasDueDay ? formatCreditDay(summary.dueDay) : "ยังไม่ได้ตั้ง"}</span>
+      </div>
+
+      {summary.hasCreditLimit ? (
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-[11px] font-semibold text-[color:var(--muted)]">
+            <span>Utilization</span>
+            <span className="tabular-nums">{summary.utilizationPercent}%</span>
+          </div>
+          <ProgressBar
+            value={summary.utilizationPercent}
+            tone={summary.utilizationPercent >= 80 ? "danger" : summary.utilizationPercent >= 50 ? "warning" : "success"}
+            label="Credit utilization"
+          />
+        </div>
+      ) : null}
+
+      {summary.nextEvents.length ? (
+        <div className="ui-help">
+          วันสำคัญถัดไป:{" "}
+          {summary.nextEvents.map((event, index) => (
+            <span key={`${event.label}-${event.date}`}>
+              {index > 0 ? " • " : ""}
+              {event.label} {event.date}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {summary.warnings.length ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+          {summary.warnings.join(" • ")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // keep legacy function name used throughout the view
 const randomColor = () => pickRandomColor();
 
@@ -657,10 +808,21 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   };
 
   const storedNumberLabel = (type) =>
-    type === "credit" ? "เลขบัตรจริง (ไม่บังคับ)" : "เลขบัญชีจริง (ไม่บังคับ)";
+    type === "credit" ? "เลขท้ายบัตร (ไม่บังคับ)" : "เลขบัญชีจริง (ไม่บังคับ)";
 
   const storedNumberPlaceholder = (type) =>
-    type === "credit" ? "เช่น 1234 5678 9012 3456" : "เช่น 123-4-56789-0";
+    type === "credit" ? "เช่น 3456" : "เช่น 123-4-56789-0";
+
+  const matchDigitsLabel = (type) =>
+    type === "credit" ? "เลขท้าย/เลขช่วยจำ (ใส่ได้หลายชุด)" : "เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)";
+
+  const matchDigitsHelper = (type) =>
+    type === "credit"
+      ? "คั่นด้วย , หรือเว้นวรรค • ใส่เลขท้าย 4-6 หลักจากสลิปหรือหน้าบัตร"
+      : "คั่นด้วย , หรือเว้นวรรค • แนะนำใส่เลขท้าย 4-6 หลัก";
+
+  const billingDayHelp =
+    "ถ้าวันครบกำหนดชำระน้อยกว่าวันตัดรอบ ระบบจะนับวันครบกำหนดเป็นเดือนถัดไป";
 
   const sanitizeStoredNumber = (value, type) => digitsOnly(value).slice(0, type === "credit" ? 19 : 20);
 
@@ -759,6 +921,8 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
 
     const matchDigits = parseDigitsList(cAccountNumber);
     const storedNumber = sanitizeStoredNumber(cStoredNumber, cType);
+    const statementDay = cType === "credit" ? clampBillingDay(cStatementDay || 1) : undefined;
+    const dueDay = cType === "credit" ? clampBillingDay(cDueDay || 1) : undefined;
 
     const baseAccount = {
       id: generateId(),
@@ -776,8 +940,8 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
       matchDigits,
       cardLast4: cType === "credit" && storedNumber.length >= 4 ? storedNumber.slice(-4) : undefined,
       creditLimit: cType === "credit" ? parseMoneyToSatang(cCreditLimit) : undefined,
-      statementDay: cType === "credit" ? Number(cStatementDay || 1) : undefined,
-      dueDay: cType === "credit" ? Number(cDueDay || 1) : undefined,
+      statementDay,
+      dueDay,
       openingBalance: 0,
     };
 
@@ -853,8 +1017,8 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     setEColor(acc?.color || "#111827");
 
     setECreditLimit(acc?.creditLimit != null ? formatMoneyInputFromSatang(acc.creditLimit, { emptyIfZero: true }) : "");
-    setEStatementDay(acc?.statementDay != null ? Number(acc.statementDay) : 20);
-    setEDueDay(acc?.dueDay != null ? Number(acc.dueDay) : 5);
+    setEStatementDay(acc?.statementDay != null ? clampBillingDay(acc.statementDay) : 20);
+    setEDueDay(acc?.dueDay != null ? clampBillingDay(acc.dueDay) : 5);
 
     setEDesiredBalance("");
     setOpenAdjustConfirm(false);
@@ -910,6 +1074,8 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
 
     const matchDigits = parseDigitsList(eAccountNumber);
     const storedNumber = sanitizeStoredNumber(eStoredNumber, eType);
+    const statementDay = eType === "credit" ? clampBillingDay(eStatementDay || 1) : undefined;
+    const dueDay = eType === "credit" ? clampBillingDay(eDueDay || 1) : undefined;
 
     const partial = {
       id: eEditing,
@@ -929,8 +1095,8 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
 
       // credit only
       creditLimit: eType === "credit" ? parseMoneyToSatang(eCreditLimit) : undefined,
-      statementDay: eType === "credit" ? Number(eStatementDay || 1) : undefined,
-      dueDay: eType === "credit" ? Number(eDueDay || 1) : undefined,
+      statementDay,
+      dueDay,
     };
 
     const desiredRaw = String(eDesiredBalance || "").trim();
@@ -1071,49 +1237,53 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
         }
       />
 
-    <main className="ui-page pt-4 pb-nav">
+    <main className="ui-page pt-4 pb-nav view-flow">
         {/* Header Card */}
-      <div className="mt-4 ui-card p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-lg font-semibold text-gray-900">คำแนะนำ</div>
-            <div className="text-xs text-gray-800/60 font-bold mt-1 leading-relaxed">
-              แนะนำใส่ <span className="font-semibold text-gray-900">เลขท้าย 4–6 หลัก</span> จากสลิป
-              และถ้ามีหลายแบบให้ใส่หลายชุด เช่น <span className="font-semibold text-gray-900">6345, 4373</span>
-            </div>
-          </div>
-
-          <div className="hidden sm:block" aria-hidden="true" />
-        </div>
+      <div className="ui-card-strong p-4">
+        <SectionHeader
+          title="คำแนะนำ"
+          subtitle={
+            <>
+              แนะนำใส่ <span className="font-semibold text-[color:var(--text)]">เลขท้าย 4–6 หลัก</span> จากสลิป
+              และถ้ามีหลายแบบให้ใส่หลายชุด เช่น <span className="font-semibold text-[color:var(--text)]">6345, 4373</span>
+            </>
+          }
+        />
 
         {/* Search */}
-        <div className="mt-4 flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 rounded-2xl px-3 py-2 bg-white/30 border border-white/20">
-            <Search size={18} className="text-gray-900/70" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="ค้นหาชื่อ/ประเภท/สกุลเงิน/เลขช่วยจำ..."
-              className="w-full bg-transparent outline-none text-sm font-semibold text-gray-900 placeholder:text-gray-800/40"
-            />
+        <div className="mt-4">
+          <label className="ui-label" htmlFor="accounts-search">ค้นหาบัญชี</label>
+          <div className="mt-1 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--muted)]" />
+              <input
+                id="accounts-search"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="ค้นหาชื่อ/ประเภท/สกุลเงิน/เลขช่วยจำ..."
+                className="ui-input pl-10"
+              />
+            </div>
+            {q ? (
+              <button
+                onClick={() => setQ("")}
+                className="ui-icon-btn"
+                title="ล้าง"
+                type="button"
+              >
+                <X size={18} />
+              </button>
+            ) : null}
           </div>
-          {q ? (
-            <button
-              onClick={() => setQ("")}
-              className="p-2 rounded-2xl bg-white/30 border border-white/20 text-gray-900 active:scale-[0.98]"
-              title="ล้าง"
-            >
-              <X size={18} />
-            </button>
-          ) : null}
+          <div className="ui-help mt-1">ค้นจากชื่อ ประเภท สกุลเงิน หรือเลขช่วยจำที่ใช้จับคู่จากสลิป</div>
         </div>
       </div>
 
       {/* Alert */}
       {alertMsg ? (
         <div
-          className={`mt-3 glass-card rounded-2xl p-3 border border-white/20 shadow-xl flex items-center gap-2 ${
-            alertType === "ok" ? "bg-white/35" : "bg-amber-200/30"
+          className={`ui-toast flex items-center gap-2 ${
+            alertType === "ok" ? "ui-toast--success" : "border-amber-200 bg-amber-50 text-amber-800"
           }`}
         >
           {alertType === "ok" ? (
@@ -1126,7 +1296,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
       ) : null}
 
 {/* Accounts balance + grouped list */}
-<div className="mt-4 space-y-4">
+<div className="space-y-4">
   {(() => {
     const accs = Array.isArray(filtered) ? filtered : [];
     const txs = store.state.transactions || [];
@@ -1135,10 +1305,14 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     const summaryById = new Map(selectAccountSummaries(allAccs, txs).map((summary) => [String(summary.id || ""), summary]));
     const withBalance = accs.map((a) => {
       const summary = summaryById.get(String(a?.id || ""));
+      const balance = calcAccountBalance(allAccs, txs, a.id);
       return {
         ...a,
         ...(summary || {}),
-        balance: Number(summary?.balanceSatang ?? calcAccountBalance(allAccs, txs, a.id)) || 0,
+        _storedCreditLimit: a?.creditLimit,
+        _storedStatementDay: a?.statementDay,
+        _storedDueDay: a?.dueDay,
+        balance: Number(balance) || 0,
       };
     });
 
@@ -1191,7 +1365,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
     const hasAny = order.some((t) => groups[t].length);
     if (!hasAny) {
       return (
-        <div className="glass-card rounded-3xl p-5 bg-white/25 border border-white/20 shadow-xl text-center">
+        <div className="view-empty">
           <div className="text-sm font-semibold text-gray-900">
             ยังไม่มีบัญชี หรือไม่พบผลลัพธ์
           </div>
@@ -1210,13 +1384,13 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
           const totals = sumByCurrency(items);
 
           return (
-            <div key={t} className="glass-card rounded-3xl p-4 bg-white/25 border border-white/20 shadow-xl overflow-hidden">
+            <div key={t} className="ui-card-strong p-4">
               <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center justify-end flex-wrap gap-2">
-                  <div className="w-10 h-10 rounded-2xl bg-white/30 border border-white/20 flex items-center justify-center text-gray-900">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
                     {groupIcon(t)}
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-base font-semibold text-gray-900">{groupLabel(t)}</div>
                     <div className="text-[11px] text-gray-800/55 font-bold">
                       รวม {items.length} บัญชี • {formatByCurrency(totals)}
@@ -1225,11 +1399,11 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                 {items.map((acc) => (
                   <div
                     key={acc.id}
-                    className="glass-panel rounded-3xl p-4 bg-white/20 border border-white/20"
+                    className="ui-card p-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3 min-w-0">
@@ -1289,68 +1463,33 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                           })()}
 
                           {acc.type === "credit" ? (
-                            <div className="text-[11px] text-gray-800/55 mt-2 leading-relaxed">
-                              <span className="font-bold">วงเงิน:</span>{" "}
-                              <span className="font-semibold text-gray-900">
-                                {formatMoney(acc.creditLimit || 0, acc.currency)}
-                              </span>
-                              <span className="mx-2">•</span>
-                              <span className="font-bold">ตัดรอบ:</span>{" "}
-                              <span className="font-semibold text-gray-900">
-                                ทุกวันที่ {acc.statementDay || 20}
-                              </span>
-                              <span className="mx-2">•</span>
-                              <span className="font-bold">ชำระภายใน:</span>{" "}
-                              <span className="font-semibold text-gray-900">
-                                วันที่ {acc.dueDay || 5}
-                              </span>
-                            </div>
-                          ) : null}
-                          {acc.type === "credit" ? (
-                            <div className="text-[11px] text-gray-800/55 mt-1 leading-relaxed">
-                              <span className="font-bold">Outstanding:</span>{" "}
-                              <span className="font-semibold text-gray-900">
-                                {formatMoney(acc.outstandingSatang || 0, acc.currency)}
-                              </span>
-                              <span className="mx-2">•</span>
-                              <span className="font-bold">Available:</span>{" "}
-                              <span className="font-semibold text-gray-900">
-                                {formatMoney(acc.availableCreditSatang || 0, acc.currency)}
-                              </span>
-                              {acc.nextDueDate ? (
-                                <>
-                                  <span className="mx-2">•</span>
-                                  <span className="font-bold">Next due:</span>{" "}
-                                  <span className="font-semibold text-gray-900">{acc.nextDueDate}</span>
-                                </>
-                              ) : null}
-                            </div>
+                            <CreditCardSummary account={acc} />
                           ) : null}
                         </div>
                       </div>
 
                       <div className="flex flex-col items-end gap-2 shrink-0">
-                        <div
-                          className={[
-                            "text-sm font-semibold tabular-nums",
-                            acc.type === "credit" && Number(acc.outstandingSatang || acc.balance || 0) > 0 ? "text-red-700" : "text-gray-900",
-                          ].join(" ")}
-                        >
-                          {String(acc.currency || "THB").toUpperCase() === "THB"
-                            ? formatCurrency(acc.balance || 0)
-                            : `${Number(acc.balance || 0).toLocaleString()} ${String(acc.currency || "").toUpperCase()}`}
-                        </div>
-
-                        {acc.type === "credit" && Number(acc.outstandingSatang || acc.balance || 0) > 0 ? (
-                          <div className="ui-chip border-red-200 bg-red-50/80 text-red-700">ยอดหนี้</div>
-                        ) : null}
+                        {acc.type === "credit" ? (
+                          <>
+                            <div className="text-right text-sm font-semibold tabular-nums text-red-700">
+                              หนี้ {formatMoney(buildCreditSummary(acc).debtSatang, acc.currency)}
+                            </div>
+                            <div className="ui-chip border-red-200 bg-red-50/80 text-red-700">ยอดหนี้</div>
+                          </>
+                        ) : (
+                          <div className="text-sm font-semibold tabular-nums text-gray-900">
+                            {String(acc.currency || "THB").toUpperCase() === "THB"
+                              ? formatCurrency(acc.balance || 0)
+                              : `${Number(acc.balance || 0).toLocaleString()} ${String(acc.currency || "").toUpperCase()}`}
+                          </div>
+                        )}
 
                         <div className="flex items-center gap-2">
                           {acc.type === "credit" ? (
                             <button
                               onClick={() => store.startNewTransaction?.({ entryMode: "manual", txType: "credit_payment" })}
                               data-testid={`account-pay-card-${acc.id}`}
-                              className="inline-flex min-h-[40px] items-center gap-2 rounded-2xl bg-emerald-50/90 border border-emerald-200 px-3 text-sm font-semibold text-emerald-800 active:scale-[0.98]"
+                              className="ui-btn ui-btn-compact border-emerald-200 bg-emerald-50/90 text-emerald-800"
                               title="Pay card"
                             >
                               <CreditCard size={18} />
@@ -1360,7 +1499,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                           <button
                             onClick={() => openEditModal(acc)}
                             data-testid={`account-edit-${acc.id}`}
-                            className="inline-flex min-h-[40px] items-center gap-2 rounded-2xl bg-white/60 border border-white/20 px-3 text-sm font-semibold text-gray-900 active:scale-[0.98]"
+                            className="ui-btn ui-btn-secondary ui-btn-compact"
                             title="แก้ไข"
                           >
                             <Pencil size={18} />
@@ -1369,7 +1508,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                           <button
                             onClick={() => confirmDeleteAccount(acc.id)}
                             data-testid={`account-delete-${acc.id}`}
-                            className="inline-flex min-h-[40px] items-center gap-2 rounded-2xl bg-red-50/80 border border-red-200 px-3 text-sm font-semibold text-red-700 active:scale-[0.98]"
+                            className="ui-btn ui-btn-danger-outline ui-btn-compact"
                             title="ลบ"
                           >
                             <Trash2 size={18} />
@@ -1511,11 +1650,11 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                   inputMode="numeric"
                   autoComplete="off"
                 />
-                <div className="ui-help mt-1">ระบบจะเก็บเลขจริงแยกจากเลขช่วยจำสำหรับ map</div>
+                <div className="ui-help mt-1">ระบบจะเก็บเลขส่วนนี้แยกจากเลขช่วยจำสำหรับ map</div>
               </div>
 
               <div className="mt-4">
-                <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
+                <label className="ui-label">{matchDigitsLabel(cType)}</label>
                 <input
                   value={cAccountNumber}
                   onChange={(e) => setCAccountNumber(e.target.value)}
@@ -1525,7 +1664,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                   autoComplete="off"
                 />
                 <div className="ui-help mt-1">
-                  คั่นด้วย <span className="font-bold">,</span> หรือเว้นวรรค • แนะนำใส่เลขท้าย 4–6 หลัก
+                  {matchDigitsHelper(cType)}
                 </div>
 
                 {(() => {
@@ -1644,29 +1783,24 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                     placeholder="เช่น 50000.00"
                     inputMode="decimal"
                   />
+                  <div className="ui-help mt-1">เก็บเป็น satang ในระบบ และใช้คำนวณ utilization/วงเงินคงเหลือ</div>
                 </div>
 
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="ui-label">วันตัดรอบ</label>
-                    <input
-                      value={cStatementDay}
-                      onChange={(e) => setCStatementDay(Number(e.target.value || 1))}
-                      className="ui-input"
-                      placeholder="20"
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <div>
-                    <label className="ui-label">วันครบกำหนด</label>
-                    <input
-                      value={cDueDay}
-                      onChange={(e) => setCDueDay(Number(e.target.value || 1))}
-                      className="ui-input"
-                      placeholder="5"
-                      inputMode="numeric"
-                    />
-                  </div>
+                  <BillingDayInput
+                    label="วันตัดรอบ"
+                    value={cStatementDay}
+                    onChange={setCStatementDay}
+                    helper="ใส่เลข 1-31 ระบบจะปรับวันสิ้นเดือนให้อัตโนมัติ"
+                    testId="account-create-statement-day"
+                  />
+                  <BillingDayInput
+                    label="วันครบกำหนดชำระ"
+                    value={cDueDay}
+                    onChange={setCDueDay}
+                    helper={billingDayHelp}
+                    testId="account-create-due-day"
+                  />
                 </div>
 
                 <div className="ui-help mt-2">
@@ -1891,11 +2025,11 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                   inputMode="numeric"
                   autoComplete="off"
                 />
-                <div className="ui-help mt-1">ระบบจะเก็บเลขจริงแยกจากเลขช่วยจำสำหรับ map</div>
+                <div className="ui-help mt-1">ระบบจะเก็บเลขส่วนนี้แยกจากเลขช่วยจำสำหรับ map</div>
               </div>
 
               <div className="mt-4">
-                <label className="ui-label">เลขช่วยจำสำหรับ map (ใส่ได้หลายชุด)</label>
+                <label className="ui-label">{matchDigitsLabel(eType)}</label>
                 <input
                   value={eAccountNumber}
                   onChange={(e) => setEAccountNumber(e.target.value)}
@@ -1905,7 +2039,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                   autoComplete="off"
                 />
                 <div className="ui-help mt-1">
-                  แนะนำใส่เลขท้าย 4–6 หลัก • บัตรเครดิตใส่ได้มากกว่า 1 ชุด
+                  {matchDigitsHelper(eType)}
                 </div>
 
                 {(() => {
@@ -2059,29 +2193,24 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                     placeholder="เช่น 50000.00"
                     inputMode="decimal"
                   />
+                  <div className="ui-help mt-1">ใช้คำนวณ utilization และวงเงินคงเหลือของบัตร</div>
                 </div>
 
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="ui-label">วันตัดรอบ</label>
-                    <input
-                      value={eStatementDay}
-                      onChange={(e) => setEStatementDay(Number(e.target.value || 1))}
-                      className="ui-input"
-                      placeholder="20"
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <div>
-                    <label className="ui-label">วันครบกำหนด</label>
-                    <input
-                      value={eDueDay}
-                      onChange={(e) => setEDueDay(Number(e.target.value || 1))}
-                      className="ui-input"
-                      placeholder="5"
-                      inputMode="numeric"
-                    />
-                  </div>
+                  <BillingDayInput
+                    label="วันตัดรอบ"
+                    value={eStatementDay}
+                    onChange={setEStatementDay}
+                    helper="ใส่เลข 1-31 ระบบจะปรับวันสิ้นเดือนให้อัตโนมัติ"
+                    testId="account-edit-statement-day"
+                  />
+                  <BillingDayInput
+                    label="วันครบกำหนดชำระ"
+                    value={eDueDay}
+                    onChange={setEDueDay}
+                    helper={billingDayHelp}
+                    testId="account-edit-due-day"
+                  />
                 </div>
               </div>
             ) : null}
@@ -2203,7 +2332,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
       ) : null}
 
       {/* Bottom helper */}
-      <div className="mt-6 glass-card rounded-3xl p-4 bg-white/20 border border-white/20 shadow-xl">
+      <div className="ui-card p-4">
         <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
           <ImageIcon size={18} />
           เลขช่วยจำสำหรับ map

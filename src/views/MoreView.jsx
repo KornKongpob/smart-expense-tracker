@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 import { useAppStore } from "../store/store.jsx";
 import AppHeader from "../components/AppHeader";
+import SectionHeader from "../components/SectionHeader.jsx";
+import StatCard from "../components/StatCard.jsx";
 import { downloadBackupJSON } from "../services/storage";
 import {
   clearAllBlobs,
@@ -89,10 +91,7 @@ function HubSection({ title, subtitle, children }) {
   return (
     <section className="hub-section">
       {title ? (
-        <div className="hub-section-head">
-          <div className="hub-section-title">{title}</div>
-          {subtitle ? <div className="hub-section-copy">{subtitle}</div> : null}
-        </div>
+        <SectionHeader className="px-1" title={title} subtitle={subtitle} />
       ) : null}
 
       <div className="ui-card-strong overflow-hidden">{children}</div>
@@ -102,11 +101,7 @@ function HubSection({ title, subtitle, children }) {
 
 function HubStatusCard({ label, value, copy }) {
   return (
-    <div className="hub-status-card">
-      <div className="hub-status-label">{label}</div>
-      <div className="hub-status-value">{value}</div>
-      <div className="hub-status-copy">{copy}</div>
-    </div>
+    <StatCard className="hub-status-card" label={label} value={value} hint={copy} />
   );
 }
 
@@ -470,12 +465,13 @@ export default function MoreView({ showAlert, showConfirm }) {
       <AppHeader title="ตั้งค่า" subtitle="ระบบ / ข้อมูล / ความปลอดภัย" />
 
     <main className="ui-page pt-4 pb-nav view-flow">
-        <section className="hub-hero">
-          <div className="dashboard-kicker">Control Center</div>
-          <h2 className="hub-hero-title">จัดการระบบ งานอัตโนมัติ และข้อมูลสำรองจากที่เดียว</h2>
-          <p className="hub-hero-copy">
-            ใช้หน้านี้เพื่อตรวจสถานะ Inbox, เปิดกฎอัตโนมัติ, สลับธีม, ตั้ง PIN Lock และสำรองข้อมูลก่อนทำงานต่อ
-          </p>
+        <section className="ui-card-strong hub-hero">
+          <SectionHeader
+            eyebrow="Control Center"
+            title="จัดการระบบ งานอัตโนมัติ และข้อมูลสำรองจากที่เดียว"
+            subtitle="ใช้หน้านี้เพื่อตรวจสถานะ Inbox, เปิดกฎอัตโนมัติ, สลับธีม, ตั้ง PIN Lock และสำรองข้อมูลก่อนทำงานต่อ"
+            titleClassName="hub-hero-title"
+          />
 
           <div className="hub-status-grid">
             <HubStatusCard
@@ -522,6 +518,13 @@ export default function MoreView({ showAlert, showConfirm }) {
             badge={activeDebtAccountCount}
             onClick={() => navigate("debts")}
             testId="hub-debts"
+          />
+          <MoreRow
+            icon={<CreditCard size={20} />}
+            title="รอบบิลบัตรเครดิต"
+            subtitle="กรอกยอดขั้นต่ำ/ยอดเต็มหลังวันตัดรอบ"
+            onClick={() => navigate("credit-statements")}
+            testId="hub-credit-statements"
           />
         </HubSection>
 

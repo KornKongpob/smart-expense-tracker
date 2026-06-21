@@ -166,14 +166,29 @@ export const AccountSchema = z.object({
 export const CreditStatementSchema = z.object({
   id: z.string().min(1),
   accountId: optionalStr,
+  cycleKey: optionalStr,
   month: monthStr,
   statementDate: isoDateStr,
   dueDate: isoDateStr,
   statementBalance: satangInt,
   minimumDue: satangInt,
+  fullDue: satangInt,
+  paidAmount: satangInt,
+  plannedPayAmount: satangInt,
   apr: z.number().finite().nonnegative().nullable().default(null),
   note: optionalStr,
-  status: z.enum(["open", "paid"]).default("open"),
+  status: z.enum(["open", "planned", "paid", "skipped"]).default("open"),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+}).passthrough();
+
+export const SalaryPlanSchema = z.object({
+  id: z.string().min(1),
+  month: monthStr,
+  salaryAmount: satangInt,
+  reserveAmount: satangInt,
+  debtBudget: satangInt,
+  strategy: z.enum(["due_date", "highest_balance", "snowball"]).default("due_date"),
   createdAt: timestamp,
   updatedAt: timestamp,
 }).passthrough();
@@ -331,6 +346,7 @@ export const AppStateSchema = z.object({
   budgets: z.array(BudgetSchema).default([]),
   recurring: z.array(RecurringSchema).default([]),
   creditStatements: z.array(CreditStatementSchema).default([]),
+  salaryPlans: z.array(SalaryPlanSchema).default([]),
   goals: z.array(GoalSchema).default([]),
   rules: z.array(RuleSchema).default([]),
   merchants: z.array(MerchantSchema).default([]),

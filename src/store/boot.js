@@ -8,6 +8,7 @@ import { normalizeTransactionTime } from "../utils/scanDateTime.js";
 import { parseMoneyToSatang, ensureSatangInt } from "../utils/money.js";
 import { normalizeMerchants } from "../utils/merchantDictionary.js";
 import { readMoneyUnit } from "../utils/moneyUnit.js";
+import { normalizeCreditStatement as normalizePlannerCreditStatement } from "../utils/creditPlanner.js";
 
 /**
  * Default account used when boot payload has no accounts.
@@ -205,7 +206,8 @@ export const clampInt = (v, min, max, fallback) => {
 
 const GOAL_TYPES = new Set(["emergency_fund", "travel", "purchase", "debt_buffer", "custom"]);
 const GOAL_STATUSES = new Set(["active", "paused", "completed"]);
-const CREDIT_STATEMENT_STATUSES = new Set(["open", "paid"]);
+const CREDIT_STATEMENT_STATUSES = new Set(["open", "planned", "paid", "skipped"]);
+const SALARY_PLAN_STRATEGIES = new Set(["due_date", "highest_balance", "snowball"]);
 
 const normalizeISODateString = (value) => {
   const s = String(value || "").trim().slice(0, 10);
@@ -347,39 +349,14 @@ export function normalizeAccount(a) {
 }
 
 export function normalizeCreditStatement(raw) {
-  const s = raw && typeof raw === "object" ? raw : {};
-  const accountId = String(s.accountId ?? s.account_id ?? "").trim();
-  const statementDate = normalizeISODateString(s.statementDate ?? s.statement_date);
-  const dueDate = normalizeISODateString(s.dueDate ?? s.due_date);
-  const month =
-    normalizeMonthKey(s.month ?? s.monthKey ?? s.month_key ?? s.statementMonth ?? s.statement_month) ||
-    normalizeMonthKey(statementDate) ||
-    normalizeMonthKey(dueDate);
-  const id = String(s.id || (accountId && month ? `credit_statement_${accountId}_${month}` : "")).trim() || generateId();
-  const createdAt = normalizeTimestamp(s.createdAt ?? s.created_at, Date.now());
-  const updatedAt = normalizeTimestamp(s.updatedAt ?? s.updated_at, createdAt);
-  const statusRaw = String(s.status || "open").toLowerCase().trim();
+  const statement = normalizePlannerCreditStatement(raw);
+  const statusRaw = String(statement.status || "open").toLowerCase().trim();
 
   return {
-    ...s,
-    id,
-    accountId,
-    month,
-    statementDate,
-    dueDate,
-    statementBalance: Math.max(
-      0,
-      safeSatang(s.statementBalance ?? s.statementBalanceSatang ?? s.statement_balance_satang ?? s.balanceSatang ?? s.balance, 0)
-    ),
-    minimumDue: Math.max(
-      0,
-      safeSatang(s.minimumDue ?? s.minimumDueSatang ?? s.minimum_due_satang ?? s.minimumPayment ?? s.minimumPaymentSatang, 0)
-    ),
-    apr: normalizeOptionalApr(s.apr ?? s.aprPercent ?? s.apr_percent),
-    note: String(s.note || "").trim(),
+    ...statement,
+    id: String(statement.id || generateId()).trim() || generateId(),
     status: CREDIT_STATEMENT_STATUSES.has(statusRaw) ? statusRaw : "open",
-    createdAt,
-    updatedAt,
+    apr: normalizeOptionalApr(statement.apr),
   };
 }
 
@@ -389,6 +366,51 @@ export function normalizeCreditStatements(list) {
 
   for (const raw of toArray(list)) {
     const item = normalizeCreditStatement(raw);
+    const key = String(item.id || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+
+  return out;
+}
+
+export function normalizeSalaryPlan(raw) {
+  const plan = raw && typeof raw === "object" ? raw : {};
+  const month = normalizeMonthKey(plan.month ?? plan.monthKey ?? plan.month_key);
+  const id = String(plan.id || (month ? `salary_plan_${month}` : "")).trim() || generateId();
+  const createdAt = normalizeTimestamp(plan.createdAt ?? plan.created_at, Date.now());
+  const updatedAt = normalizeTimestamp(plan.updatedAt ?? plan.updated_at, createdAt);
+  const strategyRaw = String(plan.strategy || "due_date").toLowerCase().trim();
+
+  return {
+    ...plan,
+    id,
+    month,
+    salaryAmount: Math.max(
+      0,
+      safeSatang(plan.salaryAmount ?? plan.salaryAmountSatang ?? plan.salary_amount_satang ?? plan.salary, 0)
+    ),
+    reserveAmount: Math.max(
+      0,
+      safeSatang(plan.reserveAmount ?? plan.reserveAmountSatang ?? plan.reserve_amount_satang ?? plan.reserve, 0)
+    ),
+    debtBudget: Math.max(
+      0,
+      safeSatang(plan.debtBudget ?? plan.debtBudgetSatang ?? plan.debt_budget_satang, 0)
+    ),
+    strategy: SALARY_PLAN_STRATEGIES.has(strategyRaw) ? strategyRaw : "due_date",
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function normalizeSalaryPlans(list) {
+  const out = [];
+  const seen = new Set();
+
+  for (const raw of toArray(list)) {
+    const item = normalizeSalaryPlan(raw);
     const key = String(item.id || "").trim();
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -488,12 +510,58 @@ export function normalizeBootPayload(boot) {
       ["statementBalance", "statement_balance", "balance"],
       ["statementBalanceSatang", "statement_balance_satang", "balanceSatang", "balance_satang"]
     );
+    statement.fullDue = readStatementAmount(
+      statement,
+      ["fullDue", "full_due", "statementBalance", "statement_balance", "balance"],
+      ["fullDueSatang", "full_due_satang", "statementBalanceSatang", "statement_balance_satang", "balanceSatang", "balance_satang"]
+    );
     statement.minimumDue = readStatementAmount(
       statement,
       ["minimumDue", "minimum_due", "minimumPayment", "minimum_payment"],
       ["minimumDueSatang", "minimum_due_satang", "minimumPaymentSatang", "minimum_payment_satang"]
     );
+    statement.paidAmount = readStatementAmount(
+      statement,
+      ["paidAmount", "paid_amount", "paid"],
+      ["paidAmountSatang", "paid_amount_satang", "paidSatang", "paid_satang"]
+    );
+    statement.plannedPayAmount = readStatementAmount(
+      statement,
+      ["plannedPayAmount", "planned_pay_amount", "plannedPayment", "planned_payment"],
+      ["plannedPayAmountSatang", "planned_pay_amount_satang", "plannedPaymentSatang", "planned_payment_satang"]
+    );
     return statement;
+  });
+
+  const readSalaryPlanAmount = (plan, valueKeys, satangKeys = []) => {
+    const source = plan && typeof plan === "object" ? plan : {};
+    for (const key of satangKeys) {
+      if (source[key] != null && String(source[key]).trim() !== "") return safeSatang(source[key], 0);
+    }
+    for (const key of valueKeys) {
+      if (source[key] != null && String(source[key]).trim() !== "") return convertAmount(source[key]);
+    }
+    return 0;
+  };
+
+  const salaryPlans = toArray(root?.salaryPlans).map((planRaw) => {
+    const plan = planRaw && typeof planRaw === "object" ? { ...planRaw } : {};
+    plan.salaryAmount = readSalaryPlanAmount(
+      plan,
+      ["salaryAmount", "salary_amount", "salary"],
+      ["salaryAmountSatang", "salary_amount_satang", "salarySatang", "salary_satang"]
+    );
+    plan.reserveAmount = readSalaryPlanAmount(
+      plan,
+      ["reserveAmount", "reserve_amount", "reserve"],
+      ["reserveAmountSatang", "reserve_amount_satang", "reserveSatang", "reserve_satang"]
+    );
+    plan.debtBudget = readSalaryPlanAmount(
+      plan,
+      ["debtBudget", "debt_budget"],
+      ["debtBudgetSatang", "debt_budget_satang"]
+    );
+    return plan;
   });
 
   const convertInboxItem = (it) => {
@@ -556,6 +624,7 @@ export function normalizeBootPayload(boot) {
     budgets,
     recurring,
     creditStatements,
+    salaryPlans,
     goals,
     merchants,
     inbox,
@@ -947,6 +1016,7 @@ export function createInitialState(boot = {}) {
     budgets: toArray(normalized?.budgets),
     recurring: toArray(normalized?.recurring),
     creditStatements: normalizeCreditStatements(normalized?.creditStatements),
+    salaryPlans: normalizeSalaryPlans(normalized?.salaryPlans),
     goals: normalizeGoals(normalized?.goals),
     merchants: normalizeMerchants(normalized?.merchants),
     inbox,

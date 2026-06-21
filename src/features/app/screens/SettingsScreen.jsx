@@ -333,6 +333,31 @@ export default function SettingsScreen() {
             <button
               type="button"
               className="finance-list-button"
+              onClick={() => navigateToView("credit-statements")}
+              data-testid="open-credit-statements"
+            >
+              <div className="finance-row">
+                <div className="finance-row-main">
+                  <span className="finance-category-icon finance-account-icon">
+                    <CreditCard size={18} />
+                  </span>
+                  <div className="finance-settings-row-copy">
+                    <div className="finance-row-title">รอบบิลบัตรเครดิต</div>
+                    <div className="finance-row-meta finance-row-meta-wrap">
+                      กรอกยอดขั้นต่ำ/ยอดเต็มหลังวันตัดรอบ
+                    </div>
+                  </div>
+                </div>
+
+                <div className="finance-row-side">
+                  <ChevronRight size={16} />
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="finance-list-button"
               onClick={() => navigateToView("goals")}
               data-testid="open-goals"
             >
