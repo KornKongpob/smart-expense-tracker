@@ -5,6 +5,12 @@ import { generateId } from "./id.js";
 const CREDIT_STATEMENT_STATUSES = new Set(["open", "planned", "paid", "skipped"]);
 const ACTIVE_STATEMENT_STATUSES = new Set(["open", "planned"]);
 const SALARY_PLAN_STRATEGIES = new Set(["due_date", "highest_balance", "snowball"]);
+const CREDIT_STATUS_LABELS = {
+  due_soon: "ครบกำหนดใกล้ถึง",
+  needs_input: "รอกรอกยอด",
+  open: "มีรอบบิลเปิด",
+  normal: "ปกติ",
+};
 
 function toLocalDate(value) {
   if (value instanceof Date) {
@@ -119,6 +125,56 @@ function compareDueDateThenId(a, b) {
     String(a.accountId || "").localeCompare(String(b.accountId || "")) ||
     String(a.id || "").localeCompare(String(b.id || ""))
   );
+}
+
+function normalizeCreditAccount(account) {
+  const acc = account && typeof account === "object" ? account : {};
+  return {
+    ...acc,
+    id: String(acc.id ?? acc.accountId ?? acc.account_id ?? "").trim(),
+    name: String(acc.name || acc.institution_label || acc.institutionLabel || "").trim(),
+    type: String(acc.type || acc.account_type || "").toLowerCase().trim(),
+    statementDay: acc.statementDay ?? acc.statement_day ?? acc._storedStatementDay ?? 1,
+    dueDay: acc.dueDay ?? acc.due_day ?? acc._storedDueDay ?? 25,
+  };
+}
+
+function daysUntilISODate(dateValue, todayDate = new Date()) {
+  const due = toLocalDate(dateValue);
+  const today = toLocalDate(todayDate);
+  return Math.ceil((due.getTime() - today.getTime()) / 86_400_000);
+}
+
+function isCreditAccount(account) {
+  return String(account?.type || account?.account_type || "").toLowerCase().trim() === "credit";
+}
+
+function getActiveStatementsForAccounts(accounts, creditStatements, todayDate, dueSoonDays) {
+  const accountById = new Map(
+    (Array.isArray(accounts) ? accounts : [])
+      .map(normalizeCreditAccount)
+      .filter((account) => account.id && isCreditAccount(account))
+      .map((account) => [account.id, account])
+  );
+
+  return (Array.isArray(creditStatements) ? creditStatements : [])
+    .map(normalizeCreditStatement)
+    .filter((statement) => accountById.has(statement.accountId))
+    .filter((statement) => ACTIVE_STATEMENT_STATUSES.has(statement.status))
+    .map((statement) => {
+      const remainingDue = Math.max(0, statement.fullDue - statement.paidAmount);
+      const daysUntilDue = statement.dueDate ? daysUntilISODate(statement.dueDate, todayDate) : null;
+      return {
+        ...statement,
+        account: accountById.get(statement.accountId),
+        accountName: accountById.get(statement.accountId)?.name || "",
+        remainingDue,
+        daysUntilDue,
+        isDueSoon: remainingDue > 0 && daysUntilDue != null && daysUntilDue <= dueSoonDays,
+      };
+    })
+    .filter((statement) => statement.remainingDue > 0)
+    .sort(compareDueDateThenId);
 }
 
 export function makeCreditStatementCycleKey(accountId, statementDate) {
@@ -241,6 +297,88 @@ export function getStatementsNeedingInput(accounts, creditStatements, todayDate 
     .map((account) => ({ account, ...getBillingCycleForCard(account, todayDate) }))
     .filter((cycle) => cycle.accountId && cycle.cycleKey && !existingKeys.has(cycle.cycleKey))
     .sort(compareDueDateThenId);
+}
+
+export function getCreditStatementReminderSummary(
+  accounts,
+  creditStatements,
+  todayDate = new Date(),
+  { dueSoonDays = 5 } = {}
+) {
+  const creditAccounts = (Array.isArray(accounts) ? accounts : [])
+    .map(normalizeCreditAccount)
+    .filter((account) => account.id && isCreditAccount(account));
+  const cardsNeedingInput = getStatementsNeedingInput(creditAccounts, creditStatements, todayDate);
+  const openStatements = getActiveStatementsForAccounts(creditAccounts, creditStatements, todayDate, dueSoonDays);
+  const dueSoonStatements = openStatements.filter((statement) => statement.isDueSoon);
+  const totalOpenFullDue = openStatements.reduce((sum, statement) => sum + statement.remainingDue, 0);
+  const nearestDueDate = openStatements[0]?.dueDate || "";
+  const nextAction = cardsNeedingInput.length ? "input" : openStatements.length ? "plan" : "view";
+
+  return {
+    cardsNeedingInput,
+    needingInputCount: cardsNeedingInput.length,
+    openStatements,
+    openStatementCount: openStatements.length,
+    totalOpenFullDue,
+    nearestDueDate,
+    dueSoonStatements,
+    hasDueSoon: dueSoonStatements.length > 0,
+    nextAction,
+  };
+}
+
+export function getCreditCardStatementStatus(
+  account,
+  creditStatements,
+  todayDate = new Date(),
+  { dueSoonDays = 5 } = {}
+) {
+  const creditAccount = normalizeCreditAccount(account);
+  if (!creditAccount.id || !isCreditAccount(creditAccount)) {
+    return { status: "normal", label: CREDIT_STATUS_LABELS.normal, tone: "default" };
+  }
+
+  const activeStatements = getActiveStatementsForAccounts([creditAccount], creditStatements, todayDate, dueSoonDays);
+  const dueSoonStatement = activeStatements.find((statement) => statement.isDueSoon);
+  if (dueSoonStatement) {
+    return {
+      status: "due_soon",
+      label: CREDIT_STATUS_LABELS.due_soon,
+      tone: "warning",
+      statement: dueSoonStatement,
+      dueDate: dueSoonStatement.dueDate,
+      daysUntilDue: dueSoonStatement.daysUntilDue,
+    };
+  }
+
+  const needsInput = getStatementsNeedingInput([creditAccount], creditStatements, todayDate)[0] || null;
+  if (needsInput) {
+    return {
+      status: "needs_input",
+      label: CREDIT_STATUS_LABELS.needs_input,
+      tone: "warning",
+      cycle: needsInput,
+      dueDate: needsInput.dueDate,
+    };
+  }
+
+  if (activeStatements.length) {
+    return {
+      status: "open",
+      label: CREDIT_STATUS_LABELS.open,
+      tone: "info",
+      statement: activeStatements[0],
+      dueDate: activeStatements[0].dueDate,
+      daysUntilDue: activeStatements[0].daysUntilDue,
+    };
+  }
+
+  return {
+    status: "normal",
+    label: CREDIT_STATUS_LABELS.normal,
+    tone: "default",
+  };
 }
 
 function getAvailableDebtBudget({ salaryAmount, reserveAmount, debtBudget }) {

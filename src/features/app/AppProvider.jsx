@@ -97,7 +97,12 @@ import {
   normalizeAttachmentBackupMap,
   sumAttachmentBackupSize,
 } from "../../utils/attachmentBackup.js";
-import { normalizeCreditStatement, normalizeCreditStatements } from "../../store/boot.js";
+import {
+  normalizeCreditStatement,
+  normalizeCreditStatements,
+  normalizeSalaryPlan,
+  normalizeSalaryPlans,
+} from "../../store/boot.js";
 import {
   checkBudgetAndNotify,
   getNotificationPermissionState,
@@ -165,6 +170,62 @@ function persistLocalCreditStatements(nextCreditStatements) {
     creditStatements: normalized,
   });
   return normalized;
+}
+
+function readLocalSalaryPlans() {
+  try {
+    const localSnapshot = loadAll({ defaultSalaryPlans: [] });
+    return normalizeSalaryPlans(localSnapshot?.salaryPlans || []);
+  } catch {
+    return [];
+  }
+}
+
+function persistLocalSalaryPlans(nextSalaryPlans) {
+  const normalized = normalizeSalaryPlans(nextSalaryPlans || []);
+  const localSnapshot = loadAll({ defaultSalaryPlans: [] });
+  saveAll({
+    ...localSnapshot,
+    salaryPlans: normalized,
+  });
+  return normalized;
+}
+
+function hasSalaryPlanIdentity(plan) {
+  return !!(plan?.id || plan?.month);
+}
+
+function isSameSalaryPlan(a, b) {
+  const left = normalizeSalaryPlan(a || {});
+  const right = normalizeSalaryPlan(b || {});
+  if (left.id && right.id && String(left.id) === String(right.id)) return true;
+  if (left.month && right.month && String(left.month) === String(right.month)) return true;
+  return false;
+}
+
+function mergeSalaryPlans(current, payloads) {
+  let next = normalizeSalaryPlans(current || []);
+  const now = Date.now();
+
+  for (const incoming of Array.isArray(payloads) ? payloads : []) {
+    const draft = normalizeSalaryPlan(incoming || {});
+    if (!hasSalaryPlanIdentity(draft)) continue;
+
+    const index = next.findIndex((plan) => isSameSalaryPlan(plan, draft));
+    const existing = index >= 0 ? next[index] : null;
+    const merged = normalizeSalaryPlan({
+      ...(existing || {}),
+      ...(incoming || {}),
+      id: incoming?.id || existing?.id || draft.id,
+      createdAt: incoming?.createdAt ?? existing?.createdAt ?? draft.createdAt ?? now,
+      updatedAt: now,
+    });
+
+    if (index >= 0) next[index] = merged;
+    else next = [...next, merged];
+  }
+
+  return normalizeSalaryPlans(next);
 }
 
 function hasCreditStatementIdentity(statement) {
@@ -473,6 +534,7 @@ export function AppProvider({ children }) {
   const [financialGoals, setFinancialGoals] = useState([]);
   const [debtPlans, setDebtPlans] = useState([]);
   const [creditStatements, setCreditStatements] = useState(readLocalCreditStatements);
+  const [salaryPlans, setSalaryPlans] = useState(readLocalSalaryPlans);
   const [budgetRows, setBudgetRows] = useState([]);
   const [planningTransactions, setPlanningTransactions] = useState([]);
   const [recurringRules, setRecurringRules] = useState([]);
@@ -572,6 +634,7 @@ export function AppProvider({ children }) {
     setQueue(readOfflineQueue());
     setLegacyAvailable(hasLegacySnapshot());
     setCreditStatements(readLocalCreditStatements());
+    setSalaryPlans(readLocalSalaryPlans());
   }, [session]);
 
   useEffect(() => {
@@ -2196,6 +2259,34 @@ export function AppProvider({ children }) {
     return saveCreditStatements([payload]);
   }
 
+  function saveSalaryPlans(payloads) {
+    const incoming = Array.isArray(payloads) ? payloads : [payloads].filter(Boolean);
+    const validIncoming = incoming.filter((item) => {
+      const draft = normalizeSalaryPlan(item || {});
+      return hasSalaryPlanIdentity(draft);
+    });
+    if (!validIncoming.length) {
+      pushToast("warning", "ไม่มีข้อมูลแผนเงินเดือนให้บันทึก");
+      return false;
+    }
+    const nextSalaryPlans = mergeSalaryPlans(salaryPlans, validIncoming);
+
+    try {
+      const persisted = persistLocalSalaryPlans(nextSalaryPlans);
+      setSalaryPlans(persisted);
+      setLegacyAvailable(hasLegacySnapshot());
+      pushToast("success", "บันทึกแผนเงินเดือนแล้ว");
+      return true;
+    } catch (error) {
+      pushToast("error", String(error?.message || error || "save_salary_plan_failed"));
+      return false;
+    }
+  }
+
+  function saveSalaryPlan(payload) {
+    return saveSalaryPlans([payload]);
+  }
+
   async function saveDebtPlan(payload) {
     if (!supabase || !session || savingRef.current) return false;
 
@@ -3230,13 +3321,16 @@ export function AppProvider({ children }) {
     });
     let localGoals = [];
     let localCreditStatements = [];
+    let localSalaryPlans = [];
     try {
       const localSnapshot = loadAll({ defaultGoals: [] });
       localGoals = Array.isArray(localSnapshot?.goals) ? localSnapshot.goals : [];
       localCreditStatements = Array.isArray(localSnapshot?.creditStatements) ? localSnapshot.creditStatements : [];
+      localSalaryPlans = Array.isArray(localSnapshot?.salaryPlans) ? localSnapshot.salaryPlans : [];
     } catch {
       localGoals = [];
       localCreditStatements = [];
+      localSalaryPlans = [];
     }
 
     return {
@@ -3252,6 +3346,7 @@ export function AppProvider({ children }) {
         goals: localGoals,
         financialGoals,
         creditStatements: localCreditStatements,
+        salaryPlans: localSalaryPlans,
         debtPlans,
         inbox: scanDocuments,
         merchants: mappingRows || [],
@@ -3357,12 +3452,15 @@ export function AppProvider({ children }) {
       try {
         const localSnapshot = loadAll({ defaultGoals: [] });
         const nextCreditStatements = normalizeCreditStatements(validation.data?.creditStatements || []);
+        const nextSalaryPlans = normalizeSalaryPlans(validation.data?.salaryPlans || []);
         saveAll({
           ...localSnapshot,
           goals: Array.isArray(validation.data?.goals) ? validation.data.goals : [],
           creditStatements: nextCreditStatements,
+          salaryPlans: nextSalaryPlans,
         });
         setCreditStatements(nextCreditStatements);
+        setSalaryPlans(nextSalaryPlans);
       } catch {
         // Local goals are best-effort during cloud import.
       }
@@ -3641,6 +3739,7 @@ export function AppProvider({ children }) {
     financialGoals,
     debtPlans,
     creditStatements,
+    salaryPlans,
     budgetRows,
     recurringRules,
     recurringDueToday,
@@ -3687,6 +3786,8 @@ export function AppProvider({ children }) {
     deleteFinancialGoal,
     saveCreditStatement,
     saveCreditStatements,
+    saveSalaryPlan,
+    saveSalaryPlans,
     saveDebtPlan,
     deleteDebtPlan,
     saveCategory,

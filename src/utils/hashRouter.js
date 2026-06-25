@@ -5,7 +5,7 @@
 const VALID_VIEWS = new Set([
   "dashboard", "add", "accounts", "stats", "plan", "assistant", "budgets",
   "categories", "goals", "debts", "bills", "recurring", "rules", "inbox",
-  "credit-statements", "merchants", "more",
+  "credit-statements", "salary-planner", "merchants", "more",
 ]);
 
 const DEFAULT_VIEW = "dashboard";

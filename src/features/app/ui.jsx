@@ -20,7 +20,7 @@ const NAV_ITEMS = [
   { id: "settings", label: "ตั้งค่า", icon: Settings },
 ];
 
-const PLAN_NAV_VIEWS = new Set(["plan", "assistant", "planner", "goals", "debts", "credit-statements", "bills", "recurring"]);
+const PLAN_NAV_VIEWS = new Set(["plan", "assistant", "planner", "goals", "debts", "credit-statements", "salary-planner", "bills", "recurring"]);
 const SETTINGS_NAV_VIEWS = new Set(["settings", "categories"]);
 
 function getToastLabel(tone) {

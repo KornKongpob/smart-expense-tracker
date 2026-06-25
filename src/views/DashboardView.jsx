@@ -35,6 +35,7 @@ import {
 import AssistantPanel from "../features/assistant/AssistantPanel.jsx";
 import { generatePersonalMoneyRecommendations } from "../features/assistant/recommendationEngine.js";
 import { generateMoneyCoachInsights } from "../utils/moneyCoach.js";
+import { getCreditStatementReminderSummary } from "../utils/creditPlanner.js";
 import MonthSummaryCards from "./dashboard/MonthSummaryCards.jsx";
 import PendingReceiptCard from "./dashboard/PendingReceiptCard.jsx";
 import CalendarMonthView from "./dashboard/CalendarMonthView.jsx";
@@ -86,6 +87,19 @@ export default function DashboardView() {
   const goals = useMemo(() => asList(state.goals), [state.goals]);
   const inbox = useMemo(() => asList(state.inbox), [state.inbox]);
   const todayISO = toISODate(new Date());
+  const creditStatementSummary = useMemo(
+    () => getCreditStatementReminderSummary(accounts, state.creditStatements || [], todayISO),
+    [accounts, state.creditStatements, todayISO],
+  );
+  const creditStatementCta = useMemo(() => {
+    if (creditStatementSummary.nextAction === "input") {
+      return { label: "กรอกยอดเรียกเก็บ", view: "credit-statements" };
+    }
+    if (creditStatementSummary.nextAction === "plan") {
+      return { label: "วางแผนจ่ายจากเงินเดือน", view: "salary-planner" };
+    }
+    return { label: "ดูรอบบิล", view: "credit-statements" };
+  }, [creditStatementSummary.nextAction]);
 
   const categoryById = useMemo(() => {
     const all = [...asList(categories.expense), ...asList(categories.income)];
@@ -258,6 +272,54 @@ export default function DashboardView() {
               tone={snapshot.accountSummary.creditCardOutstandingSatang ? "danger" : "neutral"}
               onClick={openDebtPlan}
             />
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/70 bg-white/75 p-3" data-testid="dashboard-credit-statements">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-rose-50 text-rose-700">
+                  <CreditCard size={17} aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[color:var(--text)]">บัตรเครดิต</div>
+                  <div className="ui-help mt-1">รอบบิลที่ต้องกรอก ยอดเปิด และวันครบกำหนดถัดไป</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(creditStatementCta.view)}
+                className="ui-btn ui-btn-secondary ui-btn-compact sm:self-start"
+              >
+                {creditStatementCta.label}
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-[color:var(--muted)]">รอกรอกยอด</div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-[color:var(--text)]">
+                  {creditStatementSummary.needingInputCount} ใบ
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-[color:var(--muted)]">ยอดเปิดรวม</div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-[color:var(--text)]">
+                  {formatCurrency(creditStatementSummary.totalOpenFullDue)}
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <div className="text-[11px] font-semibold text-[color:var(--muted)]">ครบกำหนดใกล้สุด</div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-[color:var(--text)]">
+                  {creditStatementSummary.nearestDueDate ? formatDateShort(creditStatementSummary.nearestDueDate) : "-"}
+                </div>
+              </div>
+            </div>
+
+            {creditStatementSummary.hasDueSoon ? (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                มีบัตรครบกำหนดใน 5 วัน
+              </div>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

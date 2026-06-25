@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, CreditCard, HandCoins, Landmark, Trash2, Wallet } from "lucide-react";
 
 import { useExpenseApp } from "../AppProvider.jsx";
-import { EmptyPanel, ScreenShell, Sheet } from "../ui.jsx";
-import { formatCurrency } from "../../../utils/format.js";
+import { EmptyPanel, ScreenShell, Sheet, StatusPill } from "../ui.jsx";
+import { formatCurrency, toISODate } from "../../../utils/format.js";
 import { parseMoneyToSatang, sanitizeMoneyInput } from "../../../utils/money.js";
 import {
   buildAccountAdjustmentSummary,
@@ -22,7 +22,8 @@ import {
   getPresetOptionsForCreateFlow,
   resolvePresetForAccount,
 } from "../accountPresetUtils.js";
-import { consumePendingAccountDeepLink } from "../navigation.js";
+import { consumePendingAccountDeepLink, useExpenseNavigation } from "../navigation.js";
+import { getCreditCardStatementStatus } from "../../../utils/creditPlanner.js";
 
 const ACCOUNT_TYPE_OPTIONS = [
   { id: "loan", label: "สินเชื่อ", icon: HandCoins },
@@ -82,8 +83,24 @@ function getAccountMeta(account, preset) {
   return parts.filter(Boolean).join(" / ");
 }
 
+function getCreditStatusPillTone(status) {
+  if (status === "due_soon" || status === "needs_input") return "warning";
+  if (status === "normal") return "success";
+  return "default";
+}
+
 export default function AccountsScreen() {
-  const { accounts, accountBalanceSnapshot, saveAccount, deleteAccount, adjustAccountBalance, saving, isOnline } = useExpenseApp();
+  const { navigateToView } = useExpenseNavigation();
+  const {
+    accounts,
+    creditStatements,
+    accountBalanceSnapshot,
+    saveAccount,
+    deleteAccount,
+    adjustAccountBalance,
+    saving,
+    isOnline,
+  } = useExpenseApp();
   const [draft, setDraft] = useState(createDraft());
   const [editorOpen, setEditorOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -97,6 +114,15 @@ export default function AccountsScreen() {
   const balanceMap = useMemo(() => {
     return buildAccountBalanceMap(accountBalanceSnapshot);
   }, [accountBalanceSnapshot]);
+  const todayISO = useMemo(() => toISODate(new Date()), []);
+  const creditStatementStatusById = useMemo(() => {
+    const statuses = new Map();
+    for (const account of Array.isArray(accounts) ? accounts : []) {
+      if (String(account?.type || "").toLowerCase().trim() !== "credit") continue;
+      statuses.set(String(account?.id || ""), getCreditCardStatementStatus(account, creditStatements, todayISO));
+    }
+    return statuses;
+  }, [accounts, creditStatements, todayISO]);
 
   const selectedPreset = useMemo(() => {
     return coerceInstitutionPreset(draft.presetId || draft.institutionLabel, draft.type);
@@ -256,13 +282,23 @@ export default function AccountsScreen() {
               const balance = balanceMap.get(Number(account.id)) ?? Number(account.opening_balance_satang || 0);
               const color = account.color || preset?.brandColor || "#0b84ff";
               const isLiability = isLiabilityAccountType(account.type);
+              const creditStatus = account.type === "credit"
+                ? creditStatementStatusById.get(String(account.id))
+                : null;
 
               return (
-                <button
+                <div
                   key={account.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   className="finance-list-button finance-account-button"
                   onClick={() => openEditor(account)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    openEditor(account);
+                  }}
                   data-testid={`account-row-${account.id}`}
                 >
                   <div className="finance-row finance-account-row">
@@ -276,6 +312,13 @@ export default function AccountsScreen() {
                       <div className="finance-account-copy">
                         <div className="finance-row-title">{account.name}</div>
                         <div className="finance-row-meta">{getAccountMeta(account, preset)}</div>
+                        {creditStatus ? (
+                          <div className="mt-2 finance-chip-grid">
+                            <StatusPill tone={getCreditStatusPillTone(creditStatus.status)}>
+                              {creditStatus.label}
+                            </StatusPill>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                     <div className="finance-row-side finance-account-side">
@@ -291,9 +334,22 @@ export default function AccountsScreen() {
                       {account.type === "credit" && Number(account.credit_limit_satang || 0) > 0 ? (
                         <div className="finance-account-limit">วงเงิน {formatCurrency(account.credit_limit_satang)}</div>
                       ) : null}
+                      {account.type === "credit" ? (
+                        <button
+                          type="button"
+                          className="ui-btn ui-btn-secondary ui-btn-compact"
+                          data-testid={`account-credit-statement-${account.id}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigateToView("credit-statements");
+                          }}
+                        >
+                          รอบบิล
+                        </button>
+                      ) : null}
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

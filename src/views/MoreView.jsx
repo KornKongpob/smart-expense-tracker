@@ -526,6 +526,13 @@ export default function MoreView({ showAlert, showConfirm }) {
             onClick={() => navigate("credit-statements")}
             testId="hub-credit-statements"
           />
+          <MoreRow
+            icon={<CreditCard size={20} />}
+            title="วางแผนจ่ายบัตรจากเงินเดือน"
+            subtitle="จ่ายขั้นต่ำให้ครบก่อน แล้วค่อยทยอยลดหนี้"
+            onClick={() => navigate("salary-planner")}
+            testId="hub-salary-planner"
+          />
         </HubSection>
 
         <HubSection title="ระบบอัตโนมัติ" subtitle="ตรวจงานที่ต้องอนุมัติ กฎประจำ และการทำงานอัตโนมัติของแอป">

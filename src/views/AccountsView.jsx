@@ -42,6 +42,7 @@ import {
   getNextDueDate,
   getNextStatementDate,
 } from "../utils/creditDates.js";
+import { getCreditCardStatementStatus } from "../utils/creditPlanner.js";
 import { useLockBodyScroll } from "../utils/useLockBodyScroll";
 
 // ===== Visual helpers =====
@@ -758,6 +759,13 @@ function CreditCardSummary({ account }) {
   );
 }
 
+function getCreditStatusChipClass(status) {
+  if (status === "due_soon") return "border-amber-200 bg-amber-50 text-amber-800";
+  if (status === "needs_input") return "border-orange-200 bg-orange-50 text-orange-800";
+  if (status === "open") return "border-blue-200 bg-blue-50 text-blue-800";
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
 // keep legacy function name used throughout the view
 const randomColor = () => pickRandomColor();
 
@@ -768,6 +776,16 @@ const generateId = () => {
 export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
   const store = useAppStore();
   const accounts = useMemo(() => store.state.accounts || [], [store.state.accounts]);
+  const creditStatements = useMemo(() => store.state.creditStatements || [], [store.state.creditStatements]);
+  const todayISO = toISODate(new Date());
+  const creditStatementStatusById = useMemo(() => {
+    const statuses = new Map();
+    for (const account of Array.isArray(accounts) ? accounts : []) {
+      if (String(account?.type || "").toLowerCase().trim() !== "credit") continue;
+      statuses.set(String(account?.id || ""), getCreditCardStatementStatus(account, creditStatements, todayISO));
+    }
+    return statuses;
+  }, [accounts, creditStatements, todayISO]);
   const { addAccount, updateAccount, deleteAccount, adjustAccountBalance } = store;
 
   const [q, setQ] = useState("");
@@ -1312,6 +1330,7 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
         _storedCreditLimit: a?.creditLimit,
         _storedStatementDay: a?.statementDay,
         _storedDueDay: a?.dueDay,
+        _creditStatementStatus: creditStatementStatusById.get(String(a?.id || "")),
         balance: Number(balance) || 0,
       };
     });
@@ -1427,6 +1446,14 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                             <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-semibold">
                               {currencyLabel(acc.currency)}
                             </div>
+                            {acc.type === "credit" ? (
+                              <div
+                                className={`ui-chip ${getCreditStatusChipClass(acc._creditStatementStatus?.status)}`}
+                                data-testid={`account-credit-statement-status-${acc.id}`}
+                              >
+                                {acc._creditStatementStatus?.label || "ปกติ"}
+                              </div>
+                            ) : null}
                             {acc.institutionId ? (
                               <div className="text-[11px] px-2 py-1 rounded-full bg-white/30 border border-white/20 text-gray-900 font-semibold">
                                 {getInstitutionChipLabel(getInstitutionPresetById(acc.institutionId))}
@@ -1494,6 +1521,17 @@ export default function AccountsView({ showAlert: showAppAlert, showConfirm }) {
                             >
                               <CreditCard size={18} />
                               <span>Pay</span>
+                            </button>
+                          ) : null}
+                          {acc.type === "credit" ? (
+                            <button
+                              type="button"
+                              onClick={() => store.navigate?.("credit-statements")}
+                              data-testid={`account-credit-statement-${acc.id}`}
+                              className="ui-btn ui-btn-secondary ui-btn-compact"
+                              title="รอบบิล"
+                            >
+                              <span>รอบบิล</span>
                             </button>
                           ) : null}
                           <button

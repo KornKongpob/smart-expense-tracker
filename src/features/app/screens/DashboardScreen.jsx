@@ -18,9 +18,10 @@ import TransactionEditSheet, {
 } from "../TransactionEditSheet.jsx";
 import { AmountText, MetricCard, ScreenShell, StatusPill } from "../ui.jsx";
 import { getPresetLabel, resolvePresetForAccount } from "../accountPresetUtils.js";
-import { formatCurrency, toISODate } from "../../../utils/format.js";
+import { formatCurrency, formatDateShort, toISODate } from "../../../utils/format.js";
 import TransactionDetailModal from "../../../components/TransactionDetailModal.jsx";
 import { generateMoneyCoachInsights } from "../../../utils/moneyCoach.js";
+import { getCreditStatementReminderSummary } from "../../../utils/creditPlanner.js";
 
 void AccountSheetPicker;
 
@@ -199,6 +200,19 @@ export default function DashboardScreen() {
   const creditCardDebtSatang = snapshotAccounts
     .filter((account) => String(account?.type || "").toLowerCase().trim() === "credit")
     .reduce((sum, account) => sum + Math.abs(Number(account?.balance_satang || 0)), 0);
+  const creditStatementSummary = useMemo(
+    () => getCreditStatementReminderSummary(allAccounts, creditStatements, todayISO),
+    [allAccounts, creditStatements, todayISO],
+  );
+  const creditStatementAction = useMemo(() => {
+    if (creditStatementSummary.nextAction === "input") {
+      return { label: "กรอกยอดเรียกเก็บ", view: "credit-statements" };
+    }
+    if (creditStatementSummary.nextAction === "plan") {
+      return { label: "วางแผนจ่ายจากเงินเดือน", view: "salary-planner" };
+    }
+    return { label: "ดูรอบบิล", view: "credit-statements" };
+  }, [creditStatementSummary.nextAction]);
   const budgetRemainingSatang = Number(displayExpenseBudgetSatang || 0) - Number(snapshot.expense_satang || 0);
   const hasExpenseBudget = Number(displayExpenseBudgetSatang || 0) > 0;
   const budgetOverviewTone = !hasExpenseBudget
@@ -373,6 +387,45 @@ export default function DashboardScreen() {
             );
           })}
         </section>
+
+        <div className="rounded-2xl border border-slate-200/70 bg-white/75 p-3" data-testid="dashboard-credit-statements">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-rose-50 text-rose-700">
+                <CreditCard size={17} aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[color:var(--text)]">บัตรเครดิต</div>
+                <div className="finance-panel-copy">รอบบิลที่ต้องกรอก ยอดเปิด และวันครบกำหนดถัดไป</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="ui-btn ui-btn-secondary ui-btn-compact sm:self-start"
+              onClick={() => navigateToView(creditStatementAction.view)}
+            >
+              {creditStatementAction.label}
+            </button>
+          </div>
+
+          <div className="finance-chip-grid">
+            <StatusPill tone={creditStatementSummary.needingInputCount ? "warning" : "default"}>
+              รอกรอกยอด {creditStatementSummary.needingInputCount} ใบ
+            </StatusPill>
+            <StatusPill tone={creditStatementSummary.openStatementCount ? "default" : "success"}>
+              ยอดเปิด {formatCurrency(creditStatementSummary.totalOpenFullDue)}
+            </StatusPill>
+            <StatusPill tone={creditStatementSummary.hasDueSoon ? "warning" : "default"}>
+              ใกล้สุด {creditStatementSummary.nearestDueDate ? formatDateShort(creditStatementSummary.nearestDueDate) : "-"}
+            </StatusPill>
+          </div>
+
+          {creditStatementSummary.hasDueSoon ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+              มีบัตรครบกำหนดใน 5 วัน
+            </div>
+          ) : null}
+        </div>
 
         <div className="finance-dashboard-actions">
           <button type="button" className="ui-btn ui-btn-primary" onClick={openAdd}>

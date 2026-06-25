@@ -29,6 +29,8 @@ import {
 } from '../src/utils/creditDates.js';
 import {
   calculateCreditPaymentPlan,
+  getCreditCardStatementStatus,
+  getCreditStatementReminderSummary,
   getBillingCycleForCard,
   getStatementsNeedingInput,
   makeCreditStatementCycleKey,
@@ -776,6 +778,49 @@ test('credit planner: statements needing input include missing credit cycles onl
   assert.equal(missing[0].dueDate, '2026-06-25');
 });
 
+test('credit planner: reminder summary surfaces input needs, open totals, and due-soon warnings', () => {
+  const accounts = [
+    { id: 'card-input', name: 'Needs Input', type: 'credit', statementDay: 20, dueDay: 5 },
+    { id: 'card-open', name: 'Open Card', type: 'credit', statementDay: 15, dueDay: 25 },
+    { id: 'cash', name: 'Cash', type: 'cash' },
+  ];
+  const creditStatements = [
+    { id: 'stmt-open', accountId: 'card-open', statementDate: '2026-06-15', dueDate: '2026-06-25', fullDue: 120_000, paidAmount: 20_000, minimumDue: 10_000, status: 'open' },
+    { id: 'stmt-paid', accountId: 'card-input', statementDate: '2026-05-20', dueDate: '2026-06-05', fullDue: 80_000, paidAmount: 80_000, minimumDue: 8_000, status: 'paid' },
+  ];
+
+  const summary = getCreditStatementReminderSummary(accounts, creditStatements, '2026-06-21');
+
+  assert.equal(summary.needingInputCount, 1);
+  assert.deepEqual(summary.cardsNeedingInput.map((item) => item.accountId), ['card-input']);
+  assert.equal(summary.openStatementCount, 1);
+  assert.equal(summary.totalOpenFullDue, 100_000);
+  assert.equal(summary.nearestDueDate, '2026-06-25');
+  assert.equal(summary.hasDueSoon, true);
+  assert.equal(summary.dueSoonStatements[0].accountId, 'card-open');
+  assert.equal(summary.nextAction, 'input');
+});
+
+test('credit planner: account status prioritizes due soon, input needed, open, then normal', () => {
+  const accounts = [
+    { id: 'due', name: 'Due Soon', type: 'credit', statementDay: 10, dueDay: 25 },
+    { id: 'input', name: 'Needs Input', type: 'credit', statementDay: 20, dueDay: 5 },
+    { id: 'open', name: 'Open', type: 'credit', statementDay: 15, dueDay: 28 },
+    { id: 'normal', name: 'Normal', type: 'credit', statementDay: 25, dueDay: 10 },
+  ];
+  const statements = [
+    { id: 'stmt-due', accountId: 'due', statementDate: '2026-06-10', dueDate: '2026-06-25', fullDue: 100_000, paidAmount: 0, minimumDue: 10_000, status: 'planned' },
+    { id: 'stmt-open', accountId: 'open', statementDate: '2026-06-15', dueDate: '2026-06-28', fullDue: 90_000, paidAmount: 10_000, minimumDue: 9_000, status: 'open' },
+    { id: 'stmt-normal', accountId: 'normal', statementDate: '2026-05-25', dueDate: '2026-06-10', fullDue: 40_000, paidAmount: 40_000, minimumDue: 4_000, status: 'paid' },
+  ];
+
+  assert.equal(getCreditCardStatementStatus(accounts[0], statements, '2026-06-21').status, 'due_soon');
+  assert.equal(getCreditCardStatementStatus(accounts[0], statements, '2026-06-21').label, 'ครบกำหนดใกล้ถึง');
+  assert.equal(getCreditCardStatementStatus(accounts[1], statements, '2026-06-21').status, 'needs_input');
+  assert.equal(getCreditCardStatementStatus(accounts[2], statements, '2026-06-21').status, 'open');
+  assert.equal(getCreditCardStatementStatus(accounts[3], statements, '2026-06-21').status, 'normal');
+});
+
 test('credit planner: normalizes legacy and new statement fields as positive satang', () => {
   const normalized = normalizePlannerCreditStatement({
     account_id: 'card-1',
@@ -859,6 +904,28 @@ test('credit planner: insufficient budget funds nearest minimums first and warns
   assert.equal(plan.payments[1].recommendedPayment, 0);
   assert.ok(plan.payments[0].warnings.includes('minimum_due_not_fully_funded'));
   assert.ok(plan.payments[1].warnings.includes('minimum_due_not_fully_funded'));
+});
+
+test('credit planner: explicit debt budget overrides salary minus reserve', () => {
+  const accounts = [{ id: 'card-a', type: 'credit' }];
+  const creditStatements = [
+    { id: 'stmt-a', accountId: 'card-a', statementDate: '2026-06-15', dueDate: '2026-07-05', fullDue: 50_000, minimumDue: 10_000, status: 'open' },
+  ];
+
+  const plan = calculateCreditPaymentPlan({
+    accounts,
+    creditStatements,
+    salaryAmount: 100_000,
+    reserveAmount: 90_000,
+    debtBudget: 30_000,
+    strategy: 'due_date',
+  });
+
+  assert.equal(plan.availableDebtBudget, 30_000);
+  assert.equal(plan.totalMinimumRequired, 10_000);
+  assert.equal(plan.totalRecommended, 30_000);
+  assert.equal(plan.payments[0].recommendedPayment, 30_000);
+  assert.equal(plan.payments[0].remainingAfterPayment, 20_000);
 });
 
 test('credit planner: full payoff never recommends more than remaining full due', () => {
@@ -3670,6 +3737,46 @@ test('credit statements route: runtime, hash router, and settings entry are wire
   assert.match(screenSource, /ยอดขั้นต่ำ/);
   assert.match(screenSource, /ยอดเต็มที่ต้องจ่าย/);
   assert.match(runtimePageSource, /return null/);
+});
+
+test('salary planner route: runtime, hash router, More, and statement CTA are wired', () => {
+  const appRootSource = readFileSync(new URL('../src/core/AppRoot.jsx', import.meta.url), 'utf8');
+  const moreSource = readFileSync(new URL('../src/views/MoreView.jsx', import.meta.url), 'utf8');
+  const creditStatementsSource = readFileSync(new URL('../src/views/CreditStatementsView.jsx', import.meta.url), 'utf8');
+  const screenSource = readFileSync(new URL('../src/views/SalaryPlannerView.jsx', import.meta.url), 'utf8');
+  const runtimePageSource = readFileSync(new URL('../app/(runtime)/salary-planner/page.js', import.meta.url), 'utf8');
+
+  assert.equal(getPathForView('salary-planner'), '/salary-planner');
+  assert.equal(getViewForPathname('/salary-planner'), 'salary-planner');
+  assert.equal(getPathForLegacyHash('#/salary-planner'), '/salary-planner');
+  assert.equal(parseHash('#/salary-planner').view, 'salary-planner');
+  assert.equal(buildHash('salary-planner'), '#/salary-planner');
+  assert.match(appRootSource, /salary-planner/);
+  assert.match(appRootSource, /SalaryPlannerScreen/);
+  assert.match(moreSource, /navigate\("salary-planner"\)/);
+  assert.match(creditStatementsSource, /salary-planner/);
+  assert.match(screenSource, /calculateCreditPaymentPlan/);
+  assert.match(screenSource, /recommendedPayment/);
+  assert.match(screenSource, /minimum_due_shortfall/);
+  assert.match(runtimePageSource, /return null/);
+});
+
+test('credit statement reminders source: dashboard and accounts use shared reminder helpers', () => {
+  const legacyDashboardSource = readFileSync(new URL('../src/views/DashboardView.jsx', import.meta.url), 'utf8');
+  const legacyAccountsSource = readFileSync(new URL('../src/views/AccountsView.jsx', import.meta.url), 'utf8');
+  const runtimeDashboardSource = readFileSync(new URL('../src/features/app/screens/DashboardScreen.jsx', import.meta.url), 'utf8');
+  const runtimeAccountsSource = readFileSync(new URL('../src/features/app/screens/AccountsScreen.jsx', import.meta.url), 'utf8');
+
+  assert.match(legacyDashboardSource, /getCreditStatementReminderSummary/);
+  assert.match(legacyDashboardSource, /dashboard-credit-statements/);
+  assert.match(legacyDashboardSource, /salary-planner/);
+  assert.match(runtimeDashboardSource, /getCreditStatementReminderSummary/);
+  assert.match(runtimeDashboardSource, /dashboard-credit-statements/);
+  assert.match(runtimeDashboardSource, /salary-planner/);
+  assert.match(legacyAccountsSource, /getCreditCardStatementStatus/);
+  assert.match(legacyAccountsSource, /account-credit-statement-/);
+  assert.match(runtimeAccountsSource, /getCreditCardStatementStatus/);
+  assert.match(runtimeAccountsSource, /account-credit-statement-/);
 });
 
 test('entry intent helpers: explicit one-shot intents are normalized deterministically', () => {

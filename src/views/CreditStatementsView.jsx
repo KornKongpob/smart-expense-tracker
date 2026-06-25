@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, CreditCard, Save } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, CreditCard, Save } from "lucide-react";
 
 import { formatCurrency, formatDateShort, toISODate } from "../utils/format.js";
 import { formatMoneyInputFromSatang, parseMoneyToSatang, sanitizeMoneyInput } from "../utils/money.js";
@@ -282,6 +282,7 @@ export default function CreditStatementsView({
   accountBalanceSnapshot = [],
   creditStatements = [],
   onSaveStatement,
+  onNavigate,
   saving = false,
   todayDate = toISODate(new Date()),
 }) {
@@ -480,6 +481,17 @@ export default function CreditStatementsView({
 
   return (
     <div className="space-y-6">
+      <section className="ui-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-slate-950">พร้อมวางแผนจ่ายจากเงินเดือน?</div>
+          <p className="ui-help mt-1">ใช้ยอดขั้นต่ำและยอดเต็มที่บันทึกไว้เพื่อจัดสรรเงินเดือนให้แต่ละบัตร</p>
+        </div>
+        <button type="button" className="ui-btn ui-btn-primary" onClick={() => onNavigate?.("salary-planner")}>
+          วางแผนจ่ายบัตร
+          <ArrowRight size={16} />
+        </button>
+      </section>
+
       <Section
         title="ต้องกรอกยอด"
         subtitle="แสดงรอบบิลล่าสุดที่ถึงวันตัดรอบแล้ว แต่ยังไม่มีข้อมูลยอดเรียกเก็บ"

@@ -1,30 +1,30 @@
 import { useExpenseApp } from "../AppProvider.jsx";
 import { useExpenseNavigation } from "../navigation.js";
 import { ScreenShell } from "../ui.jsx";
-import CreditStatementsView from "../../../views/CreditStatementsView.jsx";
+import SalaryPlannerView from "../../../views/SalaryPlannerView.jsx";
 
-export default function CreditStatementsScreen() {
+export default function SalaryPlannerScreen() {
   const { navigateToView } = useExpenseNavigation();
   const {
     accounts,
-    accountBalanceSnapshot,
     creditStatements,
-    saveCreditStatement,
+    salaryPlans,
+    saveSalaryPlan,
     saving,
   } = useExpenseApp();
 
   return (
     <ScreenShell
-      title="รอบบิลบัตรเครดิต"
-      subtitle="กรอกยอดเรียกเก็บหลังวันตัดรอบ เพื่อวางแผนเงินเดือน"
+      title="วางแผนจ่ายบัตรจากเงินเดือน"
+      subtitle="จ่ายขั้นต่ำให้ครบก่อน แล้วค่อยทยอยลดหนี้"
       headerMode="visible"
       fillViewport={false}
     >
-      <CreditStatementsView
+      <SalaryPlannerView
         accounts={accounts}
-        accountBalanceSnapshot={accountBalanceSnapshot}
         creditStatements={creditStatements}
-        onSaveStatement={saveCreditStatement}
+        salaryPlans={salaryPlans}
+        onSaveSalaryPlan={saveSalaryPlan}
         onNavigate={navigateToView}
         saving={saving}
       />
