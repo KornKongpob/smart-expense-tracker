@@ -4375,9 +4375,11 @@ test('runtime shell: stacked sheets only trap focus in the topmost dialog', () =
 test('scan access: paid AI endpoints never answer anonymous callers', () => {
   const accessSource = readFileSync(new URL('../lib/scan/access.js', import.meta.url), 'utf8');
 
-  // Origin / shared-token gates stay first for server-to-server callers.
-  assert.match(accessSource, /if \(originsConfigured\)/);
-  assert.match(accessSource, /if \(tokenConfigured\)/);
+  // A shared token is the server-to-server path; the origin allowlist only
+  // filters callers and must never be accepted as proof of identity on its own.
+  assert.match(accessSource, /if \(tokenOk\) return true;/);
+  assert.match(accessSource, /if \(originsConfigured && !originOk\)/);
+  assert.doesNotMatch(accessSource, /if \(originOk \|\| tokenOk\) return true;/);
   // Falling through used to "return true", leaving the endpoints wide open.
   assert.match(accessSource, /const auth = await getRequestUser\(req\);/);
   assert.match(accessSource, /code: "unauthorized"/);
