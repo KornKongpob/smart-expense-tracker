@@ -185,6 +185,34 @@ function buildMerchantSuggestions({ merchantMappings, recentTransactions, kind, 
     .slice(0, 6);
 }
 
+/**
+ * The line editor lets each row carry its own category. Mirror what the scan flow
+ * does with a multi-category receipt: two or more distinct categories become a
+ * category split, a single shared category just fills in the transaction category
+ * when the user has not picked one. Without this the per-line categories were
+ * collected in the UI and then dropped on save.
+ */
+function prepareManualDraft(draft) {
+  const lines = lineItemsFromDraft(draft).filter(
+    (item) => item?.receiptLineType !== "adjustment" && Number(item?.amountSatang || 0) > 0,
+  );
+  if (draft?.kind !== "expense" || lines.length < 2) return draft;
+
+  const lineCategoryIds = new Set(
+    lines.map((item) => String(item?.categoryId || "").trim()).filter(Boolean),
+  );
+
+  if (lineCategoryIds.size >= 2) {
+    return { ...draft, receiptGroups: lines, splitByCategory: true };
+  }
+
+  if (lineCategoryIds.size === 1 && !String(draft.categoryId || "").trim()) {
+    return { ...draft, categoryId: [...lineCategoryIds][0] };
+  }
+
+  return draft;
+}
+
 export default function AddScreen() {
   const { navigateToView } = useExpenseNavigation();
   const {
@@ -492,7 +520,7 @@ export default function AddScreen() {
             disabled={saving || !canSave}
             data-testid="manual-save"
             onClick={async () => {
-              await createManualTransaction(draft);
+              await createManualTransaction(prepareManualDraft(draft));
               resetDraft();
               setMode("scan");
             }}

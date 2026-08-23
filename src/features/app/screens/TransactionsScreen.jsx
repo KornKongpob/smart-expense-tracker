@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { useExpenseNavigation } from "../navigation.js";
 import TransactionEditSheet, {
@@ -47,6 +47,7 @@ export default function TransactionsScreen() {
   const [activeTransaction, setActiveTransaction] = useState(null);
   const [searchInput, setSearchInput] = useState(transactionsFilters.query || "");
   const deferredSearchInput = useDeferredValue(searchInput);
+  const syncedQueryRef = useRef(transactionsFilters.query || "");
 
   const accountMap = useMemo(
     () => new Map((Array.isArray(accounts) ? accounts : []).map((account) => [toId(account?.id), account])),
@@ -83,6 +84,7 @@ export default function TransactionsScreen() {
     Boolean(transactionsFilters.query);
 
   const syncSearchQuery = useEffectEvent((nextQuery) => {
+    syncedQueryRef.current = nextQuery;
     setTransactionsFilters((current) =>
       current.query === nextQuery ? current : { ...current, query: nextQuery },
     );
@@ -92,10 +94,15 @@ export default function TransactionsScreen() {
     void refreshTransactionsPage({ silent: true });
   });
 
+  // Only mirror the stored query when it changes from outside this screen (for
+  // example the clear-filters button). Comparing against searchInput instead
+  // wiped each keystroke before the deferred value had a chance to sync.
   useEffect(() => {
-    if (searchInput === transactionsFilters.query) return;
-    setSearchInput(transactionsFilters.query || "");
-  }, [searchInput, transactionsFilters.query]);
+    const nextQuery = transactionsFilters.query || "";
+    if (syncedQueryRef.current === nextQuery) return;
+    syncedQueryRef.current = nextQuery;
+    setSearchInput(nextQuery);
+  }, [transactionsFilters.query]);
 
   useEffect(() => {
     syncSearchQuery(deferredSearchInput);
@@ -143,6 +150,7 @@ export default function TransactionsScreen() {
               type="button"
               className="ui-btn ui-btn-secondary"
               onClick={() => {
+                syncedQueryRef.current = "";
                 setSearchInput("");
                 setTransactionsFilters((current) => ({
                   ...current,

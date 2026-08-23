@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, Repeat2, Trash2 } from "lucide-react";
 
 import AccountSheetPicker from "./AccountSheetPicker.jsx";
@@ -121,8 +121,9 @@ export default function TransactionEditSheet({
   const [editShowMore, setEditShowMore] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const editable = canEditTransactionFromHistory(transaction);
+  const transactionKey = toId(transaction?.id);
 
-  useEffect(() => {
+  const resetEditDraft = useEffectEvent(() => {
     if (!open || !transaction) {
       setEditDraft(createTransactionEditDraft());
       setEditAmountInput("");
@@ -136,7 +137,13 @@ export default function TransactionEditSheet({
     setEditAmountInput(toMoneyInput(nextDraft.amountSatang));
     setEditShowMore(false);
     setDeleteConfirmOpen(false);
-  }, [open, transaction]);
+  });
+
+  // Keyed on the transaction id, not the object: a background refresh hands over
+  // a new object for the same row and would otherwise reset edits in progress.
+  useEffect(() => {
+    resetEditDraft();
+  }, [open, transactionKey]);
 
   const editCategories = (
     editDraft.kind === "income"

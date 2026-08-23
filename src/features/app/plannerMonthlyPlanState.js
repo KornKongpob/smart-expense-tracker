@@ -394,6 +394,53 @@ function distributeDelta(rows, targetTotal, mode) {
   return next;
 }
 
+/**
+ * Category limits are rounded to whole baht, so their sum drifts away from the
+ * scenario target and can surface a shortfall the plan never actually had.
+ * Push that rounding difference back into the largest categories, never below
+ * a category floor. The target is floored to whole baht so the reconciled total
+ * can never exceed the money that is actually available.
+ */
+function reconcileRoundedLimits(rows, targetSatang) {
+  const target = Math.floor(clampPositiveInt(targetSatang) / 100) * 100;
+  const next = rows.map((row) => ({
+    categoryId: row.categoryId,
+    floorSatang: roundToNearestHundred(clampPositiveInt(row.floorSatang)),
+    limitSatang: roundToNearestHundred(clampPositiveInt(row.limitSatang)),
+  }));
+
+  const toMap = () => new Map(next.map((row) => [row.categoryId, row.limitSatang]));
+  if (!next.length) return toMap();
+
+  let diff = target - next.reduce((sum, row) => sum + row.limitSatang, 0);
+  if (!diff) return toMap();
+
+  const step = diff > 0 ? 100 : -100;
+  const order = next
+    .map((row, index) => ({ index, value: row.limitSatang }))
+    .sort((left, right) => right.value - left.value || left.index - right.index);
+
+  const maxPasses = Math.abs(diff) / 100 + 1;
+  for (let pass = 0; pass < maxPasses && diff !== 0; pass += 1) {
+    let moved = false;
+
+    for (const entry of order) {
+      if (diff === 0) break;
+      const row = next[entry.index];
+      const candidate = row.limitSatang + step;
+      if (candidate < 0) continue;
+      if (step < 0 && candidate < row.floorSatang) continue;
+      row.limitSatang = candidate;
+      diff -= step;
+      moved = true;
+    }
+
+    if (!moved) break;
+  }
+
+  return toMap();
+}
+
 function buildRootRecommendationBase({
   rootCategory,
   history,
@@ -683,10 +730,18 @@ export function buildPlannerMonthlyPlanState({
       scenario.id,
     );
     const distributedMap = new Map(distributed.map((item) => [item.categoryId, item.nextLimitSatang]));
+    const reconciledMap = reconcileRoundedLimits(
+      rootItems.map((item) => ({
+        categoryId: item.categoryId,
+        floorSatang: item.floorSatang,
+        limitSatang: distributedMap.get(item.categoryId) ?? item.recommendedLimitSatang,
+      })),
+      scenarioConfig.recommendedExpenseSatang,
+    );
     const items = rootItems.map((item) =>
       cloneItemForScenario(
         item,
-        distributedMap.get(item.categoryId) ?? item.recommendedLimitSatang,
+        reconciledMap.get(item.categoryId) ?? item.recommendedLimitSatang,
         scenario.id,
         storedItemIndex.get(`${scenario.id}:${item.categoryId}`) || null,
       ),

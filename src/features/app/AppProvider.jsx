@@ -115,6 +115,8 @@ const GUEST_DISPLAY_NAME = "Guest";
 const TRANSACTION_HISTORY_SELECT =
   "id, kind, status, account_id, from_account_id, to_account_id, category_id, merchant, note, reference, payment_method, amount_satang, currency, date, is_split_parent, is_split_child, split_group_id, split_parent_id, split_index, split_count, raw, created_at";
 const TRANSACTIONS_PAGE_SIZE = 50;
+const REQUEST_TIMEOUT_MS = 20000;
+const IMPORT_TIMEOUT_MS = 120000;
 const TRANSACTIONS_EXPORT_BATCH_SIZE = 250;
 
 function monthToDate(monthValue) {
@@ -303,13 +305,35 @@ function buildAuthMetadata(displayName) {
 }
 
 async function fetchWithSession(session, url, options = {}) {
-  const headers = new Headers(options.headers || {});
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
+  const headers = new Headers(fetchOptions.headers || {});
   headers.set("Content-Type", "application/json");
   if (session?.access_token) {
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }
 
-  const res = await fetch(url, { ...options, headers });
+  // Without a deadline a hanging request keeps the shell stuck on its loading
+  // screen indefinitely on flaky mobile connections.
+  const controller = typeof AbortController === "undefined" ? null : new AbortController();
+  const timeoutId =
+    controller && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  let res;
+  try {
+    res = await fetch(url, {
+      ...fetchOptions,
+      headers,
+      signal: fetchOptions.signal || controller?.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("request_timeout");
+    }
+    throw error;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+
   const json = await readJson(res);
   if (!res.ok || json?.ok === false) {
     throw new Error(String(json?.message || json?.detail || res.statusText || "request_failed"));
@@ -512,6 +536,113 @@ function mergeNotificationKeys(existing, nextKey) {
   return [...current, key];
 }
 
+// Every mutation below used to reject straight into the calling component, which
+// had no catch of its own — a failed save simply did nothing visible. These
+// messages give each action a Thai fallback while the raw error still reaches
+// the console for debugging.
+const ACTION_ERROR_MESSAGES = {
+  saveProfile: "บันทึกโปรไฟล์ไม่สำเร็จ",
+  savePlanningConfig: "บันทึกการตั้งค่าแผนไม่สำเร็จ",
+  saveAccount: "บันทึกบัญชีไม่สำเร็จ",
+  deleteAccount: "ลบบัญชีไม่สำเร็จ",
+  adjustAccountBalance: "ปรับยอดบัญชีไม่สำเร็จ",
+  saveFinancialGoal: "บันทึกเป้าหมายไม่สำเร็จ",
+  deleteFinancialGoal: "ลบเป้าหมายไม่สำเร็จ",
+  saveDebtPlan: "บันทึกแผนหนี้ไม่สำเร็จ",
+  deleteDebtPlan: "ลบแผนหนี้ไม่สำเร็จ",
+  saveCategory: "บันทึกหมวดหมู่ไม่สำเร็จ",
+  setCategoryHidden: "อัปเดตหมวดหมู่ไม่สำเร็จ",
+  saveCategoryBudgetBehavior: "อัปเดตหมวดหมู่ไม่สำเร็จ",
+  saveBudgetRow: "บันทึกงบประมาณไม่สำเร็จ",
+  deleteBudgetRow: "ลบงบประมาณไม่สำเร็จ",
+  saveRecurringRule: "บันทึกรายการประจำไม่สำเร็จ",
+  deleteRecurringRule: "ลบรายการประจำไม่สำเร็จ",
+  toggleRecurringRule: "อัปเดตรายการประจำไม่สำเร็จ",
+  runRecurringNow: "สร้างรายการประจำไม่สำเร็จ",
+  applySuggestedBudgets: "ใช้งบที่แนะนำไม่สำเร็จ",
+  applyPlannerPlan: "ใช้แผนที่เลือกไม่สำเร็จ",
+  acceptPlannerRecommendation: "รับคำแนะนำไม่สำเร็จ",
+  dismissPlannerRecommendation: "ปิดคำแนะนำไม่สำเร็จ",
+  lockPlannerRecommendation: "ล็อกงบไม่สำเร็จ",
+  markNotificationRead: "อัปเดตการแจ้งเตือนไม่สำเร็จ",
+  markAllNotificationsRead: "อัปเดตการแจ้งเตือนไม่สำเร็จ",
+  dismissNotification: "ปิดการแจ้งเตือนไม่สำเร็จ",
+  createManualTransaction: "บันทึกรายการไม่สำเร็จ",
+  updateTransaction: "อัปเดตรายการไม่สำเร็จ",
+  deleteTransaction: "ลบรายการไม่สำเร็จ",
+  approveScanDocument: "บันทึกรายการจากสแกนไม่สำเร็จ",
+  rejectScanDocument: "ย้ายออกจากคิวไม่สำเร็จ",
+  uploadScanFile: "อัปโหลดไฟล์ไม่สำเร็จ",
+  uploadScanFiles: "อัปโหลดไฟล์ไม่สำเร็จ",
+  retryScanUpload: "ลองสแกนใหม่ไม่สำเร็จ",
+  exportTransactionsCsv: "ส่งออก CSV ไม่สำเร็จ",
+  exportBackup: "ส่งออกข้อมูลสำรองไม่สำเร็จ",
+  exportBackupWithAttachments: "ส่งออกข้อมูลสำรองไม่สำเร็จ",
+  importBackupFile: "นำเข้าข้อมูลสำรองไม่สำเร็จ",
+  runLegacyMigration: "ย้ายข้อมูลเดิมไม่สำเร็จ",
+  refreshAll: "โหลดข้อมูลไม่สำเร็จ",
+  refreshPlannerState: "โหลดแผนการเงินไม่สำเร็จ",
+};
+
+export function toFriendlyActionError(error, fallback = "ทำรายการไม่สำเร็จ") {
+  const message = String(error?.message || error || "").toLowerCase();
+  if (!message) return fallback;
+  if (message.includes("request_timeout") || message.includes("aborted")) {
+    return "เชื่อมต่อช้าเกินไป ลองใหม่อีกครั้ง";
+  }
+  if (message.includes("failed to fetch") || message.includes("networkerror") || message.includes("network")) {
+    return "เชื่อมต่อไม่ได้ ระบบยังไม่บันทึกรายการนี้";
+  }
+  if (message.includes("jwt") || message.includes("session") || message.includes("not authenticated")) {
+    return "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่";
+  }
+  if (message.includes("row-level security") || message.includes("permission denied") || message.includes("not authorized")) {
+    return "ไม่มีสิทธิ์ทำรายการนี้";
+  }
+  if (message.includes("duplicate key") || message.includes("already exists") || message.includes("unique constraint")) {
+    return "มีข้อมูลนี้อยู่แล้ว";
+  }
+  return fallback;
+}
+
+/**
+ * Wraps every exposed mutation so a rejection always surfaces a toast. The error
+ * is rethrown so callers keep their existing control flow (a failed save must not
+ * clear the draft or close the sheet).
+ */
+function decorateActionsWithErrorFeedback(value, onError) {
+  const next = { ...value };
+
+  for (const [key, fallback] of Object.entries(ACTION_ERROR_MESSAGES)) {
+    const action = next[key];
+    if (typeof action !== "function") continue;
+
+    next[key] = async (...args) => {
+      try {
+        return await action(...args);
+      } catch (error) {
+        onError(error, fallback);
+        throw error;
+      }
+    };
+  }
+
+  return next;
+}
+
+function getOfflineQueueSignature(queue) {
+  const manual = Array.isArray(queue?.manual) ? queue.manual : [];
+  const scans = Array.isArray(queue?.scans) ? queue.scans : [];
+  return [
+    manual.map((item) => String(item?.id || "")).join(","),
+    scans.map((item) => String(item?.id || "")).join(","),
+  ].join("|");
+}
+
+function isSameOfflineQueue(left, right) {
+  return getOfflineQueueSignature(left) === getOfflineQueueSignature(right);
+}
+
 function mergeNotificationKeyList(existing, nextKeys) {
   return (Array.isArray(nextKeys) ? nextKeys : []).reduce(
     (keys, key) => mergeNotificationKeys(keys, key),
@@ -553,21 +684,23 @@ export function AppProvider({ children }) {
   const [notificationsUnavailable, setNotificationsUnavailable] = useState(false);
   const [localNotificationReadKeys, setLocalNotificationReadKeys] = useState([]);
   const [localNotificationDismissedKeys, setLocalNotificationDismissedKeys] = useState([]);
-  const [selectedMonth, setSelectedMonth] = useState(todayMonth());
+  const [selectedMonth, setSelectedMonth] = useState(todayMonth);
   const [transactionsFilters, setTransactionsFiltersState] = useState(() => createTransactionsFiltersState());
   const [transactionsPage, setTransactionsPage] = useState(() => createTransactionsPageState());
   const [toast, setToast] = useState(null);
-  const [notificationPermission, setNotificationPermission] = useState(() => getNotificationPermissionState());
-  const [queue, setQueue] = useState(readOfflineQueue());
+  const [notificationPermission, setNotificationPermission] = useState(getNotificationPermissionState);
+  const [queue, setQueue] = useState(readOfflineQueue);
   const [scanUploads, setScanUploads] = useState([]);
   const [isOnline, setIsOnline] = useState(
-    typeof navigator === "undefined" ? true : navigator.onLine !== false,
+    () => (typeof navigator === "undefined" ? true : navigator.onLine !== false),
   );
-  const [legacyAvailable, setLegacyAvailable] = useState(hasLegacySnapshot());
+  const [legacyAvailable, setLegacyAvailable] = useState(hasLegacySnapshot);
   const [migrationState, setMigrationState] = useState({ running: false, skipped: false, failures: [] });
   const authReadyRef = useRef(false);
   const savingRef = useRef(false);
   const migrationAttemptedRef = useRef(false);
+  const loadedMonthRef = useRef(null);
+  const offlineQueueRunningRef = useRef(false);
 
   const supabase = hasSupabaseBrowserConfig() ? getSupabaseBrowserClient() : null;
 
@@ -631,7 +764,7 @@ export function AppProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    setQueue(readOfflineQueue());
+    applyOfflineQueueState(readOfflineQueue());
     setLegacyAvailable(hasLegacySnapshot());
     setCreditStatements(readLocalCreditStatements());
     setSalaryPlans(readLocalSalaryPlans());
@@ -639,6 +772,7 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     if (!session || !supabase) {
+      loadedMonthRef.current = null;
       setProfile(null);
       setAccounts([]);
       setMerchantMappings([]);
@@ -665,6 +799,7 @@ export function AppProvider({ children }) {
     }
 
     let cancelled = false;
+    markMonthLoadedEvent();
 
     async function bootstrap() {
       setBootstrapping(true);
@@ -678,7 +813,7 @@ export function AppProvider({ children }) {
         refreshAllEvent(bootstrapJson.profile || null);
       } catch (error) {
         if (!cancelled) {
-          pushToast("error", String(error?.message || error || "bootstrap_failed"));
+          pushToast("error", toFriendlyActionError(error, "เปิดแอปไม่สำเร็จ ลองใหม่อีกครั้ง"));
         }
       } finally {
         if (!cancelled) setBootstrapping(false);
@@ -690,6 +825,17 @@ export function AppProvider({ children }) {
     return () => {
       cancelled = true;
     };
+  }, [session, supabase]);
+
+  // Switching months only needs a data refresh, never a full bootstrap round trip.
+  // Keeping it out of the bootstrap effect avoids blanking the shell behind the
+  // loading screen every time the month picker changes.
+  useEffect(() => {
+    if (!session || !supabase) return;
+    if (loadedMonthRef.current === null) return;
+    if (loadedMonthRef.current === selectedMonth) return;
+    loadedMonthRef.current = selectedMonth;
+    refreshAllEvent();
   }, [selectedMonth, session, supabase]);
 
   useEffect(() => {
@@ -708,6 +854,12 @@ export function AppProvider({ children }) {
 
   function pushToast(tone, message) {
     setToast({ id: Date.now(), tone, message: String(message || "").trim() });
+  }
+
+  // Keeps the queue object identity stable when nothing actually changed so the
+  // drain effect below cannot retrigger itself into a retry loop.
+  function applyOfflineQueueState(nextQueue) {
+    setQueue((current) => (isSameOfflineQueue(current, nextQueue) ? current : nextQueue));
   }
 
   function clearToast() {
@@ -1337,7 +1489,134 @@ export function AppProvider({ children }) {
       setStoredNotifications(normalizeNotifications(notificationsResult.data || []));
       setNotificationsUnavailable(notificationsResult.unavailable === true);
       setLegacyAvailable(hasLegacySnapshot());
-      setQueue(readOfflineQueue());
+      applyOfflineQueueState(readOfflineQueue());
+    } finally {
+      startTransition(() => setLoading(false));
+    }
+  }
+
+  async function fetchScanDocuments() {
+    const { data, error } = await supabase
+      .from("scan_documents")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(30);
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  }
+
+  // Scan queue mutations only move rows in scan_documents, so they never need
+  // the full refreshAll fan-out.
+  // Patch the reviewed row locally so the inbox reflects the decision instantly
+  // instead of depending on the refresh round trip landing first.
+  function markScanDocumentStatus(scanId, patch) {
+    const targetId = String(scanId || "");
+    if (!targetId) return;
+    setScanDocuments((current) =>
+      (Array.isArray(current) ? current : []).map((row) =>
+        String(row?.id || "") === targetId ? { ...row, ...patch } : row,
+      ),
+    );
+  }
+
+  async function refreshScanDocuments() {
+    if (!supabase || !session) return;
+    setScanDocuments(await fetchScanDocuments());
+  }
+
+  /**
+   * Refresh only what a transaction write can change: the planning window, the
+   * dashboard aggregates, account balances, and the recent list. Categories,
+   * budgets, goals, debts, recurring rules, and the profile are untouched by a
+   * transaction write, so this replaces ~20 requests with 7 and skips the
+   * planner row upserts. Planner state still recomputes locally from the fresh
+   * planning transactions.
+   */
+  async function refreshTransactionDependentState({ includeScans = false } = {}) {
+    if (!supabase || !session) return;
+
+    startTransition(() => setLoading(true));
+    try {
+      const safeMonthKey = sanitizeMonthKey(selectedMonth);
+      const monthDate = monthToDate(safeMonthKey);
+      const previousMonthDate = monthToDate(shiftMonthKey(safeMonthKey, -1));
+      const { planningRangeStart, planningRangeEnd } = buildPlannerRange(safeMonthKey);
+
+      const [
+        planningTransactionsResult,
+        merchantMappingsResult,
+        snapshotResult,
+        previousSnapshotResult,
+        accountBalanceResult,
+        cashflowResult,
+        transactionsResult,
+        scanRows,
+      ] = await Promise.all([
+        supabase
+          .from("transactions")
+          .select("id, kind, category_id, amount_satang, date, is_split_parent, is_split_child, raw, from_account_id, to_account_id")
+          .eq("user_id", session.user.id)
+          .eq("status", "posted")
+          .gte("date", planningRangeStart)
+          .lte("date", planningRangeEnd)
+          .order("date", { ascending: false }),
+        supabase
+          .from("merchant_mappings")
+          .select("*")
+          .order("last_used_at", { ascending: false, nullsFirst: false })
+          .order("updated_at", { ascending: false }),
+        supabase.rpc("dashboard_snapshot", { target_month: monthDate }),
+        supabase.rpc("dashboard_snapshot", { target_month: previousMonthDate }),
+        fetchOptionalRpcRows(
+          supabase.rpc("account_balance_snapshot", { target_user: session.user.id }),
+          "account_balance_snapshot",
+        ),
+        supabase.rpc("dashboard_cashflow_series", { target_month: monthDate }),
+        supabase
+          .from("transactions")
+          .select(
+            "id, kind, status, account_id, from_account_id, to_account_id, category_id, merchant, note, reference, payment_method, amount_satang, currency, date, is_split_parent, is_split_child, split_group_id, split_parent_id, split_index, split_count, raw, created_at",
+          )
+          .eq("user_id", session.user.id)
+          .eq("status", "posted")
+          .order("date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(24),
+        includeScans ? fetchScanDocuments() : Promise.resolve(null),
+      ]);
+
+      if (planningTransactionsResult.error) throw planningTransactionsResult.error;
+      if (merchantMappingsResult.error) throw merchantMappingsResult.error;
+      if (snapshotResult.error) throw snapshotResult.error;
+      if (previousSnapshotResult.error) throw previousSnapshotResult.error;
+      if (accountBalanceResult.error) throw accountBalanceResult.error;
+      if (cashflowResult.error) throw cashflowResult.error;
+      if (transactionsResult.error) throw transactionsResult.error;
+
+      setPlanningTransactions(
+        Array.isArray(planningTransactionsResult.data) ? planningTransactionsResult.data : [],
+      );
+      setMerchantMappings(Array.isArray(merchantMappingsResult.data) ? merchantMappingsResult.data : []);
+      setDashboardSnapshot(applyCategoryPresentationToSnapshot(snapshotResult.data || null, categories));
+      setDashboardPreviousSnapshot(
+        applyCategoryPresentationToSnapshot(previousSnapshotResult.data || null, categories),
+      );
+      setAccountBalanceSnapshot(normalizeAccountBalanceRows(accountBalanceResult.data || []));
+      setCashflowSeries(Array.isArray(cashflowResult.data) ? cashflowResult.data : []);
+      setRecentTransactions(
+        sortRuntimeTransactionsNewestFirst(
+          (Array.isArray(transactionsResult.data) ? transactionsResult.data : []).filter(
+            (transaction) => transaction?.is_split_child !== true,
+          ),
+        ),
+      );
+      if (scanRows) setScanDocuments(scanRows);
+
+      // The history screen keeps its own paged list; without this a deleted or
+      // edited row stays on screen until the filters change.
+      if (transactionsPage.items.length > 0) {
+        await refreshTransactionsPage({ silent: true, keepItems: true });
+      }
     } finally {
       startTransition(() => setLoading(false));
     }
@@ -1444,14 +1723,14 @@ export function AppProvider({ children }) {
       setTransactionsPage((current) =>
         createTransactionsPageState({
           ...current,
-          error: String(error?.message || error || "load_transactions_failed"),
+          error: toFriendlyActionError(error, "โหลดรายการย้อนหลังไม่สำเร็จ"),
         }),
       );
       if (options.silent !== true) {
         pushToast("error", "โหลดรายการย้อนหลังไม่สำเร็จ");
       }
       return createTransactionsPageState({
-        error: String(error?.message || error || "load_transactions_failed"),
+        error: toFriendlyActionError(error, "โหลดรายการย้อนหลังไม่สำเร็จ"),
       });
     }
   }
@@ -1484,13 +1763,13 @@ export function AppProvider({ children }) {
       setTransactionsPage((current) => ({
         ...current,
         loadingMore: false,
-        error: String(error?.message || error || "load_more_transactions_failed"),
+        error: toFriendlyActionError(error, "โหลดรายการเพิ่มไม่สำเร็จ"),
       }));
       pushToast("error", "โหลดรายการเพิ่มไม่สำเร็จ");
       return createTransactionsPageState({
         items: transactionsPage.items,
         hasMore: transactionsPage.hasMore,
-        error: String(error?.message || error || "load_more_transactions_failed"),
+        error: toFriendlyActionError(error, "โหลดรายการเพิ่มไม่สำเร็จ"),
       });
     }
   }
@@ -2647,7 +2926,7 @@ export function AppProvider({ children }) {
 
     if (!isOnline && !options.skipQueue) {
       const nextQueue = enqueueManualDraft(draft);
-      setQueue(nextQueue);
+      applyOfflineQueueState(nextQueue);
       pushToast("info", "บันทึกออฟไลน์แล้ว");
       return;
     }
@@ -2655,8 +2934,10 @@ export function AppProvider({ children }) {
     setSaving(true);
     try {
       await saveTransactionDraft(draft, { source: options.source || "manual" });
-      await refreshAll();
-      pushToast("success", "บันทึกรายการแล้ว");
+      if (options.deferRefresh !== true) {
+        await refreshTransactionDependentState();
+        pushToast("success", "บันทึกรายการแล้ว");
+      }
     } finally {
       setSaving(false);
     }
@@ -2718,7 +2999,7 @@ export function AppProvider({ children }) {
       }
 
       if (error) throw error;
-      await refreshAll();
+      await refreshTransactionDependentState();
       pushToast("success", "อัปเดตรายการแล้ว");
       return true;
     } finally {
@@ -2762,7 +3043,7 @@ export function AppProvider({ children }) {
         .in("id", targetIds);
 
       if (error) throw error;
-      await refreshAll();
+      await refreshTransactionDependentState();
       pushToast("success", targetIds.length > 1 ? "ลบรายการที่แยกหมวดแล้ว" : "ลบรายการแล้ว");
       return true;
     } finally {
@@ -2783,7 +3064,8 @@ export function AppProvider({ children }) {
         .eq("id", scanId);
 
       if (error) throw error;
-      await refreshAll();
+      markScanDocumentStatus(scanId, { status: "rejected", reviewed_at: new Date().toISOString() });
+      await refreshScanDocuments();
       pushToast("success", "ย้ายออกจากคิวแล้ว");
     } finally {
       setSaving(false);
@@ -2831,13 +3113,19 @@ export function AppProvider({ children }) {
 
       if (scanError) throw scanError;
 
+      markScanDocumentStatus(scan.id, {
+        status: "approved",
+        approved_transaction_id: transaction?.id || null,
+        reviewed_at: new Date().toISOString(),
+      });
+
       if (merchantKey) {
         await upsertMerchantMappingFromDraft(sanitized, {
           source: "scan_approval",
         });
       }
 
-      await refreshAll();
+      await refreshTransactionDependentState({ includeScans: true });
       pushToast("success", "บันทึกรายการแล้ว");
     } finally {
       setSaving(false);
@@ -3125,7 +3413,7 @@ export function AppProvider({ children }) {
 
     if (!isOnline && !options.skipQueue) {
       const nextQueue = await enqueueScanDraft(file);
-      setQueue(nextQueue);
+      applyOfflineQueueState(nextQueue);
       pushToast("info", "เก็บไฟล์ไว้แล้ว");
       return null;
     }
@@ -3139,8 +3427,10 @@ export function AppProvider({ children }) {
         return null;
       }
 
-      await refreshAll();
-      pushToast("success", "เพิ่มเข้า Inbox แล้ว");
+      if (options.deferRefresh !== true) {
+        await refreshScanDocuments();
+        pushToast("success", "เพิ่มเข้า Inbox แล้ว");
+      }
       return outcome.result;
     } finally {
       setSaving(false);
@@ -3157,7 +3447,7 @@ export function AppProvider({ children }) {
       for (const file of list) {
         nextQueue = await enqueueScanDraft(file);
       }
-      setQueue(nextQueue);
+      applyOfflineQueueState(nextQueue);
       pushToast("info", list.length > 1 ? "เก็บไฟล์ไว้รออัปโหลดแล้ว" : "เก็บไฟล์ไว้แล้ว");
       return [];
     }
@@ -3177,7 +3467,7 @@ export function AppProvider({ children }) {
       const failureCount = Math.max(0, list.length - successCount);
 
       if (successCount > 0) {
-        await refreshAll();
+        await refreshScanDocuments();
         if (failureCount > 0) {
           pushToast("info", `เพิ่มเข้า Inbox แล้ว ${successCount} ไฟล์ เหลือ ${failureCount} ไฟล์ที่ต้องตรวจ`);
         } else {
@@ -3202,7 +3492,7 @@ export function AppProvider({ children }) {
     try {
       const outcome = await runScanUpload(entry);
       if (outcome.ok) {
-        await refreshAll();
+        await refreshScanDocuments();
         pushToast("success", "เพิ่มเข้า Inbox แล้ว");
         return outcome.result;
       }
@@ -3227,6 +3517,7 @@ export function AppProvider({ children }) {
       const result = await fetchWithSession(session, "/api/import/local", {
         method: "POST",
         body: JSON.stringify(payload),
+        timeoutMs: IMPORT_TIMEOUT_MS,
       });
 
       setMigrationState({
@@ -3249,46 +3540,61 @@ export function AppProvider({ children }) {
         skipped: false,
         failures: [{ type: "migration", message: String(error?.message || error || "migration_failed") }],
       });
-      if (!automatic) pushToast("error", String(error?.message || error || "migration_failed"));
+      if (!automatic) pushToast("error", toFriendlyActionError(error, "ย้ายข้อมูลเดิมไม่สำเร็จ"));
     }
   }
 
   async function processOfflineQueue() {
-    if (!session || !isOnline) return;
+    if (!session || !isOnline || offlineQueueRunningRef.current) return;
 
     const currentQueue = readOfflineQueue();
     if (!currentQueue.manual.length && !currentQueue.scans.length) return;
 
-    for (const item of currentQueue.manual) {
-      try {
-        await createManualTransaction(item.payload, { skipQueue: true });
-        consumeOfflineQueueItem("manual", item.id);
-      } catch {
-        break;
-      }
-    }
-
-    for (const item of currentQueue.scans) {
-      try {
-        const blob = await readQueuedScanBlob(item);
-        if (!blob) {
-          consumeOfflineQueueItem("scans", item.id);
-          continue;
+    offlineQueueRunningRef.current = true;
+    let syncedCount = 0;
+    try {
+      // Each queued item defers its own refresh so a long queue costs one
+      // refresh at the end instead of one full reload per item.
+      for (const item of currentQueue.manual) {
+        try {
+          await createManualTransaction(item.payload, { skipQueue: true, deferRefresh: true });
+          consumeOfflineQueueItem("manual", item.id);
+          syncedCount += 1;
+        } catch {
+          break;
         }
-        const file = new File([blob], item.filename || "scan-upload", {
-          type: item.mimeType || blob.type || "application/octet-stream",
-        });
-        await uploadScanFile(file, { skipQueue: true });
-        await clearQueuedScanBlob(item);
-        consumeOfflineQueueItem("scans", item.id);
-      } catch {
-        break;
       }
+
+      for (const item of currentQueue.scans) {
+        try {
+          const blob = await readQueuedScanBlob(item);
+          if (!blob) {
+            consumeOfflineQueueItem("scans", item.id);
+            continue;
+          }
+          const file = new File([blob], item.filename || "scan-upload", {
+            type: item.mimeType || blob.type || "application/octet-stream",
+          });
+          await uploadScanFile(file, { skipQueue: true, deferRefresh: true });
+          await clearQueuedScanBlob(item);
+          consumeOfflineQueueItem("scans", item.id);
+          syncedCount += 1;
+        } catch {
+          break;
+        }
+      }
+    } finally {
+      offlineQueueRunningRef.current = false;
     }
 
     const nextQueue = readOfflineQueue();
     writeOfflineQueue(nextQueue);
-    setQueue(nextQueue);
+    applyOfflineQueueState(nextQueue);
+
+    if (syncedCount > 0) {
+      await refreshAll();
+      pushToast("success", `ซิงก์รายการที่ค้างไว้แล้ว ${syncedCount} รายการ`);
+    }
   }
 
   async function buildBackupPayload() {
@@ -3448,6 +3754,7 @@ export function AppProvider({ children }) {
       await fetchWithSession(session, "/api/import/local", {
         method: "POST",
         body: JSON.stringify({ snapshot, attachments }),
+        timeoutMs: IMPORT_TIMEOUT_MS,
       });
       try {
         const localSnapshot = loadAll({ defaultGoals: [] });
@@ -3479,7 +3786,7 @@ export function AppProvider({ children }) {
       );
       return true;
     } catch (error) {
-      pushToast("error", String(error?.message || error || "import_backup_failed"));
+      pushToast("error", toFriendlyActionError(error, "นำเข้าข้อมูลสำรองไม่สำเร็จ"));
       return false;
     } finally {
       setSaving(false);
@@ -3710,7 +4017,12 @@ export function AppProvider({ children }) {
     };
   }, [notificationsUnavailable, runtimeNotifications, session, storedNotifications, supabase]);
 
+  const markMonthLoadedEvent = useEffectEvent(() => {
+    loadedMonthRef.current = selectedMonth;
+  });
+
   const refreshAllEvent = useEffectEvent((nextProfile = null) => {
+    loadedMonthRef.current = selectedMonth;
     void refreshAll(nextProfile);
   });
 
@@ -3827,7 +4139,12 @@ export function AppProvider({ children }) {
     scanToDraft,
   };
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  const decoratedValue = decorateActionsWithErrorFeedback(value, (error, fallback) => {
+    console.error("app_action_failed", error);
+    pushToast("error", toFriendlyActionError(error, fallback));
+  });
+
+  return <AppContext.Provider value={decoratedValue}>{children}</AppContext.Provider>;
 }
 
 export function useExpenseApp() {

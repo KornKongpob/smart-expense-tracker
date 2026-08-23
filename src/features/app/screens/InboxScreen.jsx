@@ -31,6 +31,24 @@ function splitGroupsFromDraft(draft) {
   );
 }
 
+function withSingleAccountDefault(draft, accounts) {
+  const list = Array.isArray(accounts) ? accounts : [];
+  // Only fill in the account when there is no ambiguity: a scan that could not be
+  // matched to a card would otherwise block approval behind an extra tap.
+  if (!draft || list.length !== 1) return draft;
+
+  const onlyId = String(list[0]?.id || "");
+  if (!onlyId) return draft;
+
+  if (draft.kind === "transfer") {
+    if (String(draft.fromAccountId || "")) return draft;
+    return { ...draft, fromAccountId: onlyId, accountId: draft.accountId || onlyId };
+  }
+
+  if (String(draft.accountId || "")) return draft;
+  return { ...draft, accountId: onlyId, fromAccountId: onlyId };
+}
+
 export default function InboxScreen() {
   const { navigateToView } = useExpenseNavigation();
   const {
@@ -62,12 +80,12 @@ export default function InboxScreen() {
       return;
     }
 
-    const nextDraft = scanToDraft(selected);
+    const nextDraft = withSingleAccountDefault(scanToDraft(selected), accounts);
     setDraft(nextDraft);
     setAmountInput(toInputAmount(nextDraft?.amountSatang));
     setShowMore(false);
     setShowLines(false);
-  }, [scanToDraft, selected]);
+  }, [accounts, scanToDraft, selected]);
 
   const rows = (Array.isArray(scanDocuments) ? scanDocuments : []).filter((scan) => {
     const status = String(scan?.status || "").trim().toLowerCase();

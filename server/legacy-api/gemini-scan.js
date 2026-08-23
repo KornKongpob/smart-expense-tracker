@@ -20,7 +20,7 @@ const enforceGeminiRateLimit = createRateLimiter({ keyPrefix: "gemini", limit: R
 export default async function handler(req, res) {
   try {
     setSecurityHeadersModule(res);
-    if (!enforceAccessModule(req, res)) return;
+    if (!(await enforceAccessModule(req, res))) return;
     if (!enforceGeminiRateLimit(req, res)) return;
 
     if (req.method !== "POST") {

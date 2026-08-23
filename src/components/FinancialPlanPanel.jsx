@@ -221,6 +221,7 @@ export default function FinancialPlanPanel({
   minimumCashBuffer,
   strategy,
   deterministicDebtPlan,
+  accessToken = "",
   className = "",
 }) {
   const [plan, setPlan] = useState(null);
@@ -262,7 +263,11 @@ export default function FinancialPlanPanel({
     setErrorMessage("");
 
     try {
-      const result = await requestFinancialPlan(snapshot, { returnMeta: true });
+      // The endpoint only answers signed-in callers, so forward the session token.
+      const result = await requestFinancialPlan(snapshot, {
+        returnMeta: true,
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      });
       setPlan(result.plan);
       if (!result.ok) {
         setErrorMessage("เรียก AI ไม่สำเร็จ จึงแสดงแผนพื้นฐานจากข้อมูลในเครื่องแทน");

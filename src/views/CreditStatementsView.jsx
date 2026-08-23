@@ -151,7 +151,6 @@ function StatementFormCard({
   const status = draft.status || "open";
   const debtSatang = getDisplayDebtSatang(currentBalanceSatang);
   const balanceIsPositive = Number(currentBalanceSatang || 0) > 0;
-  const minimumDueSatang = Math.max(0, parseMoneyToSatang(draft.minimumDue));
   const fullDueSatang = Math.max(0, parseMoneyToSatang(draft.fullDue));
   const remainingDueSatang = statement ? Math.max(0, fullDueSatang - Number(statement.paidAmount || 0)) : fullDueSatang;
 

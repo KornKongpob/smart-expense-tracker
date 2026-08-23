@@ -49,9 +49,11 @@ export default function SettingsScreen() {
   const fileInputRef = useRef(null);
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
 
+  // Keyed on the value, not the profile object: a background refresh replaces the
+  // object identity and would otherwise wipe a name the user is still typing.
   useEffect(() => {
     setDisplayName(profile?.display_name || "");
-  }, [profile]);
+  }, [profile?.display_name]);
 
   const pendingCount = Number(queue.scans.length || 0) + Number(queue.manual.length || 0);
   const migrationTone = profile?.migrated_at ? "success" : "warning";

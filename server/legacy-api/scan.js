@@ -2135,7 +2135,7 @@ async function sendScanResponse({ res, auth, out, accounts, firstFile }) {
 export default async function handler(req, res) {
   try {
     setSecurityHeadersModule(res);
-    if (!enforceAccessModule(req, res)) return;
+    if (!(await enforceAccessModule(req, res))) return;
     if (!enforceRateLimitModule(req, res)) return;
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");

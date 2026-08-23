@@ -406,3 +406,56 @@ test("planner source: downstream screens consume planner signals", () => {
   assert.match(providerSource, /buildPlannerDecisionSummary\(plannerMonthlyPlan, plannerActiveScenarioKey\)/);
   assert.match(providerSource, /scenarioKey: plannerActiveScenarioKey/);
 });
+
+test("planner monthly engine: scenario totals never drift past the available budget", () => {
+  const categories = {
+    expense: Array.from({ length: 19 }, (_, index) => ({
+      id: `cat-${index + 1}`,
+      name: `หมวด ${index + 1}`,
+      kind: "expense",
+      parentId: null,
+    })),
+    income: [],
+  };
+
+  const state = buildPlannerMonthlyPlanState({
+    profile: {
+      planning_income_mode: "fixed",
+      planning_fixed_income_satang: 4_500_000,
+      planning_savings_mode: "amount",
+      planning_savings_amount_satang: 500_000,
+    },
+    categories,
+    debtPlans: [],
+    budgetRows: [],
+    transactions: [],
+    monthValue: "2026-08",
+    today: "2026-08-23",
+    storedPlans: [],
+    storedItems: [],
+  });
+
+  const available = Number(state.baseSnapshot?.availableExpenseSatang ?? 4_000_000);
+
+  for (const scenario of state.scenarios) {
+    const itemTotal = scenario.items.reduce(
+      (sum, item) => sum + Number(item.recommendedLimitSatang || 0),
+      0,
+    );
+
+    assert.equal(
+      itemTotal,
+      Number(scenario.recommendedExpenseSatang || 0),
+      `${scenario.id}: category limits must add up to the scenario budget`,
+    );
+    assert.ok(
+      Number(scenario.recommendedExpenseSatang || 0) <= available,
+      `${scenario.id}: budget must not exceed the available amount`,
+    );
+    assert.equal(
+      Number(scenario.shortfallSatang || 0),
+      0,
+      `${scenario.id}: rounding must not invent a shortfall`,
+    );
+  }
+});

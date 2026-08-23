@@ -155,9 +155,9 @@ async function run() {
     await assertHtml("/planner");
     await assertHtml("/settings");
 
+    await assertHtml("/recurring");
     await assertRedirect("/add-transaction", "/add");
     await assertRedirect("/budgets", "/planner");
-    await assertRedirect("/recurring", "/planner");
     await assertRedirect("/stats", "/planner");
 
     const manifestResponse = await request("/manifest.json");

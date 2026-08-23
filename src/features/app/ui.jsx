@@ -195,9 +195,10 @@ export function BottomNav({ view, onChange, onIntent }) {
 export function ToastBar({ toast, onClose }) {
   useEffect(() => {
     if (!toast?.message) return undefined;
+    // Keyed by id so a repeat of the same message restarts the countdown.
     const timer = window.setTimeout(() => onClose?.(), 2400);
     return () => window.clearTimeout(timer);
-  }, [onClose, toast?.message, toast?.tone]);
+  }, [onClose, toast?.id, toast?.message]);
 
   if (!toast?.message) return null;
 
@@ -328,11 +329,77 @@ export function StatusPill({ tone = "default", children }) {
   return <span className={["finance-pill", `finance-pill-${tone}`].join(" ")}>{children}</span>;
 }
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type=hidden])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+/**
+ * Moves focus into a dialog on open, keeps Tab inside it, and hands focus back
+ * to whatever opened it. Without this, keyboard and screen-reader users stay on
+ * the page behind the sheet.
+ */
+function useDialogFocus(open, dialogRef) {
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return undefined;
+
+    const previouslyFocused = document.activeElement;
+    const node = dialogRef.current;
+
+    // Focus synchronously: the portal is already committed here, and a
+    // requestAnimationFrame callback never fires while the tab is hidden.
+    const target = node?.querySelector(FOCUSABLE_SELECTOR);
+    if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+    else if (node instanceof HTMLElement) node.focus({ preventScroll: true });
+
+    const handleKeyDown = (event) => {
+      if (event.key !== "Tab" || !(node instanceof HTMLElement)) return;
+
+      // Sheets can stack (a confirm sheet on top of an editor). Only the topmost
+      // one traps focus, otherwise the outer trap pulls focus out of the inner.
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs.length && dialogs[dialogs.length - 1] !== node) return;
+
+      const focusable = [...node.querySelectorAll(FOCUSABLE_SELECTOR)].filter(
+        (element) => element instanceof HTMLElement && element.offsetParent !== null,
+      );
+      if (!focusable.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && (active === first || !node.contains(active))) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      if (previouslyFocused instanceof HTMLElement && document.contains(previouslyFocused)) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, [dialogRef, open]);
+}
+
 export function Sheet({ open, onClose, title, subtitle, children, footer }) {
   const shouldDismissBackdropRef = useRef(false);
+  const dialogRef = useRef(null);
 
   useLockBodyScroll(open);
   useKeyboardViewportState(open, { onEscape: onClose });
+  useDialogFocus(open, dialogRef);
 
   if (!open) return null;
 
@@ -351,10 +418,12 @@ export function Sheet({ open, onClose, title, subtitle, children, footer }) {
       }}
     >
       <div
+        ref={dialogRef}
         className="finance-sheet"
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         data-testid="app-sheet"
       >

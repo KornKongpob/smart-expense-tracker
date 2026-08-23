@@ -24,6 +24,7 @@ import {
   getViewForPathname,
 } from "../features/app/routes.js";
 import NotificationCenter from "../features/app/NotificationCenter.jsx";
+import ScreenErrorBoundary from "../features/app/ScreenErrorBoundary.jsx";
 import AuthScreen from "../features/app/screens/AuthScreen.jsx";
 import LoadingScreen from "../features/app/screens/LoadingScreen.jsx";
 import { BottomNav, ToastBar } from "../features/app/ui.jsx";
@@ -191,6 +192,7 @@ function useAppServiceWorker() {
       };
     }
 
+    let refreshIntervalId = 0;
     const buildId = String(
       process.env.NEXT_PUBLIC_APP_BUILD_ID || document.lastModified || process.env.NODE_ENV || "dev",
     )
@@ -238,7 +240,7 @@ function useAppServiceWorker() {
           }
         };
 
-        window.setInterval(refreshRegistration, 60 * 60 * 1000);
+        refreshIntervalId = window.setInterval(refreshRegistration, 60 * 60 * 1000);
       } catch {
         // Ignore service worker registration failures.
       }
@@ -247,6 +249,7 @@ function useAppServiceWorker() {
     window.addEventListener("load", handleLoad);
     return () => {
       window.removeEventListener("load", handleLoad);
+      if (refreshIntervalId) window.clearInterval(refreshIntervalId);
     };
   }, []);
 }
@@ -452,16 +455,33 @@ function SignedInApp() {
     window.location.reload();
   };
 
+  // Toasts must survive the signed-out and bootstrapping branches too, otherwise
+  // feedback like the sign-up confirmation notice is pushed but never rendered.
   if (!authReady) {
-    return <LoadingScreen label="กำลังเข้าใช้" />;
+    return (
+      <>
+        <ToastBar toast={toast} onClose={clearToast} />
+        <LoadingScreen label="กำลังเข้าใช้" />
+      </>
+    );
   }
 
   if (!session) {
-    return <AuthScreen />;
+    return (
+      <>
+        <ToastBar toast={toast} onClose={clearToast} />
+        <AuthScreen />
+      </>
+    );
   }
 
   if (bootstrapping) {
-    return <LoadingScreen label="กำลังโหลด" />;
+    return (
+      <>
+        <ToastBar toast={toast} onClose={clearToast} />
+        <LoadingScreen label="กำลังโหลด" />
+      </>
+    );
   }
 
   const ActiveScreen = SCREEN_COMPONENTS[view] || DashboardScreen;
@@ -511,9 +531,11 @@ function SignedInApp() {
         </header>
 
         <main ref={mainRef} className="finance-app-page finance-app-main" data-app-scroll-root="true">
-          <Suspense fallback={<LoadingScreen label="กำลังโหลดหน้าถัดไป" />}>
-            <ActiveScreen />
-          </Suspense>
+          <ScreenErrorBoundary resetKey={view}>
+            <Suspense fallback={<LoadingScreen label="กำลังโหลดหน้าถัดไป" />}>
+              <ActiveScreen />
+            </Suspense>
+          </ScreenErrorBoundary>
         </main>
 
         <BottomNav

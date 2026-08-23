@@ -505,7 +505,7 @@ export default async function handler(req, res) {
   let snapshot = null;
   try {
     setSecurityHeaders(res);
-    if (!enforceAccess(req, res)) return;
+    if (!(await enforceAccess(req, res))) return;
     if (!enforceRateLimit(req, res)) return;
 
     if (req.method !== "POST") {

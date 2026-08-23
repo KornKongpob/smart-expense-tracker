@@ -27,7 +27,7 @@ Prefer existing helpers before creating new ones:
 - `src/utils/money.js`
 - `src/utils/format.js`
 - `src/utils/transaction.js`
-- `src/utils/debtTracker.js`
+- `src/features/debts/debtPayoff.js`
 - `src/utils/aiInsights.js`
 - `src/utils/installments.js`
 - `src/utils/transferGrouping.js`

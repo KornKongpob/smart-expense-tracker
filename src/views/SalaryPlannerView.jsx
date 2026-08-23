@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, CheckCircle2, CreditCard, Save, WalletCards } from "lucide-react";
 
 import { formatCurrency, formatDateShort, toISODate, toMonthKey } from "../utils/format.js";
@@ -107,10 +107,15 @@ export default function SalaryPlannerView({
   );
   const [draft, setDraft] = useState(() => createDraft(existingPlan));
   const [feedback, setFeedback] = useState(null);
-
-  useEffect(() => {
+  const resetDraft = useEffectEvent(() => {
     setDraft(createDraft(existingPlan));
     setFeedback(null);
+  });
+
+  // Reset only when the underlying plan identity changes so in-progress edits
+  // survive unrelated re-renders of the plan list.
+  useEffect(() => {
+    resetDraft();
   }, [existingPlan?.id, existingPlan?.updatedAt, monthKey]);
 
   const creditAccounts = useMemo(

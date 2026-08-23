@@ -1,10 +1,9 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useMemo, useState } from "react";
 import { ArrowUpRight, CalendarClock, CreditCard, PlusCircle, ReceiptText, Repeat2, Target, Wallet } from "lucide-react";
 
 import { useExpenseNavigation } from "../navigation.js";
 import { useExpenseApp } from "../AppProvider.jsx";
 import AccountSheetPicker from "../AccountSheetPicker.jsx";
-import DashboardAnalyticsPanels from "../DashboardAnalyticsPanels.jsx";
 import AssistantPanel from "../../assistant/AssistantPanel.jsx";
 import { generatePersonalMoneyRecommendations } from "../../assistant/recommendationEngine.js";
 import FinancialPlanPanel from "../../../components/FinancialPlanPanel.jsx";
@@ -22,6 +21,10 @@ import { formatCurrency, formatDateShort, toISODate } from "../../../utils/forma
 import TransactionDetailModal from "../../../components/TransactionDetailModal.jsx";
 import { generateMoneyCoachInsights } from "../../../utils/moneyCoach.js";
 import { getCreditStatementReminderSummary } from "../../../utils/creditPlanner.js";
+
+// Recharts is only needed for the analytics block further down the page, so it
+// stays out of the dashboard's first-paint chunk.
+const DashboardAnalyticsPanels = lazy(() => import("../DashboardAnalyticsPanels.jsx"));
 
 void AccountSheetPicker;
 
@@ -51,6 +54,7 @@ function getAccountMeta(account) {
 export default function DashboardScreen() {
   const { navigateToPath, navigateToView, openAccountDetails } = useExpenseNavigation();
   const {
+    session,
     dashboardSnapshot,
     cashflowSeries,
     loading,
@@ -453,7 +457,11 @@ export default function DashboardScreen() {
         actionViewAliases={{ planner: "planner", budgets: "planner" }}
       />
 
-      <FinancialPlanPanel state={financialPlanState} month={selectedMonth} />
+      <FinancialPlanPanel
+        state={financialPlanState}
+        month={selectedMonth}
+        accessToken={session?.access_token || ""}
+      />
 
       <MoneyCoachPanel insights={moneyCoachInsights} onAction={handleMoneyCoachAction} />
 
@@ -605,11 +613,13 @@ export default function DashboardScreen() {
         </div>
       </article>
 
-      <DashboardAnalyticsPanels
-        snapshot={snapshot}
-        previousSnapshot={dashboardPreviousSnapshot}
-        cashflowSeries={cashflowSeries}
-      />
+      <Suspense fallback={<div className="ui-card finance-panel finance-panel-placeholder" aria-hidden="true" />}>
+        <DashboardAnalyticsPanels
+          snapshot={snapshot}
+          previousSnapshot={dashboardPreviousSnapshot}
+          cashflowSeries={cashflowSeries}
+        />
+      </Suspense>
 
       {history.length ? (
         <article className="ui-card finance-panel" data-testid="dashboard-recent-history">

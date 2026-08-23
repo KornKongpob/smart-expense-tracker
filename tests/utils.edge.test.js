@@ -2034,10 +2034,13 @@ test('financial plan UI source: dashboard exposes AI plan workflow with privacy 
   assert.match(panelSource, /แผนจ่ายหนี้/);
   assert.match(panelSource, /สิ่งที่ควรทำเดือนนี้/);
   assert.match(panelSource, /คำเตือน\/ความเสี่ยง/);
-  assert.match(panelSource, /requestFinancialPlan\(snapshot,\s*\{\s*returnMeta:\s*true\s*\}\)/);
+  assert.match(panelSource, /requestFinancialPlan\(snapshot,\s*\{[\s\S]*returnMeta:\s*true/);
+  // The AI endpoint only answers signed-in callers, so the session token must be forwarded.
+  assert.match(panelSource, /Authorization: `Bearer \$\{accessToken\}`/);
   assert.match(panelSource, /buildFinancialPlanFallback\(snapshot/);
   assert.doesNotMatch(panelSource, /process\.env|OPENAI_API_KEY|NEXT_PUBLIC_OPENAI|sk-[A-Za-z0-9]/);
-  assert.match(dashboardSource, /<FinancialPlanPanel state=\{financialPlanState\} month=\{selectedMonth\} \/>/);
+  assert.match(dashboardSource, /<FinancialPlanPanel[\s\S]*state=\{financialPlanState\}[\s\S]*month=\{selectedMonth\}/);
+  assert.match(dashboardSource, /accessToken=\{session\?\.access_token \|\| ""\}/);
   assert.match(legacyDashboardSource, /<FinancialPlanPanel state=\{state\} month=\{monthKey\} \/>/);
 });
 
@@ -3530,7 +3533,13 @@ test('runtime source: shared account picker is wired through add, inbox, dashboa
   assert.match(addSource, /applySingleAccountSelection/);
   assert.match(addSource, /applyTransferFromAccountSelection/);
   assert.match(addSource, /applyTransferToAccountSelection/);
-  assert.match(addSource, /await createManualTransaction\(draft\);[\s\S]*resetDraft\(\);[\s\S]*setMode\("scan"\);/s);
+  assert.match(
+    addSource,
+    /await createManualTransaction\(prepareManualDraft\(draft\)\);[\s\S]*resetDraft\(\);[\s\S]*setMode\("scan"\);/s,
+  );
+  // Per-line categories must reach the save plan instead of being dropped.
+  assert.match(addSource, /splitByCategory: true/);
+  assert.match(addSource, /lineCategoryIds\.size >= 2/);
   assert.doesNotMatch(addSource, /<label className="finance-field">\s*<span className="ui-label">[^<]*<\/span>\s*<AccountSheetPicker/s);
   assert.doesNotMatch(addSource, /finance-page-actions/);
 
@@ -4134,4 +4143,271 @@ test('system categories: generated rows stay globally unique', () => {
   assert.deepEqual(duplicates, []);
   assert.ok(ids.includes('interest_income'));
   assert.ok(ids.includes('adjust_balance_income'));
+});
+
+test('runtime provider: month changes refresh data without rerunning bootstrap', () => {
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+
+  const bootstrapIndex = providerSource.indexOf('async function bootstrap()');
+  assert.ok(bootstrapIndex > 0, 'provider should still declare a bootstrap effect');
+
+  const depsIndex = providerSource.indexOf('}, [', bootstrapIndex);
+  const bootstrapDeps = providerSource.slice(depsIndex, providerSource.indexOf(');', depsIndex) + 2);
+  assert.equal(bootstrapDeps, '}, [session, supabase]);');
+
+  assert.match(providerSource, /loadedMonthRef\.current === selectedMonth\) return;/);
+  assert.match(providerSource, /loadedMonthRef\.current = selectedMonth;\s*refreshAllEvent\(\);/);
+});
+
+test('runtime provider: offline queue drain cannot retrigger itself in a loop', () => {
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(providerSource, /function applyOfflineQueueState\(nextQueue\)/);
+  assert.match(providerSource, /isSameOfflineQueue\(current, nextQueue\) \? current : nextQueue/);
+  assert.match(providerSource, /!isOnline \|\| offlineQueueRunningRef\.current\) return;/);
+  assert.doesNotMatch(providerSource, /\n\s*setQueue\(readOfflineQueue\(\)\);/);
+  assert.match(
+    providerSource,
+    /createManualTransaction\(item\.payload, \{ skipQueue: true, deferRefresh: true \}\)/,
+  );
+  assert.match(providerSource, /uploadScanFile\(file, \{ skipQueue: true, deferRefresh: true \}\)/);
+});
+
+test('runtime provider: session requests carry an abort deadline', () => {
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(providerSource, /const REQUEST_TIMEOUT_MS = \d+;/);
+  assert.match(providerSource, /new AbortController\(\)/);
+  assert.match(providerSource, /throw new Error\("request_timeout"\)/);
+});
+
+test('runtime shell: a crashing screen is contained by an error boundary', () => {
+  const rootSource = readFileSync(new URL('../src/core/AppRoot.jsx', import.meta.url), 'utf8');
+  const boundarySource = readFileSync(
+    new URL('../src/features/app/ScreenErrorBoundary.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(rootSource, /<ScreenErrorBoundary resetKey=\{view\}>/);
+  assert.match(rootSource, /window\.clearInterval\(refreshIntervalId\)/);
+  assert.match(boundarySource, /static getDerivedStateFromError/);
+  assert.match(boundarySource, /ChunkLoadError/);
+});
+
+test('runtime provider: transaction and scan writes use targeted refreshes', () => {
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+
+  const readBlock = (name) => {
+    const start = providerSource.indexOf(`async function ${name}(`);
+    assert.ok(start > 0, `provider should declare ${name}`);
+    const end = providerSource.indexOf('\n  }\n', start);
+    return providerSource.slice(start, end);
+  };
+
+  for (const name of ['createManualTransaction', 'updateTransaction', 'deleteTransaction']) {
+    const block = readBlock(name);
+    assert.match(block, /refreshTransactionDependentState\(/, name);
+    assert.doesNotMatch(block, /await refreshAll\(\)/, name);
+  }
+
+  for (const name of ['rejectScanDocument', 'uploadScanFile', 'retryScanUpload']) {
+    const block = readBlock(name);
+    assert.match(block, /refreshScanDocuments\(\)/, name);
+    assert.doesNotMatch(block, /await refreshAll\(\)/, name);
+  }
+
+  assert.match(readBlock('approveScanDocument'), /refreshTransactionDependentState\(\{ includeScans: true \}\)/);
+
+  // Account and category writes still need the full fan-out.
+  for (const name of ['saveAccount', 'deleteAccount', 'adjustAccountBalance', 'saveCategory']) {
+    assert.match(readBlock(name), /await refreshAll\(\)/, name);
+  }
+
+  const targeted = readBlock('refreshTransactionDependentState');
+  assert.doesNotMatch(targeted, /planner_monthly_plans/);
+  assert.doesNotMatch(targeted, /from\("categories"\)/);
+  assert.doesNotMatch(targeted, /from\("budgets"\)/);
+  assert.match(targeted, /setPlanningTransactions\(/);
+  assert.match(targeted, /dashboard_snapshot/);
+  assert.match(targeted, /account_balance_snapshot/);
+});
+
+test('runtime shell: toasts render while signed out and while bootstrapping', () => {
+  const rootSource = readFileSync(new URL('../src/core/AppRoot.jsx', import.meta.url), 'utf8');
+
+  const signedOutBranch = rootSource.slice(
+    rootSource.indexOf('if (!authReady)'),
+    rootSource.indexOf('const ActiveScreen'),
+  );
+  const toastCount = (signedOutBranch.match(/<ToastBar/g) || []).length;
+
+  assert.equal(toastCount, 3, 'auth, loading, and bootstrapping branches each need a ToastBar');
+  assert.match(signedOutBranch, /<AuthScreen \/>/);
+});
+
+test('runtime provider: exposed actions surface failures as toasts', () => {
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(providerSource, /function decorateActionsWithErrorFeedback\(/);
+  assert.match(providerSource, /decorateActionsWithErrorFeedback\(value, \(error, fallback\) =>/);
+  assert.match(providerSource, /value=\{decoratedValue\}/);
+  // The error must be rethrown so a failed save cannot clear the draft or close the sheet.
+  assert.match(providerSource, /onError\(error, fallback\);\s*throw error;/);
+
+  for (const action of [
+    'saveAccount',
+    'deleteAccount',
+    'createManualTransaction',
+    'updateTransaction',
+    'deleteTransaction',
+    'approveScanDocument',
+    'saveBudgetRow',
+    'saveRecurringRule',
+  ]) {
+    assert.match(providerSource, new RegExp(`\\n  ${action}: "`), action);
+  }
+
+  assert.match(providerSource, /export function toFriendlyActionError\(/);
+  assert.doesNotMatch(providerSource, /String\(error\?\.message \|\| error \|\| "import_backup_failed"\)/);
+});
+
+test('transactions screen: typing in search is not overwritten by the stored filter', () => {
+  const source = readFileSync(
+    new URL('../src/features/app/screens/TransactionsScreen.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(source, /syncedQueryRef/);
+  assert.match(source, /\}, \[transactionsFilters\.query\]\);/);
+  assert.doesNotMatch(source, /\}, \[searchInput, transactionsFilters\.query\]\);/);
+});
+
+test('runtime styles: classes used by the live shell are all defined', () => {
+  const cssSource = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+
+  for (const className of [
+    'ui-toast--warning',
+    'finance-recurring-card',
+    'finance-recurring-main',
+    'finance-recurring-actions',
+    'finance-empty-icon',
+    'finance-notification-card.is-read',
+    'finance-subcategory-card.is-main',
+  ]) {
+    assert.ok(cssSource.includes(`.${className}`), `missing style for .${className}`);
+  }
+});
+
+test('runtime shell: dialogs move focus in and hand it back', () => {
+  const uiSource = readFileSync(new URL('../src/features/app/ui.jsx', import.meta.url), 'utf8');
+
+  assert.match(uiSource, /function useDialogFocus\(/);
+  assert.match(uiSource, /useDialogFocus\(open, dialogRef\)/);
+  assert.match(uiSource, /previouslyFocused\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(uiSource, /event\.key !== "Tab"/);
+  assert.match(uiSource, /toast\?\.id/);
+});
+
+test('runtime routing: every runtime view keeps a reachable route and its own title', () => {
+  const configSource = readFileSync(new URL('../next.config.mjs', import.meta.url), 'utf8');
+  const rootSource = readFileSync(new URL('../src/core/AppRoot.jsx', import.meta.url), 'utf8');
+
+  // /recurring is a real screen linked from bills, dashboard and settings, so it
+  // must not be redirected away.
+  assert.doesNotMatch(configSource, /source:\s*"\/recurring"/);
+  assert.match(configSource, /source:\s*"\/budgets"/);
+  assert.match(configSource, /source:\s*"\/stats"/);
+
+  const titles = rootSource.slice(
+    rootSource.indexOf('const SCREEN_TITLES'),
+    rootSource.indexOf('const SCREEN_HEADER_LABELS'),
+  );
+  const segments = [...titles.matchAll(/^\s+"?([a-z-]+)"?:/gm)].map((match) => match[1]);
+  assert.ok(segments.length >= 16, 'expected every screen to declare a title');
+
+  for (const segment of segments) {
+    const pageSource = readFileSync(
+      new URL(`../app/(runtime)/${segment}/page.js`, import.meta.url),
+      'utf8',
+    );
+    assert.match(pageSource, /export const metadata = \{/, segment);
+    assert.match(pageSource, /title: "/, segment);
+  }
+});
+
+test('runtime provider: transaction writes also refresh the open history page', () => {
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+
+  const start = providerSource.indexOf('async function refreshTransactionDependentState(');
+  const block = providerSource.slice(start, providerSource.indexOf('\n  }\n', start));
+
+  assert.match(block, /transactionsPage\.items\.length > 0/);
+  assert.match(block, /refreshTransactionsPage\(\{ silent: true, keepItems: true \}\)/);
+});
+
+test('runtime shell: stacked sheets only trap focus in the topmost dialog', () => {
+  const uiSource = readFileSync(new URL('../src/features/app/ui.jsx', import.meta.url), 'utf8');
+
+  assert.match(uiSource, /querySelectorAll\('\[role="dialog"\]'\)/);
+  assert.match(uiSource, /dialogs\[dialogs\.length - 1\] !== node\) return;/);
+  // requestAnimationFrame never fires in a hidden tab, so focus moves synchronously.
+  assert.doesNotMatch(uiSource, /requestAnimationFrame\(focusFirst\)/);
+});
+
+test('scan access: paid AI endpoints never answer anonymous callers', () => {
+  const accessSource = readFileSync(new URL('../lib/scan/access.js', import.meta.url), 'utf8');
+
+  // Origin / shared-token gates stay first for server-to-server callers.
+  assert.match(accessSource, /if \(originsConfigured\)/);
+  assert.match(accessSource, /if \(tokenConfigured\)/);
+  // Falling through used to "return true", leaving the endpoints wide open.
+  assert.match(accessSource, /const auth = await getRequestUser\(req\);/);
+  assert.match(accessSource, /code: "unauthorized"/);
+  assert.doesNotMatch(accessSource, /^\s*return true;\s*\n\}/m);
+  assert.match(accessSource, /export async function enforceAccess/);
+
+  for (const handler of ['financial-plan', 'gemini-scan', 'scan']) {
+    const source = readFileSync(
+      new URL(`../server/legacy-api/${handler}.js`, import.meta.url),
+      'utf8',
+    );
+    assert.match(source, /if \(!\(await enforceAccess(Module)?\(req, res\)\)\) return;/, handler);
+  }
+});
+
+test('inbox review: scan decisions patch local state and single-account drafts prefill', () => {
+  const providerSource = readFileSync(
+    new URL('../src/features/app/AppProvider.jsx', import.meta.url),
+    'utf8',
+  );
+  const inboxSource = readFileSync(
+    new URL('../src/features/app/screens/InboxScreen.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(providerSource, /function markScanDocumentStatus\(scanId, patch\)/);
+  assert.match(providerSource, /markScanDocumentStatus\(scan\.id, \{\s*status: "approved"/);
+  assert.match(providerSource, /markScanDocumentStatus\(scanId, \{ status: "rejected"/);
+
+  assert.match(inboxSource, /function withSingleAccountDefault\(draft, accounts\)/);
+  assert.match(inboxSource, /list\.length !== 1\) return draft;/);
+  assert.match(inboxSource, /withSingleAccountDefault\(scanToDraft\(selected\), accounts\)/);
 });
